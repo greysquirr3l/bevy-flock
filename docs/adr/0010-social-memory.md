@@ -113,6 +113,9 @@ How memory's cost and weight reach the scheduler is fixed by ADR 0011: leaves
 declare what a store read costs, relationships raise weight within a clamp, and
 eligibility follows the scheduler rather than the store.
 
+Persistence is fixed by ADR 0012: ages rather than stamps, identities rather
+than indices, a versioned little-endian record with per-section CRC32.
+
 ## Open questions
 
 - Whether the authored (promoted) tier belongs in this crate or in the dialogue

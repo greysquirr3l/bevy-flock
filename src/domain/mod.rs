@@ -11,6 +11,8 @@ pub mod ids;
 pub mod memory;
 pub mod population;
 pub mod rng;
+#[cfg(feature = "memory")]
+pub mod saves;
 pub mod spatial;
 pub mod steering;
 pub mod temperament;
@@ -25,6 +27,8 @@ pub use memory::{
 };
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;
+#[cfg(feature = "memory")]
+pub use saves::{MAGIC, MemorySnapshot, Origin, RestoreReport, SaveError, SaveRecord, SavedSlot};
 pub use spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 pub use steering::{SteeringParams, SteeringWeights};
 pub use temperament::{Archetype, Mood, Needs, Temperament, Weight};

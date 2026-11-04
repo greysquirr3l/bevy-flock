@@ -46,6 +46,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `VirtualCost::DEFAULT` is 40 vns — several times the priciest built-in leaf —
   rather than an arbitrary 1,000.
 
+- `MemorySnapshot` (ADR 0012): the save format. Little-endian, magic `BFLK`, version
+  1, records sorted by identity, times stored as ages so a save/load round trip
+  does not age a grudge, CRC32 on header and body, and typed errors naming the
+  reason — bad magic, unknown version, truncation, checksum, duplicate identity,
+  implausible count, capacity, subject range.
+- `SavedSlot`, `SaveRecord`, `Origin` and `RestoreReport`; `rebase_offline` for a
+  game that wants the world to have moved on while it was closed.
+- A format test pins the size claim: 10,000 NPCs with two relationships each is
+  430,032 bytes, not "roughly 430 KB".
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —
