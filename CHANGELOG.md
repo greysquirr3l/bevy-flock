@@ -132,6 +132,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The reflex ceiling is ~64,000 per tick, not the ~93,000 arithmetic suggested — the
   difference is the cost of reaching the components.
 
+- ADR 0018 proposes the ambient continuum: population outside a manifest band becomes
+  per-cell density advected by the flow field, manifested and folded deterministically,
+  with a packed reflex batch for the band itself.
+- Full-suite measurement at 64,000 and 100,000 (see `docs/performance.md`): 64,000 reflex
+  agents thinking every tick cost 11.44 ms of frame; 100,000 cost 14.01 ms. The crowd path
+  with no brains at all costs **198 ms** at 100,000 — the real ceiling, and the one the
+  continuum is aimed at.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

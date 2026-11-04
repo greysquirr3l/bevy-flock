@@ -596,6 +596,39 @@ name  = "ECS Surface"
 order = 3
 
 [[phases.tasks]]
+slug      = "ambient-continuum"
+kind      = "feature"
+title     = "Ambient continuum: population as density past the manifest band"
+goal      = "Hold population outside a manifest band as per-cell density advected by the flow field, manifesting and folding agents deterministically, so the per-entity cost of a hundred thousand inhabitants disappears rather than shrinking."
+depends_on = ["navigation-port"]
+implements = ["cognition-budget", "population-spawning"]
+hints = [
+    "ADR 0018 has the design, the rejected alternatives and the gates. Read the verification section first: the crowd path costs 198 ms at 100,000 with no brains at all, so folding out of the scheduler alone is theatre.",
+    "Folding must remove an agent from every per-entity system: steering, spatial index, perception, cognition. Gate 9 asserts a folded NPC matches no query. If it still steers, it still costs.",
+    "Conservation is exact and integer: cells hold counts, advection moves whole persons, and the remainder goes to the largest-share neighbour. A million people advected for a game day are still a million people.",
+    "Manifestation is a pure function of (seed, cell, tick, ordinal): NpcId(hash(...)) with nothing stored per NPC, or ten thousand manifestations need a table.",
+    "A manifested NPC inherits the cell's velocity, alarm and occupation as its opening blackboard. Without that, the band edge is a visible ring of people who start walking when they enter it.",
+    "Anchored entities are never folded: subjects of social memory, quest actors, anything a save names. ADR 0010 and ADR 0014 both depend on this being true.",
+    "The packed reflex batch is a separate, smaller win: 64-wide structure-of-arrays, no change detection, no blackboard borrow, for the agents inside the band.",
+    "Advection ticks on a stride (default 8), not per frame. A crowd does not visibly change at 60 Hz and the continuum must not be the thing that costs a frame.",
+]
+test_hints = [
+    "1,000,000 ambient with 2,000 manifested: frame under 6 ms, continuum tick under 0.5 ms (benches/continuum.rs).",
+    "Conservation: 10,000 ticks of churn, cell sums plus live entities equal the initial total to the unit, every tick.",
+    "Determinism: replay reproduces the manifest identifier sequence and fold counts exactly.",
+    "Parity: continuum versus full simulation for five minutes agrees on per-cell population within 1% and mean velocity within 5%. Without it the continuum is a rumour with a data structure.",
+    "No popping: a camera crossing the boundary at 30 m/s never manifests more than the ration on one frame, and visible count never jumps more than 2% between frames.",
+    "Anchoring: an anchored NPC 10 km away is still an entity after 10,000 ticks, memory intact.",
+    "No allocation after construction, asserted with the counting allocator from tests/tree_no_alloc.rs.",
+    "The amended gate: 100,000 inhabitants with 5,000 manifested sustains a frame under 8 ms — a 25x improvement on the measured 198 ms.",
+]
+must_haves = [
+    "A folded NPC matches no ECS query: not steering, not the spatial index, not the scheduler.",
+    "Population is conserved exactly, in integers, with a test that says so.",
+    "Manifestation and folding are deterministic functions of state, seed and tick.",
+    "Anchored entities never fold, and a test proves it at distance.",
+]
+[[phases.tasks]]
 slug      = "lod-think-scheduler"
 kind      = "feature"
 title     = "Virtual-cost fair-queue think scheduler"

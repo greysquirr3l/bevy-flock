@@ -320,3 +320,23 @@ which no declared cost includes.
 
 Read the last column with the reservation in mind: a tier's share is not its capacity. The
 deliberative tier could *fit* 7,000, and its 15% share only pays for 262.
+
+## At 64,000 and 100,000 (full suite, 2026-11-04)
+
+Frame times in ms; baseline is the same world with no brains.
+
+| Population | Baseline | Reflex | Reactive | Deliberative | Social | 95/4/1 mix |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1,000 | 4.26 | 4.38 | 4.38 | 4.27 | 4.24 | 4.42 |
+| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | — | 6.42 |
+| 64,000 | 4.19 | 11.44 | 7.93 | 7.68 | 7.55 | 11.99 |
+| 100,000 | 4.22 | 14.01 | 9.74 | 9.52 | 9.03 | 14.67 |
+
+Two facts worth carrying away:
+
+- **Per-think cost is not a constant.** The rows imply 219 ns at 10,000 and 113 ns at
+  64,000. Quote frame times, not nanoseconds.
+- **Cognition is not the wall at 100,000.** The crowd benchmark with 100,000 NPCs and no
+  brains runs at **198 ms per frame**: steering and spatial partitioning cost fourteen
+  times what thinking does. ADR 0018's ambient continuum exists for that number, not for
+  the scheduler's.
