@@ -432,8 +432,8 @@ then = "a trace record lists every candidate, its score and the winning reason"
 # ─── Phase 1: Foundations ────────────────────────────────────────────────────
 
 [[capabilities]]
-name        = "nemesis-memory"
-title       = "Nemesis Memory"
+name        = "social-memory"
+title       = "Social Memory"
 description = "NPCs remember the subjects they have met — the player, a party, each other — cheaply enough that the remembering is a property of who is nearby rather than of how many NPCs exist."
 requirements = [
     "MUST store memory in a bounded, pre-allocated structure sized by the number of *eligible* NPCs and subjects, never by the population, and MUST reject enrolment past capacity with a typed result instead of allocating.",
@@ -1131,10 +1131,10 @@ order = 5
 [[phases.tasks]]
 slug      = "memory-store"
 kind      = "feature"
-title     = "Nemesis memory store and cold tier"
+title     = "Social memory store and cold tier"
 goal     = "Give an NPC a bounded, deterministic memory of the subjects it has met, sized by who is eligible to remember rather than by how many NPCs exist."
 depends_on = ["domain-vocabulary", "deterministic-rng"]
-implements = ["nemesis-memory", "deterministic-simulation"]
+implements = ["social-memory", "deterministic-simulation"]
 hints = [
     "Flat slot array indexed `memory_index × subjects + subject`; one allocation for the whole crowd. A `Vec` per NPC is the shape this decision exists to reject, and the ADR says why.",
     "`MemorySlot` is sixteen bytes with the size asserted at compile time, because the cost model is `capacity × subjects × 16` and a careless field would double it.",
@@ -1176,7 +1176,7 @@ kind      = "feature"
 title     = "Encounter perception and eligibility"
 goal     = "Detect encounters between eligible NPCs and registered subjects, write them into the store, and enrol or release NPCs as the level-of-detail tiers move them — with the retention choice left to configuration."
 depends_on = ["memory-store", "ecs-core-plugin", "lod-think-scheduler"]
-implements = ["nemesis-memory", "crowd-motion", "pluggable-logic"]
+implements = ["social-memory", "crowd-motion", "pluggable-logic"]
 hints = [
     "Subjects are registered entities with a dense `SubjectId`; the plugin keeps the mapping and rejects duplicate registration.",
     "Encounter detection is a radius query against subjects only, not against the crowd: the spatial index already answers it, and the number of subjects is small by construction.",
@@ -1208,7 +1208,7 @@ kind      = "feature"
 title     = "Memory as a cognition input"
 goal     = "Make what an NPC remembers available to behaviour trees and utility scoring, and define the promotion threshold where a scalar relationship becomes authored content."
 depends_on = ["memory-store", "behavior-tree-engine", "utility-scoring"]
-implements = ["nemesis-memory", "pluggable-logic", "dialog-and-barks"]
+implements = ["social-memory", "pluggable-logic", "dialog-and-barks"]
 hints = [
     "Expose memory to leaves through the blackboard: `memory_valence`, `memory_familiarity` and `memory_flags` keys written once per think, so a tree reads integers and never touches the store.",
     "A `Recall` leaf family: `HasGrudge`, `RemembersSubject`, `FamiliarityAbove`. They are leaves like any other and declare their cost, so the calibration gate covers them.",

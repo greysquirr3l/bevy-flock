@@ -1,4 +1,4 @@
-# 0010 — Nemesis memory as a bounded, integer, two-tier store
+# 0010 — Social memory as a bounded, integer, two-tier store
 
 Status: Accepted
 
@@ -46,11 +46,12 @@ carries a half-life in ticks; `DecayPolicy::NONE` makes a grudge permanent.
 archive (memory survives), or writes it to a save file (memory is world state).
 Three strategies, two primitives, no policy in the library.
 
-**Promotion is where the value is.** Shadow of Mordor's system is not a database,
-it is a promotion: a few relationships get names, scars, and something to say.
+**Promotion is where the value is.** The best-known implementation of this idea is
+not a database, it is a promotion: a few relationships get names, scars, and
+something to say.
 Storage is the cheap part. The plan's `memory-in-cognition` task wires the scalar
 tier into trees and utility scoring; the authored tier belongs with dialogue,
-because a nemesis with nothing to say is a stat.
+because an antagonist with nothing to say is a stat.
 
 ## Consequences
 
@@ -99,7 +100,7 @@ affordable at ten thousand NPCs, which is the only place it is asked for.
   visible in a value that a behaviour tree threshold compares against.
 - **Embeddings / a vector index.** Buys "this one reminds me of that one" at the
   cost of a dependency, a budget of floats, and inference that must be bit-identical
-  across platforms to stay replayable. Nemesis memory is a small relationship table
+  across platforms to stay replayable. Social memory is a small relationship table
   plus promotion; it does not need semantic similarity, and pretending it does
   would put a model in the simulation loop.
 - **Memory in components.** A component per memory is a component explosion at
