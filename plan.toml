@@ -596,6 +596,33 @@ name  = "ECS Surface"
 order = 3
 
 [[phases.tasks]]
+slug      = "tiered-cognition"
+kind      = "feature"
+title     = "Tiered cognition: reflex, reactive, deliberative, social"
+goal      = "Four tiers of thinking, where the tier selects the logic and the weight selects the cadence, with a reserved budget share per tier so a conversation cannot be starved by a parade."
+depends_on = ["lod-think-scheduler"]
+implements = ["cognition-budget", "npc-behavior"]
+hints = [
+    "ADR 0017 has the reasoning and the numbers. The measured ceiling is 7,000 full deliberations per 16.6 ms frame; tiering lowers the average cost, not the ceiling.",
+    "Tier 0 (reflex) has no tree: a fixed rule set over the spatial grid, 50-200 ns, and it must still write the blackboard fields the tiers above read, or promotion becomes a cold start.",
+    "Promotion is a cost spike — blackboard, perception snapshot, compiled tree — and must be rationed: at most K per tick, cheapest first, the rest queued. A hundred NPCs promoted on the frame the player rounds a corner is the failure this prevents.",
+    "Tier transitions are functions of state, never of elapsed time. A replay must reach the same tier on the same tick.",
+    "A demoted NPC keeps its blackboard until re-promotion, or walking across a boundary resets a conversation.",
+    "Budget shares are reserved, not shared: reflex 55%, reactive 25%, deliberative 15%, social 5% by default, overridable. The social reserve is the property a player notices.",
+    "Per-tier queues reuse application::schedule unchanged: one ThinkScheduler per tier, each with its own budget.",
+]
+test_hints = [
+    "A 95/4/1 reflex/reactive/deliberative world of 100,000 averages under 150 ns per think and every NPC thinks within 2 ticks.",
+    "Promotion ration: 200 NPCs become eligible on one tick; at most K are promoted and the frame stays inside budget.",
+    "Determinism: the same seed and the same tier transitions produce the same dispatched sequence over 1,000 ticks.",
+    "A conversation with a social-tier NPC is never starved by 100,000 reflex agents: the social tier's reserved share is spent on it every tick.",
+]
+must_haves = [
+    "No wall-clock read anywhere in the tier or scheduler path.",
+    "Tier is derived from state, and the derivation is a pure function.",
+    "ThinkStats reports per-tier counts, or nobody will know why the crowd went quiet.",
+]
+[[phases.tasks]]
 slug      = "lod-think-scheduler"
 kind      = "feature"
 title     = "Virtual-cost fair-queue think scheduler"
@@ -603,7 +630,7 @@ goal      = "Dispatch cognition against a virtual-nanosecond budget with start-t
 depends_on = []
 implements = ["cognition-budget", "deterministic-simulation"]
 hints = [
-    "In place: application::schedule — the planner, as a pure function of state, budget and costs, with eleven tests (budget never overspent, one think per participant per tick, reproducible order, 3:1 weight share, bounded starvation, no credit for newcomers) and benches/think.rs measuring 1,000/10,000/100,000 participants. Remaining: the ECS system that collects NpcBrain costs, calls plan() and ticks the chosen trees, plus the schedule-set wiring and a world-level test that a 100,000-agent world keeps its frame budget.",
+    "SHIPPED in 4f46184 (planner in 5ac447f): application::schedule plus adapters::primary::cognition — the planner as a pure function of state, budget and costs, the three ECS systems that feed it weights and costs and tick the chosen trees, and fourteen tests (budget never overspent, one think per participant per tick, reproducible order, 3:1 weight share, bounded starvation, no credit for newcomers) and benches/think.rs measuring 1,000/10,000/100,000 participants. Measured end to end: 10,000 brains add 0.73 ms to a 4.28 ms frame; comfortable maximum 7,000 thinkers/tick at a 14 ms budget and 2 us deliberation. The tiering this record deferred is now its own task (tiered-cognition, ADR 0017).",
     "Social memory raises weight, never eligibility: apply a clamped permille boost at dispatch time, exclude it from the share that derives tier, and never release memory because a think was skipped — ADR 0011 states why each of those is load-bearing.",
     "`VirtualCost(u64)` in domain is a declared cost in virtual nanoseconds. The registry sums `LeafBehavior::cost_hint` per logic unit and caches the sum on the NPC as `ThinkCost`, refreshed when its logic changes; undeclared logic gets `VirtualCost::DEFAULT` and is listed by the calibration gate rather than panicking.",
     "`ThinkBudget { virtual_nanos }` on the config, and `ThinkWeight(u16)` per NPC in 1..=1000 produced by a weight policy (distance bands, group directive priority, player focus) with hysteresis on the band rather than on a tier.",
@@ -1271,7 +1298,7 @@ goal     = "The front door: a README that states the promise and proves it, and 
 depends_on = ["prelude-rustdoc-book", "examples-showcase"]
 implements = ["api-ergonomics", "observability"]
 hints = [
-    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; sixteen ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
+    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; seventeen ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
     "README: badges, one-paragraph pitch, animated GIF of the 10,000-NPC demo, five-line quickstart, a capability table, a benchmark table with the machine named, a comparison table against big-brain (utility AI, Bevy 0.15 as of late 2026) and bevy_boids, and an honest 'what this is not' section.",
     "Every claim in the README links to the test, benchmark or example that proves it. No unlinked adjectives.",
     "Publish the book to GitHub Pages from CI, versioned per release.",
@@ -1437,6 +1464,11 @@ the completion notes rather than in a claim:
 # Kept rather than deleted, because a plan that forgets its history is how a team
 # re-litigates a decision it already made.
 
+[[completed]]
+slug         = "lod-think-scheduler"
+phase        = "Cognition"
+delivered_in = "5ac447f..4f46184"
+evidence     = "src/application/schedule.rs (planner, 12 tests) and src/adapters/primary/cognition.rs (three ordered systems, components, 3 unit + 3 plugin tests), benches/think.rs for the planner and the frame, docs/performance.md for the comfortable maximum"
 [[completed]]
 slug         = "workspace-scaffold"
 phase        = "Foundations"
