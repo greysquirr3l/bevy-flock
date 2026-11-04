@@ -1476,6 +1476,12 @@ phase        = "Cognition"
 delivered_in = "HEAD"
 evidence     = "ADR 0021 multi-band: near band (5,000 @ 60 Hz) plus mid band (15,000 @ 20 Hz) on the same packed kernel, in adapters::primary::band. Measured 1,000,000 total inhabitants at 5.02 ms (gate: under 6 ms), with the near band's agent count unchanged from the 100,000 case. Two bugs found by measurement: the mid pack inherited the near band's 512 m grid extent, so every mid agent fell outside the grid and became a neighbour of every other; and the fixture seeded the mid ring at 300-800 m, double the specified density."
 [[completed]]
+slug         = "simd-steering"
+phase        = "Scale"
+delivered_in = "92d8a48"
+evidence     = "ADR 0023 plus the opt-in `simd` feature (wide::f32x4, no unsafe in this crate). Four agents per bucket scan, blocked from a cell-major order built as a by-product of the grid. Measured: 1,000,000 band frame 4.75 -> 3.78 ms (-20.4%), packed steer 50,000 agents 138 -> 56.5 ms (-59%), 5,000 agents 1.31 -> 1.20 ms (-8.4%), 1,000 agents 0.238 -> 0.223 ms (-6.3%). Bit-identical to the scalar path, which is retained as the reference and asserted against it (the equivalence test caught a one-ULP divergence from mul_add). Three slower attempts recorded: index-order blocking (1.40 ms at 5,000), cell-order blocking without the same-cell fast path (1.36 ms), and a per-candidate pair count (~10% at 50,000)."
+
+[[completed]]
 slug         = "tiered-cognition"
 phase        = "Cognition"
 delivered_in = "37c18cb"
