@@ -8,6 +8,12 @@
 //! A scheduler that spent the whole frame deciding who thinks would be worse than no
 //! scheduler at all, so the planner is measured on its own.
 
+#![expect(
+    clippy::expect_used,
+    reason = "the fixture asserts the tree it just built"
+)]
+
+use bevy_flock::adapters::primary::cognition::ThinkSchedule;
 use bevy_flock::application::schedule::ThinkScheduler;
 use bevy_flock::domain::cost::VirtualCost;
 use bevy_flock::domain::tick::Tick;
@@ -77,5 +83,75 @@ fn bench_steady_state(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_plan, bench_steady_state);
+criterion_group!(benches, bench_plan, bench_steady_state, bench_world);
 criterion_main!(benches);
+
+// ---------------------------------------------------------------------------
+// End to end: a real Bevy world, the real systems, the real budget.
+//
+// The planner numbers above are the cost of deciding. This is the cost of deciding *and*
+// ticking the trees, through the ECS, which is what a frame actually spends.
+// ---------------------------------------------------------------------------
+
+fn world(count: u32, brains: bool) -> bevy_app::App {
+    use bevy_transform::prelude::Transform;
+
+    use bevy_flock::adapters::primary::cognition::{NpcBlackboard, NpcThinkWeight};
+    use bevy_flock::adapters::primary::components::{Npc, NpcBrain};
+    use bevy_flock::adapters::primary::plugin::{FlockConfig, FlockPlugin};
+    use bevy_flock::domain::ids::NpcId;
+
+    let mut app = bevy_app::App::new();
+    app.add_plugins(FlockPlugin::new(FlockConfig::preset(
+        bevy_flock::adapters::primary::plugin::CrowdPreset::CityAmbient,
+    )));
+    // The preset's population is the schedule's capacity; grow it to fit the benchmark.
+    app.insert_resource(ThinkSchedule::new(count, ThinkSchedule::DEFAULT_BUDGET));
+    if brains {
+        let tree = std::sync::Arc::new(
+            bevy_flock::behavior::tree::BehaviorTree::try_from_spec(
+                bevy_flock::behavior::tree::NodeSpec::Action(0),
+            )
+            .expect("a leaf is a tree"),
+        );
+        for id in 0..count {
+            app.world_mut().spawn((
+                Npc(NpcId::unique(id)),
+                Transform::from_xyz(400.0, 0.0, 0.0),
+                NpcBrain::new(tree.clone(), VirtualCost::from_micros(2)),
+                NpcBlackboard::default(),
+                NpcThinkWeight::default(),
+            ));
+        }
+    }
+    app
+}
+
+fn bench_world(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ecs_think");
+    for count in [1_000_u32, 10_000] {
+        group.throughput(Throughput::Elements(u64::from(count)));
+        let mut app = world(count, true);
+        let mut tick = 0_u64;
+        group.bench_function(BenchmarkId::new("brains", count), |b| {
+            b.iter(|| {
+                tick = tick.wrapping_add(1);
+                app.world_mut()
+                    .resource_mut::<bevy_flock::application::SimClock>()
+                    .tick = bevy_flock::domain::tick::Tick::new(tick);
+                app.update();
+                black_box(app.world().resource::<ThinkSchedule>().stats())
+            });
+        });
+
+        // The same world with no brains: the cost of the plugin itself, subtracted by eye.
+        let mut bare = world(count, false);
+        group.bench_function(BenchmarkId::new("no_brains", count), |b| {
+            b.iter(|| {
+                bare.update();
+                black_box(bare.world().resource::<ThinkSchedule>().stats())
+            });
+        });
+    }
+    group.finish();
+}

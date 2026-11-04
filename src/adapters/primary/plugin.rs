@@ -11,6 +11,9 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
+use crate::adapters::primary::cognition::{
+    ThinkSchedule, WeightConfig, plan_thinks, set_think_weights, tick_chosen,
+};
 use crate::adapters::primary::components::{
     LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcTemperament, NpcVelocity,
 };
@@ -341,7 +344,16 @@ impl FlockPlugin {
 
 impl Plugin for FlockPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.config)
+        // The schedule's capacity is the configured population: an NPC beyond it is a
+        // configuration bug the stats report rather than a panic on the frame a crowd
+        // walks into view.
+        let think_capacity = u32::try_from(self.config.population.get()).unwrap_or(u32::MAX);
+        app.insert_resource(ThinkSchedule::new(
+            think_capacity,
+            ThinkSchedule::DEFAULT_BUDGET,
+        ))
+        .insert_resource(WeightConfig::default())
+        .insert_resource(self.config)
             .insert_resource(SimClock::new(self.config.ticks_per_second))
             .init_resource::<SpawnQueue>()
             .init_resource::<FlockStats>()
@@ -358,6 +370,19 @@ impl Plugin for FlockPlugin {
                     .chain(),
             )
             .add_systems(Update, drain_spawn_queue.in_set(FlockSet::Spawn))
+            // Weights before planning (distance is a perception fact), planning before
+            // ticking (the choice is the plan). Bevy is told the order rather than
+            // trusted to infer it from the resource conflicts.
+            .add_systems(
+                Update,
+                set_think_weights.in_set(FlockSet::Perception),
+            )
+            .add_systems(
+                Update,
+                (plan_thinks, tick_chosen)
+                    .chain()
+                    .in_set(FlockSet::Cognition),
+            )
             .add_systems(Update, advance_clock.in_set(FlockSet::AdvanceTick));
 
         // A game that added `BoidsPlugin` first (with its own steering config) is

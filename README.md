@@ -37,7 +37,9 @@ that means:
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |
-| Virtual-cost fair-queue think scheduler (ADR 0009) | **Planner shipped**, ECS adapter pending |
+| Virtual-cost fair-queue think scheduler (ADR 0009) | **Shipped** |
+| Proximity weights with hysteresis, wired to the scheduler | **Shipped** |
+| Tiered cognition: reflex, reactive, deliberative, social (ADR 0017) | Proposed |
 | Continuum ambient tier (millions of inhabitants) | Planned |
 | Dialogue graphs, barks, facts | Planned |
 | Versioned snapshots and compatibility corpus (ADR 0012-0014) | **Shipped (opt-in)** |

@@ -115,6 +115,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   share per tier. Measured: ~7,400 full deliberation thinks fit in a 16.6 ms frame;
   a 95/4/1 tier mix fits ~110,000 because the average think drops from 2.25 µs to 150 ns.
 
+- The ECS half of the scheduler: `NpcBlackboard`, `NpcThinkWeight`, `PlayerFocus`,
+  `ThinkSchedule` and three ordered systems. Weights are measured from distance to the
+  nearest player with hysteresis; costs come from each brain; only the chosen trees tick.
+  A game opts in by adding a brain, which keeps ten thousand brainless crowd agents the
+  cheap default.
+- Measured end to end in a real `App`: 10,000 brains add 0.73 ms to a 4.28 ms frame.
+  Comfortable maximum is **7,000 deliberative thinkers per tick** at a 14 ms budget and a
+  2 µs deliberation; 6,000 with headroom.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

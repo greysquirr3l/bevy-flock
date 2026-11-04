@@ -154,6 +154,15 @@ impl ThinkScheduler {
         self.weights.len() as u32
     }
 
+    /// The weight a participant is enrolled with, or `None` if it is not enrolled.
+    #[must_use]
+    pub fn weight_of(&self, id: u32) -> Option<u32> {
+        match self.weight_at(id) {
+            0 => None,
+            weight => Some(weight),
+        }
+    }
+
     /// The longest any enrolled participant has waited between runs, in ticks.
     ///
     /// The number a fairness test asserts against and a profiler reads: it is the

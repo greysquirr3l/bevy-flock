@@ -246,3 +246,42 @@ trade instead of pricing it.
 at 100,000. A game at that scale should budget 12–14 ms of virtual cost and spend the
 rest of the frame on the thinks themselves, since the planner's wall time is paid
 whatever the thinks then cost.
+
+## Cognition through the ECS
+
+The tables above price the planner. This one prices a frame: a real `App`, the real
+`FlockPlugin`, real brains, real systems (`benches/think.rs`, `ecs_think`). The baseline
+is the same world with no brains at all, so the difference is what thinking costs.
+
+| Brains | Frame, no brains | Frame, with brains | Delta | Per brain |
+| --- | --- | --- | --- | --- |
+| 1,000 | 4.27 ms | 4.42 ms | 0.15 ms | 150 ns |
+| 10,000 | 4.28 ms | 5.01 ms | 0.73 ms | 73 ns |
+
+Two things to read carefully, because both are easy to get wrong.
+
+**The delta is not the think.** These brains run a one-node tree at a declared 2 µs cost.
+The 73 ns per brain is the *system overhead* — enrolling, reading the cost, planning,
+finding the chosen ones — and the tree tick itself is inside the 2 µs budget rather than
+inside this measurement. A real archetype tree costs 4–12 µs of virtual budget, which is
+what the budget spends and what the frame pays.
+
+**The baseline is the crowd, not the scheduler.** Four milliseconds of the frame is the
+plugin spawning and steering its configured population. A game that measures its own
+frame will see the same shape: the scheduler is a small line item, and the crowd it
+schedules is the large one. That is the correct order of magnitude, and it is why the
+budget has to be a budget.
+
+### The comfortable maximum
+
+With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs deliberation:
+
+- **7,000 deliberative thinkers per tick** is the ceiling: 14 ms ÷ 2 µs. At or below it,
+  every NPC thinks every tick and the wait is one tick.
+- **6,000 is comfortable** — the same crowd with 14% headroom for the expensive archetype
+  that turns up in a scene and costs 12 µs rather than 2.
+- **10,000 fits the frame** (5.01 ms measured) but only ~70% think per tick, and the worst
+  NPC waits two ticks. Fine for background, visible on a conversation.
+- **100,000 fits the frame** (12% per tick, 45-tick worst wait) and is only acceptable
+  when the tiering in ADR 0017 lands, because then 95% of them are reflex agents at a
+  hundredth of the cost.

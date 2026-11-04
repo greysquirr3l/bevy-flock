@@ -140,7 +140,7 @@ pub enum DirectiveKind {
 ///
 /// Ordered storage rather than a hash map: iteration order feeds simulation, and
 /// a hash map's order is exactly the thing that breaks a replay.
-#[derive(Default)]
+#[derive(Default, bevy_ecs::prelude::Resource)]
 pub struct FlockRegistry {
     leaves: Vec<LeafEntry>,
     names: BTreeMap<String, u32>,
@@ -323,6 +323,18 @@ impl FlockRegistry {
 /// Bridges a [`FlockRegistry`] to a compiled behaviour tree.
 pub struct RegistryDispatch<'a> {
     registry: &'a mut FlockRegistry,
+}
+
+impl<'a> RegistryDispatch<'a> {
+    /// A dispatcher over a game's registered leaves.
+    ///
+    /// Public because the ECS layer owns the registry as a resource and has to build one
+    /// per tick; before the cognition systems existed nothing outside this module needed
+    /// to construct one.
+    #[must_use]
+    pub const fn new(registry: &'a mut FlockRegistry) -> Self {
+        Self { registry }
+    }
 }
 
 impl LeafDispatch for RegistryDispatch<'_> {
