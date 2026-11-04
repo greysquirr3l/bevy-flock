@@ -596,33 +596,6 @@ name  = "ECS Surface"
 order = 3
 
 [[phases.tasks]]
-slug      = "tiered-cognition"
-kind      = "feature"
-title     = "Tiered cognition: reflex, reactive, deliberative, social"
-goal      = "Four tiers of thinking, where the tier selects the logic and the weight selects the cadence, with a reserved budget share per tier so a conversation cannot be starved by a parade."
-depends_on = ["lod-think-scheduler"]
-implements = ["cognition-budget", "npc-behavior"]
-hints = [
-    "ADR 0017 has the reasoning and the numbers. The measured ceiling is 7,000 full deliberations per 16.6 ms frame; tiering lowers the average cost, not the ceiling.",
-    "Tier 0 (reflex) has no tree: a fixed rule set over the spatial grid, 50-200 ns, and it must still write the blackboard fields the tiers above read, or promotion becomes a cold start.",
-    "Promotion is a cost spike — blackboard, perception snapshot, compiled tree — and must be rationed: at most K per tick, cheapest first, the rest queued. A hundred NPCs promoted on the frame the player rounds a corner is the failure this prevents.",
-    "Tier transitions are functions of state, never of elapsed time. A replay must reach the same tier on the same tick.",
-    "A demoted NPC keeps its blackboard until re-promotion, or walking across a boundary resets a conversation.",
-    "Budget shares are reserved, not shared: reflex 55%, reactive 25%, deliberative 15%, social 5% by default, overridable. The social reserve is the property a player notices.",
-    "Per-tier queues reuse application::schedule unchanged: one ThinkScheduler per tier, each with its own budget.",
-]
-test_hints = [
-    "A 95/4/1 reflex/reactive/deliberative world of 100,000 averages under 150 ns per think and every NPC thinks within 2 ticks.",
-    "Promotion ration: 200 NPCs become eligible on one tick; at most K are promoted and the frame stays inside budget.",
-    "Determinism: the same seed and the same tier transitions produce the same dispatched sequence over 1,000 ticks.",
-    "A conversation with a social-tier NPC is never starved by 100,000 reflex agents: the social tier's reserved share is spent on it every tick.",
-]
-must_haves = [
-    "No wall-clock read anywhere in the tier or scheduler path.",
-    "Tier is derived from state, and the derivation is a pure function.",
-    "ThinkStats reports per-tier counts, or nobody will know why the crowd went quiet.",
-]
-[[phases.tasks]]
 slug      = "lod-think-scheduler"
 kind      = "feature"
 title     = "Virtual-cost fair-queue think scheduler"
@@ -1464,6 +1437,11 @@ the completion notes rather than in a claim:
 # Kept rather than deleted, because a plan that forgets its history is how a team
 # re-litigates a decision it already made.
 
+[[completed]]
+slug         = "tiered-cognition"
+phase        = "Cognition"
+delivered_in = "37c18cb"
+evidence     = "domain::cognition (CognitionTier, TierPolicy, BudgetShares, 9 tests), application::tiered (TieredSchedule, 8 tests), adapters::primary::cognition (assign_tiers, plan_thinks, tick_chosen, promotion ration, 4 unit + 4 plugin tests), benches/tiers.rs, ADR 0017 with the measured correction: the reflex ceiling is 64,000/tick, not the 110,000 arithmetic suggested"
 [[completed]]
 slug         = "lod-think-scheduler"
 phase        = "Cognition"
