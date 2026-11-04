@@ -1,0 +1,6 @@
+[toolchain]
+# Bevy 0.20's MSRV. Pinned so a contributor on an older stable finds out at
+# `cargo check` rather than from a confusing type error in a macro expansion.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

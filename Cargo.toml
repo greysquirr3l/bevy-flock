@@ -1,0 +1,111 @@
+[package]
+name = "bevy-flock"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
+description = "Deterministic crowd and NPC simulation for Bevy: boids, budgeted level-of-detail cognition, pluggable behaviour, and a continuum ambient tier that scales past a million inhabitants."
+repository = "https://github.com/greysquirr3l/bevy-flock"
+homepage = "https://github.com/greysquirr3l/bevy-flock"
+documentation = "https://docs.rs/bevy-flock"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bevy", "crowd", "npc", "simulation", "gamedev"]
+categories = ["game-development", "simulation"]
+exclude = ["docs/", "benches/", "examples/", ".github/"]
+# The published crate ships code and docs only. Benchmarks and examples live in
+# the repository so that dev-only dependencies never reach a consumer's graph.
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+# Serialisation of NPC blueprints, simulation snapshots and authored behaviour
+# trees. Off by default: a server that only simulates should not pay for serde.
+serde = ["dep:serde"]
+
+[dependencies]
+# Bevy 0.20 splits the engine finely enough that the simulation core needs only
+# these four crates. `bevy_transform` is the ECS transform graph (also used by
+# physics), not a rendering crate: no GPU, window or asset type reaches this
+# crate through it.
+bevy_app = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_transform = "0.20.1"
+
+smallvec = "1.16"
+thiserror = "2.0"
+# Transcendental functions come from libm, not std, because std's sin/cos/atan2
+# delegate to the platform libm and differ in the last bits between operating
+# systems. Determinism across platforms is a documented guarantee (ADR 0004).
+libm = "0.2"
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+proptest = "1.12"
+
+[[bench]]
+name = "crowd"
+harness = false
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "warn"
+# `rust_2018_idioms` is deliberately off: it flags every `Res<T>`, `Query<...>`
+# and `Commands` in a Bevy system as a hidden lifetime, which is the framework's
+# idiomatic spelling and not something this crate should paper over.
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+# Allowed project-wide: these three either fight the domain vocabulary or
+# duplicate documentation enforced elsewhere.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+multiple_crate_versions = "allow"
+# Hard-denied: every one of these is a production incident waiting to happen.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+# A group needs the same priority treatment as the other groups, otherwise it
+# silently gives way to the individual lints below it.
+suspicious = { level = "deny", priority = -1 }
+# Numeric simulation code converts between integer counts and f32 intrinsics in
+# a handful of audited places. Precision loss there is inherent to an f32
+# simulation and is bounded by the documented epsilon; allowing it globally
+# keeps the rest of the crate honest about every other lint.
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# `u32 as i64` is exact, but the suggestion to write `i64::from` at every call
+# site buys nothing a reader cannot verify at a glance.
+cast_lossless = "allow"
+float_cmp = "allow"
+# Fusing a multiply-add changes rounding. The simulation's formulas are pinned
+# and tested, so each site opts in deliberately rather than by suggestion.
+suboptimal_flops = "allow"
+# `const` is added where it enables a static or a `const` caller, not for its own
+# sake; the scheduler and config types already are.
+missing_const_for_fn = "allow"
+# Criterion's `BenchmarkGroup` is a guard by design: it owns the benchmark it
+# measures and must outlive it, which is exactly what this lint objects to.
+significant_drop_tightening = "allow"
+
+# Benchmarks run on the settings a game actually ships with: default release,
+# no LTO. Flattering the numbers with `lto = "fat"` would measure a build nobody
+# uses. Debug symbols stay on so a profile can be read against the source.
+[profile.bench]
+debug = true
