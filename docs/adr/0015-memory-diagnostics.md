@@ -81,13 +81,14 @@ written then will drop those relationships on the next load.
 
 The first run reported a fifth of arrivals meeting somebody when the fixture asked
 for two fifths, and half the subject identifiers never referenced. The cause was not
-the fixture's randomness — it was `MAX_SUBJECTS = 16`: the store clamps its subject
+the fixture's randomness — it was `MAX_SUBJECTS`, then 16: the store clamps its subject
 stride, and the fixture's thirty-two subjects meant every encounter past the ceiling
 was silently rejected by `remember` returning `false`.
 
 Two consequences. The fixture now sizes itself from `MAX_SUBJECTS` rather than a
 literal, so the tool cannot lie about the cap again. And the cap is worth stating
-where games will read it: sixteen subjects is a hard ceiling, not a default, and a
+where games will read it: the subject count is a hard ceiling, not a default (raised to
+sixty-four by ADR 0016), and a
 game that wants a player plus twenty regulars needs the subject list designed around
 it — which is a design consequence of the flat slot array in ADR 0010, not a bug in
 it.
@@ -95,7 +96,7 @@ it.
 ## Consequences
 
 - **Measurement is `O(rows × subjects)`**, the same walk as `sweep`: run it on the
-  sweep cadence, never per frame. At 10,000 rows and sixteen subjects that is 160,000
+  sweep cadence, never per frame. At 10,000 rows and sixty-four subjects that is 640,000
   cell tests, which is hundreds of microseconds, not milliseconds.
 - **The numbers are testable.** `Sample` is a plain struct of integers, so the
   definitions above are asserted in unit tests rather than inferred from pixels.

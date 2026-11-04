@@ -80,6 +80,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tried without a panic.
 - ADR 0014 (compatibility testing) and ADR 0015 (memory diagnostics).
 
+- `MAX_SUBJECTS` raised from 16 to 64 (ADR 0016): a player, a party, a faction and its
+  officers fit in one store. Sizing stays per request, so a game asking for four pays
+  for four.
+- `MemoryStore::footprint()`: `rows × (subjects × 16 + 8)` bytes, reported rather than
+  estimated, with tests pinning the model and the 4× cost of sixty-four subjects.
+- `benches/memory.rs` `memory_stride`: the sweep costs the same on ghost rows at 16 and
+  64 subjects, and 3.3× on populated rows (71 µs → 232 µs at 4,096 rows).
+- The telemetry example's layout is computed from the subject count rather than
+  hard-coded: sixty-four columns used to put the panel 600 pixels off the canvas.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —
