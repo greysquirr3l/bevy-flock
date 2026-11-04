@@ -255,47 +255,66 @@ fn gate_7_a_steady_state_frame_does_not_allocate() {
 
 #[test]
 fn gate_9_folding_removes_the_entity_and_adds_exactly_one_person() {
-    // Isolated deliberately: with the default target the band manifests 256 agents a tick
-    // and folds 256 of them again, so the fold ration is spent before this test's agent is
-    // reached. That churn is a separate finding, recorded in the gate notes; this gate is
-    // about whether a fold removes one entity and adds one person, and it does.
-    // No manifestation, so the ration cannot be spent on anyone else: this gate is about
-    // folding, and a busy band would make it a test of the ration.
-    let mut harness = Harness::with_config(BandConfig {
-        target: 0,
-        ..BandConfig::default()
-    });
-    harness.tick(0); // let the world settle
+    // This gate used to run with `target: 0`, because a band with the default target spent
+    // its whole fold ration on churn (ADR 0025) and the test's agent never got folded. The
+    // churn is fixed, so the gate runs against a full, live band - the only configuration a
+    // game ever has - and the fold ration has to share with 5,000 residents.
+    let mut harness = Harness::new();
+    // Still camera: a moving one folds its trailing edge by design (that is gate 5), and this
+    // gate is about the bookkeeping of one fold.
+    for _ in 0..30 {
+        harness.tick_still();
+    }
+    assert!(
+        harness.app.world().resource::<Band>().manifested >= 4_900,
+        "the band did not fill: manifested={}",
+        harness.app.world().resource::<Band>().manifested
+    );
 
-    let before_density = harness.population();
+    let target_live = harness.live() - 1; // the far agent is not spawned yet
+    let before = {
+        let band = harness.app.world().resource::<Band>();
+        (
+            band.field.population(),
+            band.folded,
+            band.manifested,
+            band.radius,
+        )
+    };
     let far = harness
         .app
         .world_mut()
         .spawn((
             BandAgent::still(),
-            Transform::from_xyz(256.0 + 300.0, 256.0, 0.0),
+            Transform::from_xyz(256.0 + before.3 + 40.0, 256.0, 0.0),
         ))
         .id();
-    harness.tick(1);
+    harness.tick_still();
 
-    let world = harness.app.world();
-    assert!(
-        world.get_entity(far).is_err(),
-        "a folded agent is still in the world: folded={} live={} density={}",
-        harness.app.world().resource::<Band>().folded,
-        harness.app.world().resource::<Band>().manifested,
-        harness.app.world().resource::<Band>().field.population()
-    );
-    let after_density = world.resource::<Band>().field.population();
+    let after = {
+        let world = harness.app.world();
+        let band = world.resource::<Band>();
+        (
+            world.get_entity(far).is_err(),
+            band.field.population(),
+            band.folded - before.1,
+            band.manifested - before.2,
+        )
+    };
+    assert!(after.0, "a folded agent is still in the world");
     assert_eq!(
-        after_density,
-        before_density + 1,
+        after.1,
+        before.0 + 1,
         "the fold did not add exactly one person to density"
     );
+    assert_eq!(after.2, 1, "exactly one agent should have folded");
+    assert_eq!(after.3, 0, "the band manifested while at its target");
+    // And nothing else moved: the residents are still resident. (With `target: 0` this
+    // assertion was "only the anchor should remain", which measured the emptiness of the world
+    // rather than the fold.)
+    let live = harness.live();
     assert_eq!(
-        harness.live(),
-        1,
-        "the folded agent still matches a query: only the anchor should remain"
+        live, target_live,
+        "folding changed the resident count: live={live}"
     );
-    // And it matches no query, which is what gate 9 actually says.
 }

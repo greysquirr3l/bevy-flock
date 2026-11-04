@@ -120,13 +120,37 @@ Two real defects fell out, neither of which any unit test could have found:
    290 m, no cell existed beyond 256 m from centre, so an agent that walked out had nowhere
    to fold into and stayed an entity forever. `extent` is now 1,024.
 
-### One finding still open: manifestation/fold churn
+## The churn finding, and its fix (2026-11-04, ADR 0025)
 
-With the default configuration the band manifests 256 agents a tick and folds 256 of them
-again on the next (measured: `folded = 512`, `manifested = 768` after two ticks, density
-39,744 = 40,000 - 768 + 512). Population is conserved and no gate notices, because the
-ration bounds both directions — but the band is doing work that cancels, and the intended
-steady state is agents that *stay* manifested. Suspect: newly manifested agents are placed
-at a cell centre but their first steering pass moves them outside the fold radius, or the
-manifest ring and the fold radius disagree by a cell. Gate 9 sidesteps it by testing
-folding with `target: 0`; that sidestep is the reason this note exists.
+The harness left one finding open: with the default configuration the band manifested 256
+agents a tick and folded 256 the next. Population was conserved and every gate passed, which is
+exactly why it survived five gate reviews — the *work* was cancelling, not the population. Gate
+9 sidestepped it by folding with `target: 0`.
+
+Reproduced and root-caused, it was three defects:
+
+1. **The manifest window was square.** Chebyshev rings reach `radius * sqrt(2)` = 1.41 radius
+   into the corners, against a fold bound of 1.15 radius: 1,548 of the 16,641 window cells at
+   the default geometry were past the fold radius, so anyone manifested from them was born
+   outside the band and folded next tick.
+2. **`seed_field` filled the field from the origin** and stopped when the count ran out,
+   putting 40,000 people into the first ~150 rows. A camera at the map centre stood in empty
+   country, so the square window reached further out for anyone it could find.
+3. **The spawn point was never checked against the fold bound**, so `fold_slack: 1.0` would
+   still oscillate at the ration.
+
+All three are fixed: the window is a disc bounded by the manifest radius (and the fold radius),
+the seeding utility distributes uniformly by Bresenham share, and the spawn uses the vetted
+point. `tests/band_churn.rs` pins the behaviour.
+
+| | Before | After |
+| --- | --- | --- |
+| Live agents, tick 11 | 256 | 3,072 |
+| Live agents at target | never reached | 5,000 at tick 20 |
+| Folds per tick after convergence | 256 | 0 |
+| Manifestations per tick after convergence | 256 | 0 |
+| Live agents outside the fold radius | 256 | 0 |
+
+Gate 9 now runs against a full band with a still camera instead of the `target: 0` sidestep, and
+the 1,000,000-inhabitant frame is unchanged at 3.80 ms. The harness re-ran gates 4, 5, 6 and 7
+after the change: all pass.

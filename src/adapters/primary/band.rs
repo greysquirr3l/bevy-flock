@@ -325,10 +325,25 @@ pub fn band_manifest(
     let tick = clock.map_or(Tick::new(0), |clock| clock.tick);
     let mut budget = capacity.min(config.ration);
 
-    // A square window over the manifest radius, centre outward: the nearest cells first, so
-    // a sudden capacity is filled by the people standing closest rather than by a corner.
+    // A disc over the manifest radius, centre outward: the nearest cells first, so a sudden
+    // capacity is filled by the people standing closest rather than by a corner.
+    //
+    // Circular, not square, and that is the whole of the churn fix (ADR 0025). A square
+    // window reaches `radius * sqrt(2)` into its corners, which is 1.41 radius against a
+    // 1.15 radius fold bound: the corners of the window are *outside the band*, so anyone
+    // manifested from them is folded again on the next tick. At the default geometry that
+    // was 1,548 of 16,641 window cells, and with the ration spent on them every frame the
+    // band never converged - it held 256 agents forever, manifesting and folding the same
+    // 256 people.
+    let radius_squared = band.radius * band.radius;
+    let fold_squared = band.fold_radius * band.fold_radius;
     let reach = (band.radius / config.spacing).ceil() as i32;
     'cells: for ring in 0..=reach {
+        // Rings are Chebyshev shells; once even the nearest point of a shell is beyond the
+        // radius, every outer shell is too.
+        if (ring as f32 - 1.0) * config.spacing > band.radius {
+            break 'cells;
+        }
         for dy in -ring..=ring {
             for dx in -ring..=ring {
                 if ring > 0 && dx.abs() != ring && dy.abs() != ring {
@@ -340,6 +355,19 @@ pub fn band_manifest(
                     continue;
                 }
                 let cell = CellId::new(x as u32, y as u32);
+                // Eligibility is a property of where the person would *appear*, not of where
+                // they are stored: the spawn point is the cell centre, so that is what the
+                // radius has to bound.
+                let at = band.field.centre_of(cell);
+                if distance_squared(at, centre) > radius_squared {
+                    continue;
+                }
+                // Belt and braces: if a caller sets `fold_slack` to 1.0 the two radii coincide
+                // and an agent spawned on the boundary can be folded the moment it is steered.
+                // Nobody is manifested onto ground they would immediately leave.
+                if distance_squared(at, centre) >= fold_squared {
+                    continue;
+                }
                 let available = band.field.cell(cell).map_or(0, |state| state.population());
                 if available == 0 {
                     continue;
@@ -351,7 +379,7 @@ pub fn band_manifest(
                 if !band.field.take(cell, take) {
                     continue;
                 }
-                let centre_of_cell = band.field.centre_of(cell);
+                let centre_of_cell = at;
                 let velocity = band.field.cell(cell).map_or([0.0, 0.0], |c| c.velocity());
                 for id in band.field.manifest(cell, take, tick) {
                     commands.spawn((
@@ -448,25 +476,41 @@ pub fn band_steer_mid(
 }
 
 /// A convenience for games: seed the field from a population that is not yet spawned.
+///
+/// Fills the field **uniformly**, one or more people per cell, by Bresenham distribution over
+/// the cell indices rather than by filling cells until the count runs out. The earlier version
+/// walked rows from the origin and stopped when it was spent, which put a whole 40,000-person
+/// town in the first hundred and fifty rows of a 256-row field: the focus at the centre stood
+/// in empty country, the manifest reached outward for people it should never have touched, and
+/// every one of them was folded on the next tick. A seeding utility that puts the population
+/// somewhere other than the field is a fixture that measures itself.
 pub fn seed_field(band: &mut Band, count: u32) {
     let width = band.field.width();
     let height = band.field.height();
-    if width == 0 || height == 0 {
+    let cells = u64::from(width) * u64::from(height);
+    if cells == 0 {
         return;
     }
-    let mut remaining = count;
-    let mut y = 0;
-    while y < height && remaining > 0 {
-        let mut x = 0;
-        while x < width && remaining > 0 {
-            let per_cell = (remaining / ((width - x).max(1))).max(1);
-            if let Some(cell) = band.field.cell_mut(CellId::new(x, y)) {
-                cell.absorb(per_cell, [0.4, 0.0], 0, Occupation::default());
-                remaining = remaining.saturating_sub(per_cell);
+    let total = u64::from(count);
+    let base = total / cells;
+    let remainder = total % cells;
+
+    for y in 0..height {
+        for x in 0..width {
+            let index = u64::from(y) * u64::from(width) + u64::from(x);
+            // `index` gets one of the `remainder` extra people when the running share crosses
+            // an integer boundary between this cell and the next: evenly spaced, no allocation,
+            // and reproducible for a given count and geometry.
+            let extra = index * remainder / cells != (index + 1) * remainder / cells;
+            let here = u32::try_from(base + u64::from(extra)).unwrap_or(u32::MAX);
+            if here == 0 {
+                continue;
             }
-            x += 1;
+            let Some(cell) = band.field.cell_mut(CellId::new(x, y)) else {
+                continue;
+            };
+            cell.absorb(here, [0.4, 0.0], 0, Occupation::default());
         }
-        y += 1;
     }
 }
 

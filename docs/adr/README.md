@@ -51,3 +51,4 @@ replay.
   advertisement.
 | [0023](0023-simd-steering.md) | Four-agent SIMD steering behind a cell-major order | Accepted |
 | [0024](0024-layout-ordering-and-parity.md) | The packed layout, the ordering constraints, and how parity is proven | Accepted |
+| [0025](0025-manifest-fold-hysteresis.md) | The manifest window is a disc inside the fold radius | Accepted |

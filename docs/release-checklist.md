@@ -100,11 +100,12 @@ contract, and the README quotes it.
 
 ## 6. Known limitations, stated before anyone finds them
 
-1. **Manifest/fold churn.** With the default configuration the band manifests 256 agents a tick
-   and folds 256 the next: population is conserved and every gate passes, but the work cancels
-   and the intended steady state (agents that stay manifested) is not reached. Gate 9 sidesteps
-   it by folding with `target: 0`. **Blocker for 1.0, disclosed for 0.1.0.** Tracked in
-   `docs/gates/continuum.md`.
+1. ~~**Manifest/fold churn.**~~ **Fixed** (ADR 0025, `tests/band_churn.rs`). The manifest
+   window was square and so reached 1.41 radius into its corners, past the 1.15 radius fold
+   bound; `seed_field` piled the population into the corner of the field; and the spawn point
+   was never checked against the fold bound. The band now converges to its 5,000 target in
+   twenty frames and then performs zero manifestations and zero folds for as long as the camera
+   holds still. Gate 9 no longer needs its `target: 0` sidestep.
 2. **The wide kernel is x86_64-and-aarch64-shaped.** `wide` picks SSE2 on x86_64 and NEON on
    aarch64; there is no AVX2 path and no wasm-simd path. On wasm the scalar kernel is the
    correct choice, and the feature is off by default for that reason.
@@ -126,7 +127,7 @@ contract, and the README quotes it.
 | Memory (0 allocs, 32 B/agent) | PASS | Nick Campbell |
 | Determinism | PASS | Nick Campbell |
 | Documentation and packaging | PASS except `cargo package` dry run | Nick Campbell |
-| Known limitation 1 (churn) | Accepted for 0.1.0, blocking for 1.0 | Nick Campbell |
+| Known limitation 1 (churn) | **Closed** — fixed in ADR 0025, pinned by `tests/band_churn.rs` | Nick Campbell |
 
-**Release 0.1.0 as the crowd milestone**, with limitation 1 in the release notes and a 1.0 gate
-of its own.
+**Release 0.1.0 as the crowd milestone.** The churn finding that was blocking 1.0 is fixed and
+covered; the remaining limitations are documented and accepted.

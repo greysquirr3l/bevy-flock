@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The band no longer manifolds what it folds.** The manifest window was square, so its
+  corners reached 1.41 radius while folding began at 1.15 radius: every agent manifested from
+  there was born outside the band and folded on the next tick, and the band held one ration of
+  agents (256) forever instead of its 5,000 target. The window is now a disc bounded by the
+  manifest *and* fold radii, and the spawn point is the one that was vetted. ADR 0025.
+- `seed_field` now distributes the population uniformly over the field instead of filling it
+  from the origin and stopping when the count ran out — which had left the map's centre empty
+  and made the manifest behave like a vacuum cleaner.
+
+
 ### Documentation
 
 - `docs/memory.md`: heap and cache profile of the packed kernel, scalar and wide.

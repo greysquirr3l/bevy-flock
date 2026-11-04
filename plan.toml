@@ -1482,6 +1482,12 @@ delivered_in = "HEAD"
 evidence     = "docs/release-checklist.md: nine-gate ledger with evidence, performance sign-off (1M at 3.78 ms wide / 4.75 ms scalar against a 6 ms gate), memory sign-off (0 allocations, 32 B/agent), determinism and packaging checklists, five stated limitations, and the open manifest/fold churn marked blocking for 1.0 and disclosed for 0.1.0. docs/adr/0024 records the layout as a cost contract, the ordering constraints and the parity methodology."
 
 [[completed]]
+slug         = "manifest-fold-churn"
+phase        = "Scale"
+delivered_in = "HEAD"
+evidence     = "ADR 0025 fixes the finding the gate harness left open. Three causes, all measured: the manifest window was square (Chebyshev reach 1.41 radius against a 1.15 radius fold bound, so 1,548 of 16,641 window cells were past the fold radius and every spawn there was born outside the band); seed_field filled the field from the origin and stopped when the count ran out, leaving the map centre empty; and the spawn point was never checked against the fold bound. Eligibility is now the spawn point (disc-bounded, vetted once and reused), seeding is uniformly distributed by Bresenham share. Measured: 256 live agents forever with +256/-256 per tick before; 5,000 at tick 20 and zero manifestations and zero folds for the next 60 frames after. tests/band_churn.rs pins convergence, zero steady-state churn, no agent manifested outside the band, the zero-slack degenerate case and uniform seeding. Gate 9 loses its target:0 sidestep and runs against a full band with a still camera; gates 4, 5, 6, 7 re-run and pass; the 1M frame is unchanged at 3.80 ms."
+
+[[completed]]
 slug         = "memory-profile"
 phase        = "Scale"
 delivered_in = "HEAD"
