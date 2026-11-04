@@ -869,6 +869,7 @@ goal      = "Dispatch cognition against a virtual-nanosecond budget with start-t
 depends_on = ["ecs-core-plugin"]
 implements = ["cognition-budget", "deterministic-simulation"]
 hints = [
+    "Social memory raises weight, never eligibility: apply a clamped permille boost at dispatch time, exclude it from the share that derives tier, and never release memory because a think was skipped — ADR 0011 states why each of those is load-bearing.",
     "`VirtualCost(u64)` in domain is a declared cost in virtual nanoseconds. The registry sums `LeafBehavior::cost_hint` per logic unit and caches the sum on the NPC as `ThinkCost`, refreshed when its logic changes; undeclared logic gets `VirtualCost::DEFAULT` and is listed by the calibration gate rather than panicking.",
     "`ThinkBudget { virtual_nanos }` on the config, and `ThinkWeight(u16)` per NPC in 1..=1000 produced by a weight policy (distance bands, group directive priority, player focus) with hysteresis on the band rather than on a tier.",
     "Selection is start-time fair queueing over integer tags: tag = max(start, vt) + (cost * 1024) / weight; dispatch the minimum (tag, NpcId); vt becomes the dispatched tag; stop when spent >= budget. No float appears anywhere in the arithmetic.",
@@ -1210,6 +1211,7 @@ goal     = "Make what an NPC remembers available to behaviour trees and utility 
 depends_on = ["memory-store", "behavior-tree-engine", "utility-scoring"]
 implements = ["social-memory", "pluggable-logic", "dialog-and-barks"]
 hints = [
+    "Cost the memory leaves as leaves: declare what a store read measures, let the calibration gate defend it, and re-pin the archetype table when a branch is added — ADR 0011.",
     "Expose memory to leaves through the blackboard: `memory_valence`, `memory_familiarity` and `memory_flags` keys written once per think, so a tree reads integers and never touches the store.",
     "A `Recall` leaf family: `HasGrudge`, `RemembersSubject`, `FamiliarityAbove`. They are leaves like any other and declare their cost, so the calibration gate covers them.",
     "Utility scoring reads the same keys; a consideration that scales with familiarity is enough to make a guard who knows you behave differently from one who does not.",

@@ -134,6 +134,9 @@ So the model is checked, in CI, on a fixed runner:
 - Per-NPC state grows by `ThinkWeight` + `tag` + `cost` (16 bytes).
 - Declared costs must be maintained. The gate makes that a build failure rather
   than a mystery slowdown, which is the best available answer.
+- Social memory enters this scheduler as per-leaf cost and a bounded weight boost,
+  never as eligibility — see ADR 0011 for the four rules and the feedback loop
+  they close.
 - The scheduler is single-threaded by construction. Parallel dispatch would need
   the tag arithmetic to be order-independent; deferred until a profile demands
   it (see ADR 0001's note on parallel reductions).

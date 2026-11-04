@@ -107,6 +107,12 @@ affordable at ten thousand NPCs, which is the only place it is asked for.
   100k NPCs, cannot be compacted or snapshotted cheaply, and makes the archetype
   layout depend on how many people an NPC has met.
 
+## Integration
+
+How memory's cost and weight reach the scheduler is fixed by ADR 0011: leaves
+declare what a store read costs, relationships raise weight within a clamp, and
+eligibility follows the scheduler rather than the store.
+
 ## Open questions
 
 - Whether the authored (promoted) tier belongs in this crate or in the dialogue
