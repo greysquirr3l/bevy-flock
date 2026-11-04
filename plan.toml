@@ -7,6 +7,21 @@
 # Only `[project].path` needs editing if the checkout lives somewhere other
 # than ~/Projects/bevy-flock.
 
+# ─── State of this plan ───────────────────────────────────────────────────────
+# This file is a work queue, not a changelog: [[phases.tasks]] holds what is left,
+# and [completed] below records what shipped, with the commit and the code that
+# proves it. Wiggum generates task files from the phases only, so a finished task
+# left in the queue would ask an agent to rebuild something that exists.
+#
+# Delivered so far, at v0.1.0-rc.1: the deterministic core (identifiers, RNG, ticks,
+# spatial index, steering), the Bevy surface (plugin, components, budgeted spawning),
+# cognition (behaviour trees with declared costs, the extension registry, the
+# calibration gate), social memory with a measured footprint, and the versioned save
+# format with its compatibility corpus. 231 tests, clippy clean on the MSRV.
+#
+# Nine tasks below are partially delivered; each carries a hint that names what is in
+# place and what is missing, so nobody re-does the former or mistakes it for the whole.
+
 # ─── Project ──────────────────────────────────────────────────────────────────
 
 [project]
@@ -476,45 +491,13 @@ name  = "Foundations"
 order = 1
 
 [[phases.tasks]]
-slug      = "workspace-scaffold"
-kind      = "infrastructure"
-title     = "Crate skeleton, feature matrix and repository hygiene"
-goal      = "Create a compiling, publishable library skeleton whose module layout, feature flags and tooling configuration are already the ones the finished crate will use."
-depends_on = []
-implements = ["api-ergonomics"]
-hints = [
-    "Single published crate at the repository root (`bevy-flock`), not a multi-crate workspace: one crate, one version, one dependency surface. A `benches/` target and `examples/` keep dev-only deps out of the consumer graph.",
-    "Layout follows the collapsed hexagonal shape: `src/domain` (pure simulation math and state, no Bevy types), `src/application` (scheduling, budget, orchestration over narrow traits), `src/adapters/primary` (plugin, systems, commands, observers), `src/adapters/secondary` (spatial index, storage, optional integrations).",
-    "Feature skeleton, all off by default except the core: `default = [\"std\"]`; `2d`, `3d`, `physics-avian`, `save-moonshine`, `net-replicon`, `inspector`, `serde`, `tracing-integration`, `wasm`.",
-    "`Cargo.toml` metadata: edition 2024, `rust-version` read from Bevy 0.20.1's declared MSRV (do not guess), `[package.metadata.docs.rs] all-features = true`, keywords, categories (`game-development`, `simulation`), `exclude = [\"docs/\", \"benches/\"]`.",
-    "Pin `bevy = { version = \"0.20.1\", default-features = false }` and depend on `bevy_app`, `bevy_ecs`, `bevy_math` directly for the core. Pin `glam = \"0.33\"` only if a public type actually exposes glam.",
-    "`rust-toolchain.toml`, `rustfmt.toml` (max_width 100, use_small_heuristics), `clippy.toml`, `.cargo/config.toml` with the project `l` alias, `.gitignore`, dual MIT/Apache-2.0 licence files, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`.",
-    "Add `README.md` with name, one-paragraph pitch and a placeholder quickstart that will be made real by the last phase.",
-    "Do not add dependencies that nothing uses yet. An unused dependency in a library is a supply-chain liability.",
-]
-test_hints = [
-    "`cargo build --all-features` and `cargo build --no-default-features` both succeed.",
-    "A smoke test in `tests/smoke.rs` constructs an `App`, adds an empty plugin, and runs one update.",
-    "`cargo package --list` contains no `docs/`, `benches/` or fixture files.",
-]
-must_haves = [
-    "`src/lib.rs` declares `#![deny(unsafe_code)]`, `#![deny(missing_docs)]` and the module tree.",
-    "Cargo.toml declares every feature named in the hints, even if the module behind it lands later.",
-    "`cargo package --allow-dirty` succeeds on the skeleton.",
-]
-evaluation_criteria = [
-    "`cargo build --no-default-features` compiles with only bevy_app, bevy_ecs and bevy_math in the dependency tree (`cargo tree --no-default-features` proves it).",
-    "The module tree matches the documented hexagonal layout; no simulation logic sits in `lib.rs`.",
-    "Licence files, MSRV, editions and feature list are all present and consistent between Cargo.toml and README.",
-]
-
-[[phases.tasks]]
 slug      = "ci-and-supply-chain"
 kind      = "infrastructure"
 title     = "CI matrix, supply-chain gates and benchmark tracking"
 goal      = "Make every quality claim in this plan mechanically enforced by CI on the first commit rather than by reviewer diligence."
-depends_on = ["workspace-scaffold"]
+depends_on = []
 hints = [
+    "In place: fmt, clippy (-D warnings, project profile), tests on a three-OS matrix, MSRV 1.97.1, docs with -D warnings, cargo-deny, a bench smoke build, and the compat job that rebuilds against the release tag. Remaining: cargo-hack --each-feature and --feature-powerset jobs, and a wasm32 build for --no-default-features.",
     "GitHub Actions: `ci.yml` runs fmt, clippy (project profile, -D warnings), test, and doc on ubuntu-latest, macos-latest and windows-latest.",
     "Separate jobs: MSRV check, `cargo hack check --each-feature` and `--feature-powerset --depth 2`, `wasm32-unknown-unknown` build for `--no-default-features` and `--features 2d`, and a docs job with `RUSTDOCFLAGS=\"-D warnings\"`.",
     "Supply chain: `deny.toml` with advisories, licences (allow MIT, Apache-2.0, BSD-3-Clause, Zlib, Unicode-3.0, CC0-1.0), bans on duplicate Bevy versions, and `sources` unrestricted only for crates.io.",
@@ -539,140 +522,16 @@ evaluation_criteria = [
     "The feature-powerset job actually enumerates more than one feature combination (paste the job log).",
 ]
 
-[[phases.tasks]]
-slug      = "architecture-record"
-kind      = "research"
-title     = "Architecture document and decision records"
-goal     = "Write down the load-bearing design decisions before they are implemented, so every later task has a fixed contract to implement against."
-depends_on = ["workspace-scaffold"]
-hints = [
-    "`ARCHITECTURE.md`: the three simulation tiers, the tick model, the boundary between domain/application/adapters, and the rule that rendering observes simulation but never drives it.",
-    "`docs/adr/` records, one file each, numbered as they already are in the tree: 0001 collapsed hexagonal layout; 0002 deterministic PCG32 streams per NPC; 0003 the spatial grid and the two designs that lost to it; 0004 `libm` transcendentals; 0005 budgeted spawning; 0006 trees and state machines together; 0007 no renderer, physics or networking in the core; 0008 fallible constructors and no panic paths; 0009 the virtual-cost fair-queue think scheduler.",
-    "Each ADR: context, decision, consequences, and the alternative that was rejected with the reason. Two paragraphs each, no filler.",
-    "Include the target performance envelope with the methodology used to measure it: 10,000 NPCs at 60 Hz with rendering, 100,000 simulated headless, 1,000,000 ambient.",
-    "State explicitly what bevy-flock will not do: no renderer, no physics solver, no networking protocol, no scripting language.",
-]
-test_hints = [
-    "`docs/adr/README.md` indexes every ADR and every one is linked.",
-    "Any decision later reversed gets a superseding ADR rather than an edit of the original.",
-]
-must_haves = [
-    "ARCHITECTURE.md and at least eight ADRs exist.",
-    "Every ADR names a rejected alternative.",
-    "The performance envelope is stated with its measurement method.",
-]
-evaluation_criteria = [
-    "A reader can implement the core from ARCHITECTURE.md alone without asking a design question.",
-    "No ADR contradicts another without a cross-reference.",
-]
-
-# ─── Phase 2: Deterministic Core ─────────────────────────────────────────────
-
 [[phases]]
 name  = "Deterministic Core"
 order = 2
-
-[[phases.tasks]]
-slug      = "domain-vocabulary"
-kind      = "feature"
-title     = "Domain vocabulary: identifiers, counts, ticks and typed errors"
-goal     = "Define the newtypes every later module compiles against, so invalid values are unrepresentable at the boundary and transposed arguments cannot compile."
-depends_on = ["workspace-scaffold"]
-implements = ["api-ergonomics", "deterministic-simulation"]
-hints = [
-    "`NpcId(u32)`, `FlockId(u64)`, `GroupId(u32)`, `SlotId(u32)`: opaque, `Copy`, `Ord`, `Hash`, with `Display` and `Debug`. `NpcId` carries a namespace byte so recycled and unique populations cannot collide.",
-    "`PopulationSize`: `try_new(usize) -> Result<Self, PopulationError>` enforcing 1..=1_000_000. No public field, no `From<usize>` — construction must be fallible.",
-    "`Tick(u64)`, `TicksPerSecond(NonZeroU32)`, `Radius(f32)` rejecting NaN, negative and infinite values, `Weight(f32)` clamped to 0..=1 via `try_new`.",
-    "`SimSeed(u64)` with a `SplitMix64`-derived `stream_for(NpcId) -> RngStream` so stream assignment is a pure function of seed and identity.",
-    "`PopulationMode::{Unique, Recycled { slots: NonZeroU32 }}` with `Recycled` requiring at least one slot.",
-    "Errors: `PopulationError`, `ConfigError`, `RegistrationError` via `thiserror`, each variant carrying the offending value and the valid range in its `Display`.",
-    "No Bevy imports in this module. It must be usable from a server binary that never links rendering.",
-]
-test_hints = [
-    "Boundary tests: 0 rejected, 1 accepted, 1_000_000 accepted, 1_000_001 rejected, and the error message names the range.",
-    "`Radius::try_new(f32::NAN)` and `try_new(-1.0)` both return Err.",
-    "Proptest: any `PopulationSize` round-trips through serde and through `u64` conversion.",
-    "A compile-fail test (`trybuild`) proves `Radius` and `Tick` cannot be interchanged.",
-]
-must_haves = [
-    "Every newtype is constructible only through a validating constructor.",
-    "All error variants carry context, none are field-less.",
-    "`#![deny(missing_docs)]` satisfied with examples on every public item.",
-]
-evaluation_criteria = [
-    "No public function in the module accepts a bare `usize`/`f32` count, radius or weight.",
-    "Error messages state the field, the value and the valid range.",
-    "The module compiles with no Bevy dependency at all.",
-]
-
-[[phases.tasks]]
-slug      = "deterministic-rng"
-kind      = "feature"
-title     = "Deterministic RNG streams with per-entity isolation"
-goal     = "Provide a random number generator whose output is identical on every platform and whose streams are independent per entity, so adding an NPC never changes another NPC's fate."
-depends_on = ["domain-vocabulary"]
-implements = ["deterministic-simulation"]
-hints = [
-    "Implement PCG32 (or xoshiro256**) directly in `src/domain/rng.rs` — roughly 40 lines — instead of depending on `rand`, which would also pin a version the consumer must agree with.",
-    "`RngStream` is `Clone` and seedable; `split()` derives child streams so a group can hand each member a stream without sharing state.",
-    "All sampling helpers are explicit: `next_u32`, `next_bounded(u32)`, `next_f32_unit`, `next_range_f32`, `shuffle`, `choose_weighted` — all documented as deterministic and free of rejection-loop bias.",
-    "Float sampling must be built from integer draws (`(bits >> 8) as f32 * 2^-24`) so results never depend on platform `f32` conversion rules.",
-    "Expose a `StreamId` so a save file can restore a stream mid-sequence; offset storage as `(seed, draw_count)` rather than materialised state.",
-    "Optional `bevy_rand` bridge behind a feature for projects already using it — do not make it a default dependency.",
-]
-test_hints = [
-    "Golden vector tests: the first 16 outputs for seed 0 and seed 0xDEADBEEF are asserted against a checked-in expected array.",
-    "Statistical smoke tests: 1,000,000 draws of `next_bounded(10)` produce each bucket within 1 percent of uniform; `next_f32_unit` stays in [0,1).",
-    "Stream isolation: draws from `stream_for(NpcId(5))` are unchanged by draws from `stream_for(NpcId(6))`.",
-    "Proptest: `next_range_f32(lo, hi)` never leaves [lo, hi) for 100,000 random ranges.",
-]
-must_haves = [
-    "No dependency on `rand` in the core.",
-    "Golden vectors committed and asserted.",
-    "Every sampling helper documents its determinism guarantee.",
-]
-evaluation_criteria = [
-    "The same seed produces identical output in a debug build, a release build and a wasm build (assert via the CI golden test).",
-    "No `HashMap` iteration, `SystemTime` or `thread_rng` anywhere in the module.",
-]
-
-[[phases.tasks]]
-slug      = "temperament-and-needs"
-kind      = "feature"
-title     = "Temperament, needs and mood model"
-goal     = "Give NPCs a personality and internal drives that produce visibly different behaviour from the same code, without any behaviour code having to special-case personality."
-depends_on = ["domain-vocabulary", "deterministic-rng"]
-implements = ["pluggable-logic", "deterministic-simulation"]
-hints = [
-    "`Temperament` holds the five OCEAN dimensions plus three game-facing axes (bravery, sociability, industriousness) as `Weight`s, with `Temperament::sample(&mut RngStream)` drawing from a configurable distribution and `Temperament::archetype(Brave|Timid|Merchant|Guard|... )` presets.",
-    "`Needs` holds a fixed-size array of named need channels (energy, hunger, social, safety) with per-channel decay and satisfaction rates; fixed-size so it is `Copy` and allocation-free.",
-    "`Mood` is a derived scalar/valence-arousal pair updated by decay and events, clamped, with hysteresis-free continuous integration at a fixed tick.",
-    "All step functions take `Tick` and `RngStream` explicitly and return new values — no `&mut self`, no interior mutability, so the domain stays trivially testable and parallelisable.",
-    "Provide `NeedChannel` indices as `const` rather than strings; string lookup is a debug-only convenience.",
-    "Document the model in the module docs with the actual formulas so a game designer can reason about tuning.",
-]
-test_hints = [
-    "Property test: after any number of steps, every need and mood value stays within [0, 1] and never becomes NaN.",
-    "Decay is monotonic: with zero satisfaction, need values strictly decrease over ticks.",
-    "Two NPCs with identical seeds and identical temperaments evolve identically; differing temperaments diverge measurably within 100 ticks.",
-    "Archetype presets sample within their documented bands.",
-]
-must_haves = [
-    "No heap allocation in the per-tick update path.",
-    "Formulas documented with worked examples.",
-    "Deterministic given (state, tick, stream).",
-]
-evaluation_criteria = [
-    "The module has zero Bevy imports and zero global state.",
-    "Behaviour authors can read a temperament and predict which behaviour will win (documented mapping).",
-]
 
 [[phases.tasks]]
 slug      = "archetype-generator"
 kind      = "feature"
 title     = "Procedural NPC generation: names, looks, backgrounds"
 goal     = "Generate plausible, varied, reproducible NPCs — name, temperament, needs, role, faction lean, appearance seed — deterministically from a world seed and an index."
-depends_on = ["temperament-and-needs"]
+depends_on = []
 implements = ["population-spawning", "deterministic-simulation"]
 hints = [
     "Generation is a pure function `generate(seed, index, &ArchetypeTable) -> NpcBlueprint`; the same triple always yields the same blueprint, and generation order does not matter.",
@@ -699,74 +558,11 @@ evaluation_criteria = [
 ]
 
 [[phases.tasks]]
-slug      = "spatial-grid"
-kind      = "feature"
-title     = "Deterministic spatial grid with neighbour queries"
-goal     = "Answer radius, k-nearest and cone queries in logarithmic-to-constant time without hash iteration order, so crowd code is both fast and reproducible."
-depends_on = ["domain-vocabulary"]
-implements = ["crowd-motion", "deterministic-simulation"]
-hints = [
-    "Uniform grid over a rectangular bounds with `CellSize` derived from the largest query radius; cell storage is a flat `Vec` indexed by `z * (h * w) + y * w + x`, not a `HashMap`.",
-    "Each cell holds `SmallVec<[NpcId; 8]>`; insertion order is the deterministic sort key, and queries return results sorted by `(distance_squared, NpcId)`.",
-    "Rebuild each tick from a caller-supplied slice of positions (structure-of-arrays), with a `rebuild_dirty` path that only moves agents whose cell changed.",
-    "API: `radius(center, r, &mut out)`, `nearest(center, k, &mut out)`, `within_cone(center, dir, half_angle, r)`, `cell_at(point)`, `for_each_cell`, all allocation-free given a reusable `QueryScratch` buffer.",
-    "Guard the pathological case: a cell containing 10,000 agents must still answer quickly, so document and test the behaviour when a single cell dominates.",
-    "Auto-tune cell size from agent density at construction, and expose the choice in the stats snapshot.",
-]
-test_hints = [
-    "Equivalence property test: for 200 random worlds and 50 random queries each, grid results equal an O(n^2) brute-force scan exactly, including ordering.",
-    "Boundary test: agents exactly on a cell border are found exactly once, never zero and never twice.",
-    "Empty-grid and single-agent cases are covered.",
-    "Benchmark: 100,000 agents, radius query returning ~20 neighbours, under the documented nanosecond target.",
-]
-must_haves = [
-    "No `HashMap` in the module.",
-    "Results are deterministically ordered.",
-    "Allocation-free steady state proven with a counting allocator test.",
-]
-evaluation_criteria = [
-    "Brute-force equivalence test passes with ordering compared, not just set equality.",
-    "`cargo tree` shows no spatial-index dependency — this is hand-written.",
-]
-
-[[phases.tasks]]
-slug      = "steering-model"
-kind      = "feature"
-title     = "Composable steering behaviours with crowd stability"
-goal     = "Implement separation, alignment, cohesion, seek, flee, arrive, wander and obstacle avoidance as weighted, composable steering forces that stay stable in dense crowds."
-depends_on = ["spatial-grid"]
-implements = ["crowd-motion"]
-hints = [
-    "Each behaviour is a small `fn(&AgentContext, &[Neighbour], &mut Vec3)` writing into a shared accumulator; composition is priority-weighted truncation (the classic Reynolds `prioritized_dithering`) rather than naive summation, so avoidance is never outvoted.",
-    "Steering outputs a desired velocity; a separate integrator clamps to `MaxSpeed`, applies `MaxAcceleration`, and damps. Keep them separate so a physics adapter can take over integration.",
-    "Stability rules that must be implemented and documented: velocity-squared damping near a destination, a dead-zone radius below which separation is scaled down, and a jitter threshold that snaps sub-epsilon velocity to zero.",
-    "Obstacle avoidance uses time-to-collision against capsule/sphere primitives from a caller-supplied slice — no physics dependency in the core.",
-    "All vector math via glam 0.33; any transcendental (atan2 for cone tests, sin/cos for wander) goes through `libm`.",
-    "Provide `SteeringWeights` as a newtype with sane defaults per preset, and document what each weight does to the crowd's look.",
-]
-test_hints = [
-    "Separation invariant: after settling, no two agents are inside the sum of their radii.",
-    "Rest stability: a crowd at rest produces total kinetic energy below the jitter threshold for 300 ticks.",
-    "Boids invariants: 200 agents with alignment converge toward a shared heading (angular variance decreases over 500 ticks).",
-    "Obstacle test: no agent's segment from previous to next position intersects an obstacle capsule at 5x max speed.",
-    "Golden test: a fixed scenario's positions at tick 100 are asserted to a tolerance.",
-]
-must_haves = [
-    "No `std::f32::sin`/`cos`/`atan2` in the module.",
-    "Weighted truncation implemented, not naive summation.",
-    "Every stability rule has a test that fails without it.",
-]
-evaluation_criteria = [
-    "Dense-crowd test with 1,000 agents in a small box shows no oscillation artefact in a committed plot or numeric trace.",
-    "A physics adapter can replace integration without touching behaviour code.",
-]
-
-[[phases.tasks]]
 slug      = "flow-field-pathing"
 kind      = "feature"
 title     = "Hierarchical flow fields for destination-driven crowds"
 goal     = "Let thousands of NPCs share one computed path field per destination, so crowd pathfinding costs one solve instead of one per agent."
-depends_on = ["spatial-grid"]
+depends_on = []
 implements = ["crowd-motion", "deterministic-simulation"]
 hints = [
     "Two-tier grid: a coarse navigation grid (baked from an obstacle list or supplied by an adapter) and a per-destination flow field cached in an LRU keyed by destination cell.",
@@ -800,73 +596,11 @@ name  = "ECS Surface"
 order = 3
 
 [[phases.tasks]]
-slug      = "ecs-core-plugin"
-kind      = "feature"
-title     = "FlockPlugin, components and named schedules"
-goal     = "Wire the deterministic core into Bevy with an explicit schedule, components that hold simulation state, and a plugin whose ordering is documented rather than incidental."
-depends_on = ["domain-vocabulary", "deterministic-rng"]
-implements = ["api-ergonomics", "headless-parity"]
-hints = [
-    "`FlockPlugin` with `FlockConfig` (population, mode, seed, tick rate, budgets, presets) inserted as a resource; `app.add_plugins(FlockPlugin::new(config))` is the single entry point.",
-    "Components stay thin and `Copy` where possible: `Npc`, `NpcIdentity`, `NpcTemperament`, `NpcNeeds`, `NpcMood`, `NpcLod`, `NpcBrainRef`, `NpcVelocity`, `NpcDesiredVelocity`.",
-    "Named system sets ordered explicitly: `FlockSet::{Input, Perception, Cognition, Steering, Integration, Cleanup, Diagnostics}` with `.chain()` inside each set and documented cross-set edges.",
-    "Drive from `FixedUpdate` against a `SimTick` resource incremented by our own system, not `Time<Fixed>` elapsed — determinism requires the tick to be logical.",
-    "Provide `FlockCommands` as an extension trait on `Commands`/`EntityCommands`: `spawn_npc()`, `spawn_flock(config)`, `despawn_npc()`, plus a queued `SpawnQueue` so spawning never mutates the world mid-iteration.",
-    "Observer hooks: emit `NpcSpawned`, `NpcDespawned`, `NpcBecameAware`, `NpcTierChanged` events; a game hooks these instead of polling.",
-    "Document the schedule with a diagram in the module docs.",
-]
-test_hints = [
-    "Plugin registration test: `App::new().add_plugins(FlockPlugin::default())` runs 100 updates without panicking and reports the configured population.",
-    "Schedule ordering test: a probe resource records set execution order and asserts the documented order.",
-    "Determinism test: two apps with the same seed produce the same `SimTick` and the same digest after 100 updates.",
-]
-must_haves = [
-    "No simulation logic in `lib.rs` or the plugin; systems delegate to domain functions.",
-    "Schedule order documented and tested.",
-    "Works with `MinimalPlugins` only (headless).",
-]
-evaluation_criteria = [
-    "`cargo test --no-default-features` runs the plugin tests without any rendering plugin.",
-    "Every component has a doc comment stating who writes it and when.",
-]
-
-[[phases.tasks]]
-slug      = "staged-spawn-pipeline"
-kind      = "feature"
-title     = "Budgeted, streaming population spawn"
-goal     = "Spawn 1 to 1,000,000 NPCs without a frame hitch by draining a queue against a per-frame entity budget, with progress a game can render."
-depends_on = ["ecs-core-plugin", "archetype-generator"]
-implements = ["population-spawning"]
-hints = [
-    "`SpawnQueue` resource holds pending ranges, not materialised blueprints; draining generates on demand so a million-NPC request costs kilobytes until it drains.",
-    "`SpawnBudget { entities_per_frame, max_micros }` — whichever limit is hit first stops the drain for that frame.",
-    "Recycled mode keeps a `SlotPool` free-list; despawning returns the slot so identities are reused deterministically (lowest free slot first).",
-    "Emit `SpawnProgress { spawned, total }` every frame while draining, and `SpawnComplete` once.",
-    "Cancellation: `cancel_spawn()` drops pending ranges and despawns what was already spawned, returning the population to its pre-request state exactly.",
-    "Guard against a game calling `spawn_flock` twice with conflicting seeds — document the merge rule and test it.",
-]
-test_hints = [
-    "Spawn 100,000 at 2,000 per frame: drains in 50 frames, final count exact, no frame exceeds budget by more than 25 percent.",
-    "Recycled pool: despawn 100 of 500, respawn 100, assert live count 500 and that the freed slot ids were reused.",
-    "Cancellation test: cancel mid-drain leaves zero NPCs and no queued work.",
-    "Determinism: two runs with the same seed produce the same `NpcIdentity` sequence regardless of budget size.",
-]
-must_haves = [
-    "No O(n) blueprint materialisation before draining.",
-    "Recycled mode reuses slot identities deterministically.",
-    "Progress and completion events emitted.",
-]
-evaluation_criteria = [
-    "A 100,000-NPC spawn shows no single frame over budget in the recorded per-frame trace.",
-    "Changing the budget changes how long the spawn takes but not which NPCs exist.",
-]
-
-[[phases.tasks]]
 slug      = "lod-think-scheduler"
 kind      = "feature"
 title     = "Virtual-cost fair-queue think scheduler"
 goal      = "Dispatch cognition against a virtual-nanosecond budget with start-time fair queueing, so cost is bounded, replay is exact and no NPC can starve."
-depends_on = ["ecs-core-plugin"]
+depends_on = []
 implements = ["cognition-budget", "deterministic-simulation"]
 hints = [
     "Social memory raises weight, never eligibility: apply a clamped permille boost at dispatch time, exclude it from the share that derives tier, and never release memory because a think was skipped — ADR 0011 states why each of those is load-bearing.",
@@ -903,7 +637,7 @@ slug      = "ambient-population-tier"
 kind      = "feature"
 title     = "Continuum ambient population that materialises into entities"
 goal     = "Represent a million inhabitants as a density field, then solidify them into real NPCs as the player approaches and dissolve them on the way out, conserving population."
-depends_on = ["staged-spawn-pipeline", "spatial-grid"]
+depends_on = ["lod-think-scheduler"]
 implements = ["ambient-tier", "crowd-motion"]
 hints = [
     "`AmbientField`: per-cell population mass (`f32`), mean velocity, dominant archetype mix, and a per-cell RNG stream derived from `(seed, cell)`. Memory is O(cells), not O(inhabitants).",
@@ -938,44 +672,11 @@ name  = "Cognition"
 order = 4
 
 [[phases.tasks]]
-slug      = "behavior-tree-engine"
-kind      = "feature"
-title     = "Behaviour trees with typed nodes and a blackboard"
-goal     = "A behaviour tree that designers can read, programmers can extend, and the scheduler can interrupt — compiled to a flat node array so evaluation allocates nothing."
-depends_on = ["domain-vocabulary"]
-implements = ["pluggable-logic", "deterministic-simulation"]
-hints = [
-    "Nodes: `Sequence`, `Selector`, `Parallel { policy }`, `Inverter`, `Cooldown`, `Timeout`, `Condition`, `Action`, plus `RepeatUntilFail`. Status is `Success | Failure | Running` with explicit running-state semantics for sequences (resume at the same child).",
-    "Compile the authored tree into a flat `Vec<Node>` with child ranges, so evaluation walks indices and never the heap — this is the performance story for 100,000 NPCs and must be measured.",
-    "Blackboard is a typed, fixed-capacity key-value store keyed by `BlackboardKey` consts, not strings; values are a small enum (`Bool`, `Int`, `Float`, `EntityRef`, `Vec3`).",
-    "Builder API mirrors the tree shape (`seq([...])`, `sel([...])`, `act(Greet)`) so trees read like the thing they describe; a RON loader behind the `serde` feature produces the same structure.",
-    "Interruption: `abort()` must be propagated depth-first and every running node must be given a chance to clean up — test it, because it is the classic source of stuck NPCs.",
-    "Deterministic tie-breaking in `Selector`: order of children, never a scored pick (utility scoring is a separate task).",
-    "Document the node semantics table in the module docs: tick, resume, abort, reset for each node type.",
-]
-test_hints = [
-    "Semantics table test: one test per node type per status outcome, including the resume-after-running case.",
-    "Abort test: a running sequence aborted mid-child leaves no node in `Running` and releases its blackboard writes.",
-    "Allocation test: evaluating a 1,000-node tree 10,000 times allocates zero bytes after warm-up.",
-    "Golden test: a RON-authored tree and the equivalent builder tree produce identical evaluation traces.",
-    "Fuzz test: random tree shapes never panic and always terminate.",
-]
-must_haves = [
-    "Flat node storage, no per-evaluation allocation.",
-    "Abort semantics tested, not assumed.",
-    "RON round-trip equal to builder-built trees.",
-]
-evaluation_criteria = [
-    "Evaluation of a 20-node tree costs under the documented nanosecond budget per NPC.",
-    "No `Box<dyn Node>` in the hot path — dyn dispatch only at leaf boundaries, and that decision is documented.",
-]
-
-[[phases.tasks]]
 slug      = "utility-scoring"
 kind      = "feature"
 title     = "Utility scoring with response curves and inhibition"
 goal     = "Let behaviour selection emerge from personality and circumstance: each candidate scores itself from considerations, and the winner is explainable."
-depends_on = ["temperament-and-needs", "behavior-tree-engine"]
+depends_on = []
 implements = ["pluggable-logic", "observability"]
 hints = [
     "`Consideration` = (input extractor, response curve, weight). Curves: linear, quadratic, inverse, logistic, step, and a `PiecewiseCurve` for designer-shaped responses.",
@@ -1002,71 +703,11 @@ evaluation_criteria = [
 ]
 
 [[phases.tasks]]
-slug      = "cognition-extension-api"
-kind      = "feature"
-title     = "Registration API for custom logic at NPC, group and world scope"
-goal     = "One coherent extension surface where a game registers its own behaviours, directors, dialog providers and state machines, with object-safe traits and build-time validation."
-depends_on = ["behavior-tree-engine", "utility-scoring", "lod-think-scheduler"]
-implements = ["pluggable-logic", "api-ergonomics"]
-hints = [
-    "Traits: `LeafBehavior` (tick, abort, cost hint), `Consideration`, `GroupDirector`, `WorldDirector`, `DialogProvider`, `NavSource`, `NpcLogic` (full takeover). All object-safe, all `Send + Sync + 'static`, all documented with an example.",
-    "`FlockRegistry` resource with `register_*` methods that return `Result<Handle, RegistrationError>`; duplicate ids are rejected at registration time.",
-    "Full takeover: attaching `ExternalCognition` makes the scheduler skip the entity entirely; provide a `NpcLogicContext` with read access to perception and a command buffer for writes so external logic cannot corrupt the sim.",
-    "Cost hints: every extension declares a `CostHint { nanos }` used by the scheduler before first measurement; document that a lying hint degrades fairness but never safety.",
-    "Compile-fail tests (`trybuild`) for the common mistakes: non-object-safe impl, missing `Send`, wrong associated type.",
-    "Show the full path in `examples/custom_behavior.rs` and in module docs.",
-]
-test_hints = [
-    "Registration test: 50 custom leaves registered, only the assigned 50 NPCs evaluate theirs.",
-    "Duplicate registration returns `RegistrationError::Duplicate { id }` and names the id.",
-    "Takeover test: `ExternalCognition` entity is never written by the built-in scheduler across 1,000 ticks.",
-    "trybuild compile-fail suite passes with the expected error strings.",
-]
-must_haves = [
-    "All extension traits object-safe and documented with runnable examples.",
-    "Duplicate ids rejected at build time.",
-    "Takeover path proven to be inert for built-in systems.",
-]
-evaluation_criteria = [
-    "A game can implement a behaviour in under 30 lines using only the prelude.",
-    "No extension trait leaks internal types in its signature.",
-]
-
-[[phases.tasks]]
-slug      = "cost-calibration-gate"
-kind      = "infrastructure"
-title     = "Cost-model calibration gate"
-goal      = "Keep declared virtual costs honest: measure every registered leaf on a fixed runner and fail the build when the model drifts by more than 20 percent."
-depends_on = ["cognition-extension-api", "lod-think-scheduler"]
-implements = ["cognition-budget", "observability"]
-hints = [
-    "`benches/cost_model.rs` measures every registered built-in leaf with one criterion group per leaf, so a regression names itself in the report.",
-    "`tests/cost_model.rs` runs the same measurement as an assertion: 100,000 iterations per leaf, median, compared against the declared `VirtualCost`; the failure message carries declared, measured and the corrected value to paste.",
-    "Tolerance is 20 percent, and the comparison is against a reference table generated by the bench on the fixed runner, not against absolute nanoseconds. Only relative costs set fairness shares, so absolute drift on other hardware is expected and harmless; drift in the model is the failure being caught.",
-    "CI gets a `cost-model` job on the same runner class as `bench.yml`, required on every pull request, plus a nightly drift report that warns without failing so a runner fleet change is visible before it breaks the gate.",
-    "Document the re-calibration ritual in `docs/performance.md`: measure, update the declaration, regenerate the reference table, and state the reason in the commit message.",
-    "A leaf that declares no cost is not a silent default: the gate lists uncalibrated leaves and the scheduler charges `VirtualCost::DEFAULT`, which is deliberately pessimistic so an undeclared leaf cannot hide as cheap.",
-]
-test_hints = [
-    "Declare one leaf at half its measured cost: the gate fails, naming the leaf and the corrected value.",
-    "Register a leaf with no declared cost: the gate passes but lists it as uncalibrated.",
-    "Regenerate the reference table from the bench and assert the test reads the generated file, not a hand-edited one.",
-]
-must_haves = [
-    "Every built-in leaf has a declared cost and a generated reference measurement.",
-    "The gate fails the build, not merely a benchmark, when the model drifts.",
-]
-evaluation_criteria = [
-    "A deliberate 3x cost regression in one leaf is caught by CI with that leaf named.",
-    "The reference table is machine-generated and checked in, with the generating command documented.",
-]
-
-[[phases.tasks]]
 slug      = "group-faction-model"
 kind      = "feature"
 title     = "Groups, formations and faction relations"
 goal     = "Model squads, flocks and crowds as first-class members with leaders, shared blackboards and directives that propagate to members on their own think latency."
-depends_on = ["ecs-core-plugin"]
+depends_on = []
 implements = ["pluggable-logic", "deterministic-simulation"]
 hints = [
     "Group is an entity with `GroupMembers` (Bevy 0.20 relationships or an explicit index set — pick one and document why), `GroupBlackboard`, `GroupDirectorRef`, and formation slot allocation.",
@@ -1098,7 +739,7 @@ slug      = "world-director"
 kind      = "feature"
 title     = "World director: mood, events and population pressure"
 goal     = "A top-level decision layer that shapes the whole crowd — festivals, patrols, panics, migrations — without any NPC hard-coding those states."
-depends_on = ["group-faction-model", "cognition-extension-api"]
+depends_on = ["group-faction-model", "utility-scoring"]
 implements = ["pluggable-logic", "ambient-tier"]
 hints = [
     "`WorldDirector` trait: `tick(&mut self, &WorldSnapshot, &mut DirectorCommands)`. It reads a snapshot and writes commands; it never touches the world directly, which is what keeps director logic deterministic and testable.",
@@ -1130,53 +771,38 @@ name  = "Society and Voice"
 order = 5
 
 [[phases.tasks]]
-slug      = "memory-store"
-kind      = "feature"
-title     = "Social memory store and cold tier"
-goal     = "Give an NPC a bounded, deterministic memory of the subjects it has met, sized by who is eligible to remember rather than by how many NPCs exist."
-depends_on = ["domain-vocabulary", "deterministic-rng"]
-implements = ["social-memory", "deterministic-simulation"]
+slug      = "subject-clamp-diagnostic"
+kind      = "refactor"
+title     = "Refuse a subject count above the ceiling instead of clamping it"
+goal      = "A game that asks for more subjects than the store can hold currently gets the maximum and a store that silently refuses every relationship past it. Make that request fail loudly at construction, so the failure mode ADR 0015 had to diagnose cannot recur."
+depends_on = []
+implements = ["social-memory"]
 hints = [
-    "Flat slot array indexed `memory_index × subjects + subject`; one allocation for the whole crowd. A `Vec` per NPC is the shape this decision exists to reject, and the ADR says why.",
-    "`MemorySlot` is sixteen bytes with the size asserted at compile time, because the cost model is `capacity × subjects × 16` and a careless field would double it.",
-    "`MemoryIndex` is issued by `enrol` and stored on the entity, the way `NpcId` is; the store keeps no map from `NpcId` to a row.",
-    "Valence blends three parts history to one part news, in `i32` arithmetic with an explicit saturating conversion, so one bad afternoon does not erase a friendship.",
-    "Decay halves the *magnitude* and reapplies the sign. Arithmetic `>>` on a negative value converges to -1, which would make a grudge permanent at one point of hostility — a test must pin the value reaching zero.",
-    "`DecayPolicy::NONE` exists because a game may want a grudge that never fades, and that has to be expressible rather than a special case.",
-    "The cold tier is a bounded `BTreeMap` with eviction by lowest total familiarity then lowest `NpcId`; iteration order is part of the eviction rule, so a hash map is the wrong container.",
-    "`release` returns a `NpcMemories` the caller can drop, park or serialise. The library must not pick a retention policy for the game.",
-    "`implant` restores a slot exactly; reconstructing by replaying encounters would decay it twice and lose the original encounter kind.",
-    "Free-list reuse is LIFO and double release is a no-op, so a churning eligibility set never hands one row to two NPCs.",
-]
-test_hints = [
-    "Slot size asserted as a test as well as a const, so a future refactor that pads the struct fails loudly.",
-    "Blend test with exact expected integers for help-then-attack and attack-then-help.",
-    "Saturation test: 70,000 encounters leave counts at `u16::MAX` rather than wrapping.",
-    "Decay test across the half-life boundaries, asserting the faded value is exactly zero and that `NONE` never decays.",
-    "Sweep test proving only faded rows are freed and the freed count is exact.",
-    "Archive test proving the faintest record is evicted and ties break by identifier.",
-    "Round-trip test: release, park, restore, and recall the original valence, encounters and flags.",
-    "Determinism test: two stores fed identical events agree on every decayed read.",
-    "Rejection test: an unknown index, an out-of-range subject and a double release all fail without writing.",
-    "Benchmark asserting the per-NPC cost of remember, recall, decayed recall and sweep.",
+    "MemoryStore::new clamps with `subjects.clamp(1, MAX_SUBJECTS)`; remembering a subject past the stride returns false and a caller is free to ignore it. That is how a sixteen-subject ceiling went unnoticed for a whole feature cycle.",
+    "Add `ConfigError::TooManySubjects { requested, max }` and return a Result from a fallible constructor, keeping `new` as the clamping variant for callers who mean 'the maximum'. ADR 0008 already established fallible constructors for exactly this shape of mistake.",
+    "A doc test must show the error, and a unit test must prove the clamp still works for callers who ask for the maximum deliberately.",
 ]
 must_haves = [
-    "Store allocation is sized by capacity and subjects, asserted in a test.",
-    "Decay is lazy, integer, and reaches zero.",
-    "Cold tier evicts deterministically.",
-    "Retention policy lives in the caller, not the store.",
+    "MUST fail at construction, not at the first remember() that would be rejected.",
+    "MUST keep the clamping path available and documented, because `MAX_SUBJECTS` as an argument is a legitimate idiom.",
+    "MUST not change the save format: the ceiling is a runtime bound, and identifiers in a file are already bounded by it.",
 ]
 evaluation_criteria = [
-    "Recall costs single-digit nanoseconds per NPC in the benchmark.",
-    "Sweeping a full store is measured and documented as a slow-cadence operation, not a per-frame one.",
-    "The ADR records why per-NPC vectors, hash maps and embeddings were rejected.",
+    "When a store is constructed with MAX_SUBJECTS + 1, the fallible constructor returns TooManySubjects naming both numbers.",
+    "When a store is constructed with exactly MAX_SUBJECTS, it succeeds and every subject slot is addressable.",
+    "When the clamping constructor is used with a larger request, it stores MAX_SUBJECTS and its doc comment says so.",
 ]
+test_hints = [
+    "Assert `remember` succeeds for subject MAX_SUBJECTS - 1 after a construction at the ceiling.",
+    "Assert the error renders the requested and maximum counts, since this error is read by a developer at startup.",
+]
+
 [[phases.tasks]]
 slug      = "encounter-perception"
 kind      = "feature"
 title     = "Encounter perception and eligibility"
 goal     = "Detect encounters between eligible NPCs and registered subjects, write them into the store, and enrol or release NPCs as the level-of-detail tiers move them — with the retention choice left to configuration."
-depends_on = ["memory-store", "ecs-core-plugin", "lod-think-scheduler"]
+depends_on = ["lod-think-scheduler"]
 implements = ["social-memory", "crowd-motion", "pluggable-logic"]
 hints = [
     "Subjects are registered entities with a dense `SubjectId`; the plugin keeps the mapping and rejects duplicate registration.",
@@ -1208,7 +834,7 @@ slug      = "memory-in-cognition"
 kind      = "feature"
 title     = "Memory as a cognition input"
 goal     = "Make what an NPC remembers available to behaviour trees and utility scoring, and define the promotion threshold where a scalar relationship becomes authored content."
-depends_on = ["memory-store", "behavior-tree-engine", "utility-scoring"]
+depends_on = ["utility-scoring", "encounter-perception"]
 implements = ["social-memory", "pluggable-logic", "dialog-and-barks"]
 hints = [
     "Cost the memory leaves as leaves: declare what a store read measures, let the calibration gate defend it, and re-pin the archetype table when a branch is added — ADR 0011.",
@@ -1241,7 +867,7 @@ slug      = "dialog-graph-engine"
 kind      = "feature"
 title     = "Dialogue graphs, facts and conversation state"
 goal     = "Conversations as data: a directed graph of lines, choices and conditions evaluated against typed facts, with guaranteed termination and resumable state."
-depends_on = ["domain-vocabulary"]
+depends_on = []
 implements = ["dialog-and-barks", "deterministic-simulation"]
 hints = [
     "Node kinds: `Line { speaker, text_key, next }`, `Choice { options }`, `Condition { predicate, then, else }`, `Action { effect, next }`, `End`. `text_key` is a localisation key plus optional authored fallback text — never a hard-coded English string in the engine.",
@@ -1305,7 +931,7 @@ slug      = "dialog-provider-seam"
 kind      = "feature"
 title     = "External line providers without blocking the tick"
 goal     = "Let a game route line text through localisation, an LLM or a TTS pipeline while the simulation stays deterministic and never blocks."
-depends_on = ["dialog-graph-engine", "cognition-extension-api"]
+depends_on = ["dialog-graph-engine"]
 implements = ["dialog-and-barks", "pluggable-logic"]
 hints = [
     "`DialogProvider` trait returns either `Ready(text)` or `Pending(request_id)`; the engine never blocks on a provider inside the tick.",
@@ -1343,7 +969,7 @@ slug      = "navigation-port"
 kind      = "feature"
 title     = "Navigation trait with grid, navmesh and hand-authored adapters"
 goal     = "One navigation port the crowd speaks to, with a built-in grid implementation and adapters a game can swap in without touching steering or cognition."
-depends_on = ["flow-field-pathing", "ecs-core-plugin"]
+depends_on = ["flow-field-pathing"]
 implements = ["crowd-motion", "pluggable-logic"]
 hints = [
     "`NavSource` trait: `bounds()`, `is_walkable(cell)`, `neighbours(cell, &mut out)`, `cell_of(position)`, `center_of(cell)`, `version()`. Object-safe, no generic parameters.",
@@ -1373,7 +999,7 @@ slug      = "physics-adapter"
 kind      = "feature"
 title     = "Optional avian integration for collision-aware crowds"
 goal     = "Let games that already use avian get real collision response without bevy-flock depending on a physics engine."
-depends_on = ["steering-model", "ecs-core-plugin"]
+depends_on = []
 implements = ["crowd-motion", "headless-parity"]
 hints = [
     "Feature `physics-avian` adds `avian2d`/`avian3d` as optional deps and an adapter that writes `LinearVelocity` from our desired velocity and reads back the resolved position after the physics step.",
@@ -1403,7 +1029,7 @@ slug      = "render-adapter"
 kind      = "feature"
 title     = "2D sprite and 3D instanced crowd rendering"
 goal     = "Draw 10,000 NPCs at 60 Hz by pooling and instancing, with per-NPC variation driven by the simulation's appearance seed — while keeping all rendering outside the simulation."
-depends_on = ["ecs-core-plugin", "lod-think-scheduler"]
+depends_on = ["lod-think-scheduler"]
 implements = ["headless-parity", "api-ergonomics"]
 hints = [
     "Feature `2d`: pooled `Sprite` entities with atlas index derived from the NPC's appearance seed; cull by tier and viewport, never despawn on cull.",
@@ -1430,46 +1056,11 @@ evaluation_criteria = [
 ]
 
 [[phases.tasks]]
-slug      = "persistence-and-snapshots"
-kind      = "feature"
-title     = "Versioned snapshots, restore and command-log replay"
-goal     = "Capture and restore the entire simulation — including brains, facts and the ambient field — so determinism is provable and saves are possible."
-depends_on = ["ecs-core-plugin", "dialog-graph-engine", "cognition-extension-api"]
-implements = ["state-persistence", "deterministic-simulation"]
-hints = [
-    "Compatibility is a corpus, not a round trip: committed fixtures blessed deliberately, a frozen-writer byte test, a pinned old build for the forward direction, and bit-flip fuzzing that must produce typed errors and never a panic — ADR 0014. Waste is measured as ghost rows and orphan slots in permille, drawn by an example rather than the library — ADR 0015.",
-    "Subjects are matched by stable key, not position: the file carries a registry whose fingerprint short-circuits the common case, translation drops and counts what the current registry no longer knows, and a registry-less version 1 file is refused unless the game opts in — ADR 0013.",
-    "Relationships persist through the versioned format in ADR 0012: ages not stamps, identities not indices, sorted records, CRC32 per section, typed errors for every refusal, and the crate produces bytes rather than opening files.",
-    "`SnapshotV1` with an explicit `schema_version`, `engine_version`, `seed`, `tick`, population records, per-NPC brain state, fact store, group state and ambient field. Serialise with RON behind `serde` for human diffing, and document a binary path if size demands it.",
-    "Version gate: unknown or newer schema returns `UnsupportedSnapshotVersion { found, supported }` and leaves the world untouched — test the untouched part.",
-    "Digest: a stable 64-bit hash over the canonicalised state (sorted by `NpcId`, integers first) used by tests and by the benchmark gate.",
-    "Command log: every external input (spawn, despawn, directive, dialog choice, nav rebuild) appended as a typed record with its tick; replay applies them at the same ticks.",
-    "Optional `save-moonshine` adapter behind a feature for games already using moonshine-save; verify 0.8 compatibility with Bevy 0.20 before wiring it.",
-    "Restore must rebuild derived state (spatial grid, flow-field cache) rather than serialising it — document what is canonical versus derived.",
-]
-test_hints = [
-    "Round-trip: snapshot at tick 500, restore into a fresh app, both run to 1000, digests equal.",
-    "Reject: schema 99 returns the typed error and the world's digest is unchanged.",
-    "Replay: 2,000-tick recorded run reproduces the final digest from seed + log alone.",
-    "Canonicalisation: two snapshots of the same state serialise to identical bytes regardless of entity insertion order.",
-    "Corruption: truncated or malformed snapshot returns a typed parse error, never a panic.",
-]
-must_haves = [
-    "Snapshot versioned and forward-rejecting.",
-    "Digest canonical and order-independent.",
-    "Replay from seed + log proven.",
-]
-evaluation_criteria = [
-    "Snapshot size for 10,000 NPCs measured and documented.",
-    "Snapshot and restore are O(n) with no per-NPC allocation storm (benchmarked).",
-]
-
-[[phases.tasks]]
 slug      = "networking-adapter"
 kind      = "feature"
 title     = "Optional replication for server-authoritative crowds"
 goal     = "Let a dedicated server simulate the crowd and replicate only what a client needs to draw it, without shipping a networking protocol in the core."
-depends_on = ["ecs-core-plugin", "persistence-and-snapshots"]
+depends_on = []
 implements = ["headless-parity", "state-persistence"]
 hints = [
     "Feature `net-replicon` with `bevy_replicon` 0.45.x; replicate a compact `NpcNetState { id, position, yaw, tier, visual_state }` rather than the full entity.",
@@ -1501,44 +1092,14 @@ name  = "Developer Experience"
 order = 7
 
 [[phases.tasks]]
-slug      = "public-api-ergonomics"
-kind      = "refactor"
-title     = "Five-line quickstart, presets and API consistency pass"
-goal     = "Turn a working engine into a library that feels obvious: one import, five lines, sensible presets, and names that a user can guess."
-depends_on = ["ecs-core-plugin", "staged-spawn-pipeline", "cognition-extension-api", "dialog-graph-engine"]
-implements = ["api-ergonomics"]
-hints = [
-    "`prelude` exports exactly what a first crowd needs; everything else is behind explicit module paths. If the prelude exceeds ~20 items, cut it.",
-    "Quickstart that is literally five lines in a doctest: add plugin with a preset, spawn a crowd, done. The doctest is the contract — if it grows past five lines, the API is wrong.",
-    "Presets: `CrowdPreset::{city_ambient, battle_horde, marketplace_bustle, quiet_village}` as `const fn`-ish constructors returning `FlockConfig`, each documented with what it feels like.",
-    "Naming pass: verbs for methods, nouns for types, no `Manager`/`Helper`/`Util`, builder methods return `Self`, `#[must_use]` everywhere a dropped value is a bug. Write `docs/api-conventions.md` and then enforce it in review.",
-    "Every configuration error names the field, the value and the valid range; write the error catalogue in the docs.",
-    "Deprecation policy and semver commitment documented in `docs/semver.md` before 1.0.",
-]
-test_hints = [
-    "Doctest: the five-line quickstart compiles and runs as part of `cargo test`.",
-    "Preset test: each preset constructs a valid config and spawns without error.",
-    "API snapshot test (`cargo public-api` or a generated list) committed so accidental public additions are visible in review.",
-    "Every preset spawns its documented count in the documented mode.",
-]
-must_haves = [
-    "Five-line doctest quickstart passes.",
-    "Four presets exist and are tested.",
-    "Public API snapshot committed.",
-]
-evaluation_criteria = [
-    "A developer who has never seen the crate can spawn a crowd from the README alone.",
-    "No public item is undocumented; `#![deny(missing_docs)]` is on.",
-]
-
-[[phases.tasks]]
 slug      = "prelude-rustdoc-book"
 kind      = "feature"
 title     = "Rustdoc, mdbook guide and diagrams"
 goal     = "Documentation that teaches the model — tiers, budgets, determinism, extension points — not just the signatures."
-depends_on = ["public-api-ergonomics"]
+depends_on = []
 implements = ["api-ergonomics", "observability"]
 hints = [
+    "In place: rustdoc with -D warnings on every public item, a prelude, and ARCHITECTURE.md. Remaining: the mdbook guide and the diagrams it needs.",
     "Crate-level rustdoc: pitch, quickstart, the three-tier model diagram, the schedule diagram, a feature-flag matrix table, and a 'where to go next' map. `#![doc = include_str!(\"../README.md\")]` only if the README is genuinely the right front page.",
     "`book/` mdbook: Getting Started, Core Concepts (ticks, determinism, tiers, budgets), Crowds and Steering, Cognition, Dialogue and Barks, Ambient Populations, Performance Tuning, Extending, Migration, Troubleshooting.",
     "Every chapter has a runnable snippet or a link to an example; no chapter is prose-only.",
@@ -1566,9 +1127,10 @@ slug      = "observability-and-debug"
 kind      = "feature"
 title     = "Stats, gizmos, tracing and 'why did it do that'"
 goal     = "Make the invisible visible: who is thinking, what it cost, where the budget went, and why an NPC chose what it chose."
-depends_on = ["ecs-core-plugin", "lod-think-scheduler"]
+depends_on = ["lod-think-scheduler"]
 implements = ["observability"]
 hints = [
+    "In place: domain::telemetry (ghost rows, orphan slots, permille measures) and the registry_telemetry example that draws them. Remaining: tracing spans, gizmos, and the 'why did it do that' inspector over the blackboard and the scheduler trace.",
     "`FlockStats` resource: live counts per tier, thoughts this tick, deferrals, budget used vs allowed, per-phase microseconds, spawn queue depth, ambient mass, materialised entities.",
     "Gizmo overlays behind a `debug-gizmos` feature: tier colouring, spatial grid cells, flow-field arrows, steering vectors, group formation slots — each toggleable at runtime.",
     "Tracing: `tracing` spans per phase and a `debug!` record per cognition decision with the score vector; no logging in hot loops without a level check.",
@@ -1603,9 +1165,10 @@ slug      = "benchmark-suite"
 kind      = "feature"
 title     = "Criterion benchmarks at 1, 10k, 100k and 1M"
 goal     = "Prove the performance envelope with benchmarks anyone can run, gated in CI so it cannot silently regress."
-depends_on = ["staged-spawn-pipeline", "ambient-population-tier", "steering-model", "dialog-graph-engine"]
+depends_on = ["ambient-population-tier", "dialog-graph-engine"]
 implements = ["cognition-budget", "ambient-tier", "crowd-motion"]
 hints = [
+    "In place: crowd (10,000 agents), brain (per-archetype cognition), memory (remember/recall/sweep/stride) and saves (v1 against v2 at 50,000 NPCs). Remaining: the 100,000-agent think-scheduler budget and the 1,000,000-agent ambient tier, both of which need the features they measure.",
     "`benches/crowd.rs` with criterion groups: spawn throughput at 1/100/10k/100k/1M, steering step at each size, spatial grid query at each size, cognition tick at each size, flow-field build, dialog resolution, snapshot round-trip.",
     "The headline benchmark is the one the plan promises: 10,000 NPCs, full pipeline, measured as milliseconds per frame with a 16.6 ms budget line in the report.",
     "Headless always (`MinimalPlugins`) so the numbers measure the engine, not the GPU; a separate optional bench with rendering reports end-to-end frame time in the example instead.",
@@ -1635,9 +1198,10 @@ slug      = "property-and-fuzz-suite"
 kind      = "feature"
 title     = "Property tests, invariant harnesses and fuzzing"
 goal     = "Attack the engine with random operations so the failure modes are found in CI rather than in someone's game."
-depends_on = ["archetype-generator", "dialog-graph-engine", "behavior-tree-engine"]
+depends_on = ["archetype-generator", "dialog-graph-engine"]
 implements = ["deterministic-simulation", "population-spawning"]
 hints = [
+    "In place: the save-format corpus flips every bit and tries every prefix, asserting typed errors only. Remaining: proptest coverage for the spatial grid (parity with brute force), steering stability, and the behaviour-tree cursor invariants.",
     "Proptest harnesses: random spawn/despawn/directive/dialog/save sequences applied to a live app, asserting invariants after every step (no NaN, tier counts sum, no orphan members, no dangling brain refs, population bounds).",
     "Shrinking must produce a readable failing case: write a custom `Debug` for the operation log so a failure prints a replayable script.",
     "`cargo-fuzz` targets: RON dialog graph load, RON behaviour tree load, snapshot load — all must return typed errors and never panic or hang.",
@@ -1661,44 +1225,14 @@ evaluation_criteria = [
 ]
 
 [[phases.tasks]]
-slug      = "determinism-replay-tests"
-kind      = "feature"
-title     = "Golden determinism, replay and rollback tests"
-goal     = "Make the determinism claim falsifiable: committed digests, cross-platform comparison, replay from a log, and a rollback test that catches hidden state."
-depends_on = ["persistence-and-snapshots", "cognition-extension-api", "ambient-population-tier"]
-implements = ["deterministic-simulation", "state-persistence"]
-hints = [
-    "`tests/determinism.rs`: a scripted 5,000-tick scenario with a committed digest per 500 ticks, run with and without rendering features and compared.",
-    "Cross-platform job: CI prints the digests on Linux, macOS and Windows and compares them against the committed set — this is the only way the claim survives contact with reality.",
-    "Rollback test: snapshot at 500, run to 1,000, restore the 500 snapshot, rerun to 1,000, compare digests. This catches state that is not in the snapshot (the classic bug).",
-    "Replay test: record the command log of a scenario with dialog choices and director events, replay from seed + log, compare the transcript and digest.",
-    "A `FlockDeterminismReport` on failure that names the first divergent entity and the first divergent field, not just 'digests differ'.",
-    "Document the guarantee precisely: what is guaranteed (same binary, same platform, same features, same input) and what is not (across engine feature changes, across physics adapters).",
-]
-test_hints = [
-    "Golden digests reproduce on all three CI platforms.",
-    "Rollback test passes with the full state set and fails when a state field is deliberately excluded from the snapshot (verified, then fixed).",
-    "Replay transcript is byte-identical.",
-    "Divergence report names the entity and field for an injected divergence.",
-]
-must_haves = [
-    "Committed golden digests.",
-    "Three-platform comparison in CI.",
-    "Rollback and replay both proven.",
-]
-evaluation_criteria = [
-    "The determinism section of the docs matches the tests exactly — no claim without a test.",
-    "A deliberate nondeterminism injection (HashMap iteration) is caught by the suite.",
-]
-
-[[phases.tasks]]
 slug      = "examples-showcase"
 kind      = "feature"
 title     = "Runnable examples that sell the engine"
 goal     = "Six examples that each demonstrate one promise, run with one command, and look good enough to record a GIF from."
-depends_on = ["render-adapter", "dialog-provider-seam", "public-api-ergonomics", "physics-adapter"]
+depends_on = ["render-adapter", "dialog-provider-seam", "physics-adapter"]
 implements = ["api-ergonomics", "headless-parity", "dialog-and-barks"]
 hints = [
+    "In place: hello_flock (spawn, steer, observe) and registry_telemetry (diagnostics with an SVG). Remaining: a cognition showcase, a dialogue/bark showcase, and a headless server example.",
     "`hello_flock`: 10 NPCs, five lines of setup, 2D, no assets required — the do-not-make-me-read example.",
     "`city_crowd`: 3D, 10,000 NPCs, instanced, with an on-screen HUD showing tier counts, frame time and budget usage.",
     "`horde_100k`: headless, prints a per-second throughput table and a digest — the benchmark-as-a-demo.",
@@ -1736,6 +1270,7 @@ goal     = "The front door: a README that states the promise and proves it, and 
 depends_on = ["prelude-rustdoc-book", "examples-showcase"]
 implements = ["api-ergonomics", "observability"]
 hints = [
+    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; sixteen ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
     "README: badges, one-paragraph pitch, animated GIF of the 10,000-NPC demo, five-line quickstart, a capability table, a benchmark table with the machine named, a comparison table against big-brain (utility AI, Bevy 0.15 as of late 2026) and bevy_boids, and an honest 'what this is not' section.",
     "Every claim in the README links to the test, benchmark or example that proves it. No unlinked adjectives.",
     "Publish the book to GitHub Pages from CI, versioned per release.",
@@ -1765,6 +1300,7 @@ goal     = "Ship 0.1.0 to crates.io with a changelog, a contribution path and a 
 depends_on = ["docs-site-and-readme", "benchmark-suite"]
 implements = ["api-ergonomics"]
 hints = [
+    "In place: v0.1.0-rc.1 tagged, CHANGELOG with an Unreleased section, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, dual licence. Remaining: publish to crates.io, the release checklist, and the discipline of moving compat/Cargo.toml's pin forward with each format change.",
     "`cargo-release` or a release workflow: version bump, changelog from conventional commits (git-cliff), tag, `cargo publish --dry-run`, publish, GitHub release with the changelog extracted.",
     "`CHANGELOG.md` shows the 0.1.0 feature list grouped by phase, written for humans.",
     "`CONTRIBUTING.md`: how to run preflight, how to add a behaviour, how to add a benchmark, the ADR requirement for design changes, and the review checklist.",
@@ -1823,6 +1359,7 @@ goal     = "Prove the crate builds and behaves everywhere it claims, and that th
 depends_on = ["ci-and-supply-chain", "examples-showcase"]
 implements = ["headless-parity", "deterministic-simulation"]
 hints = [
+    "In place: a three-OS CI matrix and an endian-explicit save format that does not need a big-endian host to be correct. Remaining: the wasm32 build and a browser run, plus the feature-powerset check that catches a combination that does not compile.",
     "Build matrix: default, `--no-default-features`, each feature alone, each pair that the docs claim composes, `--all-features`, and wasm32 for the headless and 2D sets.",
     "Run the determinism suite on all three desktop platforms plus wasm (wasm via a headless browser runner if practical; otherwise document the gap explicitly rather than claiming coverage).",
     "Check MSRV actually builds: a CI job with the pinned toolchain and `-Zminimal-versions` style dependency resolution where practical.",
@@ -1892,3 +1429,105 @@ the completion notes rather than in a claim:
 - The work is finished, not deferred. "Follow-up task" is only acceptable for
   genuinely new scope the plan did not name, never for finishing this one.
 """
+
+# ─── Completed ───────────────────────────────────────────────────────────────
+# Read by humans; wiggum ignores this table. Each entry names the phase it came
+# from, the commit that delivered it, and the code or record that proves it.
+# Kept rather than deleted, because a plan that forgets its history is how a team
+# re-litigates a decision it already made.
+
+[[completed]]
+slug         = "workspace-scaffold"
+phase        = "Foundations"
+delivered_in = "d5fab71"
+evidence     = "Cargo.toml with the feature matrix, rust-toolchain.toml, rustfmt/clippy config, dual licences, README/ARCHITECTURE/CONTRIBUTING/SECURITY, .gitignore"
+
+[[completed]]
+slug         = "architecture-record"
+phase        = "Foundations"
+delivered_in = "d5fab71..46dadf9"
+evidence     = "ARCHITECTURE.md plus ADR 0001-0016 with an index (docs/adr/README.md); every decision record is amended rather than rewritten when measurement contradicts it"
+
+[[completed]]
+slug         = "domain-vocabulary"
+phase        = "Deterministic Core"
+delivered_in = "d5fab71"
+evidence     = "src/domain/{ids,tick,population}.rs and src/error.rs: NpcId/MemoryIndex/SubjectId/Tick newtypes, SlotCount, typed FlockError tree with thiserror"
+
+[[completed]]
+slug         = "deterministic-rng"
+phase        = "Deterministic Core"
+delivered_in = "d5fab71"
+evidence     = "src/domain/rng.rs: per-entity PCG32 streams seeded by SplitMix64, no float, no weekly seeding; tested against the reference sequence (ADR 0002)"
+
+[[completed]]
+slug         = "temperament-and-needs"
+phase        = "Deterministic Core"
+delivered_in = "d5fab71"
+evidence     = "src/domain/temperament.rs: integer temperament axes, needs and mood derivation with saturating arithmetic"
+
+[[completed]]
+slug         = "spatial-grid"
+phase        = "Deterministic Core"
+delivered_in = "d5fab71"
+evidence     = "src/domain/spatial.rs: dense counting-sort grid with a hard cell budget that scales with population rather than volume, brute-force parity tests including query order (ADR 0003)"
+
+[[completed]]
+slug         = "steering-model"
+phase        = "Deterministic Core"
+delivered_in = "d5fab71"
+evidence     = "src/domain/steering.rs plus src/boids.rs: separation/alignment/cohesion/seek with priority weights and a determinism test across two runs (ADR 0004 for the libm transcendentals)"
+
+[[completed]]
+slug         = "ecs-core-plugin"
+phase        = "ECS Surface"
+delivered_in = "d5fab71"
+evidence     = "src/adapters/primary/{plugin,components}.rs: FlockPlugin, FlockConfig, components, schedules with explicit ordering, and a test that tolerates BoidsPlugin being added first"
+
+[[completed]]
+slug         = "staged-spawn-pipeline"
+phase        = "ECS Surface"
+delivered_in = "d5fab71"
+evidence     = "budgeted spawn system with a per-tick cap and a recycling pool, so a 10,000-strong wave arrives over frames; tests/spawning.rs covers recycling and determinism (ADR 0005)"
+
+[[completed]]
+slug         = "behavior-tree-engine"
+phase        = "Cognition"
+delivered_in = "0824252"
+evidence     = "src/behavior/{tree,leaves,leaf,blackboard,state_machine}.rs: typed nodes, compiled child ranges, a cursor with a depth budget, sixteen built-in leaves with declared costs, zero-allocation ticking asserted by tests/tree_no_alloc.rs (ADR 0006)"
+
+[[completed]]
+slug         = "cognition-extension-api"
+phase        = "Cognition"
+delivered_in = "0824252"
+evidence     = "src/behavior/registry.rs: one registration entry point for leaves, guards, state machines and director logic, at NPC, group and world scope; unknown names are typed errors"
+
+[[completed]]
+slug         = "cost-calibration-gate"
+phase        = "Cognition"
+delivered_in = "0824252"
+evidence     = "benches/brain.rs measures every archetype, the declared cost table is pinned by a test, and docs/performance.md carries the numbers the table was calibrated from (ADR 0009)"
+
+[[completed]]
+slug         = "memory-store"
+phase        = "Society and Voice"
+delivered_in = "d1efb47..e269c80"
+evidence     = "src/domain/memory.rs: flat slot array, cold archive, lazy integer decay, sweep, and the diagnostics in src/domain/telemetry.rs; 64-subject ceiling with a measured footprint (ADR 0010, 0015, 0016)"
+
+[[completed]]
+slug         = "persistence-and-snapshots"
+phase        = "Adapters"
+delivered_in = "46dadf9"
+evidence     = "src/domain/saves.rs: versioned sectioned format with a subject registry and key-based translation, a committed fixture corpus, bit-flip and prefix fuzzing, and a released build reading current files (ADR 0012, 0013, 0014)"
+
+[[completed]]
+slug         = "public-api-ergonomics"
+phase        = "Developer Experience"
+delivered_in = "d5fab71"
+evidence     = "prelude, presets, builders that cannot build an invalid config, fallible constructors (ADR 0008), and examples/hello_flock.rs as the five-line quickstart"
+
+[[completed]]
+slug         = "determinism-replay-tests"
+phase        = "Proof"
+delivered_in = "d5fab71"
+evidence     = "tests/determinism.rs: same seed produces the same 64-bit state digest, plus the replay test that would catch a wall clock entering the tick"
