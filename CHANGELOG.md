@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `NpcBrain`: a component holding a shared tree, a per-NPC cursor and the cached
   cost, ready for the scheduler task to drive.
 
-- Nemesis memory behind the `memory` feature (ADR 0010): `MemoryStore`, a flat
+- Social memory behind the `memory` feature (ADR 0010): `MemoryStore`, a flat
   array of 16-byte slots indexed by eligibility and subject, with lazy integer
   decay, a LIFO free list, and exact `implant`/`release` round-tripping.
 - `MemoryArchive`, a bounded cold tier that evicts the faintest record by lowest

@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-# Nemesis memory: an opt-in store so a game that never remembers anyone does not
+# Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
 memory = []
 

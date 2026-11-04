@@ -31,7 +31,7 @@ that means:
 | Budgeted, deterministic population spawning (unique and recycled) | **Shipped** |
 | Behaviour trees: flat compiled nodes, resume, abort, cooldown, timeout, parallel | **Shipped** |
 | Leaf catalogue with declared costs and per-archetype trees | **Shipped** |
-| Nemesis memory: bounded slot store, cold archive, lazy decay (`memory` feature) | **Shipped (opt-in)** |
+| Social memory: bounded slot store, cold archive, lazy decay (`memory` feature) | **Shipped (opt-in)** |
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |

@@ -1,4 +1,4 @@
-//! Nemesis memory: what an NPC remembers about a subject, and how cheaply.
+//! Social memory: what an NPC remembers about a subject, and how cheaply.
 //!
 //! A crowd of ten thousand cannot each keep a `Vec` of grudges, and a crowd of a
 //! million cannot keep a grudge at all. So memory is layered by *eligibility*
@@ -33,7 +33,7 @@
 //!
 //! Semantic memory ("this one reminds me of that one") needs a vector index, a
 //! real dependency, and inference that is bit-identical across platforms to stay
-//! replayable. Nemesis-style memory does not need any of it: the value is a small
+//! replayable. Social memory does not need any of it: the value is a small
 //! relationship table plus *promotion* of the few relationships worth authoring
 //! into names, scars and dialogue. Store integers; promote deliberately.
 //!
