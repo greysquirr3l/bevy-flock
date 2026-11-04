@@ -1,0 +1,39 @@
+# Architecture decision records
+
+One file per decision that would be expensive to reverse. Each records the
+context, the decision, its consequences, and the alternatives that were rejected
+with the reason — the last part is the one that stops a decision being re-litigated
+every six months.
+
+A decision is not edited after the fact. If it is reversed, a new ADR supersedes
+it and both stay in the tree.
+
+## Index
+
+| ADR | Decision | Status |
+| --- | --- | --- |
+| [0001](0001-hexagonal-layout.md) | Collapsed hexagonal layout: `domain`, `application`, adapters | Accepted |
+| [0002](0002-deterministic-rng.md) | A PCG32 stream per NPC derived from `(seed, NpcId)` | Accepted |
+| [0003](0003-spatial-grid.md) | Dense uniform grid with a cell budget; two measured designs rejected | Accepted |
+| [0004](0004-libm-transcendentals.md) | `libm` instead of `std` maths in simulation code | Accepted |
+| [0005](0005-budgeted-spawning.md) | Budgeted spawning from a queue of ranges | Accepted |
+| [0006](0006-trees-and-state-machines.md) | Behaviour trees and state machines as separate primitives | Accepted |
+| [0007](0007-no-renderer.md) | No renderer, physics or networking in the core | Accepted |
+| [0008](0008-fallible-constructors.md) | Parse, don't validate; no panic paths in library code | Accepted |
+| [0009](0009-virtual-cost-stride-scheduler.md) | Cognition scheduled against a virtual cost by start-time fair queueing | Accepted |
+
+## Reading order
+
+For a new contributor: 0001 gives the shape of the code, 0002 and 0004 explain why
+the numbers are reproducible, 0003 explains the one data structure that dominates
+frame time, and 0009 explains how cognition will be bounded without giving up
+replay.
+
+## Writing one
+
+- Name the alternative you rejected, and why. "We chose X" is not a decision
+  record; "we chose X because Y lost for this reason" is.
+- Include the numbers if a measurement drove the decision. A benchmark table ages
+  better than an adjective.
+- State the consequences you do not like. An ADR with no downsides is an
+  advertisement.
