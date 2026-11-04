@@ -22,9 +22,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+# Nemesis memory: an opt-in store so a game that never remembers anyone does not
+# pay for the rows. Off by default and dependency-free.
+memory = []
+
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
-serde = ["dep:serde", "dep:ron"]
+serde = ["dep:serde", "dep:ron", "smallvec/serde"]
 
 [dependencies]
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
@@ -59,6 +63,11 @@ harness = false
 [[bench]]
 name = "brain"
 harness = false
+
+[[bench]]
+name = "memory"
+harness = false
+required-features = ["memory"]
 
 [lints.rust]
 unsafe_code = "deny"

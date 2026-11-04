@@ -157,6 +157,33 @@ Ten thousand guards thinking costs 449 µs, 2.7% of a 16.6 ms frame. That is the
 headroom the think scheduler exists to spend deliberately: at 60 Hz this crowd
 could think every frame and still leave the frame 97% for everything else.
 
+## Memory
+
+`benches/memory.rs` measures what remembering costs, over 16,384 enrolled NPCs
+with four subjects — a busy district rather than a city.
+
+| Operation | 16,384 NPCs | Per NPC |
+| --- | --- | --- |
+| `remember` (one encounter each) | 125.6 µs | 7.7 ns |
+| `recall` | 90.1 µs | 5.5 ns |
+| `recall_decayed` | 139.9 µs | 8.5 ns |
+| `sweep`, nothing faded | 113.7 µs | 6.9 ns |
+| `sweep`, everything reclaimed | 288.4 µs | 17.6 ns |
+
+Sixteen thousand NPCs remembering eight subjects each is 2 MB, allocated once.
+
+Reading a memory inside a think costs 8.5 ns against a guard think of 45 ns, so
+memory is about a fifth of a think at the only population where it is asked for.
+
+**Sweeping is not a frame operation.** 288 µs is 1.7% of a 16.6 ms frame spent on
+housekeeping, which is too much to pay every frame for work whose answer changes
+slowly. Sweep on a cadence measured in seconds.
+
+The benchmark found a real bug before the design was settled: the first version
+guarded against double release with `free.contains(&index)`, which made sweeping a
+full store quadratic — 24.7 ms for 16k rows. `Option::take` already prevents a
+double push, so the guard was both wrong and expensive. 24.7 ms became 288 µs.
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.
