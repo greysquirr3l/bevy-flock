@@ -603,6 +603,7 @@ goal      = "Dispatch cognition against a virtual-nanosecond budget with start-t
 depends_on = []
 implements = ["cognition-budget", "deterministic-simulation"]
 hints = [
+    "In place: application::schedule — the planner, as a pure function of state, budget and costs, with eleven tests (budget never overspent, one think per participant per tick, reproducible order, 3:1 weight share, bounded starvation, no credit for newcomers) and benches/think.rs measuring 1,000/10,000/100,000 participants. Remaining: the ECS system that collects NpcBrain costs, calls plan() and ticks the chosen trees, plus the schedule-set wiring and a world-level test that a 100,000-agent world keeps its frame budget.",
     "Social memory raises weight, never eligibility: apply a clamped permille boost at dispatch time, exclude it from the share that derives tier, and never release memory because a think was skipped — ADR 0011 states why each of those is load-bearing.",
     "`VirtualCost(u64)` in domain is a declared cost in virtual nanoseconds. The registry sums `LeafBehavior::cost_hint` per logic unit and caches the sum on the NPC as `ThinkCost`, refreshed when its logic changes; undeclared logic gets `VirtualCost::DEFAULT` and is listed by the calibration gate rather than panicking.",
     "`ThinkBudget { virtual_nanos }` on the config, and `ThinkWeight(u16)` per NPC in 1..=1000 produced by a weight policy (distance bands, group directive priority, player focus) with hysteresis on the band rather than on a tier.",

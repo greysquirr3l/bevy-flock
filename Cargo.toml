@@ -139,3 +139,7 @@ required-features = ["memory"]
 [[example]]
 name = "registry_telemetry"
 required-features = ["memory"]
+
+[[bench]]
+name = "think"
+harness = false

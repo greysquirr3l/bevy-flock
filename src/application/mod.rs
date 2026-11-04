@@ -5,6 +5,8 @@
 //! a [`Tick`] as an argument; they cannot read the clock, so they cannot depend
 //! on when they were called.
 
+pub mod schedule;
+
 use bevy_ecs::prelude::*;
 
 use crate::domain::tick::{Tick, TicksPerSecond};

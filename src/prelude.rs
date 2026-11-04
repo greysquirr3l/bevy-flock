@@ -26,6 +26,7 @@ pub use crate::behavior::{
     sequence, timeout,
 };
 
+pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
 pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
 pub use crate::domain::cost::VirtualCost;
 pub use crate::domain::ids::{GroupId, NpcId, SimSeed};

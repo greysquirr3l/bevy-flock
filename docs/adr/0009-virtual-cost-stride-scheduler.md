@@ -1,6 +1,6 @@
 # ADR 0009 — Cognition is scheduled against a virtual cost in integer nanoseconds
 
-- Status: Accepted
+- Status: Accepted, planner implemented in `application::schedule`
 - Date: 2026-11-04
 - Supersedes: the wall-clock reading of ADR 0008's predecessor task ("nanosecond
   budget measured with an injectable clock")
@@ -157,3 +157,40 @@ So the model is checked, in CI, on a fixed runner:
   a quest NPC cannot tolerate.
 - **Floating-point weights and tags** — drift and platform variance in the one
   place determinism is hardest to debug.
+
+## Implementation notes (2026-11-04)
+
+The planner is `application::schedule::ThinkScheduler`: a min-heap of
+`(virtual_finish_time, id)` with the id breaking ties, so the plan is reproducible
+without a sort. It is free of Bevy and of every clock — `plan` takes a budget and a
+cost function and returns the participants to run, which is what makes the fairness
+properties testable without a world.
+
+Two things the implementation settled that this record did not.
+
+**A participant thinks once per tick; "as often as its cost allows" was wrong.** The
+first version advanced a participant's virtual time and put it straight back in the
+queue — textbook fair queueing — and produced 1,383 thinks for a single participant in
+one tick, because the cost model said the budget could afford them. A think is not a
+packet: it produces a status the world reads once. Participants that have already run
+are now held out of the queue for the rest of the tick and returned at the same virtual
+time, so a cheap NPC runs on most ticks without running many times on one.
+
+**Deciding is not free.** The planner costs ~150 ns per selected participant, so 1.8 ms
+to choose 12,124 of 100,000. That is 11% of a 16.6 ms frame spent on the decision, so a
+game at that scale must set its virtual budget against what it can afford to spend
+deciding, not against the whole frame.
+
+Measured with a 16.6 ms virtual budget and the cost mix from `benches/brain.rs`:
+
+| Participants | Thinks per tick | Served per tick | Worst wait |
+| --- | --- | --- | --- |
+| 1 | 1 | 100% | 1 tick |
+| 1,000 | 1,000 | 100% | 1 tick |
+| 10,000 | 8,872 | 88.7% | 3 ticks |
+| 100,000 | 12,124 | 12.1% | 45 ticks |
+
+Ten thousand NPCs cannot all think every tick at this cost mix, which is the finding
+that justifies the mechanism rather than an assumption behind it: the budget buys
+88.7% of them and the rest are served within three ticks, because the queue is ordered
+by virtual time rather than by a modulo.

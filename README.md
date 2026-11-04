@@ -37,10 +37,10 @@ that means:
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |
-| Virtual-cost fair-queue think scheduler (ADR 0009) | Planned |
+| Virtual-cost fair-queue think scheduler (ADR 0009) | **Planner shipped**, ECS adapter pending |
 | Continuum ambient tier (millions of inhabitants) | Planned |
 | Dialogue graphs, barks, facts | Planned |
-| Snapshots, replay, rollback | Planned |
+| Versioned snapshots and compatibility corpus (ADR 0012-0014) | **Shipped (opt-in)** |
 | Render adapters, avian, replicon | Planned |
 
 The full 40-task plan lives in [`plan.toml`](plan.toml), including the

@@ -97,6 +97,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The telemetry example's chart is derived from the subject count, and its render is
   committed at `docs/images/registry-telemetry.png` so a layout regression is visible.
 
+- `application::schedule::ThinkScheduler`: the virtual-cost fair-queue think scheduler
+  (ADR 0009). A min-heap of `(virtual finish time, id)`, one think per participant per
+  tick, weights that buy proportional share, and a starvation bound measured rather
+  than claimed. 11 tests; `benches/think.rs` covers 1,000 to 100,000 participants.
+- Measured: a 16.6 ms virtual budget serves 88.7% of 10,000 NPCs per tick (worst wait
+  3 ticks) and 12.1% of 100,000 (worst wait 45 ticks), with the planner itself costing
+  1.34 ms and 1.83 ms respectively — the number that makes this a budget rather than a
+  trick.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

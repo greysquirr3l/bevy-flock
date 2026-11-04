@@ -221,3 +221,28 @@ it is not the case this format optimises for.
   performance does not.
 - **Threads.** Everything measured is single-threaded. The determinism policy
   (ADR 0002) constrains what can be parallelised and how.
+
+## Think scheduling
+
+`benches/think.rs`, and the table `application::schedule` asserts in its own tests. A
+16.6 ms **virtual** budget — simulated cost, never a clock — with the cost mix measured
+in `benches/brain.rs`:
+
+| Participants | Thinks per tick | Served per tick | Worst wait | Planner wall time |
+| --- | --- | --- | --- | --- |
+| 1 | 1 | 100% | 1 tick | — |
+| 1,000 | 1,000 | 100% | 1 tick | 0.12 ms |
+| 10,000 | 8,872 | 88.7% | 3 ticks | 1.34 ms |
+| 100,000 | 12,124 | 12.1% | 45 ticks | 1.83 ms |
+
+Two readings matter more than the headline.
+
+**Ten thousand NPCs do not all think every tick at this cost mix.** The budget serves
+88.7% and the rest wait at most three ticks — a twentieth of a second for a crowd the
+player cannot pick out of a line. A per-archetype fudge factor would have hidden that
+trade instead of pricing it.
+
+**Deciding is not free.** The planner costs ~150 ns per selected participant, 1.83 ms
+at 100,000. A game at that scale should budget 12–14 ms of virtual cost and spend the
+rest of the frame on the thinks themselves, since the planner's wall time is paid
+whatever the thinks then cost.
