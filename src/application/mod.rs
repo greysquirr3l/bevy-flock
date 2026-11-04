@@ -6,6 +6,7 @@
 //! on when they were called.
 
 pub mod schedule;
+pub mod tiered;
 
 use bevy_ecs::prelude::*;
 

@@ -285,3 +285,38 @@ With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs delibe
 - **100,000 fits the frame** (12% per tick, 45-tick worst wait) and is only acceptable
   when the tiering in ADR 0017 lands, because then 95% of them are reflex agents at a
   hundredth of the cost.
+
+## Tiered cognition
+
+`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 4.23 ms baseline frame with the
+same crowd and no brains:
+
+| Composition | Frame | Delta | Who thought |
+| --- | --- | --- | --- |
+| All reflex (200 ns) | 6.40 ms | 2.17 ms | all 10,000, every tick |
+| All reactive (2 µs) | 4.85 ms | 0.62 ms | ~1,750 per tick |
+| All deliberative (8 µs) | 4.77 ms | 0.54 ms | ~262 per tick |
+| All social (30 µs) | 4.68 ms | 0.45 ms | ~23 per tick |
+| 95/4/1 mix | 6.42 ms | 2.19 ms | ~9,700 / 175 / 13 |
+
+The expensive tiers are the cheap frames, because their reserved shares buy so few of them.
+Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
+Reflex is the only composition where everybody thinks every tick, and it is the only one
+that costs 2 ms.
+
+**So the reflex ceiling is ~64,000 per tick at 14 ms**, measured at ~217 ns per reflex think
+end to end in the ECS — not the ~93,000 that dividing the budget by the declared 150 ns
+would suggest. The difference is query traversal, blackboard access and change detection,
+which no declared cost includes.
+
+## The comfortable maximum, restated
+
+| Tier | Measured per-think | Comfortable per tick (14 ms) |
+| --- | --- | --- |
+| Reflex | 217 ns | 64,000 |
+| Reactive | ~350 ns (delta/1,750) | 40,000 |
+| Deliberative | ~2 µs | 7,000 |
+| Social | ~20 µs | 700 |
+
+Read the last column with the reservation in mind: a tier's share is not its capacity. The
+deliberative tier could *fit* 7,000, and its 15% share only pays for 262.

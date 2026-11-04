@@ -5,6 +5,7 @@
 //! makes the simulation testable without an `App`, replayable from a seed, and
 //! portable to a server binary that never links a renderer.
 
+pub mod cognition;
 pub mod cost;
 pub mod ids;
 #[cfg(feature = "memory")]

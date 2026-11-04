@@ -1,6 +1,6 @@
 # 0017 — Tiered cognition: from reptile to social
 
-- Status: Proposed
+- Status: Accepted, implemented in `domain::cognition`, `application::tiered` and `adapters::primary::cognition`
 - Date: 2026-11-04
 - Amends: ADR 0009 (the virtual-cost scheduler), which assumed one kind of think
 - Relates to: `domain::weight` (how often), `application::schedule` (who gets the budget)
@@ -121,3 +121,52 @@ inhabitants is 150 ms of frame.
   not reduce the work, which is the point here.
 - **Promotion without rationing.** Simple, and it produces the worst possible frame: the
   one where the player rounds a corner and a hundred NPCs are promoted in the same tick.
+
+## Implementation notes (2026-11-04)
+
+The ladder is `domain::cognition::CognitionTier`, the queues are
+`application::tiered::TieredSchedule` (one `ThinkScheduler` per tier, budgets split before
+anything is planned), and the ECS wiring is `adapters::primary::cognition`. Two decisions
+changed while building it.
+
+**Promotion is rationed by omission, not by a backlog.** The first version kept a queue of
+NPCs waiting to be promoted. It desynchronised within an hour: the counter reset in one
+system and the queue drained in another. An NPC that misses the ration now simply keeps the
+tier it holds and retries on the next tick. A missed promotion costs a tick; it cannot cost
+a cost spike or a leak, and there is no second structure to keep honest.
+
+**New participants enrol at reflex and climb.** Enrolling a spawned crowd straight into the
+tier its distance implies spends the entire budget on the frame the crowd appears — the
+exact spike the ration exists to prevent, arriving through the front door.
+
+### Measured, and one claim that did not survive
+
+`benches/tiers.rs`, 10,000 NPCs, a 14 ms budget, the crowd baseline of the plugin at
+4.23 ms for comparison:
+
+| Composition | Frame | Delta over no brains | Who thought |
+| --- | --- | --- | --- |
+| All reflex (200 ns) | 6.40 ms | 2.17 ms | all 10,000, every tick |
+| All reactive (2 µs) | 4.85 ms | 0.62 ms | ~1,750 per tick (25% share) |
+| All deliberative (8 µs) | 4.77 ms | 0.54 ms | ~262 per tick (15% share) |
+| All social (30 µs) | 4.68 ms | 0.45 ms | ~23 per tick (5% share) |
+| 95/4/1 mix | 6.42 ms | 2.19 ms | ~9,700 reflex, 175 reactive, 13 deliberative |
+
+The table inverts the naive reading and is worth stating plainly: **the expensive tiers are
+the cheap frames.** Not because deliberation got faster, but because their reserved shares
+buy so few of them. The budget bounds the frame; the tier decides who gets served. Reflex is
+the only composition where everybody thinks every tick, and it is the only one that costs
+2 ms.
+
+**Therefore the ceiling in this record's context table was wrong.** 95/4/1 averaging 150 ns
+was arithmetic on declared costs; measured, a reflex think costs ~217 ns end to end in the
+ECS (query traversal, blackboard access, change detection), so 100,000 inhabitants need
+~21 ms of frame, not 14. The honest numbers:
+
+- **~64,000 reflex thinkers per tick** at 14 ms measured (not 110,000).
+- **~7,000 deliberative** (unchanged; that one was measured from the start).
+- 100,000 inhabitants is reachable only by making the reflex pass cheaper than 140 ns —
+  which means not touching the blackboard for most of them — or by the ambient continuum,
+  which is what ADR 0009 already said.
+
+Correcting the record rather than the arithmetic is the point of writing the numbers down.

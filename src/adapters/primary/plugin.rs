@@ -12,7 +12,7 @@ use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
 use crate::adapters::primary::cognition::{
-    ThinkSchedule, WeightConfig, plan_thinks, set_think_weights, tick_chosen,
+    ThinkSchedule, TierConfig, WeightConfig, assign_tiers, plan_thinks, tick_chosen,
 };
 use crate::adapters::primary::components::{
     LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcTemperament, NpcVelocity,
@@ -353,6 +353,7 @@ impl Plugin for FlockPlugin {
             ThinkSchedule::DEFAULT_BUDGET,
         ))
         .insert_resource(WeightConfig::default())
+        .insert_resource(TierConfig::default())
         .insert_resource(self.config)
             .insert_resource(SimClock::new(self.config.ticks_per_second))
             .init_resource::<SpawnQueue>()
@@ -373,10 +374,7 @@ impl Plugin for FlockPlugin {
             // Weights before planning (distance is a perception fact), planning before
             // ticking (the choice is the plan). Bevy is told the order rather than
             // trusted to infer it from the resource conflicts.
-            .add_systems(
-                Update,
-                set_think_weights.in_set(FlockSet::Perception),
-            )
+            .add_systems(Update, assign_tiers.in_set(FlockSet::Perception))
             .add_systems(
                 Update,
                 (plan_thinks, tick_chosen)

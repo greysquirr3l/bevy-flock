@@ -124,6 +124,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Comfortable maximum is **7,000 deliberative thinkers per tick** at a 14 ms budget and a
   2 µs deliberation; 6,000 with headroom.
 
+- Tiered cognition (ADR 0017): `CognitionTier`, `TierPolicy` with hysteresis and
+  engagement, `BudgetShares` with reserved per-tier budgets, `TieredSchedule` with one
+  queue per tier, and the ECS systems that assign tiers under a promotion ration.
+- Measured: at 10,000 NPCs a 14 ms budget spends 2.17 ms of frame on reflex (every NPC
+  thinks every tick), 0.62 ms on reactive, 0.54 ms on deliberative and 0.45 ms on social.
+  The reflex ceiling is ~64,000 per tick, not the ~93,000 arithmetic suggested — the
+  difference is the cost of reaching the components.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

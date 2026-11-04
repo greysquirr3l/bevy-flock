@@ -5,7 +5,8 @@ pub mod components;
 pub mod plugin;
 
 pub use cognition::{
-    NpcBlackboard, NpcThinkWeight, PlayerFocus, ThinkSchedule, ThinkStats, WeightConfig,
+    NpcBlackboard, NpcEngaged, NpcThinkWeight, NpcTier, PlayerFocus, ThinkSchedule, ThinkStats,
+    TierConfig, WeightConfig, assign_tiers, plan_thinks, tick_chosen,
 };
 pub use components::{
     FlockMember, LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcMood, NpcNeeds,
