@@ -49,3 +49,4 @@ replay.
   better than an adjective.
 - State the consequences you do not like. An ADR with no downsides is an
   advertisement.
+| [0023](0023-simd-steering.md) | Four-agent SIMD steering behind a cell-major order | Accepted |

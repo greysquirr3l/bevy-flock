@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `simd` feature: the steering kernel processes four agents at a time with `wide::f32x4`,
+  behind a cell-major block order. 1,000,000-inhabitant frame 4.75 -> 3.78 ms; packed steer
+  at 50,000 agents 138 -> 56.5 ms. Bit-identical to the scalar path, which is kept as the
+  reference and tested against it. See ADR 0023.
+
+
+### Added
+
 - A complete behaviour-tree node set: `Sequence`, `Selector`, `Parallel` with
   `RequireAll`/`RequireAny`, `Inverter`, `RepeatUntilFail`, `Cooldown`, `Timeout`,
   `Condition` and `Action`. Compiled to a flat node array; a tick allocates

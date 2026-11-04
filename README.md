@@ -150,6 +150,20 @@ Three mechanisms make it hold:
 
 ## Benchmarks
 
+### Optional: four agents at a time
+
+`features = ["simd"]` runs the steering kernel four agents wide with `wide::f32x4`, behind a
+cell-major block order. It is off by default so the default build has no dependencies.
+
+| Workload | Scalar | `simd` |
+| --- | --- | --- |
+| 1,000,000 band frame | 4.75 ms | **3.78 ms** |
+| packed steer, 50,000 agents | 138 ms | **56.5 ms** |
+| packed steer, 5,000 agents | 1.31 ms | **1.20 ms** |
+
+The wide path is bit-identical to the scalar one, which stays in the crate as the reference and
+is tested against it on every run. ADR 0023 has the design and the three slower attempts.
+
 Run them yourself:
 
 ```sh

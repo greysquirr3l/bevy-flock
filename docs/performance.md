@@ -274,6 +274,32 @@ neighbours per agent at the band's density. The options, in order of expected va
    parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
    knob for exactly this reason.
 
+
+## Four-agent SIMD steering (2026-11-04)
+
+ADR 0023. After the profiling pass the kernel was 93% of the frame in self time, so the next
+move was the neighbour scan itself: four agents behind one bucket walk, with `wide::f32x4` as
+the vector type.
+
+The enabling detail is not the vector width, it is the **order**. Blocks are taken from a
+cell-major index built as a by-product of the grid, so the four agents in a block are
+neighbours on the map and not merely neighbours in memory.
+
+| Workload | Scalar | `--features simd` | Change |
+| --- | --- | --- | --- |
+| 1,000,000 band frame | 4.75 ms | **3.78 ms** | −20.4% |
+| packed steer, 50,000 | 138 ms | **56.5 ms** | −59% |
+| packed steer, 5,000 | 1.31 ms | **1.20 ms** | −8.4% |
+| packed steer, 1,000 | 0.238 ms | **0.223 ms** | −6.3% |
+
+Enable it with `bevy-flock = { version = "0.1", features = ["simd"] }`. The default build
+stays dependency-free, and the scalar kernel remains in the crate as the reference the wide
+path is tested against bit for bit.
+
+Three earlier attempts at the same idea were slower and are recorded in the ADR: blocking in
+index order (1.40 ms at 5,000), blocking in cell order without the same-cell fast path
+(1.36 ms), and computing the pair count per candidate instead of from the lane totals.
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.

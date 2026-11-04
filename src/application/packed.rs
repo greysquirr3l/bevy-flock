@@ -27,6 +27,27 @@
 )]
 
 use core::f32::consts::TAU;
+#[cfg(feature = "simd")]
+use wide::f32x4;
+
+/// How many agents the vectorised steering path handles at once.
+#[cfg(feature = "simd")]
+const LANES: usize = 4;
+
+/// Four lanes of accumulators, carried from the scan to the finalisation.
+#[cfg(feature = "simd")]
+struct BlockSums {
+    counts: f32x4,
+    close: f32x4,
+    centre_x: f32x4,
+    centre_y: f32x4,
+    heading_x: f32x4,
+    heading_y: f32x4,
+    away_x: f32x4,
+    away_y: f32x4,
+    velocity_x: f32x4,
+    velocity_y: f32x4,
+}
 
 /// Steering weights and limits. Distances in metres, speeds in metres per second.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,6 +119,10 @@ pub struct Pack {
     desired: Vec<[f32; 2]>,
     heads: Vec<i32>,
     next: Vec<i32>,
+    /// Agent indices grouped by grid cell, rebuilt with the grid. The vectorised path walks
+    /// this instead of `0..len`, so the four agents in a block are neighbours on the map and
+    /// not merely neighbours in memory.
+    order: Vec<u32>,
     cell_size: f32,
     side: usize,
 }
@@ -117,6 +142,7 @@ impl Pack {
             desired: Vec::with_capacity(capacity),
             heads: vec![-1; side * side],
             next: Vec::with_capacity(capacity),
+            order: Vec::with_capacity(capacity),
             cell_size,
             side,
         }
@@ -198,6 +224,9 @@ impl Pack {
     /// alignment toward the local heading, separation away from anyone too close. The result
     /// lands in [`Pack::desired`]; integration is the caller's, because a game may want to
     /// blend it with a flow field or a path.
+    ///
+    /// With the `simd` feature this walks four agents at a time behind one bucket scan; the
+    /// arithmetic is identical, so the results are identical too.
     pub fn steer(&mut self, params: &SteerParams) -> SteerReport {
         let mut report = SteerReport::default();
         if !params.is_usable() || self.positions.is_empty() {
@@ -205,85 +234,373 @@ impl Pack {
         }
         self.build_grid();
 
+        #[cfg(feature = "simd")]
+        self.steer_blocks(params, &mut report);
+
+        #[cfg(not(feature = "simd"))]
+        for index in 0..self.positions.len() {
+            self.steer_one(index, params, &mut report);
+        }
+
+        report
+    }
+
+    /// One agent: the definition the vectorised path has to reproduce exactly.
+    fn steer_one(&mut self, index: usize, params: &SteerParams, report: &mut SteerReport) {
         let radius_squared = params.radius * params.radius;
         let separation_squared = params.separation * params.separation;
+        let position = self.positions[index];
+        let velocity = self.velocities[index];
 
-        for index in 0..self.positions.len() {
-            let position = self.positions[index];
-            let velocity = self.velocities[index];
+        let mut centre = [0.0_f32; 2];
+        let mut heading = [0.0_f32; 2];
+        let mut away = [0.0_f32; 2];
+        let mut neighbours = 0_u32;
+        let mut too_close = 0_u32;
 
-            let mut centre = [0.0_f32; 2];
-            let mut heading = [0.0_f32; 2];
-            let mut away = [0.0_f32; 2];
-            let mut neighbours = 0_u32;
-            let mut too_close = 0_u32;
+        self.for_each_neighbour(position, |other| {
+            if other == index {
+                return;
+            }
+            let delta = [
+                self.positions[other][0] - position[0],
+                self.positions[other][1] - position[1],
+            ];
+            let distance_squared = delta[0] * delta[0] + delta[1] * delta[1];
+            if distance_squared > radius_squared {
+                return;
+            }
+            report.pairs += 1;
+            neighbours += 1;
+            centre[0] += self.positions[other][0];
+            centre[1] += self.positions[other][1];
+            heading[0] += self.velocities[other][0];
+            heading[1] += self.velocities[other][1];
+            if distance_squared < separation_squared {
+                too_close += 1;
+                // Weight by inverse distance so a near miss matters more than a distant
+                // one; the epsilon keeps a coincident pair finite.
+                let scale = 1.0 / (distance_squared + 1e-4);
+                away[0] -= delta[0] * scale;
+                away[1] -= delta[1] * scale;
+            }
+        });
 
-            self.for_each_neighbour(position, |other| {
-                if other == index {
-                    return;
-                }
-                let delta = [
-                    self.positions[other][0] - position[0],
-                    self.positions[other][1] - position[1],
-                ];
-                let distance_squared = delta[0] * delta[0] + delta[1] * delta[1];
-                if distance_squared > radius_squared {
-                    return;
-                }
-                report.pairs += 1;
-                neighbours += 1;
-                centre[0] += self.positions[other][0];
-                centre[1] += self.positions[other][1];
-                heading[0] += self.velocities[other][0];
-                heading[1] += self.velocities[other][1];
-                if distance_squared < separation_squared {
-                    too_close += 1;
-                    // Weight by inverse distance so a near miss matters more than a distant
-                    // one; the epsilon keeps a coincident pair finite.
-                    let scale = 1.0 / (distance_squared + 1e-4);
-                    away[0] -= delta[0] * scale;
-                    away[1] -= delta[1] * scale;
-                }
-            });
+        if neighbours == 0 {
+            report.isolated += 1;
+            self.desired[index] = velocity;
+            return;
+        }
 
-            if neighbours == 0 {
-                report.isolated += 1;
-                self.desired[index] = velocity;
+        let count = neighbours as f32;
+        centre[0] = centre[0] / count - position[0];
+        centre[1] = centre[1] / count - position[1];
+        heading[0] /= count;
+        heading[1] /= count;
+
+        let cohesion = clamp(centre, params.max_speed);
+        let alignment = clamp(sub(heading, velocity), params.max_force);
+        let separation = if too_close > 0 {
+            clamp(away, params.max_force)
+        } else {
+            [0.0, 0.0]
+        };
+        self.desired[index] = clamp(
+            [
+                velocity[0]
+                    + params.cohesion * cohesion[0]
+                    + params.alignment * alignment[0]
+                    + params.separation_weight * separation[0],
+                velocity[1]
+                    + params.cohesion * cohesion[1]
+                    + params.alignment * alignment[1]
+                    + params.separation_weight * separation[1],
+            ],
+            params.max_speed,
+        );
+        report.steered += 1;
+    }
+
+    /// Turn four lanes of sums into four desired velocities.
+    ///
+    /// The same arithmetic as [`Pack::steer_one`], lane by lane, because a caller comparing
+    /// the two paths should find them indistinguishable rather than merely close.
+    #[cfg(feature = "simd")]
+    fn finish_block(
+        &mut self,
+        indices: [usize; LANES],
+        params: &SteerParams,
+        sums: &BlockSums,
+        report: &mut SteerReport,
+    ) {
+        let count = sums.counts.to_array();
+        let centre_x = sums.centre_x.to_array();
+        let centre_y = sums.centre_y.to_array();
+        let heading_x = sums.heading_x.to_array();
+        let heading_y = sums.heading_y.to_array();
+        let away_x = sums.away_x.to_array();
+        let away_y = sums.away_y.to_array();
+        let close = sums.close.to_array();
+        let velocity_x = sums.velocity_x.to_array();
+        let velocity_y = sums.velocity_y.to_array();
+
+        for lane in 0..LANES {
+            let index = indices[lane];
+            if index >= self.positions.len() {
                 continue;
             }
-
-            let count = neighbours as f32;
-            centre[0] = centre[0] / count - position[0];
-            centre[1] = centre[1] / count - position[1];
-            heading[0] /= count;
-            heading[1] /= count;
-
-            let cohesion = clamp(centre, params.max_speed);
-            let alignment = clamp(sub(heading, velocity), params.max_force);
-            let separation = if too_close > 0 {
-                clamp(away, params.max_force)
+            if count[lane] == 0.0 {
+                report.isolated += 1;
+                self.desired[index] = [velocity_x[lane], velocity_y[lane]];
+                continue;
+            }
+            let position = self.positions[index];
+            let scaled = count[lane];
+            let cohesion = clamp(
+                [
+                    centre_x[lane] / scaled - position[0],
+                    centre_y[lane] / scaled - position[1],
+                ],
+                params.max_speed,
+            );
+            let alignment = clamp(
+                sub(
+                    [heading_x[lane] / scaled, heading_y[lane] / scaled],
+                    [velocity_x[lane], velocity_y[lane]],
+                ),
+                params.max_force,
+            );
+            let separation = if close[lane] > 0.0 {
+                clamp([away_x[lane], away_y[lane]], params.max_force)
             } else {
                 [0.0, 0.0]
             };
-            let desired = clamp(
+            self.desired[index] = clamp(
                 [
-                    velocity[0]
+                    velocity_x[lane]
                         + params.cohesion * cohesion[0]
                         + params.alignment * alignment[0]
                         + params.separation_weight * separation[0],
-                    velocity[1]
+                    velocity_y[lane]
                         + params.cohesion * cohesion[1]
                         + params.alignment * alignment[1]
                         + params.separation_weight * separation[1],
                 ],
                 params.max_speed,
             );
-            self.desired[index] = desired;
             report.steered += 1;
         }
-        report
     }
 
+    /// Four agents at a time, behind one bucket scan (ADR 0023).
+    ///
+    /// The blocks come from the cell-major `order`, not from `0..len`: four consecutive
+    /// agents in the pack can be four unrelated places on the map, and then the union box
+    /// they share is larger than the four scans it replaces. Grouped by cell, a block is
+    /// usually one cell wide and the scan is strictly less work than the scalar path.
+    #[cfg(feature = "simd")]
+    fn steer_blocks(&mut self, params: &SteerParams, report: &mut SteerReport) {
+        let mut block = 0_usize;
+        while (block + LANES) <= self.order.len() {
+            let mut indices = [0_usize; LANES];
+            for (lane, slot) in indices.iter_mut().enumerate() {
+                *slot = self.order[block + lane] as usize;
+            }
+            self.steer_block(indices, params, report);
+            block += LANES;
+        }
+        while block < self.order.len() {
+            let index = self.order[block] as usize;
+            self.steer_one(index, params, report);
+            block += 1;
+        }
+    }
+
+    /// Set one block up: four agents' lanes, their cells, and the box they share.
+    #[cfg(feature = "simd")]
+    fn steer_block(
+        &mut self,
+        indices: [usize; LANES],
+        params: &SteerParams,
+        report: &mut SteerReport,
+    ) {
+        let mut cells = [(0_usize, 0_usize); LANES];
+        let mut positions = [(0.0_f32, 0.0_f32); LANES];
+        let mut velocities = [(0.0_f32, 0.0_f32); LANES];
+        for lane in 0..LANES {
+            let Some(position) = self.positions.get(indices[lane]).copied() else {
+                continue;
+            };
+            positions[lane] = (position[0], position[1]);
+            cells[lane] = self.cell_of(position);
+            if let Some(velocity) = self.velocities.get(indices[lane]) {
+                velocities[lane] = (velocity[0], velocity[1]);
+            }
+        }
+
+        let x_min = cells
+            .iter()
+            .map(|cell| cell.0)
+            .min()
+            .unwrap_or(0)
+            .saturating_sub(1);
+        let y_min = cells
+            .iter()
+            .map(|cell| cell.1)
+            .min()
+            .unwrap_or(0)
+            .saturating_sub(1);
+        let x_max = (cells.iter().map(|cell| cell.0).max().unwrap_or(0) + 1).min(self.side - 1);
+        let y_max = (cells.iter().map(|cell| cell.1).max().unwrap_or(0) + 1).min(self.side - 1);
+        if (x_max - x_min + 1) * (y_max - y_min + 1) > 3 * 3 + 3 {
+            // The order was not contiguous, so the box costs more than the four scans it
+            // replaces; the scalar path is the honest choice for this block.
+            for index in indices {
+                self.steer_one(index, params, report);
+            }
+            return;
+        }
+
+        let identities = f32x4::from(indices.map(|index| index as f32));
+        let position = (
+            f32x4::from(positions.map(|value| value.0)),
+            f32x4::from(positions.map(|value| value.1)),
+        );
+        let velocity = (
+            f32x4::from(velocities.map(|value| value.0)),
+            f32x4::from(velocities.map(|value| value.1)),
+        );
+        let (sums, pairs) = self.scan_block(
+            identities,
+            position,
+            velocity,
+            cells,
+            (x_min, y_min, x_max, y_max),
+            params,
+        );
+        report.pairs += pairs;
+        self.finish_block(indices, params, &sums, report);
+    }
+
+    /// The scan: every cell in the block's box, every agent in each cell, four lanes at once.
+    ///
+    /// Split from the setup and the finish because this is the part that has to be fast, and
+    /// the other two are bookkeeping around it.
+    #[cfg(feature = "simd")]
+    fn scan_block(
+        &self,
+        identities: f32x4,
+        position: (f32x4, f32x4),
+        velocity: (f32x4, f32x4),
+        cells: [(usize, usize); LANES],
+        bounds: (usize, usize, usize, usize),
+        params: &SteerParams,
+    ) -> (BlockSums, u64) {
+        let (position_x, position_y) = position;
+        let (velocity_x, velocity_y) = velocity;
+        let (x_min, y_min, x_max, y_max) = bounds;
+
+        let radius_squared = f32x4::splat(params.radius * params.radius);
+        let separation_squared = f32x4::splat(params.separation * params.separation);
+        let epsilon = f32x4::splat(1e-4);
+        let one = f32x4::splat(1.0);
+        let zero = f32x4::splat(0.0);
+
+        let mut centre_x = zero;
+        let mut centre_y = zero;
+        let mut heading_x = zero;
+        let mut heading_y = zero;
+        let mut away_x = zero;
+        let mut away_y = zero;
+        let mut counts = zero;
+        let mut close_counts = zero;
+
+        // Four agents in one cell is the common case once the order is cell-major, and then
+        // every lane sees every cell in the box. Checking it once saves building four masks
+        // per cell, which is exactly what made the first version slower than the scalar path.
+        let same_cell = cells.iter().all(|cell| *cell == cells[0]);
+        let all_inside = f32x4::splat(f32::from_bits(u32::MAX));
+
+        for y in y_min..=y_max {
+            for x in x_min..=x_max {
+                let inside = if same_cell {
+                    all_inside
+                } else {
+                    let mut inside = [0.0_f32; LANES];
+                    for (lane, slot) in inside.iter_mut().enumerate() {
+                        let (cx, cy) = cells[lane];
+                        let near = x + 1 >= cx && x <= cx + 1 && y + 1 >= cy && y <= cy + 1;
+                        *slot = if near { f32::from_bits(u32::MAX) } else { 0.0 };
+                    }
+                    f32x4::from(inside)
+                };
+
+                let mut cursor = self.heads[y * self.side + x];
+                let mut guard = 0_usize;
+                while cursor >= 0 && guard <= self.positions.len() {
+                    let other = cursor as usize;
+                    cursor = self.next.get(other).copied().unwrap_or(-1);
+                    guard += 1;
+
+                    let Some(other_position) = self.positions.get(other).copied() else {
+                        continue;
+                    };
+                    let other_velocity = self.velocities.get(other).copied().unwrap_or([0.0, 0.0]);
+                    let dx = f32x4::splat(other_position[0]) - position_x;
+                    let dy = f32x4::splat(other_position[1]) - position_y;
+                    // Deliberately not `mul_add`: a fused multiply-add rounds once where the
+                    // scalar path rounds twice, which is a one-ULP difference in the distance
+                    // and therefore in the result. Parity with the reference is worth more
+                    // here than the instruction.
+                    let distance_squared = dx * dx + dy * dy;
+
+                    let mut keep = distance_squared.simd_le(radius_squared) & inside;
+                    keep &= f32x4::splat(other as f32).simd_ne(identities);
+                    if !keep.any() {
+                        continue;
+                    }
+
+                    let weight = keep.select(one, zero);
+                    counts += weight;
+                    centre_x += f32x4::splat(other_position[0]) * weight;
+                    centre_y += f32x4::splat(other_position[1]) * weight;
+                    heading_x += f32x4::splat(other_velocity[0]) * weight;
+                    heading_y += f32x4::splat(other_velocity[1]) * weight;
+
+                    let close = keep & distance_squared.simd_lt(separation_squared);
+                    if close.any() {
+                        let inverse = one / (distance_squared + epsilon);
+                        let separation_weight = close.select(one, zero);
+                        close_counts += separation_weight;
+                        let push = inverse * separation_weight;
+                        away_x -= dx * push;
+                        away_y -= dy * push;
+                    }
+                }
+            }
+        }
+
+        let pairs = counts
+            .to_array()
+            .iter()
+            .map(|lane| *lane as u64)
+            .sum::<u64>();
+        (
+            BlockSums {
+                counts,
+                close: close_counts,
+                centre_x,
+                centre_y,
+                heading_x,
+                heading_y,
+                away_x,
+                away_y,
+                velocity_x,
+                velocity_y,
+            },
+            pairs,
+        )
+    }
     fn build_grid(&mut self) {
         for head in &mut self.heads {
             *head = -1;
@@ -294,6 +611,18 @@ impl Pack {
             let bucket = cell.1 * side + cell.0;
             self.next[index] = self.heads[bucket];
             self.heads[bucket] = index as i32;
+        }
+
+        // Cell-major order, free: the buckets already hold exactly this grouping.
+        self.order.clear();
+        for bucket in 0..self.heads.len() {
+            let mut cursor = self.heads[bucket];
+            let mut guard = 0_usize;
+            while cursor >= 0 && guard <= self.positions.len() {
+                self.order.push(cursor as u32);
+                cursor = self.next.get(cursor as usize).copied().unwrap_or(-1);
+                guard += 1;
+            }
         }
     }
 
@@ -510,5 +839,49 @@ mod tests {
         };
         assert_eq!(pack.steer(&bad), SteerReport::default());
         assert!(!bad.is_usable());
+    }
+
+    /// The vectorised path has to be the scalar path, not merely close to it.
+    ///
+    /// Every lane accumulates in the same cell order over the same neighbours, and a masked
+    /// contribution adds exactly zero, so the four-wide kernel should land on the same bits.
+    /// If this ever fails while the wide kernel still looks plausible, the masking is wrong.
+    #[cfg(feature = "simd")]
+    #[test]
+    fn the_vectorised_kernel_agrees_with_the_scalar_one() {
+        let params = params();
+        let mut packed = Pack::with_capacity(256, params);
+        let mut scalar = Pack::with_capacity(256, params);
+        let mut state = 0x5EED_u64;
+        for _ in 0..256 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let x = ((state >> 33) as f32 / (u32::MAX >> 1) as f32) * params.extent;
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let y = ((state >> 33) as f32 / (u32::MAX >> 1) as f32) * params.extent;
+            packed.push([x, y], [0.5, 0.25]);
+            scalar.push([x, y], [0.5, 0.25]);
+        }
+
+        let wide_report = packed.steer(&params);
+
+        // The reference: the same grid, one agent at a time.
+        scalar.build_grid();
+        let mut reference = SteerReport::default();
+        for index in 0..scalar.positions.len() {
+            scalar.steer_one(index, &params, &mut reference);
+        }
+
+        assert_eq!(wide_report.pairs, reference.pairs, "pair counts diverged");
+        assert_eq!(wide_report.steered, reference.steered);
+        assert_eq!(wide_report.isolated, reference.isolated);
+        for index in 0..scalar.positions.len() {
+            let wide = packed.desired(index);
+            let narrow = scalar.desired(index);
+            assert_eq!(wide, narrow, "lane {index} diverged from the scalar path");
+        }
     }
 }

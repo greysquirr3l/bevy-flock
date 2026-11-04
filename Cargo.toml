@@ -29,6 +29,10 @@ memory = []
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
 serde = ["dep:serde", "dep:ron", "smallvec/serde"]
+# Four agents at a time through `wide::f32x4`, behind a cell-major block order (ADR 0023).
+# Off by default so the default build has no dependencies; worth 20% of a 1,000,000-
+# inhabitant frame and 59% of the packed kernel at 50,000 agents.
+simd = ["dep:wide"]
 
 [dependencies]
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
@@ -51,6 +55,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 # the same reason serde is: a headless server that builds trees in code should not
 # carry a parser for a format it never reads.
 ron = { version = "0.9", optional = true }
+wide = { version = "1.7", default-features = false, optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
