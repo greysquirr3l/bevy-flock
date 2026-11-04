@@ -5,6 +5,7 @@
 //! a [`Tick`] as an argument; they cannot read the clock, so they cannot depend
 //! on when they were called.
 
+pub mod packed;
 pub mod schedule;
 pub mod tiered;
 

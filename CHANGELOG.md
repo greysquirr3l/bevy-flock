@@ -150,6 +150,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Gate 8 of ADR 0018 **fails**: a 5,000-entity manifest band costs 9.47 ms because the
   crowd path costs ~1.9 ms per 1,000 steered NPCs. See `docs/gates/continuum.md`.
 
+- `application::packed`: steering over contiguous arrays with a bucket grid. 5,000 agents
+  steer, integrate and advance in **1.50 ms**, against 9.47 ms through the ECS crowd path.
+  Density matters more than count: the same 5,000 in a 128 m square costs 10.92 ms.
+- ADR 0020 specifies the manifest band plugin: radius derived from a target density,
+  ownership table, system ordering, seven requirements, and how each open gate closes.
+- `tests/memory_aging.rs`: four integration tests over long-duration simulation, covering
+  the absent-NPC leak, the anchored grudge that outlives an hour of silence, per-owner
+  exemption, and bounded reclamation work.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

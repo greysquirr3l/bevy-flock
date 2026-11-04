@@ -151,3 +151,11 @@ harness = false
 [[bench]]
 name = "continuum"
 harness = false
+
+[[bench]]
+name = "packed"
+harness = false
+
+[[test]]
+name = "memory_aging"
+required-features = ["memory"]

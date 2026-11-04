@@ -13,7 +13,7 @@ machine, and every gate the code cannot yet attempt is marked open rather than a
 | 5 | No popping at the boundary | < 2% count delta | — | **OPEN** |
 | 6 | Anchoring at 10 km | entity after 10k ticks | — | **OPEN** |
 | 7 | No allocation after construction | zero | — | **OPEN** |
-| 8 | 100k with 5,000 manifested | < 8 ms | **9.47 ms** | **FAIL** |
+| 8 | 100k with 5,000 manifested | < 8 ms | 9.47 ms (ECS) / **1.50 ms** (packed steer) | **OPEN** (wiring) |
 | 9 | Folded NPC matches no query | zero matches | — | **OPEN** |
 
 ## Gate 8 fails, and the continuum is not the reason
@@ -52,3 +52,29 @@ this library has measured.**
 manifestation, O(1) folding, alarm that decays by stride, and a flow-field seam the
 navigation task will fill. Eleven unit tests cover it, including 10,000 strides of
 wandering-wind advection that conserve a population to the person.
+
+## Update: the packed steering kernel (2026-11-04)
+
+`application::packed` steers, integrates and advances over contiguous arrays:
+
+| Agents | Steer + integrate + advance |
+| --- | --- |
+| 1,000 | 249 µs |
+| 5,000 | **1.50 ms** |
+| 50,000 | 137 ms |
+
+Against 9.47 ms for the same 5,000 through the ECS crowd path, the arithmetic is no longer
+the constraint: replacing the steering half leaves ample room under 8 ms.
+
+The honesty is in the density column:
+
+| 5,000 agents in | Frame |
+| --- | --- |
+| 512 m square | 1.42 ms |
+| 256 m square | 3.65 ms |
+| 128 m square | 10.92 ms |
+
+The kernel is bound by neighbour count, not agent count. A dense band destroys the saving,
+which is why ADR 0020 derives the manifest radius from a target density instead of fixing a
+count. Gate 8 stays **OPEN** until a band plugin produces a measured frame; the mechanism
+below it is now measured.
