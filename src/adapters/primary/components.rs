@@ -5,12 +5,18 @@
 //! this field" is the question that decides whether a crowd simulation is
 //! debuggable or a mystery.
 
+use std::sync::Arc;
+
 use bevy_ecs::prelude::*;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
+use crate::behavior::blackboard::Blackboard;
+use crate::behavior::tree::{BehaviorTree, LeafDispatch, Status, TreeCursor};
+use crate::domain::cost::VirtualCost;
 use crate::domain::ids::NpcId;
 use crate::domain::temperament::{Archetype, Mood, Needs, Temperament};
+use crate::domain::tick::Tick;
 
 /// An NPC. The identifier is the entity's identity for RNG, tie-breaks and
 /// snapshots.
@@ -115,6 +121,88 @@ impl LodTier {
 pub struct FlockMember {
     /// The group identifier.
     pub group: crate::domain::ids::GroupId,
+}
+
+/// An NPC's compiled behaviour tree and where it currently is in it.
+///
+/// The tree is behind an `Arc` because it is shared: ten thousand guards run one
+/// compiled tree, not ten thousand copies of it. Only the [`TreeCursor`] is
+/// per-NPC, and it is bounded by tree depth rather than tree size.
+///
+/// [`NpcBrain::cost`] is the declared cost of one think, read by the think
+/// scheduler when it decides who gets the budget (ADR 0009). It is cached here
+/// rather than recomputed because the scheduler asks this question every tick and
+/// the answer never changes.
+#[derive(Component, Debug, Clone)]
+pub struct NpcBrain {
+    tree: Arc<BehaviorTree>,
+    cursor: TreeCursor,
+    cost: VirtualCost,
+}
+
+impl NpcBrain {
+    /// Wrap a compiled tree.
+    #[must_use]
+    pub fn new(tree: Arc<BehaviorTree>, cost: VirtualCost) -> Self {
+        Self {
+            tree,
+            cursor: TreeCursor::new(),
+            cost,
+        }
+    }
+
+    /// The tree this NPC thinks with.
+    #[must_use]
+    pub fn tree(&self) -> &BehaviorTree {
+        &self.tree
+    }
+
+    /// The declared cost of one think.
+    #[must_use]
+    pub const fn cost(&self) -> VirtualCost {
+        self.cost
+    }
+
+    /// Where in the tree this NPC currently is.
+    #[must_use]
+    pub const fn cursor(&self) -> &TreeCursor {
+        &self.cursor
+    }
+
+    /// Evaluate one think.
+    ///
+    /// Called by whichever scheduler owns the budget; this component does not
+    /// decide *when* it runs, only *what* happens when it does.
+    pub fn tick(
+        &mut self,
+        dispatch: &mut dyn LeafDispatch,
+        blackboard: &mut Blackboard,
+        tick: Tick,
+        npc: NpcId,
+    ) -> Status {
+        let mut ctx = crate::behavior::tree::LeafContext {
+            blackboard,
+            tick,
+            npc,
+        };
+        self.tree.tick(&mut self.cursor, dispatch, &mut ctx)
+    }
+
+    /// Abandon the current behaviour and release whatever it holds.
+    pub fn abort(
+        &mut self,
+        dispatch: &mut dyn LeafDispatch,
+        blackboard: &mut Blackboard,
+        tick: Tick,
+        npc: NpcId,
+    ) {
+        let mut ctx = crate::behavior::tree::LeafContext {
+            blackboard,
+            tick,
+            npc,
+        };
+        self.tree.abort(&mut self.cursor, dispatch, &mut ctx);
+    }
 }
 
 /// A bundle for the minimum viable NPC.

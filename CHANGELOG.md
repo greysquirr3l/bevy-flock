@@ -6,10 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Planned work is specified in `plan.toml`: the budgeted think scheduler, the
-continuum ambient tier, dialogue graphs and barks, snapshots and replay,
-rollback, and the render, `avian`, and `replicon` adapters. Nothing in this
-section is implemented yet, which is why it is a list and not a changelog entry.
+### Added
+
+- A complete behaviour-tree node set: `Sequence`, `Selector`, `Parallel` with
+  `RequireAll`/`RequireAny`, `Inverter`, `RepeatUntilFail`, `Cooldown`, `Timeout`,
+  `Condition` and `Action`. Compiled to a flat node array; a tick allocates
+  nothing, which `tests/tree_no_alloc.rs` measures rather than assumes.
+- Abort semantics that reach running leaves deepest-first, with subtree ranges in
+  the compiled layout so a timeout can cancel the work underneath it.
+- `NodeSpec::from_ron` behind the `serde` feature, so a designer can author a tree
+  without recompiling; a golden test asserts it evaluates identically to the
+  builder equivalent.
+- `VirtualCost`, the declared-cost newtype the think scheduler will spend
+  (ADR 0009), plus `LeafBehavior::cost_hint` and `FlockRegistry::tree_cost`.
+- `StandardLeaves`: sixteen built-in leaves (actions and predicates) that are
+  stateless by construction, so one registered instance serves the whole crowd,
+  each with a cost calibrated against `benches/brain.rs`.
+- `Archetype::logic`: a behaviour tree per archetype with a pinned declared cost —
+  guard 27 vns, merchant 46, urchin 36, noble 35, wanderer 35.
+- `NpcBrain`: a component holding a shared tree, a per-NPC cursor and the cached
+  cost, ready for the scheduler task to drive.
+
+### Changed
+
+- `LeafBehavior::tick` and `abort` take `&self`: a leaf is a shared function over
+  the blackboard, not per-NPC state. This makes the "one instance, whole crowd"
+  model explicit instead of a footgun.
+- `VirtualCost::DEFAULT` is 40 vns — several times the priciest built-in leaf —
+  rather than an arbitrary 1,000.
+
+### Planned
+
+The budgeted think scheduler, the utility scorer, the continuum ambient tier,
+dialogue graphs and barks, snapshots and replay, rollback, and the render, `avian`
+and `replicon` adapters are specified in `plan.toml` and not implemented yet.
 
 ## [0.1.0] — 2026-11-04
 

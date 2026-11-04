@@ -15,7 +15,8 @@ use std::collections::BTreeMap;
 use bevy_math::Vec3;
 
 use crate::behavior::blackboard::Blackboard;
-use crate::behavior::tree::{LeafContext, LeafDispatch, LeafId, Status};
+use crate::behavior::tree::{BehaviorTree, LeafContext, LeafDispatch, LeafId, Status};
+use crate::domain::cost::VirtualCost;
 use crate::domain::ids::{GroupId, NpcId};
 use crate::domain::tick::Tick;
 use crate::error::RegistrationError;
@@ -29,20 +30,30 @@ use crate::error::RegistrationError;
 /// assuming consecutive frames.
 pub trait LeafBehavior: Send + Sync {
     /// Advance one step.
-    fn tick(&mut self, ctx: &mut LeafContext<'_>) -> Status;
+    ///
+    /// Takes `&self`, not `&mut self`, on purpose: one instance is registered and
+    /// shared by every NPC running it, so per-NPC memory belongs on the
+    /// [`Blackboard`]. A leaf that kept `remaining: u32` in a field would give the
+    /// entire crowd one countdown — a bug that is invisible until two NPCs move in
+    /// lockstep.
+    fn tick(&self, ctx: &mut LeafContext<'_>) -> Status;
 
     /// Release any state the leaf is holding.
     ///
-    /// Called when the NPC's behaviour is replaced or it despawns. Leaving state
-    /// behind here is how NPCs get stuck mid-conversation.
-    fn abort(&mut self, ctx: &mut LeafContext<'_>) {
+    /// Called when the NPC's behaviour is replaced, it despawns, or a `Timeout`
+    /// cuts its subtree short. State here means blackboard entries: clearing them
+    /// is how an NPC that was mid-conversation does not come back to a stale one.
+    fn abort(&self, ctx: &mut LeafContext<'_>) {
         let _ = ctx;
     }
 
-    /// A rough cost in nanoseconds, used by the scheduler before it has
-    /// measured this leaf for real.
-    fn cost_hint(&self) -> u64 {
-        100
+    /// The cost one tick of this leaf declares, in virtual nanoseconds.
+    ///
+    /// Charged by the think scheduler (ADR 0009) and checked against measurement
+    /// by the calibration gate. The default is deliberately pessimistic so an
+    /// undeclared leaf cannot pretend to be cheap.
+    fn cost_hint(&self) -> VirtualCost {
+        VirtualCost::DEFAULT
     }
 
     /// A short label for trace output.
@@ -272,13 +283,35 @@ impl FlockRegistry {
             .collect()
     }
 
-    /// Total declared cost of every registered leaf, in nanoseconds.
+    /// The cost one leaf declares.
+    ///
+    /// An unknown identifier returns [`VirtualCost::DEFAULT`]: an unregistered
+    /// leaf is a wiring bug, and charging the pessimistic default keeps it from
+    /// quietly getting a free share of the budget.
     #[must_use]
-    pub fn declared_cost(&self) -> u64 {
+    pub fn leaf_cost(&self, id: LeafId) -> VirtualCost {
+        self.leaves
+            .get(id as usize)
+            .map_or(VirtualCost::DEFAULT, |entry| entry.behavior.cost_hint())
+    }
+
+    /// Total declared cost of every registered leaf.
+    ///
+    /// This is the catalogue's cost, not a tree's: registering a leaf does not
+    /// mean any NPC runs it. Use [`FlockRegistry::tree_cost`] for the number the
+    /// scheduler actually charges.
+    #[must_use]
+    pub fn declared_cost(&self) -> VirtualCost {
         self.leaves
             .iter()
             .map(|entry| entry.behavior.cost_hint())
             .sum()
+    }
+
+    /// The declared cost of one think of a tree, given the leaves it runs.
+    #[must_use]
+    pub fn tree_cost(&self, tree: &BehaviorTree) -> VirtualCost {
+        tree.declared_cost(|id| self.leaf_cost(id))
     }
 
     /// A dispatcher that borrows this registry for one tree evaluation.
@@ -294,16 +327,16 @@ pub struct RegistryDispatch<'a> {
 
 impl LeafDispatch for RegistryDispatch<'_> {
     fn tick(&mut self, leaf: LeafId, ctx: &mut LeafContext<'_>) -> Status {
-        match self.registry.leaves.get_mut(leaf as usize) {
-            Some(entry) => entry.behavior.tick(ctx),
-            // An unregistered leaf is a wiring bug; failing the node is the only
-            // safe answer, and the label lookup will surface which one.
-            None => Status::Failure,
-        }
+        // An unregistered leaf is a wiring bug; failing the node is the only safe
+        // answer, and the label lookup will surface which one.
+        self.registry
+            .leaves
+            .get(leaf as usize)
+            .map_or(Status::Failure, |entry| entry.behavior.tick(ctx))
     }
 
     fn abort(&mut self, leaf: LeafId, ctx: &mut LeafContext<'_>) {
-        if let Some(entry) = self.registry.leaves.get_mut(leaf as usize) {
+        if let Some(entry) = self.registry.leaves.get(leaf as usize) {
             entry.behavior.abort(ctx);
         }
     }
@@ -343,7 +376,7 @@ mod tests {
     struct Greet;
 
     impl LeafBehavior for Greet {
-        fn tick(&mut self, _ctx: &mut LeafContext<'_>) -> Status {
+        fn tick(&self, _ctx: &mut LeafContext<'_>) -> Status {
             Status::Success
         }
 
@@ -355,12 +388,12 @@ mod tests {
     struct Shouty;
 
     impl LeafBehavior for Shouty {
-        fn tick(&mut self, _ctx: &mut LeafContext<'_>) -> Status {
+        fn tick(&self, _ctx: &mut LeafContext<'_>) -> Status {
             Status::Success
         }
 
-        fn cost_hint(&self) -> u64 {
-            42
+        fn cost_hint(&self) -> VirtualCost {
+            VirtualCost::new(42)
         }
 
         fn label(&self) -> &'static str {
@@ -464,8 +497,34 @@ mod tests {
     #[test]
     fn declared_cost_sums_the_hints() {
         let mut registry = FlockRegistry::new();
-        registry.register_leaf("shout", Shouty).expect("fresh");
-        assert_eq!(registry.declared_cost(), 42);
+        let shout = registry.register_leaf("shout", Shouty).expect("fresh");
+        assert_eq!(registry.declared_cost(), VirtualCost::new(42));
+        assert_eq!(registry.leaf_cost(shout), VirtualCost::new(42));
+    }
+
+    #[test]
+    fn an_unknown_leaf_is_charged_the_pessimistic_default() {
+        let registry = FlockRegistry::new();
+        assert_eq!(registry.leaf_cost(7), VirtualCost::DEFAULT);
+    }
+
+    #[test]
+    fn a_leaf_without_a_declaration_gets_the_default_not_free_ride() {
+        let mut registry = FlockRegistry::new();
+        let greet = registry.register_leaf("greet", Greet).expect("fresh");
+        assert_eq!(registry.leaf_cost(greet), VirtualCost::DEFAULT);
+        assert!(VirtualCost::DEFAULT > VirtualCost::ZERO);
+    }
+
+    #[test]
+    fn tree_cost_counts_only_the_leaves_the_tree_uses() {
+        use crate::behavior::tree::{action, sequence};
+        let mut registry = FlockRegistry::new();
+        registry.register_leaf("greet", Greet).expect("fresh");
+        let shout = registry.register_leaf("shout", Shouty).expect("fresh");
+        let tree = BehaviorTree::try_from_spec(sequence(vec![action(shout)])).expect("valid");
+        assert_eq!(registry.tree_cost(&tree), VirtualCost::new(42));
+        assert!(registry.tree_cost(&tree) < registry.declared_cost());
     }
 
     #[test]

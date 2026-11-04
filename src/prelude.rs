@@ -12,20 +12,22 @@ pub use bevy_math::Vec3;
 pub use bevy_transform::prelude::Transform;
 
 pub use crate::adapters::primary::components::{
-    FlockMember, LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcMood, NpcNeeds,
-    NpcTarget, NpcTemperament, NpcVelocity,
+    FlockMember, LodTier, Npc, NpcBrain, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcMood,
+    NpcNeeds, NpcTarget, NpcTemperament, NpcVelocity,
 };
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
 };
 
 pub use crate::behavior::{
-    BehaviorTree, Blackboard, Directive, DirectiveKind, FlockRegistry, LeafBehavior, LeafContext,
-    LeafId, NodeSpec, StateMachine, Status, TreeCursor, action, condition, invert, selector,
-    sequence,
+    ArchetypeLogic, BehaviorTree, Blackboard, Directive, DirectiveKind, FlockRegistry,
+    LeafBehavior, LeafContext, LeafId, NodeSpec, ParallelPolicy, StandardLeaves, StateMachine,
+    Status, TreeCursor, action, condition, cooldown, invert, parallel, repeat_until_fail, selector,
+    sequence, timeout,
 };
 
 pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
+pub use crate::domain::cost::VirtualCost;
 pub use crate::domain::ids::{GroupId, NpcId, SimSeed};
 pub use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 pub use crate::domain::spatial::SpatialGridConfig;
