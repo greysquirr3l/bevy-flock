@@ -28,7 +28,7 @@ pub use memory::{
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;
 #[cfg(feature = "memory")]
-pub use saves::{MAGIC, MemorySnapshot, Origin, RestoreReport, SaveError, SaveRecord, SavedSlot};
+pub use saves::{LoadReport, MAGIC, MemorySnapshot, Origin, SaveError, SaveRecord, SavedSlot};
 pub use spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 pub use steering::{SteeringParams, SteeringWeights};
 pub use temperament::{Archetype, Mood, Needs, Temperament, Weight};

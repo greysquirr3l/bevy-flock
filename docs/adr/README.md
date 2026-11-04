@@ -24,6 +24,7 @@ it and both stay in the tree.
 | [0010](0010-social-memory.md) | Social memory as a bounded, integer, two-tier store | Accepted |
 | [0011](0011-memory-and-the-scheduler.md) | Memory enters the scheduler as cost and weight, never as a tier | Accepted |
 | [0012](0012-memory-save-format.md) | Relationships persist as ages in a versioned binary record | Accepted |
+| [0013](0013-subject-registry.md) | Subjects are matched by stable key, and the file says which keys it used | Accepted |
 
 ## Reading order
 

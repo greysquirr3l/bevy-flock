@@ -51,10 +51,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   does not age a grudge, CRC32 on header and body, and typed errors naming the
   reason — bad magic, unknown version, truncation, checksum, duplicate identity,
   implausible count, capacity, subject range.
-- `SavedSlot`, `SaveRecord`, `Origin` and `RestoreReport`; `rebase_offline` for a
+- `SavedSlot`, `SaveRecord`, `Origin` and `LoadReport`; `rebase_offline` for a
   game that wants the world to have moved on while it was closed.
 - A format test pins the size claim: 10,000 NPCs with two relationships each is
   430,032 bytes, not "roughly 430 KB".
+
+- Format version 2 (ADR 0013): a sectioned container with a subject registry, so a
+  content patch that adds, removes or reorders subjects translates memories instead
+  of silently re-pointing them at the wrong person.
+- `SubjectRegistry`, `SubjectEntry`, `SubjectKey`, `SubjectKind`: dense identifiers
+  at runtime, stable keys in the file, labels for humans only.
+- `LoadReport` replaces `RestoreReport`, and reports `dropped_slots`, `translated`
+  and `unverified_mapping` so a lossy load says what it lost.
+- `LegacySubjectPolicy::{Refuse, AssumeDense}`: a version 1 file has no keys, so it
+  is refused by default and loaded only when the game says so out loud.
+- Unknown sections are skipped, so additive format changes no longer need a version.
 
 ### Documentation
 

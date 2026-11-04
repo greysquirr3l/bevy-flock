@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-11-04
 - Relates to: ADR 0010 (social memory), ADR 0011 (memory in the scheduler)
+- Superseded in part by: ADR 0013, which replaces the version 1 layout with a
+  sectioned container and adds the subject registry this record left as an open
+  question. Version 1 files remain readable.
 
 ## Context
 
@@ -121,7 +124,8 @@ does file I/O has stopped being a simulation crate.
 
 ## Consequences
 
-- **430 KB for 10,000 NPCs with two relationships each; 790 KB at four.** A game
+- **430,032 bytes for 10,000 NPCs with two relationships each; 790 KB at four.**
+  ADR 0013's version 2 is 430,094 bytes for the same world, plus a registry. A game
   with a tighter budget gzips the bytes, which compresses well because slot fields
   are mostly zero and repeat.
 - **Save time is a function of records, not population.** NPCs who have met nobody
