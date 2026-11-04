@@ -19,6 +19,7 @@ pub mod steering;
 pub mod telemetry;
 pub mod temperament;
 pub mod tick;
+pub mod weight;
 
 pub use cost::VirtualCost;
 pub use ids::{GroupId, NpcId, SimSeed, SlotId};

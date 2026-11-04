@@ -28,6 +28,7 @@ it and both stay in the tree.
 | [0014](0014-compatibility-testing.md) | Save compatibility is tested against committed files and a pinned old build | Accepted |
 | [0015](0015-memory-diagnostics.md) | Waste is measured in integers and drawn outside the library | Accepted |
 | [0016](0016-subject-ceiling.md) | Sixty-four subjects, and a footprint games can budget from | Accepted |
+| [0017](0017-tiered-cognition.md) | Tiered cognition: from reptile to social | Proposed |
 
 ## Reading order
 

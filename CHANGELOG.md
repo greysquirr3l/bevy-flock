@@ -106,6 +106,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   1.34 ms and 1.83 ms respectively — the number that makes this a budget rather than a
   trick.
 
+- `domain::weight`: the proximity weight policy the scheduler's numbers were always
+  missing. Distance bands (close / nearby / distant / background) with hysteresis, so an
+  NPC on a boundary keeps the weight it earned instead of flickering between 8 and 1
+  forty times a second. Six tests.
+- ADR 0017 proposes tiered cognition — reflex, reactive, deliberative, social — where the
+  tier selects the *logic* and the weight selects the *cadence*, with a reserved budget
+  share per tier. Measured: ~7,400 full deliberation thinks fit in a 16.6 ms frame;
+  a 95/4/1 tier mix fits ~110,000 because the average think drops from 2.25 µs to 150 ns.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —
