@@ -5,6 +5,7 @@
 //! makes the simulation testable without an `App`, replayable from a seed, and
 //! portable to a server binary that never links a renderer.
 
+pub mod cost;
 pub mod ids;
 pub mod population;
 pub mod rng;
@@ -13,6 +14,7 @@ pub mod steering;
 pub mod temperament;
 pub mod tick;
 
+pub use cost::VirtualCost;
 pub use ids::{GroupId, NpcId, SimSeed, SlotId};
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;

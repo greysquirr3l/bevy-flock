@@ -29,7 +29,8 @@ that means:
 | Deterministic spatial grid (radius, k-nearest) | **Shipped** |
 | Deterministic RNG with per-NPC streams (PCG32, reference-verified) | **Shipped** |
 | Budgeted, deterministic population spawning (unique and recycled) | **Shipped** |
-| Behaviour trees with resume semantics and abort | **Shipped** |
+| Behaviour trees: flat compiled nodes, resume, abort, cooldown, timeout, parallel | **Shipped** |
+| Leaf catalogue with declared costs and per-archetype trees | **Shipped** |
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |

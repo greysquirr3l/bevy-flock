@@ -24,7 +24,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
-serde = ["dep:serde"]
+serde = ["dep:serde", "dep:ron"]
 
 [dependencies]
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
@@ -43,6 +43,10 @@ thiserror = "2.0"
 # systems. Determinism across platforms is a documented guarantee (ADR 0004).
 libm = "0.2"
 serde = { version = "1.0", features = ["derive"], optional = true }
+# RON is how a designer authors a behaviour tree without recompiling. Optional for
+# the same reason serde is: a headless server that builds trees in code should not
+# carry a parser for a format it never reads.
+ron = { version = "0.9", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -50,6 +54,10 @@ proptest = "1.12"
 
 [[bench]]
 name = "crowd"
+harness = false
+
+[[bench]]
+name = "brain"
 harness = false
 
 [lints.rust]

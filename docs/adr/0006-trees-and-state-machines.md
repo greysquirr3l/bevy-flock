@@ -38,7 +38,14 @@ rather than replacing them.
   running child, a failure resets the cursor, an abort walks the cursor.
 - Trees are compiled to a flat `Vec` with child ranges, so evaluation walks
   indices and never dereferences a box per node. Cursor memory is bounded by tree
-  *depth*, not tree size — twenty bytes for a twenty-node tree.
+  *depth*, not tree size: twelve bytes per running node, and a twenty-node tree
+  rarely has more than three running at once.
+
+  Amended when the engine grew `Parallel`, `Cooldown` and `Timeout`: a running leaf
+  is now recorded in the cursor too. Without that entry an abort had nothing to walk
+  and every running leaf was silently skipped — the exact stuck-NPC failure this
+  ADR is about. Each node also stores the end of its subtree, so "abort everything
+  under here" is a loop over a contiguous index range rather than a traversal.
 - A repeat node is capped at 64 iterations per tick. An uncapped repeat over an
   always-succeeding child is a hang, and "the game froze" is not an acceptable
   failure mode for an AI primitive.
