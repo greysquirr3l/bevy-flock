@@ -33,7 +33,7 @@ that means:
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |
-| Level-of-detail think scheduler with a nanosecond budget | Planned |
+| Virtual-cost fair-queue think scheduler (ADR 0009) | Planned |
 | Continuum ambient tier (millions of inhabitants) | Planned |
 | Dialogue graphs, barks, facts | Planned |
 | Snapshots, replay, rollback | Planned |

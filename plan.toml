@@ -21,8 +21,10 @@ The design targets three scales at once:
   * 1–10,000 named NPCs, spawned unique or recycled, with full per-entity
     brains, dialogue, factions and relationships.
   * 100,000 simulated NPCs inside a 16.6 ms budget on a single desktop core
-    budget, using a think-scheduler that spends an explicit nanosecond
-    allowance instead of a hand-tuned "think every N frames" fudge.
+    budget, using a think-scheduler that spends a virtual-nanosecond allowance
+    against declared, calibrated costs. It is a weighted fair queue rather than
+    a hand-tuned "think every N frames" fudge, and it replays exactly because no
+    wall clock ever enters the decision.
   * 1,000,000+ ambient inhabitants that exist as a continuum population
     field — a density/velocity model, not entities — which materialise into
     real ECS entities as the player approaches and dissolve back when they
@@ -215,27 +217,40 @@ then = "the golden digests are identical on all three"
 
 [[capabilities]]
 name        = "cognition-budget"
-title       = "Budgeted, Level-of-Detail Cognition"
-description = "Cognition cost is bounded per frame by an explicit time budget, with detail degrading gracefully as distance grows."
+title       = "Virtual-Cost, Fair-Queue Cognition Budget"
+description = "Cognition cost per frame is bounded by a budget of virtual nanoseconds dispatched through a weighted fair queue, so the frame is bounded, the tick replays exactly and no NPC starves."
 requirements = [
-    "MUST place every NPC in a detail tier (Near, Mid, Far, Ambient) derived from distance, screen coverage and an explicit gameplay override.",
-    "MUST schedule thinking against a per-frame nanosecond allowance rather than a fixed think-every-N-frames rate.",
-    "MUST apply tier hysteresis so an NPC hovering at a tier boundary does not oscillate between tiers every frame.",
-    "MUST never exceed its frame budget by more than the documented overshoot tolerance, even when every NPC in the world wants to think on the same tick.",
-    "MUST record actual versus budgeted time per tier so a game can display and tune the allowance.",
+    "MUST charge every think a declared virtual cost summed from the registered logic units, and MUST dispatch against a per-frame budget of virtual nanoseconds rather than wall-clock time.",
+    "MUST select the dispatched set by start-time fair queueing over integer tags with a total tie-break order, so the set is a pure function of tick, weights, declared costs and queue state.",
+    "MUST guarantee a bounded maximum think interval for every weight class, derived from the budget and the total weight, and prove it by test rather than by a promotion rule bolted on top.",
+    "MUST treat near/mid/far/ambient detail as an output of the scheduler, used for culling, rendering and stats, never as an input cadence; hysteresis applies to weight bands, not to tier boundaries.",
+    "MUST calibrate declared costs against measured costs on a fixed runner in CI and fail the build when any registered logic unit drifts by more than 20 percent.",
+    "MUST report real versus virtual time per tick in stats only, and MUST NOT read real elapsed time in any scheduling decision.",
 ]
 [[capabilities.scenarios]]
 name = "budget-respected"
-when = "10,000 NPCs all request a think on the same tick with a 2 ms budget"
-then = "the cognition step completes within budget plus tolerance and defers the remainder to later ticks"
+when = "10,000 NPCs are ready to think on the same tick with a budget of 2,000,000 virtual nanoseconds"
+then = "the dispatched set is a prefix of the fair-queue order and the frame exceeds the budget by no more than one tree's declared cost"
 [[capabilities.scenarios]]
-name = "tier-hysteresis"
-when = "an NPC walks back and forth across a tier boundary 60 times"
-then = "its tier changes at most twice, not once per crossing"
+name = "starvation-bound"
+when = "an NPC of the lowest weight is ready every tick for 1,000 ticks"
+then = "it thinks at least once per ceil(cost * total_weight / (budget * weight)) + 1 ticks, asserted over the whole run"
 [[capabilities.scenarios]]
-name = "starved-npc"
-when = "an NPC has been deferred for longer than its maximum think interval"
-then = "it is promoted ahead of other candidates so it cannot starve indefinitely"
+name = "replay-under-speed-difference"
+when = "a 1,000-tick run is replayed with every declared cost multiplied by four, simulating a machine four times slower"
+then = "the dispatched NpcId sequence is identical to the original run"
+[[capabilities.scenarios]]
+name = "tier-is-an-output"
+when = "the budget is halved at runtime"
+then = "every NPC's think interval grows proportionally and the reported per-tier counts follow, with no tier configuration edited"
+[[capabilities.scenarios]]
+name = "weight-raises-share"
+when = "one NPC's weight is raised from 1 to 4"
+then = "it thinks four times as often, plus or minus one dispatch, over 1,000 ticks"
+[[capabilities.scenarios]]
+name = "cost-model-drift"
+when = "a logic unit's measured cost exceeds its declared cost by more than 20 percent"
+then = "the cost-model gate fails the build and names the leaf together with the corrected value"
 
 [[capabilities]]
 name        = "crowd-motion"
@@ -492,7 +507,7 @@ goal     = "Write down the load-bearing design decisions before they are impleme
 depends_on = ["workspace-scaffold"]
 hints = [
     "`ARCHITECTURE.md`: the three simulation tiers, the tick model, the boundary between domain/application/adapters, and the rule that rendering observes simulation but never drives it.",
-    "`docs/adr/` records, one file each: 0001 Bevy 0.20 and glam 0.33 pinning; 0002 single crate with features; 0003 fixed logical tick over wall clock; 0004 `libm` for transcendental determinism; 0005 continuum ambient tier instead of entities; 0006 flow fields over per-agent pathfinding; 0007 trait-object behaviour registry over generics; 0008 nanosecond budget over think-every-N-frames.",
+    "`docs/adr/` records, one file each, numbered as they already are in the tree: 0001 collapsed hexagonal layout; 0002 deterministic PCG32 streams per NPC; 0003 the spatial grid and the two designs that lost to it; 0004 `libm` transcendentals; 0005 budgeted spawning; 0006 trees and state machines together; 0007 no renderer, physics or networking in the core; 0008 fallible constructors and no panic paths; 0009 the virtual-cost fair-queue think scheduler.",
     "Each ADR: context, decision, consequences, and the alternative that was rejected with the reason. Two paragraphs each, no filler.",
     "Include the target performance envelope with the methodology used to measure it: 10,000 NPCs at 60 Hz with rendering, 100,000 simulated headless, 1,000,000 ambient.",
     "State explicitly what bevy-flock will not do: no renderer, no physics solver, no networking protocol, no scripting language.",
@@ -809,32 +824,37 @@ evaluation_criteria = [
 [[phases.tasks]]
 slug      = "lod-think-scheduler"
 kind      = "feature"
-title     = "Level-of-detail tiers and the nanosecond think budget"
-goal     = "Bound cognition cost per frame with an explicit time allowance, degrade detail with distance, and prove no NPC can starve."
+title     = "Virtual-cost fair-queue think scheduler"
+goal      = "Dispatch cognition against a virtual-nanosecond budget with start-time fair queueing, so cost is bounded, replay is exact and no NPC can starve."
 depends_on = ["ecs-core-plugin"]
 implements = ["cognition-budget", "deterministic-simulation"]
 hints = [
-    "`LodTier::{Near, Mid, Far, Ambient}` with entry/exit thresholds and hysteresis bands; the tier decides think interval, perception radius and steering fidelity, not just frequency.",
-    "The scheduler is a priority queue keyed by `(staleness_ticks desc, tier, NpcId)` with a per-frame `ThinkBudget { nanos }`. It pops candidates until the budget is spent, measuring elapsed time with an injectable `Clock` trait so tests are deterministic.",
-    "Fairness rule: any NPC whose staleness exceeds `max_staleness` is force-promoted to the front, which makes starvation impossible by construction rather than by luck.",
-    "Cost feedback: each behaviour reports its measured cost; the scheduler keeps an EWMA per behaviour and uses it to decide how many candidates fit this frame.",
-    "Determinism note: the scheduler must consume the budget by a *count* derived from measured cost, and the count must be recorded in the tick's command log so a replay is exact. Never branch on wall-clock elapsed inside simulation logic.",
-    "Stats: `ThinkStats { candidates, thought, deferred, budget_used_nanos, per_tier }` refreshed each tick.",
+    "`VirtualCost(u64)` in domain is a declared cost in virtual nanoseconds. The registry sums `LeafBehavior::cost_hint` per logic unit and caches the sum on the NPC as `ThinkCost`, refreshed when its logic changes; undeclared logic gets `VirtualCost::DEFAULT` and is listed by the calibration gate rather than panicking.",
+    "`ThinkBudget { virtual_nanos }` on the config, and `ThinkWeight(u16)` per NPC in 1..=1000 produced by a weight policy (distance bands, group directive priority, player focus) with hysteresis on the band rather than on a tier.",
+    "Selection is start-time fair queueing over integer tags: tag = max(start, vt) + (cost * 1024) / weight; dispatch the minimum (tag, NpcId); vt becomes the dispatched tag; stop when spent >= budget. No float appears anywhere in the arithmetic.",
+    "max(start, vt) is load-bearing, not defensive. Without it an NPC that idled while others thought accrues credit and then monopolises the queue; ship the test that fails when it is removed.",
+    "Detail tiers are an output: derive `LodTier` for culling, rendering and stats from measured think share and distance, and report per-tier counts in `ThinkStats`. The scheduler never branches on tier.",
+    "Overshoot is bounded by one dispatch because the budget is checked before each think. Expose `max_think_cost()` so a game can size its budget against its most expensive tree.",
+    "Determinism: the dispatched set is a pure function of ready set, tags, weights, declared costs and budget, all integers in simulation state. Record the dispatched `NpcId` list in the tick log so a replay consumes it verbatim instead of recomputing it.",
+    "`ThinkStats { virtual_spent, real_nanos, dispatched, deferred, per_tier }` refreshes each tick. `real_nanos` is instrumentation and must never feed a decision.",
 ]
 test_hints = [
-    "Budget test with a fake clock: 10,000 NPCs all stale, 2 ms budget, assert thoughts stop at the budget and the remainder are deferred.",
-    "Starvation test: an NPC at the back of the queue gets its turn within `max_staleness` ticks, for 10,000 iterations.",
-    "Hysteresis test: 60 boundary crossings produce at most 2 tier changes.",
-    "Determinism test: replaying a recorded tick with the recorded counts produces identical thought sets.",
+    "10,000 ready NPCs with a 2,000,000 vns budget: the dispatched set equals the fair-queue prefix and overshoot is at most one declared tree cost.",
+    "Starvation bound: 10,000 NPCs with mixed weights over 1,000 ticks; no NPC exceeds ceil(cost * total_weight / (budget * weight)) + 1 ticks between thinks.",
+    "Replay: run 1,000 ticks, then rerun with every declared cost multiplied by four; the dispatched NpcId sequence is identical.",
+    "Fairness: weight 4 thinks four times as often, plus or minus one dispatch, as weight 1 over 1,000 ticks.",
+    "No credit accumulation: park an NPC for 500 ticks, wake it, and assert it takes at most one dispatch before the queue catches up.",
+    "Hysteresis: 60 boundary crossings produce at most 2 weight-band changes.",
 ]
 must_haves = [
-    "Budget is time-based with an injectable clock, not frame-count based.",
-    "Force-promotion makes starvation impossible.",
-    "Per-tier and per-behaviour cost recorded.",
+    "No wall-clock read anywhere in the scheduling path.",
+    "All tag, weight and cost arithmetic is integer.",
+    "The maximum think interval is bounded and asserted, with no promotion special case.",
 ]
 evaluation_criteria = [
-    "No `Instant::now()` call inside domain or application logic — only inside the injected clock implementation.",
-    "The recorded tick log is enough to reproduce the scheduler's decisions exactly.",
+    "No `Instant::now()`, `SystemTime` or `Time` resource read in `src/application` or `src/domain`; grep proves it.",
+    "The dispatched set is identical between the baseline run and a run whose declared costs are scaled by four.",
+    "The queue is a total order: a shuffled ready set produces the same dispatch sequence.",
 ]
 
 [[phases.tasks]]
@@ -969,6 +989,35 @@ must_haves = [
 evaluation_criteria = [
     "A game can implement a behaviour in under 30 lines using only the prelude.",
     "No extension trait leaks internal types in its signature.",
+]
+
+[[phases.tasks]]
+slug      = "cost-calibration-gate"
+kind      = "infrastructure"
+title     = "Cost-model calibration gate"
+goal      = "Keep declared virtual costs honest: measure every registered leaf on a fixed runner and fail the build when the model drifts by more than 20 percent."
+depends_on = ["cognition-extension-api", "lod-think-scheduler"]
+implements = ["cognition-budget", "observability"]
+hints = [
+    "`benches/cost_model.rs` measures every registered built-in leaf with one criterion group per leaf, so a regression names itself in the report.",
+    "`tests/cost_model.rs` runs the same measurement as an assertion: 100,000 iterations per leaf, median, compared against the declared `VirtualCost`; the failure message carries declared, measured and the corrected value to paste.",
+    "Tolerance is 20 percent, and the comparison is against a reference table generated by the bench on the fixed runner, not against absolute nanoseconds. Only relative costs set fairness shares, so absolute drift on other hardware is expected and harmless; drift in the model is the failure being caught.",
+    "CI gets a `cost-model` job on the same runner class as `bench.yml`, required on every pull request, plus a nightly drift report that warns without failing so a runner fleet change is visible before it breaks the gate.",
+    "Document the re-calibration ritual in `docs/performance.md`: measure, update the declaration, regenerate the reference table, and state the reason in the commit message.",
+    "A leaf that declares no cost is not a silent default: the gate lists uncalibrated leaves and the scheduler charges `VirtualCost::DEFAULT`, which is deliberately pessimistic so an undeclared leaf cannot hide as cheap.",
+]
+test_hints = [
+    "Declare one leaf at half its measured cost: the gate fails, naming the leaf and the corrected value.",
+    "Register a leaf with no declared cost: the gate passes but lists it as uncalibrated.",
+    "Regenerate the reference table from the bench and assert the test reads the generated file, not a hand-edited one.",
+]
+must_haves = [
+    "Every built-in leaf has a declared cost and a generated reference measurement.",
+    "The gate fails the build, not merely a benchmark, when the model drifts.",
+]
+evaluation_criteria = [
+    "A deliberate 3x cost regression in one leaf is caught by CI with that leaf named.",
+    "The reference table is machine-generated and checked in, with the generating command documented.",
 ]
 
 [[phases.tasks]]

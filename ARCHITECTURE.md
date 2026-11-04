@@ -37,7 +37,7 @@ belongs in an adapter.
 ```
 FlockSet::Spawn         drain the spawn queue against the per-frame budget
 FlockSet::Perception    rebuild the spatial grid from current positions
-FlockSet::Cognition     brains decide (planned: budgeted think scheduler)
+FlockSet::Cognition     brains think, dispatched by the virtual-cost scheduler
 FlockSet::Steering      each NPC computes its desired velocity
 FlockSet::Integration   accelerate toward it, integrate position
 FlockSet::AdvanceTick   clock.tick += 1
@@ -85,10 +85,12 @@ Two budgets, both explicit resources rather than magic numbers:
 
 - `FlockConfig::spawn_budget` — entities created per frame. 100,000 NPCs at 4,096
   per frame arrive over 25 frames instead of one 400 ms hitch.
-- The think budget (planned) — nanoseconds per frame for cognition. Tier decides
-  how often an NPC *wants* to think; the budget decides how many actually do, and
-  a fairness rule promotes anything that has waited too long so starvation is
-  impossible by construction.
+- The think budget (planned, ADR 0009) — **virtual** nanoseconds per frame. Each
+  logic unit declares a cost, the sum is charged per think, and a start-time fair
+  queue dispatches the minimum tag first. No wall clock enters the decision, so a
+  replay dispatches the same NPCs on a machine four times slower; the maximum
+  think interval is bounded by `ceil(cost * total_weight / (budget * weight)) + 1`
+  ticks rather than enforced by a promotion rule.
 
 ## Failure philosophy
 
