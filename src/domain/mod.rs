@@ -6,6 +6,7 @@
 //! portable to a server binary that never links a renderer.
 
 pub mod cognition;
+pub mod continuum;
 pub mod cost;
 pub mod ids;
 #[cfg(feature = "memory")]

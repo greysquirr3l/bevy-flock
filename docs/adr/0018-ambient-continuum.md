@@ -85,19 +85,14 @@ That trade is only acceptable with two guarantees, and both are load-bearing:
 ### The cell
 
 ```rust
-/// One patch of ambient population. Deliberately small: 32 bytes at 4 m spacing is a
-/// megabyte for a million inhabitants over four square kilometres.
+/// One patch of ambient population. Deliberately small: twelve bytes as built, so a
+/// million inhabitants over four square kilometres is 480 KB.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CellState {
-    /// How many people are in this cell. The conserved quantity.
-    pub population: u32,
-    /// Mean velocity, for seeding a manifested NPC with plausible momentum.
-    pub velocity: [f32; 2],
-    /// Alarm level, 0..=1000 permille: raised by violence, decays toward calm.
-    pub alarm: u16,
-    /// What they are doing: 0 walking, 1 working, 2 shopping, 3 mustering.
-    pub occupation: u8,
-    pub _pad: u8,
+    pub population: u32,      // the conserved quantity
+    pub velocity: [i16; 2],   // mm/s, so a cell compares and copies bitwise
+    pub alarm: u16,           // permille
+    pub occupation: Occupation,
 }
 
 pub struct AmbientField {
@@ -225,7 +220,7 @@ The task is not complete when the code compiles. It is complete when these hold,
 
 **Gained.** The ceiling stops being a property of the ECS and becomes a property of the
 manifest band, which is a design decision a game can tune. A million inhabitants at 60 Hz
-becomes arithmetic instead of aspiration. Saves shrink, because a cell is 16 bytes and a
+becomes arithmetic instead of aspiration. Saves shrink, because a cell is 12 bytes and a
 thousand folded NPCs are one cell.
 
 **Lost.** Identity outside the band. The library can no longer answer "where is villager

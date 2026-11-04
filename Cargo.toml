@@ -147,3 +147,7 @@ harness = false
 [[bench]]
 name = "tiers"
 harness = false
+
+[[bench]]
+name = "continuum"
+harness = false

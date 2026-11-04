@@ -140,6 +140,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with no brains at all costs **198 ms** at 100,000 — the real ceiling, and the one the
   continuum is aimed at.
 
+- `domain::continuum`: ambient population as twelve-byte cells with exact integer
+  conservation, deterministic manifestation and O(1) folding. Advection of a million
+  inhabitants over 40,000 cells measures 0.315 ms per stride; manifesting 2,000 identities
+  is 10.5 µs.
+- `MemoryStore::sweep_keeping` / `age` (ADR 0019): reclamation is a store-level cadence
+  with an anchor exemption, so NPCs nobody simulates cannot leak rows, and anchored
+  memories fade in warmth without losing their record.
+- Gate 8 of ADR 0018 **fails**: a 5,000-entity manifest band costs 9.47 ms because the
+  crowd path costs ~1.9 ms per 1,000 steered NPCs. See `docs/gates/continuum.md`.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

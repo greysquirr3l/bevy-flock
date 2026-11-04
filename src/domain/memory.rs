@@ -700,6 +700,75 @@ impl MemoryStore {
         freed
     }
 
+    /// Free every row whose strongest memory has decayed below `min_familiarity`,
+    /// **except** rows the caller vouches for.
+    ///
+    /// This is the difference between a memory system and a leak with a half-life. Decay
+    /// itself is already independent of simulation — [`crate::domain::memory::DecayPolicy`]
+    /// evaluates it from `now - last_seen` at read time — but *reclamation* is not: a row
+    /// is only freed when somebody sweeps it. An NPC nobody simulates, because it is
+    /// folded into the continuum (ADR 0018) or simply far away, is never swept by
+    /// per-entity code, so its row and its subject slots sit there until the store is
+    /// full.
+    ///
+    /// The `keep` predicate is the anchor seam. A row it protects is never freed, however
+    /// long the subject has been away: the *warmth* of the memory decays to nothing
+    /// through [`MemoryStore::recall_decayed`], while the *record* — the fact that this
+    /// NPC has met this subject, and what kind of meeting it was — survives. That is the
+    /// difference between "I have forgotten you" and "I know exactly who you are, and I
+    /// am not pleased".
+    pub fn sweep_keeping(
+        &mut self,
+        now: Tick,
+        decay: DecayPolicy,
+        min_familiarity: u16,
+        keep: &dyn Fn(NpcId) -> bool,
+    ) -> u32 {
+        let mut freed = 0;
+        for index in 0..self.high_water {
+            let Some(Some(owner)) = self.owners.get(index as usize).copied() else {
+                continue;
+            };
+            if keep(owner) {
+                continue;
+            }
+            let strongest = self.strongest_familiarity(MemoryIndex(index), now, decay);
+            if strongest.is_some_and(|value| value >= min_familiarity) {
+                continue;
+            }
+            self.release_row(MemoryIndex(index));
+            freed += 1;
+        }
+        freed
+    }
+
+    /// Sweep on a cadence, exempting anchored owners.
+    ///
+    /// `cadence` is in ticks: a sweep every 600 ticks is ten seconds at 60 Hz and is the
+    /// only rate at which this needs to run. Call it every frame if you like — it is
+    /// idempotent — but the point of the cadence is that a game with ten thousand absent
+    /// NPCs pays for them once every ten seconds rather than once a frame.
+    pub fn age(
+        &mut self,
+        now: Tick,
+        decay: DecayPolicy,
+        policy: AgingPolicy,
+        keep: &dyn Fn(NpcId) -> bool,
+    ) -> AgingReport {
+        let mut report = AgingReport::default();
+        if policy.cadence == 0 || !now.get().is_multiple_of(policy.cadence) {
+            return report;
+        }
+        report.swept = true;
+        report.freed = self.sweep_keeping(now, decay, policy.min_familiarity, keep);
+        report.retained = self
+            .owners
+            .iter()
+            .filter(|owner| owner.is_some_and(&keep))
+            .count() as u32;
+        report
+    }
+
     /// The strongest decayed familiarity this NPC still holds, if any.
     #[must_use]
     pub fn strongest_familiarity(
@@ -869,8 +938,158 @@ fn total_familiarity(memories: &NpcMemories) -> u32 {
         .sum()
 }
 
+/// How often absent NPCs are swept, and how faded a memory has to be to be freed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgingPolicy {
+    /// Ticks between sweeps. Zero disables sweeping entirely.
+    pub cadence: u64,
+    /// Familiarity at or above this keeps a row alive. Zero means "fade to nothing
+    /// before you are forgotten", which is almost never what a game wants.
+    pub min_familiarity: u16,
+}
+
+impl AgingPolicy {
+    /// Ten seconds at 60 Hz, with a floor of one point of familiarity.
+    pub const DEFAULT: Self = Self {
+        cadence: 600,
+        min_familiarity: 1,
+    };
+
+    /// Sweep every `cadence` ticks with the default floor.
+    #[must_use]
+    pub const fn every(cadence: u64) -> Self {
+        Self {
+            cadence,
+            min_familiarity: 1,
+        }
+    }
+}
+
+impl Default for AgingPolicy {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// What an [`MemoryStore::age`] pass did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AgingReport {
+    /// Whether the cadence came due this tick.
+    pub swept: bool,
+    /// Rows reclaimed.
+    pub freed: u32,
+    /// Rows kept because their owner was anchored.
+    pub retained: u32,
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_absent_npc_is_reclaimed_and_its_slot_reused() {
+        // The player leaves for an hour of game time. The NPC is never simulated, so no
+        // per-entity code ever touches its row: the cadence sweep is the only thing that
+        // can reclaim it, and if it cannot, this is a leak with a half-life.
+        let mut store = MemoryStore::new(8, 4);
+        let absent = NpcId::unique(1);
+        let index = store.enrol(absent).expect("room for one");
+        let subject = SubjectId::new(0);
+        store.remember(
+            index,
+            subject,
+            &Encounter::new(EncounterKind::Spoke, Tick::new(0)),
+        );
+        assert_eq!(store.len(), 1);
+
+        let policy = AgingPolicy::every(600);
+        let far_future = Tick::new(216_000);
+
+        // Before the cadence comes due, nothing happens: that is the point of a cadence.
+        let off_beat = store.age(Tick::new(216_001), DecayPolicy::MINUTE, policy, &|_| false);
+        assert!(!off_beat.swept, "off cadence is not a sweep");
+
+        let report = store.age(far_future, DecayPolicy::MINUTE, policy, &|_| false);
+        assert!(report.swept);
+        assert_eq!(report.freed, 1, "a hundred half-lives is not a memory");
+        assert_eq!(store.len(), 0, "the row is gone");
+
+        // And the slot is genuinely reusable, which is what makes this a fix rather than
+        // a smaller leak.
+        let newcomer = NpcId::unique(2);
+        let second = store.enrol(newcomer).expect("the row came back");
+        assert!(store.remember(
+            second,
+            subject,
+            &Encounter::new(EncounterKind::Traded, Tick::new(216_000))
+        ));
+    }
+
+    #[test]
+    fn an_anchored_npc_is_kept_and_its_grudge_survives_its_warmth() {
+        // An hour away, anchored: the record survives, the feeling does not.
+        let mut store = MemoryStore::new(8, 4);
+        let anchored = NpcId::unique(7);
+        let index = store.enrol(anchored).expect("room for one");
+        let subject = SubjectId::new(1);
+        store.remember(
+            index,
+            subject,
+            &Encounter::new(EncounterKind::Attacked, Tick::new(0)),
+        );
+
+        let policy = AgingPolicy::every(600);
+        let now = Tick::new(216_000);
+        let keep = |owner: NpcId| owner == anchored;
+        let report = store.age(now, DecayPolicy::MINUTE, policy, &keep);
+
+        assert_eq!(report.freed, 0, "an anchor is not swept");
+        assert_eq!(report.retained, 1);
+        assert_eq!(store.len(), 1, "the row is still there");
+
+        // Warmth is gone; the fact of the attack is not.
+        let decayed = store.recall_decayed(index, subject, now, DecayPolicy::MINUTE);
+        assert!(
+            decayed.is_none_or(|(valence, familiarity)| familiarity == 0 && valence == 0),
+            "after a hundred half-lives nothing is felt: {decayed:?}"
+        );
+        let raw = store.recall(index, subject).expect("the record survives");
+        assert!(raw.is_grudge(), "and it is still a grudge");
+        assert_eq!(raw.last_seen(), Tick::new(0), "the date is unchanged");
+        assert!(
+            raw.encounters() == 1,
+            "the count is history, not a feeling, so it does not decay"
+        );
+    }
+
+    #[test]
+    fn a_long_absence_does_not_grow_the_store() {
+        // Five thousand arrivals and departures through a store with room for sixteen
+        // rows: only reclamation keeps this bounded, and absence must not defeat it.
+        let mut store = MemoryStore::new(16, 2);
+        let policy = AgingPolicy::every(60);
+        let mut tick = 0_u64;
+        for round in 0..5_000_u64 {
+            let npc = NpcId::unique(u32::try_from(round).expect("in range"));
+            let Some(index) = store.enrol(npc) else {
+                panic!("enrol refused at round {round}: {} rows held", store.len());
+            };
+            store.remember(
+                index,
+                SubjectId::new(0),
+                &Encounter::new(EncounterKind::Spoke, Tick::new(tick)),
+            );
+            // Eight half-lives between arrivals: the previous visitor has faded to
+            // nothing, so the row is reclaimable. A shorter gap would test that the store
+            // fills, which is a different assertion.
+            tick += 28_800;
+            store.age(Tick::new(tick), DecayPolicy::MINUTE, policy, &|_| false);
+            assert!(
+                store.len() <= 16,
+                "the store grew to {} rows at round {round}",
+                store.len()
+            );
+        }
+    }
     use super::*;
 
     const SUBJECT: SubjectId = SubjectId::new(0);

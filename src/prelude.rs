@@ -28,6 +28,7 @@ pub use crate::behavior::{
 
 pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
 pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
+pub use crate::domain::continuum::{AmbientField, CellId, CellState, Occupation};
 pub use crate::domain::cost::VirtualCost;
 pub use crate::domain::ids::{GroupId, NpcId, SimSeed};
 #[cfg(feature = "memory")]
