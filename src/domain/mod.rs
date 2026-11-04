@@ -15,6 +15,8 @@ pub mod rng;
 pub mod saves;
 pub mod spatial;
 pub mod steering;
+#[cfg(feature = "memory")]
+pub mod telemetry;
 pub mod temperament;
 pub mod tick;
 
@@ -31,5 +33,7 @@ pub use rng::RngStream;
 pub use saves::{LoadReport, MAGIC, MemorySnapshot, Origin, SaveError, SaveRecord, SavedSlot};
 pub use spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 pub use steering::{SteeringParams, SteeringWeights};
+#[cfg(feature = "memory")]
+pub use telemetry::{Sample, measure, references_to, retire};
 pub use temperament::{Archetype, Mood, Needs, Temperament, Weight};
 pub use tick::{Tick, TicksPerSecond};

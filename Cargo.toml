@@ -68,6 +68,10 @@ harness = false
 name = "memory"
 harness = false
 required-features = ["memory"]
+[[bench]]
+name = "saves"
+harness = false
+required-features = ["memory"]
 
 [lints.rust]
 unsafe_code = "deny"
@@ -126,3 +130,12 @@ significant_drop_tightening = "allow"
 # uses. Debug symbols stay on so a profile can be read against the source.
 [profile.bench]
 debug = true
+
+[[test]]
+name = "save_compat"
+harness = true
+required-features = ["memory"]
+
+[[example]]
+name = "registry_telemetry"
+required-features = ["memory"]

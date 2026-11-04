@@ -184,6 +184,28 @@ guarded against double release with `free.contains(&index)`, which made sweeping
 full store quadratic — 24.7 ms for 16k rows. `Option::take` already prevents a
 double push, so the guard was both wrong and expensive. 24.7 ms became 288 µs.
 
+## Save format
+
+`benches/saves.rs` measures both formats over 50,000 active NPCs with two
+relationships each: about 2.15 MB, which is the size at which a save stops being
+instant.
+
+| | v1 | v2 | delta |
+| --- | --- | --- | --- |
+| bytes | 2,150,032 | 2,150,172 | +140 (+0.007%) |
+| encode | 8.27 ms | 8.67 ms | +0.40 ms |
+| decode | 11.50 ms | 11.93 ms | +0.43 ms |
+
+The section container is close to free. What was not free was the first checksum
+strategy: hashing the whole file in the trailer *in addition* to each section cost
+6.7 ms of a 14.9 ms encode, because it hashed two megabytes twice. The trailer now
+covers the header and table only, and encode landed within half a millisecond of
+version 1.
+
+At one NPC the container's fixed cost shows: 57 bytes becomes 197, because a table
+and a registry are not free at small sizes either. A save with one relationship in
+it is not the case this format optimises for.
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.

@@ -1437,6 +1437,7 @@ goal     = "Capture and restore the entire simulation — including brains, fact
 depends_on = ["ecs-core-plugin", "dialog-graph-engine", "cognition-extension-api"]
 implements = ["state-persistence", "deterministic-simulation"]
 hints = [
+    "Compatibility is a corpus, not a round trip: committed fixtures blessed deliberately, a frozen-writer byte test, a pinned old build for the forward direction, and bit-flip fuzzing that must produce typed errors and never a panic — ADR 0014. Waste is measured as ghost rows and orphan slots in permille, drawn by an example rather than the library — ADR 0015.",
     "Subjects are matched by stable key, not position: the file carries a registry whose fingerprint short-circuits the common case, translation drops and counts what the current registry no longer knows, and a registry-less version 1 file is refused unless the game opts in — ADR 0013.",
     "Relationships persist through the versioned format in ADR 0012: ages not stamps, identities not indices, sorted records, CRC32 per section, typed errors for every refusal, and the crate produces bytes rather than opening files.",
     "`SnapshotV1` with an explicit `schema_version`, `engine_version`, `seed`, `tick`, population records, per-NPC brain state, fact store, group state and ambient field. Serialise with RON behind `serde` for human diffing, and document a binary path if size demands it.",

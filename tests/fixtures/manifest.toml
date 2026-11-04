@@ -1,0 +1,22 @@
+# The save-format corpus (ADR 0014).
+#
+# Every file here is committed, and every test that reads it is reading bytes no code
+# path in the current run produced. A fixture that stops loading is a P0: the fix is
+# the reader, never the fixture.
+#
+# Re-blessing rewrites a file, so the diff is reviewable next to the ADR that
+# authorised the format change:
+#
+#     BLESS_SAVES=1 cargo test --test save_compat
+
+[files."v1/basic.bflk"]
+format = 1
+writer = "reconstruction of the ADR 0012 layout, for the legacy read path"
+covers = ["records sorted by identity", "an archived record", "two subjects"]
+expected = { records = 3, slots = 4, documents = "loads under AssumeDense and reports unverified_mapping; refused under Refuse" }
+
+[files."v2/canonical.bflk"]
+format = 2
+writer = "the version 2 writer, blessed"
+covers = ["section table", "subject registry with labels", "records", "table checksum"]
+expected = { records = 3, slots = 4, documents = "the frozen writer; byte equality is asserted" }
