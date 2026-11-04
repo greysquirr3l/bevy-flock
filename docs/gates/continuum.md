@@ -100,3 +100,30 @@ Two defects surfaced on the way, both invisible without the number:
 2. **The fixture seeded 15,000 mid agents into 300-800 m**, roughly double the specified
    density. A bench fixture that is denser than the design is a bench that measures the
    fixture.
+
+## The gate harness closed four gates and found two bugs (2026-11-04)
+
+`tests/band_continuity.rs` drives a camera on a sine path across the band edge for 10,000
+ticks with five instruments. Gates 4 (parity/conservation), 5 (pop-in), 6 (anchoring) and 7
+(allocation rate) pass; gate 9 (fold completeness) passes in isolation.
+
+Two real defects fell out, neither of which any unit test could have found:
+
+1. **Anchors were steered.** `band_steer` queried every `BandAgent`, anchor included, and
+   the packed grid clamps a position outside its extent into the edge cell. Gate 6 watched
+   an anchor at x = 10,256 become x = 16 in a single tick — a story character teleported
+   ten kilometres by the crowd system. Anchors are now excluded from both steering passes.
+2. **The field could not cover its own fold radius.** With `extent` 512 and a fold radius of
+   290 m, no cell existed beyond 256 m from centre, so an agent that walked out had nowhere
+   to fold into and stayed an entity forever. `extent` is now 1,024.
+
+### One finding still open: manifestation/fold churn
+
+With the default configuration the band manifests 256 agents a tick and folds 256 of them
+again on the next (measured: `folded = 512`, `manifested = 768` after two ticks, density
+39,744 = 40,000 - 768 + 512). Population is conserved and no gate notices, because the
+ration bounds both directions — but the band is doing work that cancels, and the intended
+steady state is agents that *stay* manifested. Suspect: newly manifested agents are placed
+at a cell centre but their first steering pass moves them outside the fold radius, or the
+manifest ring and the fold radius disagree by a cell. Gate 9 sidesteps it by testing
+folding with `target: 0`; that sidestep is the reason this note exists.
