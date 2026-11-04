@@ -1437,6 +1437,7 @@ goal     = "Capture and restore the entire simulation — including brains, fact
 depends_on = ["ecs-core-plugin", "dialog-graph-engine", "cognition-extension-api"]
 implements = ["state-persistence", "deterministic-simulation"]
 hints = [
+    "Relationships persist through the versioned format in ADR 0012: ages not stamps, identities not indices, sorted records, CRC32 per section, typed errors for every refusal, and the crate produces bytes rather than opening files.",
     "`SnapshotV1` with an explicit `schema_version`, `engine_version`, `seed`, `tick`, population records, per-NPC brain state, fact store, group state and ambient field. Serialise with RON behind `serde` for human diffing, and document a binary path if size demands it.",
     "Version gate: unknown or newer schema returns `UnsupportedSnapshotVersion { found, supported }` and leaves the world untouched — test the untouched part.",
     "Digest: a stable 64-bit hash over the canonicalised state (sorted by `NpcId`, integers first) used by tests and by the benchmark gate.",

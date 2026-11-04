@@ -35,6 +35,8 @@ pub use crate::domain::memory::{
     NpcMemories, SubjectId,
 };
 pub use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
+#[cfg(feature = "memory")]
+pub use crate::domain::saves::{MemorySnapshot, Origin, RestoreReport, SaveError, SaveRecord};
 pub use crate::domain::spatial::SpatialGridConfig;
 pub use crate::domain::steering::SteeringParams;
 pub use crate::domain::temperament::{Archetype, Temperament};

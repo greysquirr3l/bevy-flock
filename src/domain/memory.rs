@@ -240,6 +240,30 @@ impl MemorySlot {
         last_seen: 0,
     };
 
+    /// Build a slot from its parts.
+    ///
+    /// The inverse of the accessors, used by the save format (ADR 0012) to rebuild a
+    /// slot at a new clock. Callers that are not a loader should record encounters
+    /// through [`MemoryStore::remember`] instead.
+    #[must_use]
+    pub const fn from_parts(
+        familiarity: u16,
+        valence: i16,
+        encounters: u16,
+        flags: u16,
+        first_seen: Tick,
+        last_seen: Tick,
+    ) -> Self {
+        Self {
+            familiarity,
+            valence,
+            encounters,
+            flags,
+            first_seen: first_seen.get() as u32,
+            last_seen: last_seen.get() as u32,
+        }
+    }
+
     /// Whether anything is remembered here.
     #[must_use]
     pub const fn is_empty(self) -> bool {
@@ -518,6 +542,18 @@ impl MemoryStore {
         self.owners
             .get(index.0 as usize)
             .is_some_and(Option::is_some)
+    }
+
+    /// Every enrolled row, in index order.
+    ///
+    /// Deliberately an iterator over live rows rather than the whole capacity: the
+    /// save format only writes what exists, and a crowd of hermits should save to a
+    /// header.
+    pub fn enrolled(&self) -> impl Iterator<Item = (MemoryIndex, NpcId)> + '_ {
+        self.owners
+            .iter()
+            .enumerate()
+            .filter_map(|(index, owner)| owner.map(|npc| (MemoryIndex(index as u32), npc)))
     }
 
     /// The NPC a row belongs to.
