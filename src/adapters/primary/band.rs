@@ -22,7 +22,7 @@ use bevy_transform::prelude::Transform;
 
 use crate::adapters::primary::cognition::PlayerFocus;
 use crate::application::packed::{Pack, SteerParams};
-use crate::domain::continuum::{AmbientField, CellId};
+use crate::domain::continuum::{AmbientField, CellId, FieldError, Occupation};
 use crate::domain::ids::NpcId;
 use crate::domain::tick::Tick;
 
@@ -44,6 +44,14 @@ impl BandAgent {
     }
 }
 
+/// A mid-band agent: individually present, steered on a cadence rather than every frame.
+/// ADR 0021's second ring. Fidelity is a rate, not a population.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct MidAgent {
+    /// Current velocity in metres per second.
+    pub velocity: [f32; 2],
+}
+
 /// Never folded, whatever the distance. Threads of the story, not population.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BandAnchor;
@@ -60,6 +68,10 @@ pub struct BandConfig {
     pub fold_slack: f32,
     /// Most agents manifested or folded on one frame.
     pub ration: u32,
+    /// Mid-band target, steered on a cadence (ADR 0021).
+    pub mid_target: u32,
+    /// Frames between mid-band passes. Three is 20 Hz at 60.
+    pub mid_cadence: u32,
     /// Metres per cell.
     pub spacing: f32,
     /// The extent of the world the pack's grid must cover.
@@ -73,6 +85,8 @@ impl Default for BandConfig {
             density: 1.0 / 40.0,
             fold_slack: 1.15,
             ration: 256,
+            mid_target: 15_000,
+            mid_cadence: 3,
             spacing: 4.0,
             extent: 512.0,
         }
@@ -114,6 +128,12 @@ pub struct Band {
     pub pack: Pack,
     /// Inside this, an entity is individually present.
     pub radius: f32,
+    /// The mid band's steering buffer, run every `mid_cadence` frames.
+    pub mid_pack: Pack,
+    /// Frames between mid-band steering passes.
+    pub mid_cadence: u32,
+    /// Frames elapsed, for the mid cadence.
+    pub frame: u32,
     /// Outside this, an entity folds back into density.
     pub fold_radius: f32,
     /// Manifestations and folds performed since the plugin started.
@@ -125,20 +145,40 @@ pub struct Band {
 impl Band {
     /// Build a band from configuration.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics only if the field geometry is degenerate, which the configuration cannot
-    /// express: spacing is validated positive and the grid is sized from the extent.
-    #[must_use]
-    pub fn new(config: BandConfig) -> Self {
+    /// [`FieldError`] if the derived grid exceeds the field's cell ceiling. The plugin
+    /// substitutes [`Band::minimal`] rather than panicking in a game loop.
+    pub fn new(config: BandConfig) -> Result<Self, FieldError> {
         let radius = config.radius();
-        let side = ((config.extent / config.spacing).ceil() as u32).clamp(1, 4096);
-        let field = AmbientField::new(side, side, config.spacing, 0x5EED_BA9D)
-            .expect("band geometry is validated by construction");
-        Self {
+        // 2048² is exactly AmbientField::MAX_CELLS: the largest grid a band may ask for.
+        let side = ((config.extent / config.spacing).ceil() as u32).clamp(1, 2048);
+        let field = AmbientField::new(side, side, config.spacing, 0x5EED_BA9D)?;
+        Ok(Self {
             field,
             pack: Pack::with_capacity(config.target as usize + 1, config.steer_params()),
             radius,
+            mid_pack: Pack::with_capacity(config.mid_target as usize + 1, config.steer_params()),
+            mid_cadence: config.mid_cadence.max(1),
+            frame: 0,
+            fold_radius: radius * config.fold_slack.max(1.0),
+            manifested: 0,
+            folded: 0,
+        })
+    }
+
+    /// A degenerate band: one cell, no grid. Used when the configured geometry is
+    /// impossible, so a bad config costs population rather than a panic.
+    #[must_use]
+    pub fn minimal(config: BandConfig) -> Self {
+        let radius = config.radius();
+        Self {
+            field: AmbientField::minimal(config.spacing, 0x5EED_BA9D),
+            pack: Pack::with_capacity(1, config.steer_params()),
+            radius,
+            mid_pack: Pack::with_capacity(1, config.steer_params()),
+            mid_cadence: 1,
+            frame: 0,
             fold_radius: radius * config.fold_slack.max(1.0),
             manifested: 0,
             folded: 0,
@@ -186,14 +226,14 @@ impl Plugin for BandPlugin {
     fn build(&self, app: &mut App) {
         let config = self.config;
         app.insert_resource(config)
-            .insert_resource(Band::new(config))
+            .insert_resource(Band::new(config).unwrap_or_else(|_| Band::minimal(config)))
             .configure_sets(
                 Update,
                 (BandSet::Fold, BandSet::Manifest, BandSet::Steer).chain(),
             )
             .add_systems(
                 Update,
-                (band_fold, band_manifest, band_steer)
+                (band_fold, band_manifest, band_steer, band_steer_mid)
                     .chain()
                     .in_set(BandSet::Steer),
             );
@@ -213,6 +253,10 @@ fn distance_squared(a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 /// Fold agents beyond the fold radius into density. Anchors are skipped.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by the scheduler"
+)]
 pub fn band_fold(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -243,6 +287,10 @@ pub fn band_fold(
 }
 
 /// Manifest density inside the manifest radius, rationed, taking before spawning.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by the scheduler"
+)]
 pub fn band_manifest(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -309,6 +357,10 @@ pub fn band_manifest(
 }
 
 /// Copy the band into the pack, steer it, and copy the result back.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by the scheduler"
+)]
 pub fn band_steer(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
@@ -341,6 +393,43 @@ pub fn band_steer(
     }
 }
 
+/// Steer the mid band every `mid_cadence` frames. Same kernel, a third of the rate.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by the scheduler"
+)]
+pub fn band_steer_mid(
+    mut band: ResMut<Band>,
+    config: Res<BandConfig>,
+    mut mids: Query<(&mut Transform, &mut MidAgent)>,
+) {
+    band.frame = band.frame.wrapping_add(1);
+    if !band.frame.is_multiple_of(band.mid_cadence) || mids.is_empty() {
+        return;
+    }
+    band.mid_pack.clear();
+    for (transform, mid) in &mids {
+        band.mid_pack.push(
+            [transform.translation.x, transform.translation.y],
+            mid.velocity,
+        );
+    }
+    let params = config.steer_params();
+    let _ = band.mid_pack.steer(&params);
+    let dt = 1.0 / 60.0 * band.mid_cadence as f32;
+    band.mid_pack.integrate(params.max_speed);
+    band.mid_pack.advance(dt, params.extent);
+    for (index, (mut transform, mut mid)) in mids.iter_mut().enumerate() {
+        if let Some(position) = band.mid_pack.position(index) {
+            transform.translation.x = position[0];
+            transform.translation.y = position[1];
+        }
+        if let Some(velocity) = band.mid_pack.velocity(index) {
+            mid.velocity = velocity;
+        }
+    }
+}
+
 /// A convenience for games: seed the field from a population that is not yet spawned.
 pub fn seed_field(band: &mut Band, count: u32) {
     let width = band.field.width();
@@ -355,7 +444,7 @@ pub fn seed_field(band: &mut Band, count: u32) {
         while x < width && remaining > 0 {
             let per_cell = (remaining / ((width - x).max(1))).max(1);
             if let Some(cell) = band.field.cell_mut(CellId::new(x, y)) {
-                cell.absorb(per_cell, [0.4, 0.0], 0, Default::default());
+                cell.absorb(per_cell, [0.4, 0.0], 0, Occupation::default());
                 remaining = remaining.saturating_sub(per_cell);
             }
             x += 1;

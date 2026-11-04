@@ -1,5 +1,4 @@
 //! Gate 8: 100,000 inhabitants with 5,000 manifested, under an 8 ms frame.
-#![expect(clippy::expect_used, reason = "fixtures fail loudly")]
 
 use std::hint::black_box;
 
@@ -7,7 +6,9 @@ use bevy_app::prelude::*;
 use bevy_transform::prelude::Transform;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use bevy_flock::adapters::primary::band::{Band, BandAgent, BandConfig, BandPlugin, seed_field};
+use bevy_flock::adapters::primary::band::{
+    Band, BandAgent, BandConfig, BandPlugin, MidAgent, seed_field,
+};
 use bevy_flock::adapters::primary::cognition::PlayerFocus;
 
 fn world(total: u32, manifested: u32) -> App {
@@ -33,7 +34,7 @@ fn world(total: u32, manifested: u32) -> App {
             .wrapping_add(1);
         ((state >> 33) as f32) / (u32::MAX >> 1) as f32
     };
-    for _ in 0..manifested {
+    for index in 0..manifested {
         let angle = next() * std::f32::consts::TAU;
         let distance = radius.sqrt() * next() * radius.sqrt();
         app.world_mut().spawn((
@@ -56,6 +57,21 @@ fn bench_band(c: &mut Criterion) {
             app.update();
         }
         group.throughput(Throughput::Elements(u64::from(total)));
+        // Mid band: 15,000 agents at 20 Hz, seeded once outside the timed loop.
+        for index in 0..15_000_u32 {
+            let angle = index as f32 * 0.0007;
+            let distance = 300.0 + (index % 500) as f32;
+            app.world_mut().spawn((
+                MidAgent {
+                    velocity: [0.4, 0.1],
+                },
+                Transform::from_xyz(
+                    256.0 + angle.cos() * distance,
+                    256.0 + angle.sin() * distance,
+                    0.0,
+                ),
+            ));
+        }
         group.bench_function(format!("{total}_total_{manifested}_manifested"), |b| {
             b.iter(|| {
                 app.update();

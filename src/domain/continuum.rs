@@ -256,6 +256,25 @@ impl AmbientField {
         })
     }
 
+    /// A one-cell field. Cannot fail, so callers that must not propagate a construction
+    /// error have somewhere to stand.
+    #[must_use]
+    pub fn minimal(spacing: f32, seed: u64) -> Self {
+        Self {
+            cells: vec![CellState::default()],
+            width: 1,
+            height: 1,
+            spacing: if spacing.is_finite() && spacing > 0.0 {
+                spacing
+            } else {
+                1.0
+            },
+            origin: [0.0, 0.0],
+            seed,
+            outbox: vec![[0; 4]],
+        }
+    }
+
     /// Move the field's south-west corner. Population is not resampled; the grid clips.
     pub fn set_origin(&mut self, origin: [f32; 2]) {
         self.origin = origin;
