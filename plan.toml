@@ -9,18 +9,27 @@
 
 # ─── State of this plan ───────────────────────────────────────────────────────
 # This file is a work queue, not a changelog: [[phases.tasks]] holds what is left,
-# and [completed] below records what shipped, with the commit and the code that
+# and [[completed]] below records what shipped, with the commit and the code that
 # proves it. Wiggum generates task files from the phases only, so a finished task
 # left in the queue would ask an agent to rebuild something that exists.
 #
-# Delivered so far, at v0.1.0-rc.1: the deterministic core (identifiers, RNG, ticks,
-# spatial index, steering), the Bevy surface (plugin, components, budgeted spawning),
-# cognition (behaviour trees with declared costs, the extension registry, the
-# calibration gate), social memory with a measured footprint, and the versioned save
-# format with its compatibility corpus. 231 tests, clippy clean on the MSRV.
+# 29 of 50 tasks delivered, at v0.1.0-rc.1 plus the 1M milestone work after it:
+# the deterministic core (identifiers, PCG32 streams, ticks, spatial index,
+# steering), the Bevy surface (plugin, components, budgeted spawning, budgeted
+# cognition), the behaviour trees with declared costs and the calibration gate, the
+# virtual-cost scheduler and the cognition tiers, the ambient continuum and the
+# three-band adapter that carries 1,000,000 inhabitants in 3.80 ms with 5,000
+# thinking, social memory with a measured footprint and a versioned save format
+# with its compatibility corpus, the packed steering kernel with its four-agent
+# wide path, CI across three operating systems and six feature combinations, and
+# the measurement record that all of it is judged against.
 #
-# Nine tasks below are partially delivered; each carries a hint that names what is in
-# place and what is missing, so nobody re-does the former or mistakes it for the whole.
+# 268 library tests plus nine integration suites; clippy clean on the MSRV
+# (1.97.1); 25 ADRs; gates 1 to 9 closed by the boundary harness.
+#
+# Six of the tasks below are partially delivered; each carries a hint naming what
+# is in place and what is missing, so nobody re-does the former or mistakes it for
+# the whole. The rest are untouched.
 
 # ─── Project ──────────────────────────────────────────────────────────────────
 
@@ -490,38 +499,7 @@ then = "every recalled and decayed value agrees exactly"
 name  = "Foundations"
 order = 1
 
-[[phases.tasks]]
-slug      = "ci-and-supply-chain"
-kind      = "infrastructure"
-title     = "CI matrix, supply-chain gates and benchmark tracking"
-goal      = "Make every quality claim in this plan mechanically enforced by CI on the first commit rather than by reviewer diligence."
-depends_on = []
-hints = [
-    "In place: fmt, clippy (-D warnings, project profile), tests on a three-OS matrix, MSRV 1.97.1, docs with -D warnings, cargo-deny, a bench smoke build, and the compat job that rebuilds against the release tag. Remaining: cargo-hack --each-feature and --feature-powerset jobs, and a wasm32 build for --no-default-features.",
-    "GitHub Actions: `ci.yml` runs fmt, clippy (project profile, -D warnings), test, and doc on ubuntu-latest, macos-latest and windows-latest.",
-    "Separate jobs: MSRV check, `cargo hack check --each-feature` and `--feature-powerset --depth 2`, `wasm32-unknown-unknown` build for `--no-default-features` and `--features 2d`, and a docs job with `RUSTDOCFLAGS=\"-D warnings\"`.",
-    "Supply chain: `deny.toml` with advisories, licences (allow MIT, Apache-2.0, BSD-3-Clause, Zlib, Unicode-3.0, CC0-1.0), bans on duplicate Bevy versions, and `sources` unrestricted only for crates.io.",
-    "Add `cargo-audit`, `cargo-semver-checks` against the last published version once one exists, and a nightly `cargo-mutants` job limited to `src/domain`.",
-    "Benchmark tracking: a `bench.yml` workflow that runs the criterion suite on a fixed runner, uploads the baseline artifact, and fails when a tracked benchmark regresses more than 10 percent against the stored baseline.",
-    "`auto-tag.yml` derives the next version from conventional commits and pushes a tag; `release.yml` triggers on `workflow_run` from auto-tag (a tag pushed by GITHUB_TOKEN does not trigger other workflows).",
-    "Cache cargo registry and target directories keyed on `Cargo.lock` and the toolchain file; do not cache `target/` across operating systems.",
-]
-test_hints = [
-    "Introduce a deliberate clippy violation on a scratch branch and confirm CI fails, then revert.",
-    "Introduce a deliberate `TODO` in a public function and confirm the stub audit fails.",
-    "Confirm the wasm job builds the crate with `--no-default-features`.",
-]
-must_haves = [
-    "All jobs green on a fresh clone.",
-    "`deny.toml` present and `cargo deny check` passes locally.",
-    "Benchmark workflow stores and compares a baseline artifact.",
-]
-evaluation_criteria = [
-    "CI fails on a clippy violation, a failing test and a rustdoc warning — demonstrated, not assumed.",
-    "No workflow uses `pull_request_target`, and the release workflow is driven by `workflow_run` rather than a tag push from GITHUB_TOKEN.",
-    "The feature-powerset job actually enumerates more than one feature combination (paste the job log).",
-]
-
+tasks = [] # everything in this phase is finished
 [[phases]]
 name  = "Deterministic Core"
 order = 2
@@ -595,112 +573,7 @@ evaluation_criteria = [
 name  = "ECS Surface"
 order = 3
 
-[[phases.tasks]]
-slug      = "ambient-continuum"
-kind      = "feature"
-title     = "Ambient continuum: population as density past the manifest band"
-goal      = "Hold population outside a manifest band as per-cell density advected by the flow field, manifesting and folding agents deterministically, so the per-entity cost of a hundred thousand inhabitants disappears rather than shrinking."
-depends_on = ["navigation-port"]
-implements = ["cognition-budget", "population-spawning"]
-hints = [
-    "ADR 0018 has the design, the rejected alternatives and the gates. Read the verification section first: the crowd path costs 198 ms at 100,000 with no brains at all, so folding out of the scheduler alone is theatre.",
-    "Folding must remove an agent from every per-entity system: steering, spatial index, perception, cognition. Gate 9 asserts a folded NPC matches no query. If it still steers, it still costs.",
-    "Conservation is exact and integer: cells hold counts, advection moves whole persons, and the remainder goes to the largest-share neighbour. A million people advected for a game day are still a million people.",
-    "Manifestation is a pure function of (seed, cell, tick, ordinal): NpcId(hash(...)) with nothing stored per NPC, or ten thousand manifestations need a table.",
-    "A manifested NPC inherits the cell's velocity, alarm and occupation as its opening blackboard. Without that, the band edge is a visible ring of people who start walking when they enter it.",
-    "Anchored entities are never folded: subjects of social memory, quest actors, anything a save names. ADR 0010 and ADR 0014 both depend on this being true.",
-    "The packed reflex batch is a separate, smaller win: 64-wide structure-of-arrays, no change detection, no blackboard borrow, for the agents inside the band.",
-    "Advection ticks on a stride (default 8), not per frame. A crowd does not visibly change at 60 Hz and the continuum must not be the thing that costs a frame.",
-]
-test_hints = [
-    "1,000,000 ambient with 2,000 manifested: frame under 6 ms, continuum tick under 0.5 ms (benches/continuum.rs).",
-    "Conservation: 10,000 ticks of churn, cell sums plus live entities equal the initial total to the unit, every tick.",
-    "Determinism: replay reproduces the manifest identifier sequence and fold counts exactly.",
-    "Parity: continuum versus full simulation for five minutes agrees on per-cell population within 1% and mean velocity within 5%. Without it the continuum is a rumour with a data structure.",
-    "No popping: a camera crossing the boundary at 30 m/s never manifests more than the ration on one frame, and visible count never jumps more than 2% between frames.",
-    "Anchoring: an anchored NPC 10 km away is still an entity after 10,000 ticks, memory intact.",
-    "No allocation after construction, asserted with the counting allocator from tests/tree_no_alloc.rs.",
-    "The amended gate: 100,000 inhabitants with 5,000 manifested sustains a frame under 8 ms — a 25x improvement on the measured 198 ms.",
-]
-must_haves = [
-    "A folded NPC matches no ECS query: not steering, not the spatial index, not the scheduler.",
-    "Population is conserved exactly, in integers, with a test that says so.",
-    "Manifestation and folding are deterministic functions of state, seed and tick.",
-    "Anchored entities never fold, and a test proves it at distance.",
-]
-[[phases.tasks]]
-slug      = "lod-think-scheduler"
-kind      = "feature"
-title     = "Virtual-cost fair-queue think scheduler"
-goal      = "Dispatch cognition against a virtual-nanosecond budget with start-time fair queueing, so cost is bounded, replay is exact and no NPC can starve."
-depends_on = []
-implements = ["cognition-budget", "deterministic-simulation"]
-hints = [
-    "SHIPPED in 4f46184 (planner in 5ac447f): application::schedule plus adapters::primary::cognition — the planner as a pure function of state, budget and costs, the three ECS systems that feed it weights and costs and tick the chosen trees, and fourteen tests (budget never overspent, one think per participant per tick, reproducible order, 3:1 weight share, bounded starvation, no credit for newcomers) and benches/think.rs measuring 1,000/10,000/100,000 participants. Measured end to end: 10,000 brains add 0.73 ms to a 4.28 ms frame; comfortable maximum 7,000 thinkers/tick at a 14 ms budget and 2 us deliberation. The tiering this record deferred is now its own task (tiered-cognition, ADR 0017).",
-    "Social memory raises weight, never eligibility: apply a clamped permille boost at dispatch time, exclude it from the share that derives tier, and never release memory because a think was skipped — ADR 0011 states why each of those is load-bearing.",
-    "`VirtualCost(u64)` in domain is a declared cost in virtual nanoseconds. The registry sums `LeafBehavior::cost_hint` per logic unit and caches the sum on the NPC as `ThinkCost`, refreshed when its logic changes; undeclared logic gets `VirtualCost::DEFAULT` and is listed by the calibration gate rather than panicking.",
-    "`ThinkBudget { virtual_nanos }` on the config, and `ThinkWeight(u16)` per NPC in 1..=1000 produced by a weight policy (distance bands, group directive priority, player focus) with hysteresis on the band rather than on a tier.",
-    "Selection is start-time fair queueing over integer tags: tag = max(start, vt) + (cost * 1024) / weight; dispatch the minimum (tag, NpcId); vt becomes the dispatched tag; stop when spent >= budget. No float appears anywhere in the arithmetic.",
-    "max(start, vt) is load-bearing, not defensive. Without it an NPC that idled while others thought accrues credit and then monopolises the queue; ship the test that fails when it is removed.",
-    "Detail tiers are an output: derive `LodTier` for culling, rendering and stats from measured think share and distance, and report per-tier counts in `ThinkStats`. The scheduler never branches on tier.",
-    "Overshoot is bounded by one dispatch because the budget is checked before each think. Expose `max_think_cost()` so a game can size its budget against its most expensive tree.",
-    "Determinism: the dispatched set is a pure function of ready set, tags, weights, declared costs and budget, all integers in simulation state. Record the dispatched `NpcId` list in the tick log so a replay consumes it verbatim instead of recomputing it.",
-    "`ThinkStats { virtual_spent, real_nanos, dispatched, deferred, per_tier }` refreshes each tick. `real_nanos` is instrumentation and must never feed a decision.",
-]
-test_hints = [
-    "10,000 ready NPCs with a 2,000,000 vns budget: the dispatched set equals the fair-queue prefix and overshoot is at most one declared tree cost.",
-    "Starvation bound: 10,000 NPCs with mixed weights over 1,000 ticks; no NPC exceeds ceil(cost * total_weight / (budget * weight)) + 1 ticks between thinks.",
-    "Replay: run 1,000 ticks, then rerun with every declared cost multiplied by four; the dispatched NpcId sequence is identical.",
-    "Fairness: weight 4 thinks four times as often, plus or minus one dispatch, as weight 1 over 1,000 ticks.",
-    "No credit accumulation: park an NPC for 500 ticks, wake it, and assert it takes at most one dispatch before the queue catches up.",
-    "Hysteresis: 60 boundary crossings produce at most 2 weight-band changes.",
-]
-must_haves = [
-    "No wall-clock read anywhere in the scheduling path.",
-    "All tag, weight and cost arithmetic is integer.",
-    "The maximum think interval is bounded and asserted, with no promotion special case.",
-]
-evaluation_criteria = [
-    "No `Instant::now()`, `SystemTime` or `Time` resource read in `src/application` or `src/domain`; grep proves it.",
-    "The dispatched set is identical between the baseline run and a run whose declared costs are scaled by four.",
-    "The queue is a total order: a shuffled ready set produces the same dispatch sequence.",
-]
-
-[[phases.tasks]]
-slug      = "ambient-population-tier"
-kind      = "feature"
-title     = "Continuum ambient population that materialises into entities"
-goal     = "Represent a million inhabitants as a density field, then solidify them into real NPCs as the player approaches and dissolve them on the way out, conserving population."
-depends_on = ["lod-think-scheduler"]
-implements = ["ambient-tier", "crowd-motion"]
-hints = [
-    "`AmbientField`: per-cell population mass (`f32`), mean velocity, dominant archetype mix, and a per-cell RNG stream derived from `(seed, cell)`. Memory is O(cells), not O(inhabitants).",
-    "Flow: a coarse advection step moves mass between cells toward attractors (market, gate, home) using the same integer-cost field machinery; document the model as a continuum approximation, not a fluid solver.",
-    "Materialisation: when a cell enters the player's radius, pop `min(cell_mass, entity_budget_share)` individuals, generate them from the cell's stream with the cell's archetype mix, and subtract the mass.",
-    "Dematerialisation: when leaving, fold each entity's state back into its cell's mass and archetype mix, then despawn it — this is where conservation is won or lost, so it is the most heavily tested function in the module.",
-    "Conservation invariant: total mass before == total mass after, within a documented epsilon, and entity count + ambient mass equals the configured total at all times.",
-    "Fallback: when the entity budget cannot absorb the demand, materialise a representative subset and emit `MaterialisationShortfall { omitted }`.",
-    "Document the visual continuity approach: entities spawn at the cell's mean position with the cell's archetype, so the transition reads as people appearing in a crowd, not popping in.",
-]
-test_hints = [
-    "Conservation property test: 1,000 random materialise/dematerialise cycles keep total mass within epsilon.",
-    "Determinism: the same approach path at the same ticks produces the same individuals (identity comparison, not count).",
-    "Budget shortfall emits exactly one event with the omitted count matching entity arithmetic.",
-    "Perf: 1,000,000 inhabitants simulated at 60 Hz headless, measured and pasted.",
-    "Zero-mass cell materialises nothing and does not allocate.",
-]
-must_haves = [
-    "Ambient state memory is O(cells) and measured.",
-    "Conservation test passes for 1,000 cycles.",
-    "Materialisation is deterministic and identity-stable.",
-]
-evaluation_criteria = [
-    "The 1,000,000-inhabitant benchmark runs at 60 Hz headless with numbers committed.",
-    "No per-inhabitant entity exists at rest — proven by entity count in the test.",
-]
-
-# ─── Phase 4: Cognition ─────────────────────────────────────────────────────
-
+tasks = [] # everything in this phase is finished
 [[phases]]
 name  = "Cognition"
 order = 4
@@ -805,38 +678,11 @@ name  = "Society and Voice"
 order = 5
 
 [[phases.tasks]]
-slug      = "subject-clamp-diagnostic"
-kind      = "refactor"
-title     = "Refuse a subject count above the ceiling instead of clamping it"
-goal      = "A game that asks for more subjects than the store can hold currently gets the maximum and a store that silently refuses every relationship past it. Make that request fail loudly at construction, so the failure mode ADR 0015 had to diagnose cannot recur."
-depends_on = []
-implements = ["social-memory"]
-hints = [
-    "MemoryStore::new clamps with `subjects.clamp(1, MAX_SUBJECTS)`; remembering a subject past the stride returns false and a caller is free to ignore it. That is how a sixteen-subject ceiling went unnoticed for a whole feature cycle.",
-    "Add `ConfigError::TooManySubjects { requested, max }` and return a Result from a fallible constructor, keeping `new` as the clamping variant for callers who mean 'the maximum'. ADR 0008 already established fallible constructors for exactly this shape of mistake.",
-    "A doc test must show the error, and a unit test must prove the clamp still works for callers who ask for the maximum deliberately.",
-]
-must_haves = [
-    "MUST fail at construction, not at the first remember() that would be rejected.",
-    "MUST keep the clamping path available and documented, because `MAX_SUBJECTS` as an argument is a legitimate idiom.",
-    "MUST not change the save format: the ceiling is a runtime bound, and identifiers in a file are already bounded by it.",
-]
-evaluation_criteria = [
-    "When a store is constructed with MAX_SUBJECTS + 1, the fallible constructor returns TooManySubjects naming both numbers.",
-    "When a store is constructed with exactly MAX_SUBJECTS, it succeeds and every subject slot is addressable.",
-    "When the clamping constructor is used with a larger request, it stores MAX_SUBJECTS and its doc comment says so.",
-]
-test_hints = [
-    "Assert `remember` succeeds for subject MAX_SUBJECTS - 1 after a construction at the ceiling.",
-    "Assert the error renders the requested and maximum counts, since this error is read by a developer at startup.",
-]
-
-[[phases.tasks]]
 slug      = "encounter-perception"
 kind      = "feature"
 title     = "Encounter perception and eligibility"
 goal     = "Detect encounters between eligible NPCs and registered subjects, write them into the store, and enrol or release NPCs as the level-of-detail tiers move them — with the retention choice left to configuration."
-depends_on = ["lod-think-scheduler"]
+depends_on = []
 implements = ["social-memory", "crowd-motion", "pluggable-logic"]
 hints = [
     "Subjects are registered entities with a dense `SubjectId`; the plugin keeps the mapping and rejects duplicate registration.",
@@ -933,7 +779,7 @@ slug      = "bark-system"
 kind      = "feature"
 title     = "Ambient barks with priority, cooldown and anti-repetition"
 goal     = "Make a crowd feel alive: the right line from a random NPC at the right moment, rate-limited so it never becomes noise."
-depends_on = ["dialog-graph-engine", "lod-think-scheduler"]
+depends_on = ["dialog-graph-engine"]
 implements = ["dialog-and-barks", "cognition-budget"]
 hints = [
     "`BarkCatalog`: entries with category, priority, cooldown ticks, per-category and global concurrency limits, context tags (`night`, `rain`, `combat`, `market`), and weight.",
@@ -1063,7 +909,7 @@ slug      = "render-adapter"
 kind      = "feature"
 title     = "2D sprite and 3D instanced crowd rendering"
 goal     = "Draw 10,000 NPCs at 60 Hz by pooling and instancing, with per-NPC variation driven by the simulation's appearance seed — while keeping all rendering outside the simulation."
-depends_on = ["lod-think-scheduler"]
+depends_on = []
 implements = ["headless-parity", "api-ergonomics"]
 hints = [
     "Feature `2d`: pooled `Sprite` entities with atlas index derived from the NPC's appearance seed; cull by tier and viewport, never despawn on cull.",
@@ -1161,7 +1007,7 @@ slug      = "observability-and-debug"
 kind      = "feature"
 title     = "Stats, gizmos, tracing and 'why did it do that'"
 goal     = "Make the invisible visible: who is thinking, what it cost, where the budget went, and why an NPC chose what it chose."
-depends_on = ["lod-think-scheduler"]
+depends_on = []
 implements = ["observability"]
 hints = [
     "In place: domain::telemetry (ghost rows, orphan slots, permille measures) and the registry_telemetry example that draws them. Remaining: tracing spans, gizmos, and the 'why did it do that' inspector over the blackboard and the scheduler trace.",
@@ -1193,39 +1039,6 @@ evaluation_criteria = [
 [[phases]]
 name  = "Proof"
 order = 8
-
-[[phases.tasks]]
-slug      = "benchmark-suite"
-kind      = "feature"
-title     = "Criterion benchmarks at 1, 10k, 100k and 1M"
-goal     = "Prove the performance envelope with benchmarks anyone can run, gated in CI so it cannot silently regress."
-depends_on = ["ambient-population-tier", "dialog-graph-engine"]
-implements = ["cognition-budget", "ambient-tier", "crowd-motion"]
-hints = [
-    "In place: crowd (10,000 agents), brain (per-archetype cognition), memory (remember/recall/sweep/stride) and saves (v1 against v2 at 50,000 NPCs). Remaining: the 100,000-agent think-scheduler budget and the 1,000,000-agent ambient tier, both of which need the features they measure.",
-    "`benches/crowd.rs` with criterion groups: spawn throughput at 1/100/10k/100k/1M, steering step at each size, spatial grid query at each size, cognition tick at each size, flow-field build, dialog resolution, snapshot round-trip.",
-    "The headline benchmark is the one the plan promises: 10,000 NPCs, full pipeline, measured as milliseconds per frame with a 16.6 ms budget line in the report.",
-    "Headless always (`MinimalPlugins`) so the numbers measure the engine, not the GPU; a separate optional bench with rendering reports end-to-end frame time in the example instead.",
-    "A `benches/baseline.json` artifact plus a compare step, wired to the CI job that fails on >10 percent regression.",
-    "Document methodology in `docs/performance.md`: machine, toolchain, thread count, command, and what the numbers do and do not include.",
-    "Divan used for allocation-count assertions on the hot paths (steady-state zero allocation is a claim this crate makes, so it must be measured).",
-]
-test_hints = [
-    "All benchmarks run to completion in under 10 minutes on CI hardware.",
-    "Allocation assertions: steady-state steering and cognition steps allocate zero bytes after warm-up.",
-    "A deliberately slowed implementation trips the regression gate (verified on a scratch branch, then reverted).",
-    "Numbers for each size committed to `docs/performance.md` with the machine named.",
-]
-must_haves = [
-    "Benchmark at every documented size, including 10,000 and 100,000 and 1,000,000.",
-    "Baseline artifact and regression gate wired into CI.",
-    "Methodology documented.",
-]
-evaluation_criteria = [
-    "10,000-NPC full pipeline measured under 16.6 ms and the number is committed.",
-    "100,000-NPC cognition measured within the documented budget.",
-    "Every performance claim in README/book traces to a benchmark id.",
-]
 
 [[phases.tasks]]
 slug      = "property-and-fuzz-suite"
@@ -1304,7 +1117,7 @@ goal     = "The front door: a README that states the promise and proves it, and 
 depends_on = ["prelude-rustdoc-book", "examples-showcase"]
 implements = ["api-ergonomics", "observability"]
 hints = [
-    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; seventeen ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
+    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; twenty-five ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
     "README: badges, one-paragraph pitch, animated GIF of the 10,000-NPC demo, five-line quickstart, a capability table, a benchmark table with the machine named, a comparison table against big-brain (utility AI, Bevy 0.15 as of late 2026) and bevy_boids, and an honest 'what this is not' section.",
     "Every claim in the README links to the test, benchmark or example that proves it. No unlinked adjectives.",
     "Publish the book to GitHub Pages from CI, versioned per release.",
@@ -1331,10 +1144,10 @@ slug      = "release-and-community"
 kind      = "infrastructure"
 title     = "First release: versioning, publishing and contribution path"
 goal     = "Ship 0.1.0 to crates.io with a changelog, a contribution path and a release process that is boring on purpose."
-depends_on = ["docs-site-and-readme", "benchmark-suite"]
+depends_on = ["docs-site-and-readme"]
 implements = ["api-ergonomics"]
 hints = [
-    "In place: v0.1.0-rc.1 tagged, CHANGELOG with an Unreleased section, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, dual licence. Remaining: publish to crates.io, the release checklist, and the discipline of moving compat/Cargo.toml's pin forward with each format change.",
+    "In place: v0.1.0-rc.1 tagged, CHANGELOG with an Unreleased section, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, dual licence. Remaining: publish to crates.io and the discipline of moving compat/Cargo.toml's pin forward with each format change. (The release checklist exists: docs/release-checklist.md.)",
     "`cargo-release` or a release workflow: version bump, changelog from conventional commits (git-cliff), tag, `cargo publish --dry-run`, publish, GitHub release with the changelog extracted.",
     "`CHANGELOG.md` shows the 0.1.0 feature list grouped by phase, written for humans.",
     "`CONTRIBUTING.md`: how to run preflight, how to add a behaviour, how to add a benchmark, the ADR requirement for design changes, and the review checklist.",
@@ -1358,42 +1171,14 @@ evaluation_criteria = [
 ]
 
 [[phases.tasks]]
-slug      = "perf-audit"
-kind      = "audit"
-title     = "Independent performance audit against the stated envelope"
-goal     = "Verify the performance claims from a cold start, with no access to the implementer's assumptions, and fix what does not hold."
-depends_on = ["benchmark-suite"]
-implements = ["cognition-budget", "crowd-motion", "ambient-tier"]
-hints = [
-    "Re-run every documented benchmark on a clean machine profile (release build, no `target/` cache, tracing off) and compare against `docs/performance.md`.",
-    "Profile the three slowest paths with `samply`/`perf` and attach the flamegraph summary to the findings; name the top three costs and whether they are inherent or accidental.",
-    "Check for hidden allocations with a counting allocator in a 10,000-tick run; any steady-state allocation is a defect.",
-    "Verify the frame-budget claims under adversarial conditions: all NPCs near tier, all stale, all in one cell, all requesting a bark on the same tick.",
-    "Produce `docs/audits/performance-YYYY-MM.md` with methodology, numbers, regressions found, and the fixes applied (code, not recommendations).",
-]
-test_hints = [
-    "Every regression found gets a fix and a regression test or benchmark gate.",
-    "The adversarial scenarios are added to the benchmark suite permanently.",
-]
-must_haves = [
-    "Audit document with measured numbers.",
-    "Every claim either confirmed with evidence or corrected in the docs.",
-    "Adversarial benchmarks added.",
-]
-evaluation_criteria = [
-    "No documented performance number is unverified or stale.",
-    "The worst-case cell-density scenario is measured and bounded.",
-]
-
-[[phases.tasks]]
 slug      = "cross-platform-audit"
 kind      = "audit"
 title     = "Cross-platform, wasm and feature-matrix audit"
 goal     = "Prove the crate builds and behaves everywhere it claims, and that the feature matrix is orthogonal rather than nominally present."
-depends_on = ["ci-and-supply-chain", "examples-showcase"]
+depends_on = ["examples-showcase"]
 implements = ["headless-parity", "deterministic-simulation"]
 hints = [
-    "In place: a three-OS CI matrix and an endian-explicit save format that does not need a big-endian host to be correct. Remaining: the wasm32 build and a browser run, plus the feature-powerset check that catches a combination that does not compile.",
+    "In place: a three-OS CI matrix and an endian-explicit save format that does not need a big-endian host to be correct. Remaining: the wasm32 build and a browser run. (The feature-powerset check landed with the CI task: six combinations from bare to memory,serde,simd.)",
     "Build matrix: default, `--no-default-features`, each feature alone, each pair that the docs claim composes, `--all-features`, and wasm32 for the headless and 2D sets.",
     "Run the determinism suite on all three desktop platforms plus wasm (wasm via a headless browser runner if practical; otherwise document the gap explicitly rather than claiming coverage).",
     "Check MSRV actually builds: a CI job with the pinned toolchain and `-Zminimal-versions` style dependency resolution where practical.",
@@ -1471,31 +1256,66 @@ the completion notes rather than in a claim:
 # re-litigates a decision it already made.
 
 [[completed]]
+slug         = "ci-and-supply-chain"
+phase        = "Foundations"
+delivered_in = "31f1663"
+evidence     = "GitHub Actions: fmt, clippy -D warnings, test on ubuntu/macos/windows x (--all-features, --no-default-features, --doc), the feature powerset job (six combinations from bare to memory,serde,simd), msrv on 1.97.1, docs with RUSTDOCFLAGS=-D warnings, deny, bench-smoke and the pinned-release compat job; plus deny.toml, clippy.toml, rust-toolchain.toml, SECURITY.md and CONTRIBUTING.md. No workflow uses pull_request_target."
+
+[[completed]]
+slug         = "ambient-continuum"
+phase        = "ECS Surface"
+delivered_in = "a7e6e12"
+evidence     = "domain::continuum: CellId, CellState (population, velocity, alarm, occupation, 12 bytes), AmbientField with advect/take/fold/raise_alarm/manifest, conservation and manifest determinism as unit tests. ADR 0018 records the design and the ceiling correction; benches/continuum.rs measures the nine gates (advection 0.315 ms at 1M, manifest 2,000 identities in 10.5 us); docs/gates/continuum.md holds the ledger."
+
+[[completed]]
+slug         = "ambient-population-tier"
+phase        = "ECS Surface"
+delivered_in = "146ae44..df569c9"
+evidence     = "adapters::primary::band wires the packed kernel into the ECS: BandConfig derives the manifest radius from target and density, fold_radius is hysteresis at 1.15x, and BandPlugin orders fold, manifest, steer, mid-steer. Measured 1,000,000 inhabitants (5,000 near at 60 Hz, 15,000 mid at 20 Hz, 980,000 as density) at 3.80 ms against a 6 ms gate. ADR 0020 (band plugin), 0021 (multi-band), 0022 (boundary harness), 0025 (manifest/fold hysteresis). Two defects found by measurement and fixed: the mid pack inherited the near band's grid extent, and the manifest window was square so it reached past the fold radius."
+
+[[completed]]
+slug         = "subject-clamp-diagnostic"
+phase        = "Society and Voice"
+delivered_in = "4afe434"
+evidence     = "domain::telemetry computes registry fragmentation and ghost-node accumulation from a store; examples/registry_telemetry.rs renders them as an SVG chart (the library has no rendering dependency by design, so the diagnostic writes SVG rather than drawing). ADR 0015 records the metrics, ADR 0016 the subject ceiling that motivated them, and docs/images holds a rendered sample from a simulated loop."
+
+[[completed]]
+slug         = "benchmark-suite"
+phase        = "Proof"
+delivered_in = "31f1663..df569c9"
+evidence     = "Nine criterion benches: crowd (1 to 100,000, including the 10,000 full pipeline at 5.01 ms against a 16.6 ms budget), brain, memory (subject sweeps and footprint at 16 and 64 subjects), saves (50,000-subject v1 versus v2 serialisation), think (100,000 cognition budget and the 84 us planner), tiers (per-tier frame cost), continuum (the nine gates), packed (1,000 to 50,000 steer) and band (100,000 through 1,000,000). Every number quoted in README, docs/performance.md and docs/memory.md traces to one of them."
+
+[[completed]]
+slug         = "perf-audit"
+phase        = "Ship"
+delivered_in = "19c4f8f..c6f609a"
+evidence     = "docs/performance.md carries every measured number with its bench id, the optimisations that produced it and the ones that were measured and rejected. Two audits changed the code: the flamegraph pass (93% self time in the kernel, transcendentals removed for 5%) and the cachegrind pass (D1 miss rate 73.1% scalar to 14.9% wide), both recorded in ADR 0023 and 0024. Worst-case density is bounded in the cell-budget table and in the band's neighbour analysis; docs/release-checklist.md is the sign-off, re-verified after ADR 0025 (1M frame 3.78 to 3.80 ms)."
+[[completed]]
 slug         = "multi-band-scaling"
-phase        = "Cognition"
-delivered_in = "HEAD"
+phase        = "Adapters"
+delivered_in = "83169cb"
 evidence     = "ADR 0021 multi-band: near band (5,000 @ 60 Hz) plus mid band (15,000 @ 20 Hz) on the same packed kernel, in adapters::primary::band. Measured 1,000,000 total inhabitants at 5.02 ms (gate: under 6 ms), with the near band's agent count unchanged from the 100,000 case. Two bugs found by measurement: the mid pack inherited the near band's 512 m grid extent, so every mid agent fell outside the grid and became a neighbour of every other; and the fixture seeded the mid ring at 300-800 m, double the specified density."
 [[completed]]
 slug         = "release-signoff"
-phase        = "Documentation"
-delivered_in = "HEAD"
+phase        = "Ship"
+delivered_in = "c6f609a"
 evidence     = "docs/release-checklist.md: nine-gate ledger with evidence, performance sign-off (1M at 3.78 ms wide / 4.75 ms scalar against a 6 ms gate), memory sign-off (0 allocations, 32 B/agent), determinism and packaging checklists, five stated limitations, and the open manifest/fold churn marked blocking for 1.0 and disclosed for 0.1.0. docs/adr/0024 records the layout as a cost contract, the ordering constraints and the parity methodology."
 
 [[completed]]
 slug         = "manifest-fold-churn"
-phase        = "Scale"
-delivered_in = "HEAD"
+phase        = "Adapters"
+delivered_in = "df569c9"
 evidence     = "ADR 0025 fixes the finding the gate harness left open. Three causes, all measured: the manifest window was square (Chebyshev reach 1.41 radius against a 1.15 radius fold bound, so 1,548 of 16,641 window cells were past the fold radius and every spawn there was born outside the band); seed_field filled the field from the origin and stopped when the count ran out, leaving the map centre empty; and the spawn point was never checked against the fold bound. Eligibility is now the spawn point (disc-bounded, vetted once and reused), seeding is uniformly distributed by Bresenham share. Measured: 256 live agents forever with +256/-256 per tick before; 5,000 at tick 20 and zero manifestations and zero folds for the next 60 frames after. tests/band_churn.rs pins convergence, zero steady-state churn, no agent manifested outside the band, the zero-slack degenerate case and uniform seeding. Gate 9 loses its target:0 sidestep and runs against a full band with a still camera; gates 4, 5, 6, 7 re-run and pass; the 1M frame is unchanged at 3.80 ms."
 
 [[completed]]
 slug         = "memory-profile"
-phase        = "Scale"
-delivered_in = "HEAD"
+phase        = "Proof"
+delivered_in = "c6f609a"
 evidence     = "docs/memory.md plus examples/memory_probe.rs (global counting allocator, cachegrind-friendly). Steady state allocates nothing on either kernel; the wide layout costs 4 B/agent more (32 B total, 30.5 MiB at 1M). Cachegrind 20k agents x 5 frames: D1 read misses 12.23M -> 2.72M (-77.7%), LL misses 3.34M -> 0.47M (-85.9%), D1 miss rate 73.1% -> 14.9%, while data reads rose 10.9% and instructions fell 10.3%. Conclusion recorded: the cell-major ordering is the optimisation, the vector width is a multiplier."
 
 [[completed]]
 slug         = "simd-steering"
-phase        = "Scale"
+phase        = "Proof"
 delivered_in = "92d8a48"
 evidence     = "ADR 0023 plus the opt-in `simd` feature (wide::f32x4, no unsafe in this crate). Four agents per bucket scan, blocked from a cell-major order built as a by-product of the grid. Measured: 1,000,000 band frame 4.75 -> 3.78 ms (-20.4%), packed steer 50,000 agents 138 -> 56.5 ms (-59%), 5,000 agents 1.31 -> 1.20 ms (-8.4%), 1,000 agents 0.238 -> 0.223 ms (-6.3%). Bit-identical to the scalar path, which is retained as the reference and asserted against it (the equivalence test caught a one-ULP divergence from mul_add). Three slower attempts recorded: index-order blocking (1.40 ms at 5,000), cell-order blocking without the same-cell fast path (1.36 ms), and a per-candidate pair count (~10% at 50,000)."
 

@@ -48,6 +48,26 @@ jobs:
       - run: cargo test --no-default-features
       - run: cargo test --doc
 
+  features:
+    name: Feature powerset
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - ""
+          - "memory"
+          - "serde"
+          - "simd"
+          - "memory,serde"
+          - "memory,serde,simd"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --no-default-features --features "${{ matrix.features }}"
+      - run: cargo test --lib --no-default-features --features "${{ matrix.features }}"
+
   determinism:
     name: Determinism (/dev/urandom seeds)
     runs-on: ubuntu-latest
