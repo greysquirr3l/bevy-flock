@@ -93,7 +93,10 @@ impl Default for BandConfig {
             mid_cadence: 3,
             mid_extent: 2_400.0,
             spacing: 4.0,
-            extent: 512.0,
+            // The field must reach past the fold radius in every direction, or an agent
+            // that walks out has no cell to fold into and stays an entity forever. The
+            // gate_9 harness caught exactly that with 512.
+            extent: 1_024.0,
         }
     }
 }
@@ -375,7 +378,7 @@ pub fn band_manifest(
 pub fn band_steer(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
-    mut agents: Query<(&mut Transform, &mut BandAgent)>,
+    mut agents: Query<(&mut Transform, &mut BandAgent), Without<BandAnchor>>,
 ) {
     if agents.is_empty() {
         return;
@@ -412,7 +415,7 @@ pub fn band_steer(
 pub fn band_steer_mid(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
-    mut mids: Query<(&mut Transform, &mut MidAgent)>,
+    mut mids: Query<(&mut Transform, &mut MidAgent), Without<BandAnchor>>,
 ) {
     band.frame = band.frame.wrapping_add(1);
     if !band.frame.is_multiple_of(band.mid_cadence) || mids.is_empty() {
