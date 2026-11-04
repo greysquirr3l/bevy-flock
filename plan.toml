@@ -1476,6 +1476,18 @@ phase        = "Cognition"
 delivered_in = "HEAD"
 evidence     = "ADR 0021 multi-band: near band (5,000 @ 60 Hz) plus mid band (15,000 @ 20 Hz) on the same packed kernel, in adapters::primary::band. Measured 1,000,000 total inhabitants at 5.02 ms (gate: under 6 ms), with the near band's agent count unchanged from the 100,000 case. Two bugs found by measurement: the mid pack inherited the near band's 512 m grid extent, so every mid agent fell outside the grid and became a neighbour of every other; and the fixture seeded the mid ring at 300-800 m, double the specified density."
 [[completed]]
+slug         = "release-signoff"
+phase        = "Documentation"
+delivered_in = "HEAD"
+evidence     = "docs/release-checklist.md: nine-gate ledger with evidence, performance sign-off (1M at 3.78 ms wide / 4.75 ms scalar against a 6 ms gate), memory sign-off (0 allocations, 32 B/agent), determinism and packaging checklists, five stated limitations, and the open manifest/fold churn marked blocking for 1.0 and disclosed for 0.1.0. docs/adr/0024 records the layout as a cost contract, the ordering constraints and the parity methodology."
+
+[[completed]]
+slug         = "memory-profile"
+phase        = "Scale"
+delivered_in = "HEAD"
+evidence     = "docs/memory.md plus examples/memory_probe.rs (global counting allocator, cachegrind-friendly). Steady state allocates nothing on either kernel; the wide layout costs 4 B/agent more (32 B total, 30.5 MiB at 1M). Cachegrind 20k agents x 5 frames: D1 read misses 12.23M -> 2.72M (-77.7%), LL misses 3.34M -> 0.47M (-85.9%), D1 miss rate 73.1% -> 14.9%, while data reads rose 10.9% and instructions fell 10.3%. Conclusion recorded: the cell-major ordering is the optimisation, the vector width is a multiplier."
+
+[[completed]]
 slug         = "simd-steering"
 phase        = "Scale"
 delivered_in = "92d8a48"

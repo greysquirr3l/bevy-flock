@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/memory.md`: heap and cache profile of the packed kernel, scalar and wide.
+- `docs/adr/0024`: the layout as a cost contract, the ordering constraints, and the parity rule.
+- `docs/release-checklist.md`: gate ledger, performance and memory sign-off for the
+  1,000,000-inhabitant milestone, with the open manifest/fold churn listed as a 1.0 blocker.
+- `examples/memory_probe.rs`: allocation and footprint probe, cachegrind-friendly.
+
+
 ### Added
 
 - `simd` feature: the steering kernel processes four agents at a time with `wide::f32x4`,

@@ -189,6 +189,12 @@ at scale. What shipped is the third design, and
 [`docs/performance.md`](docs/performance.md) has both losing designs, their
 numbers, and why they lost — a benchmark table without the failures is marketing.
 
+### Cost per agent
+
+32 bytes of steering state per NPC (positions, velocities, desired, bucket chain, cell-major
+order), no allocation in the steady state, 30.5 MiB for a million. Measured, with cache
+profiles, in [`docs/memory.md`](docs/memory.md).
+
 ## Architecture
 
 ```

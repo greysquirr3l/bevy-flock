@@ -300,6 +300,16 @@ Three earlier attempts at the same idea were slower and are recorded in the ADR:
 index order (1.40 ms at 5,000), blocking in cell order without the same-cell fast path
 (1.36 ms), and computing the pair count per candidate instead of from the lane totals.
 
+## Memory, not just time
+
+Wall-clock numbers say nothing about *why*, and for this kernel the why turned out to be the
+cache. `docs/memory.md` has the profile: the wide path executes 10% fewer instructions and
+issues 11% **more** memory operations, while D1 misses fall 76% and last-level misses 86%. The
+ordering is the optimisation; the vector width is a multiplier.
+
+The milestone sign-off, including the open churn finding, is in
+[`release-checklist.md`](release-checklist.md).
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.

@@ -9,12 +9,12 @@ machine, and every gate the code cannot yet attempt is marked open rather than a
 | 1 | Manifest 2,000 identities | — | 10.5 µs | **PASS** |
 | 2 | Conservation over 10,000 strides | exact | exact | **PASS** (unit test) |
 | 3 | Determinism of manifest ids | exact | exact | **PASS** (unit test) |
-| 4 | Parity vs full simulation | 1% cells, 5% velocity | — | **OPEN** (needs the band plugin) |
-| 5 | No popping at the boundary | < 2% count delta | — | **OPEN** |
-| 6 | Anchoring at 10 km | entity after 10k ticks | — | **OPEN** |
-| 7 | No allocation after construction | zero | — | **OPEN** |
+| 4 | Parity vs full simulation | 1% cells, 5% velocity | passes | **PASS** | `tests/band_continuity.rs` |
+| 5 | No popping at the boundary | < 2% count delta | passes | **PASS** | `tests/band_continuity.rs` |
+| 6 | Anchoring at 10 km | entity after 10k ticks | passes | **PASS** | `tests/band_continuity.rs` |
+| 7 | No allocation after construction | zero | zero | **PASS** | `tests/band_continuity.rs`, `tests/tree_no_alloc.rs` |
 | 8 | 100k with 5,000 manifested | < 8 ms | **3.37 ms** (band plugin) | **PASS** |
-| 9 | Folded NPC matches no query | zero matches | — | **OPEN** |
+| 9 | Folded NPC matches no query | zero matches | passes | **PASS** | `tests/band_continuity.rs` |
 
 ## Gate 8 fails, and the continuum is not the reason
 
@@ -100,6 +100,9 @@ Two defects surfaced on the way, both invisible without the number:
 2. **The fixture seeded 15,000 mid agents into 300-800 m**, roughly double the specified
    density. A bench fixture that is denser than the design is a bench that measures the
    fixture.
+
+The table above is the post-harness state: gates 4, 5, 6, 7 and 9 were closed by
+`tests/band_continuity.rs`, two of them after the harness found the defects described below.
 
 ## The gate harness closed four gates and found two bugs (2026-11-04)
 

@@ -50,3 +50,4 @@ replay.
 - State the consequences you do not like. An ADR with no downsides is an
   advertisement.
 | [0023](0023-simd-steering.md) | Four-agent SIMD steering behind a cell-major order | Accepted |
+| [0024](0024-layout-ordering-and-parity.md) | The packed layout, the ordering constraints, and how parity is proven | Accepted |
