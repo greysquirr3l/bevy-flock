@@ -34,7 +34,7 @@ fn world(total: u32, manifested: u32) -> App {
             .wrapping_add(1);
         ((state >> 33) as f32) / (u32::MAX >> 1) as f32
     };
-    for index in 0..manifested {
+    for _ in 0..manifested {
         let angle = next() * std::f32::consts::TAU;
         let distance = radius.sqrt() * next() * radius.sqrt();
         app.world_mut().spawn((
@@ -51,16 +51,19 @@ fn world(total: u32, manifested: u32) -> App {
 
 fn bench_band(c: &mut Criterion) {
     let mut group = c.benchmark_group("band_frame");
-    for (total, manifested) in [(100_000_u32, 5_000_u32), (250_000, 5_000)] {
+    for (total, manifested) in [(1_000_000_u32, 5_000_u32)] {
         let mut app = world(total, manifested);
         for _ in 0..4 {
             app.update();
         }
         group.throughput(Throughput::Elements(u64::from(total)));
         // Mid band: 15,000 agents at 20 Hz, seeded once outside the timed loop.
+        // A ring from 400 m to 1,100 m: 15,000 agents over ~3.5 km², which is the density
+        // the mid band is specified at. The previous ring was 300-800 m and the pack's grid
+        // only covered 512 m, so every mid agent fell outside it.
         for index in 0..15_000_u32 {
-            let angle = index as f32 * 0.0007;
-            let distance = 300.0 + (index % 500) as f32;
+            let angle = index as f32 * 0.000_419;
+            let distance = 400.0 + (index % 700) as f32;
             app.world_mut().spawn((
                 MidAgent {
                     velocity: [0.4, 0.1],

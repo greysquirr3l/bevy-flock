@@ -165,6 +165,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ADR 0021 proposes concentric bands (near 60 Hz, mid 20 Hz, far as density) to take the
   same flatness past 250,000.
 
+- ADR 0021 implemented and measured: near band (5,000 @ 60 Hz) plus mid band (15,000 @
+  20 Hz) on the packed kernel. **1,000,000 total inhabitants at 5.02 ms**, under the 6 ms
+  gate, with the near band's count unchanged. `BandConfig::mid_extent` exists because the
+  mid pack inherited the near band's 512 m grid and clamped every agent into its edges.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

@@ -85,3 +85,18 @@ The band plugin (ADR 0020) is wired: 100,000 inhabitants with 5,000 manifested m
 **3.37 ms**, and 250,000 measure **3.37 ms** — the frame is flat in total population because
 it depends on the band, not the world. ADR 0021 takes this past 250,000 with concentric
 bands at independent cadence.
+
+## ADR 0021 gate (2026-11-04)
+
+1,000,000 inhabitants — 5,000 near, 15,000 mid, 980,000 as density — measure **5.02 ms**,
+under the 6 ms gate, with the near band's agent count unchanged from the 100,000 case.
+
+Two defects surfaced on the way, both invisible without the number:
+
+1. **The mid pack inherited the near band's grid extent** (512 m). Mid agents live from
+   400 m outward, so every one of them fell outside the grid and clamped into its edge
+   cells, becoming a neighbour of every other mid agent. The frame was 7.6 ms for that
+   reason, not for the cadence. `BandConfig::mid_extent` fixes it.
+2. **The fixture seeded 15,000 mid agents into 300-800 m**, roughly double the specified
+   density. A bench fixture that is denser than the design is a bench that measures the
+   fixture.

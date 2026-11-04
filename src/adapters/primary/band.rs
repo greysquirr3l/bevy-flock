@@ -72,6 +72,10 @@ pub struct BandConfig {
     pub mid_target: u32,
     /// Frames between mid-band passes. Three is 20 Hz at 60.
     pub mid_cadence: u32,
+    /// The mid band's world extent. It is a ring outside the near band, so its grid must be
+    /// larger than the near one — sizing it from `extent` puts every mid agent in the
+    /// grid's clamped edge cells, where they all become neighbours (see the gate-1M run).
+    pub mid_extent: f32,
     /// Metres per cell.
     pub spacing: f32,
     /// The extent of the world the pack's grid must cover.
@@ -87,6 +91,7 @@ impl Default for BandConfig {
             ration: 256,
             mid_target: 15_000,
             mid_cadence: 3,
+            mid_extent: 2_400.0,
             spacing: 4.0,
             extent: 512.0,
         }
@@ -158,7 +163,13 @@ impl Band {
             field,
             pack: Pack::with_capacity(config.target as usize + 1, config.steer_params()),
             radius,
-            mid_pack: Pack::with_capacity(config.mid_target as usize + 1, config.steer_params()),
+            mid_pack: Pack::with_capacity(
+                config.mid_target as usize + 1,
+                SteerParams {
+                    extent: config.mid_extent,
+                    ..config.steer_params()
+                },
+            ),
             mid_cadence: config.mid_cadence.max(1),
             frame: 0,
             fold_radius: radius * config.fold_slack.max(1.0),
@@ -414,7 +425,10 @@ pub fn band_steer_mid(
             mid.velocity,
         );
     }
-    let params = config.steer_params();
+    let params = SteerParams {
+        extent: config.mid_extent,
+        ..config.steer_params()
+    };
     let _ = band.mid_pack.steer(&params);
     let dt = 1.0 / 60.0 * band.mid_cadence as f32;
     band.mid_pack.integrate(params.max_speed);

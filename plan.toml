@@ -1471,6 +1471,11 @@ the completion notes rather than in a claim:
 # re-litigates a decision it already made.
 
 [[completed]]
+slug         = "multi-band-scaling"
+phase        = "Cognition"
+delivered_in = "HEAD"
+evidence     = "ADR 0021 multi-band: near band (5,000 @ 60 Hz) plus mid band (15,000 @ 20 Hz) on the same packed kernel, in adapters::primary::band. Measured 1,000,000 total inhabitants at 5.02 ms (gate: under 6 ms), with the near band's agent count unchanged from the 100,000 case. Two bugs found by measurement: the mid pack inherited the near band's 512 m grid extent, so every mid agent fell outside the grid and became a neighbour of every other; and the fixture seeded the mid ring at 300-800 m, double the specified density."
+[[completed]]
 slug         = "tiered-cognition"
 phase        = "Cognition"
 delivered_in = "37c18cb"
