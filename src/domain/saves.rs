@@ -11,7 +11,7 @@
 //! section table      count × { id u16, reserved u16, offset u32, len u32, crc u32 }
 //! section 1          subject registry: count, fingerprint, then key/kind/label
 //! section 2          records: npc, origin, slot_count, then (subject, 16-byte slot)
-//! trailer (8)        crc over everything above, reserved
+//! trailer (8)        crc over the header and table, reserved
 //! ```
 //!
 //! # Times are ages
@@ -78,6 +78,12 @@ const TRAILER_BYTES: usize = 8;
 
 /// Bytes per slot on disk: sixteen, the same as in memory, written field by field.
 const SLOT_BYTES: usize = 16;
+
+/// Bytes of registry section header: count, fingerprint, reserved.
+const REGISTRY_HEADER_BYTES: usize = 8;
+
+/// Bytes per registry entry before its label: key, kind, label length.
+const ENTRY_FIXED_BYTES: usize = 11;
 
 /// Section identifier: the subject registry.
 const SECTION_REGISTRY: u16 = 1;
@@ -645,7 +651,12 @@ impl MemorySnapshot {
             out.extend_from_slice(payload);
         }
 
-        let crc = crc32(&out);
+        // The trailer covers the header and the table, not the payloads: every
+        // section already carries its own checksum, and hashing two megabytes twice
+        // cost 6.7 ms of a 14.9 ms encode at 50,000 NPCs (benches/saves.rs). The
+        // table is the part no section covers, so it is the part worth hashing.
+        let table_end = HEADER_BYTES + sections.len() * TABLE_ENTRY_BYTES;
+        let crc = crc32(out.get(0..table_end).unwrap_or(&out));
         out.extend_from_slice(&crc.to_le_bytes());
         out.extend_from_slice(&0_u32.to_le_bytes());
         out
@@ -819,10 +830,10 @@ impl MemorySnapshot {
         let trailer_crc =
             read_u32(bytes, body_end).ok_or(SaveError::Truncated { offset: body_end })?;
         let covered = bytes
-            .get(0..body_end)
-            .ok_or(SaveError::Truncated { offset: body_end })?;
+            .get(0..body_start)
+            .ok_or(SaveError::Truncated { offset: 0 })?;
         if crc32(covered) != trailer_crc {
-            return Err(SaveError::ChecksumMismatch { section: "file" });
+            return Err(SaveError::ChecksumMismatch { section: "table" });
         }
 
         Ok(Self {
@@ -986,11 +997,27 @@ impl MemorySnapshot {
 
     /// Bytes this snapshot will occupy once encoded.
     ///
-    /// Encoding is deterministic, so asking the encoder is both simpler and less
-    /// likely to drift than keeping a second size formula in step with it.
+    /// A formula rather than a dry run of the encoder: callers size buffers with
+    /// this, and a sizing call that transparently allocates and hashes two megabytes
+    /// is a trap — it made a benchmark's baseline look like the slower format until
+    /// the numbers were traced. A test asserts it agrees with [`Self::to_bytes`].
     #[must_use]
     pub fn encoded_len(&self) -> usize {
-        self.to_bytes().len()
+        let registry = self.registry.as_ref().map_or(0, |registry| {
+            REGISTRY_HEADER_BYTES
+                + registry
+                    .entries()
+                    .iter()
+                    .map(|entry| ENTRY_FIXED_BYTES + entry.label.len())
+                    .sum::<usize>()
+        });
+        let sections = if self.registry.is_some() { 2 } else { 1 };
+        let records: usize = self
+            .records
+            .iter()
+            .map(|record| 7 + record.slots.len() * (2 + SLOT_BYTES))
+            .sum();
+        HEADER_BYTES + sections * TABLE_ENTRY_BYTES + registry + records + TRAILER_BYTES
     }
 
     /// Whether the snapshot holds nothing.
@@ -1698,12 +1725,11 @@ mod tests {
         if let Some(byte) = bytes.get_mut(middle) {
             *byte ^= 0xFF;
         }
-        match MemorySnapshot::from_bytes(&bytes) {
-            Err(SaveError::ChecksumMismatch { section }) => {
-                assert!(section == "records" || section == "file", "{section}");
-            }
-            other => panic!("expected a checksum failure, got {other:?}"),
-        }
+        assert_eq!(
+            MemorySnapshot::from_bytes(&bytes),
+            Err(SaveError::ChecksumMismatch { section: "records" }),
+            "a changed payload is caught by its own section, not by a whole-file hash"
+        );
     }
 
     #[test]
@@ -1816,6 +1842,36 @@ mod tests {
     }
 
     #[test]
+    fn the_size_formula_agrees_with_the_encoder() {
+        let (world, archive) = populated();
+        let populated_snapshot =
+            MemorySnapshot::capture(&world, &archive, Tick::new(200), 0, &registry());
+        let empty =
+            MemorySnapshot::capture(&store(), &MemoryArchive::new(1), Tick::ZERO, 0, &registry());
+        let bulk = MemorySnapshot {
+            half_life_ticks: 0,
+            registry: Some(two_subject_registry()),
+            records: (0..1_000_u32)
+                .map(|npc| SaveRecord {
+                    npc: NpcId::unique(npc),
+                    origin: Origin::Store,
+                    slots: SmallVec::from_slice(&[
+                        (SubjectId::new(0), SavedSlot::zeroed()),
+                        (SubjectId::new(1), SavedSlot::zeroed()),
+                    ]),
+                })
+                .collect(),
+        };
+        for snapshot in [populated_snapshot, empty, bulk] {
+            assert_eq!(
+                snapshot.encoded_len(),
+                snapshot.to_bytes().len(),
+                "the formula and the encoder must not drift"
+            );
+        }
+    }
+
+    #[test]
     fn the_size_is_the_advertised_size() {
         let (store, archive) = populated();
         let snapshot = MemorySnapshot::capture(&store, &archive, Tick::new(200), 0, &registry());
@@ -1921,8 +1977,8 @@ mod tests {
         for (_, body) in &sections {
             out.extend_from_slice(body);
         }
-        let file_crc = crc32(&out);
-        out.extend_from_slice(&file_crc.to_le_bytes());
+        let table_crc = crc32(out.get(0..table_bytes).unwrap_or(&out));
+        out.extend_from_slice(&table_crc.to_le_bytes());
         out.extend_from_slice(&0_u32.to_le_bytes());
         out
     }

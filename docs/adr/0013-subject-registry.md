@@ -67,7 +67,7 @@ header (24)     magic BFLK, version 2, flags, half-life, subjects, records,
 table           count × 16 bytes: id u16, reserved u16, offset u32, len u32, CRC32
 section 1       subject registry
 section 2       relationship records (unchanged encoding from v1)
-trailer (8)     CRC32 over everything above, reserved
+trailer (8)     CRC32 over the header and table, reserved
 ```
 
 Rules that make it a container rather than a bag of bytes:
@@ -78,6 +78,9 @@ Rules that make it a container rather than a bag of bytes:
   trailer; a table entry that points elsewhere is `SectionOutOfBounds`.
 - Each section carries its own CRC32, so a corrupt file can be reported by *which*
   part is corrupt rather than "this save is bad".
+- The trailer checksums the header and the table, not the payloads. Amended after
+  measurement (see below): hashing two megabytes twice cost 6.7 ms of a 14.9 ms
+  encode at 50,000 NPCs, and the payloads were already covered.
 - **Unknown sections are skipped.** A newer writer may add one; refusing to read a
   save because it contains something this build does not use would make the format
   impossible to grow, which is the mistake version 1 made in the first place.
@@ -123,6 +126,18 @@ assuming the old behaviour would preserve exactly the bug this record exists to
 fix.
 
 ## What it costs
+
+`benches/saves.rs`, 50,000 NPCs with two relationships each:
+
+| | version 1 | version 2, whole-file trailer | version 2, table trailer |
+| --- | --- | --- | --- |
+| bytes | 2,150,032 | 2,150,172 | 2,150,172 |
+| encode | 8.27 ms | 14.87 ms | 8.67 ms |
+| decode | 11.50 ms | 18.84 ms | 11.93 ms |
+
+The container is effectively free: 0.4 ms of encode and 0.4 ms of decode over
+version 1, against 140 extra bytes. The checksum choice was not free, which is why
+it changed.
 
 | | Bytes |
 | --- | --- |

@@ -67,6 +67,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is refused by default and loaded only when the game says so out loud.
 - Unknown sections are skipped, so additive format changes no longer need a version.
 
+- `benches/saves.rs`: version 1 against version 2 at 50,000 NPCs. The container costs
+  0.4 ms of encode and 0.4 ms of decode over version 1 for 140 extra bytes; the
+  original whole-file trailer checksum cost 6.7 ms of a 14.9 ms encode and now covers
+  the header and table only.
+- `registry_telemetry` example and `domain::telemetry`: ghost rows, orphan subjects
+  and orphan slots as permille integers, plus a dependency-free SVG of accumulation
+  over twelve sessions and references per subject.
+- `tests/save_compat.rs` with a committed fixture corpus and `BLESS_SAVES=1` blessing
+  (ADR 0014): the frozen writer, a version 1 file that still loads, a future version
+  refused by number, an unknown section skipped, every bit flipped and every prefix
+  tried without a panic.
+- ADR 0014 (compatibility testing) and ADR 0015 (memory diagnostics).
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

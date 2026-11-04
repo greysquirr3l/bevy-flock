@@ -32,6 +32,8 @@ that means:
 | Behaviour trees: flat compiled nodes, resume, abort, cooldown, timeout, parallel | **Shipped** |
 | Leaf catalogue with declared costs and per-archetype trees | **Shipped** |
 | Social memory: bounded slot store, cold archive, lazy decay (`memory` feature) | **Shipped (opt-in)** |
+| Versioned save format with a subject registry and a committed fixture corpus | **Shipped (opt-in)** |
+| Diagnostics: ghost rows, orphan slots, SVG graphs (`registry_telemetry` example) | **Shipped (opt-in)** |
 | Guarded state machines with dwell times | **Shipped** |
 | Extension registry for game-defined logic | **Shipped** |
 | Personality, needs and mood model | **Shipped** |

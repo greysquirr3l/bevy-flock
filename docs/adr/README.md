@@ -25,6 +25,8 @@ it and both stay in the tree.
 | [0011](0011-memory-and-the-scheduler.md) | Memory enters the scheduler as cost and weight, never as a tier | Accepted |
 | [0012](0012-memory-save-format.md) | Relationships persist as ages in a versioned binary record | Accepted |
 | [0013](0013-subject-registry.md) | Subjects are matched by stable key, and the file says which keys it used | Accepted |
+| [0014](0014-compatibility-testing.md) | Save compatibility is tested against committed files and a pinned old build | Accepted |
+| [0015](0015-memory-diagnostics.md) | Waste is measured in integers and drawn outside the library | Accepted |
 
 ## Reading order
 
