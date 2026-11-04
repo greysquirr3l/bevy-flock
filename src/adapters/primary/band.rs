@@ -1,0 +1,373 @@
+//! The manifest band: entities inside a radius, density outside it (ADR 0020).
+//!
+//! This is the ECS half of the continuum. It owns three things and refuses to own a fourth:
+//!
+//! - **The field.** Population outside [`Band::fold_radius`] lives in cells, advected on a
+//!   stride.
+//! - **Manifestation.** Crossing inward takes people out of a cell with
+//!   [`AmbientField::take`] and spawns entities for them, rationed per frame. A failed take
+//!   means no entity, which is the only thing standing between this and a crowd that
+//!   doubles.
+//! - **Steering.** Band agents are copied into a [`Pack`] once per frame, steered as
+//!   contiguous arrays, and copied back. That is the 1.50 ms per 5,000 measured in
+//!   `benches/packed.rs`, against 9.47 ms through the ECS crowd path.
+//!
+//! What it does not own is memory. Anchored entities (ADR 0019) are skipped by folding
+//! entirely: a [`BandAnchor`] is never despawned into a cell, because identity is the one
+//! thing the continuum cannot reconstruct.
+
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_transform::prelude::Transform;
+
+use crate::adapters::primary::cognition::PlayerFocus;
+use crate::application::packed::{Pack, SteerParams};
+use crate::domain::continuum::{AmbientField, CellId};
+use crate::domain::ids::NpcId;
+use crate::domain::tick::Tick;
+
+/// Marks an entity the band owns: it is steered by the packed kernel, not by the ECS crowd
+/// systems, and it is the unit that folds into density.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct BandAgent {
+    /// Current velocity in metres per second, carried between frames.
+    pub velocity: [f32; 2],
+}
+
+impl BandAgent {
+    /// An agent at rest.
+    #[must_use]
+    pub const fn still() -> Self {
+        Self {
+            velocity: [0.0, 0.0],
+        }
+    }
+}
+
+/// Never folded, whatever the distance. Threads of the story, not population.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandAnchor;
+
+/// How the band is sized and rationed.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct BandConfig {
+    /// How many agents should be individually present, at most.
+    pub target: u32,
+    /// Agents per square metre inside the band. Drives the radius, because the packed
+    /// kernel is bound by neighbours rather than by count (ADR 0020).
+    pub density: f32,
+    /// Fold radius as a multiple of the manifest radius. Above one, or agents oscillate.
+    pub fold_slack: f32,
+    /// Most agents manifested or folded on one frame.
+    pub ration: u32,
+    /// Metres per cell.
+    pub spacing: f32,
+    /// The extent of the world the pack's grid must cover.
+    pub extent: f32,
+}
+
+impl Default for BandConfig {
+    fn default() -> Self {
+        Self {
+            target: 5_000,
+            density: 1.0 / 40.0,
+            fold_slack: 1.15,
+            ration: 256,
+            spacing: 4.0,
+            extent: 512.0,
+        }
+    }
+}
+
+impl BandConfig {
+    /// The manifest radius that makes `target` agents sit at `density`.
+    ///
+    /// `sqrt(target / (density * PI))`: a disc. Raising the target without raising the
+    /// radius buys neighbours, not people, which is the mistake the density bench exists to
+    /// catch.
+    #[must_use]
+    pub fn radius(self) -> f32 {
+        if self.density <= 0.0 || !self.density.is_finite() {
+            return 0.0;
+        }
+        (self.target as f32 / (self.density * core::f32::consts::PI))
+            .sqrt()
+            .max(1.0)
+    }
+
+    /// The steering parameters implied by the band's geometry.
+    #[must_use]
+    pub fn steer_params(self) -> SteerParams {
+        SteerParams {
+            extent: self.extent,
+            ..SteerParams::default()
+        }
+    }
+}
+
+/// The band's runtime state: the field, the pack, and the radii derived from config.
+#[derive(Resource)]
+pub struct Band {
+    /// Population outside the band.
+    pub field: AmbientField,
+    /// The steering buffer, sized once.
+    pub pack: Pack,
+    /// Inside this, an entity is individually present.
+    pub radius: f32,
+    /// Outside this, an entity folds back into density.
+    pub fold_radius: f32,
+    /// Manifestations and folds performed since the plugin started.
+    pub manifested: u64,
+    /// Folds performed since the plugin started.
+    pub folded: u64,
+}
+
+impl Band {
+    /// Build a band from configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the field geometry is degenerate, which the configuration cannot
+    /// express: spacing is validated positive and the grid is sized from the extent.
+    #[must_use]
+    pub fn new(config: BandConfig) -> Self {
+        let radius = config.radius();
+        let side = ((config.extent / config.spacing).ceil() as u32).clamp(1, 4096);
+        let field = AmbientField::new(side, side, config.spacing, 0x5EED_BA9D)
+            .expect("band geometry is validated by construction");
+        Self {
+            field,
+            pack: Pack::with_capacity(config.target as usize + 1, config.steer_params()),
+            radius,
+            fold_radius: radius * config.fold_slack.max(1.0),
+            manifested: 0,
+            folded: 0,
+        }
+    }
+
+    /// Population held as density plus the agents currently manifest.
+    #[must_use]
+    pub fn total(&self, manifested: usize) -> u64 {
+        self.field.population() + manifested as u64
+    }
+}
+
+/// The band plugin. Add it after [`crate::adapters::primary::plugin::FlockPlugin`].
+pub struct BandPlugin {
+    config: BandConfig,
+}
+
+impl BandPlugin {
+    /// A band with the given configuration.
+    #[must_use]
+    pub const fn new(config: BandConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for BandPlugin {
+    fn default() -> Self {
+        Self::new(BandConfig::default())
+    }
+}
+
+/// Systems that fold, manifest and steer, in the order ADR 0020 fixes.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BandSet {
+    /// Entities beyond the fold radius become density.
+    Fold,
+    /// Density inside the manifest radius becomes entities.
+    Manifest,
+    /// Copy in, steer, copy out.
+    Steer,
+}
+
+impl Plugin for BandPlugin {
+    fn build(&self, app: &mut App) {
+        let config = self.config;
+        app.insert_resource(config)
+            .insert_resource(Band::new(config))
+            .configure_sets(
+                Update,
+                (BandSet::Fold, BandSet::Manifest, BandSet::Steer).chain(),
+            )
+            .add_systems(
+                Update,
+                (band_fold, band_manifest, band_steer)
+                    .chain()
+                    .in_set(BandSet::Steer),
+            );
+    }
+}
+
+/// The player's position, or the origin when there is no player. The band is centred on the
+/// first [`PlayerFocus`]; a game with several players needs a policy, and this is not one.
+fn focus_at(focus: &Query<&Transform, With<PlayerFocus>>) -> [f32; 2] {
+    focus.iter().next().map_or([0.0, 0.0], |transform| {
+        [transform.translation.x, transform.translation.y]
+    })
+}
+
+fn distance_squared(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
+}
+
+/// Fold agents beyond the fold radius into density. Anchors are skipped.
+pub fn band_fold(
+    mut commands: Commands,
+    config: Res<BandConfig>,
+    mut band: ResMut<Band>,
+    focus: Query<&Transform, With<PlayerFocus>>,
+    agents: Query<(Entity, &Transform, &BandAgent), Without<BandAnchor>>,
+) {
+    let centre = focus_at(&focus);
+    let limit = band.fold_radius * band.fold_radius;
+    let mut budget = config.ration;
+
+    for (entity, transform, agent) in &agents {
+        if budget == 0 {
+            break;
+        }
+        let at = [transform.translation.x, transform.translation.y];
+        if distance_squared(at, centre) <= limit {
+            continue;
+        }
+        let Some(cell) = band.field.cell_of(at) else {
+            continue;
+        };
+        band.field.fold(cell, 1, agent.velocity, 0);
+        commands.entity(entity).despawn();
+        band.folded += 1;
+        budget -= 1;
+    }
+}
+
+/// Manifest density inside the manifest radius, rationed, taking before spawning.
+pub fn band_manifest(
+    mut commands: Commands,
+    config: Res<BandConfig>,
+    mut band: ResMut<Band>,
+    focus: Query<&Transform, With<PlayerFocus>>,
+    agents: Query<&Transform, With<BandAgent>>,
+    clock: Option<Res<crate::application::SimClock>>,
+) {
+    let centre = focus_at(&focus);
+    let live = agents.iter().count() as u32;
+    let capacity = config.target.saturating_sub(live);
+    if capacity == 0 {
+        return;
+    }
+    let Some(centre_cell) = band.field.cell_of(centre) else {
+        return;
+    };
+    let tick = clock.map_or(Tick::new(0), |clock| clock.tick);
+    let mut budget = capacity.min(config.ration);
+
+    // A square window over the manifest radius, centre outward: the nearest cells first, so
+    // a sudden capacity is filled by the people standing closest rather than by a corner.
+    let reach = (band.radius / config.spacing).ceil() as i32;
+    'cells: for ring in 0..=reach {
+        for dy in -ring..=ring {
+            for dx in -ring..=ring {
+                if ring > 0 && dx.abs() != ring && dy.abs() != ring {
+                    continue;
+                }
+                let x = centre_cell.x as i32 + dx;
+                let y = centre_cell.y as i32 + dy;
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                let cell = CellId::new(x as u32, y as u32);
+                let available = band.field.cell(cell).map_or(0, |state| state.population());
+                if available == 0 {
+                    continue;
+                }
+                let take = available.min(budget);
+                if take == 0 {
+                    break 'cells;
+                }
+                if !band.field.take(cell, take) {
+                    continue;
+                }
+                let centre_of_cell = band.field.centre_of(cell);
+                let velocity = band.field.cell(cell).map_or([0.0, 0.0], |c| c.velocity());
+                for id in band.field.manifest(cell, take, tick) {
+                    commands.spawn((
+                        crate::adapters::primary::components::Npc(id),
+                        BandAgent { velocity },
+                        Transform::from_xyz(centre_of_cell[0], centre_of_cell[1], 0.0),
+                    ));
+                    band.manifested += 1;
+                }
+                budget -= take;
+                if budget == 0 {
+                    break 'cells;
+                }
+            }
+        }
+    }
+}
+
+/// Copy the band into the pack, steer it, and copy the result back.
+pub fn band_steer(
+    mut band: ResMut<Band>,
+    config: Res<BandConfig>,
+    mut agents: Query<(&mut Transform, &mut BandAgent)>,
+) {
+    if agents.is_empty() {
+        return;
+    }
+    band.pack.clear();
+    for (transform, agent) in &agents {
+        band.pack.push(
+            [transform.translation.x, transform.translation.y],
+            agent.velocity,
+        );
+    }
+
+    let params = config.steer_params();
+    let _ = band.pack.steer(&params);
+    band.pack.integrate(params.max_speed);
+    band.pack.advance(1.0 / 60.0, params.extent);
+
+    for (index, (mut transform, mut agent)) in agents.iter_mut().enumerate() {
+        let Some(position) = band.pack.position(index) else {
+            continue;
+        };
+        let velocity = band.pack.velocity(index).unwrap_or(agent.velocity);
+        transform.translation.x = position[0];
+        transform.translation.y = position[1];
+        agent.velocity = velocity;
+    }
+}
+
+/// A convenience for games: seed the field from a population that is not yet spawned.
+pub fn seed_field(band: &mut Band, count: u32) {
+    let width = band.field.width();
+    let height = band.field.height();
+    if width == 0 || height == 0 {
+        return;
+    }
+    let mut remaining = count;
+    let mut y = 0;
+    while y < height && remaining > 0 {
+        let mut x = 0;
+        while x < width && remaining > 0 {
+            let per_cell = (remaining / ((width - x).max(1))).max(1);
+            if let Some(cell) = band.field.cell_mut(CellId::new(x, y)) {
+                cell.absorb(per_cell, [0.4, 0.0], 0, Default::default());
+                remaining = remaining.saturating_sub(per_cell);
+            }
+            x += 1;
+        }
+        y += 1;
+    }
+}
+
+/// Whether an identifier is present as an entity. Used by the fold-completeness test.
+pub fn is_manifested(
+    agents: &Query<&crate::adapters::primary::components::Npc>,
+    id: NpcId,
+) -> bool {
+    agents.iter().any(|npc| npc.0 == id)
+}

@@ -1,5 +1,6 @@
 //! Driving adapters: what a game actually calls.
 
+pub mod band;
 pub mod cognition;
 pub mod components;
 pub mod plugin;

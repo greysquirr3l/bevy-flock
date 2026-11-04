@@ -159,6 +159,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the absent-NPC leak, the anchored grudge that outlives an hour of silence, per-owner
   exemption, and bounded reclamation work.
 
+- `BandPlugin` (ADR 0020) wires the packed kernel into the ECS: fold, manifest and steer in
+  one ordered set. Gate 8 **passes**: 100,000 inhabitants with 5,000 manifested measure
+  **3.37 ms**, and 250,000 measure the same — flat in total population.
+- ADR 0021 proposes concentric bands (near 60 Hz, mid 20 Hz, far as density) to take the
+  same flatness past 250,000.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

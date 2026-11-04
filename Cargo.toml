@@ -159,3 +159,7 @@ harness = false
 [[test]]
 name = "memory_aging"
 required-features = ["memory"]
+
+[[bench]]
+name = "band"
+harness = false

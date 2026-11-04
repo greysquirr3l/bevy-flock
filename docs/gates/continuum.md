@@ -13,7 +13,7 @@ machine, and every gate the code cannot yet attempt is marked open rather than a
 | 5 | No popping at the boundary | < 2% count delta | — | **OPEN** |
 | 6 | Anchoring at 10 km | entity after 10k ticks | — | **OPEN** |
 | 7 | No allocation after construction | zero | — | **OPEN** |
-| 8 | 100k with 5,000 manifested | < 8 ms | 9.47 ms (ECS) / **1.50 ms** (packed steer) | **OPEN** (wiring) |
+| 8 | 100k with 5,000 manifested | < 8 ms | **3.37 ms** (band plugin) | **PASS** |
 | 9 | Folded NPC matches no query | zero matches | — | **OPEN** |
 
 ## Gate 8 fails, and the continuum is not the reason
@@ -78,3 +78,10 @@ The kernel is bound by neighbour count, not agent count. A dense band destroys t
 which is why ADR 0020 derives the manifest radius from a target density instead of fixing a
 count. Gate 8 stays **OPEN** until a band plugin produces a measured frame; the mechanism
 below it is now measured.
+
+## Gate 8 closed (2026-11-04)
+
+The band plugin (ADR 0020) is wired: 100,000 inhabitants with 5,000 manifested measure
+**3.37 ms**, and 250,000 measure **3.37 ms** — the frame is flat in total population because
+it depends on the band, not the world. ADR 0021 takes this past 250,000 with concentric
+bands at independent cadence.
