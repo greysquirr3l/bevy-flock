@@ -23,7 +23,7 @@ use bevy_flock::domain::memory::{
     DecayPolicy, Encounter, EncounterKind, MemoryIndex, MemoryStore, SubjectId,
 };
 use bevy_flock::prelude::*;
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 const ROWS: u32 = 16_384;
 const SUBJECTS: u16 = 4;
@@ -148,5 +148,52 @@ fn bench_sweep(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_remember, bench_recall, bench_sweep);
+criterion_group!(
+    benches,
+    bench_remember,
+    bench_recall,
+    bench_sweep,
+    bench_stride
+);
 criterion_main!(benches);
+
+/// What ADR 0016's ceiling costs when a game actually uses it.
+///
+/// The stride is the sweep's outer loop: a store with sixty-four subjects scans four
+/// times as many cells as one with sixteen, and touches four times as many cache
+/// lines per row. This measures that, in the case where it is entirely paid for — a
+/// store holding no relationships at all, which is the worst case for the scan.
+fn bench_stride(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_stride");
+    group.throughput(Throughput::Elements(4_096));
+    let decay = DecayPolicy::MINUTE;
+    for subjects in [16_u16, 64] {
+        let mut store = MemoryStore::new(4_096, subjects);
+        for npc in 0..4_096_u32 {
+            store.enrol(NpcId::unique(npc)).expect("sized");
+        }
+        group.bench_function(BenchmarkId::new("sweep_empty", subjects), |b| {
+            b.iter(|| {
+                black_box(store.sweep(black_box(Tick::new(10)), decay, 1));
+            });
+        });
+
+        // One relationship per row, held at the first subject: the shape a crowded
+        // street actually has, and the one where the stride is really walked.
+        let mut populated = MemoryStore::new(4_096, subjects);
+        for npc in 0..4_096_u32 {
+            let index = populated.enrol(NpcId::unique(npc)).expect("sized");
+            populated.remember(
+                index,
+                SubjectId::new(0),
+                &Encounter::new(EncounterKind::Spoke, Tick::ZERO),
+            );
+        }
+        group.bench_function(BenchmarkId::new("sweep_one_slot_each", subjects), |b| {
+            b.iter(|| {
+                black_box(populated.sweep(black_box(Tick::new(10)), decay, 1));
+            });
+        });
+    }
+    group.finish();
+}

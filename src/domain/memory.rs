@@ -61,9 +61,14 @@ pub const SLOT_BYTES: usize = 16;
 /// The most subjects one store can track.
 ///
 /// Subjects are dense identifiers — one per player, pet or rival NPC a game wants
-/// remembered. Sixteen is a deliberate ceiling: the slot array is indexed by
-/// subject, so this multiplies the store's memory.
-pub const MAX_SUBJECTS: u16 = 16;
+/// remembered. The slot array is indexed by subject, so this multiplies the store's
+/// memory: a store costs `capacity × subjects × 16` bytes for its slots alone.
+///
+/// Sixty-four is the ceiling (ADR 0016): a player, a party, a faction and its
+/// officers fit without a second store. It is a ceiling, not a stride —
+/// [`MemoryStore::new`] sizes to the subjects a game asks for, so a game using four
+/// pays for four whether this number is sixteen or sixty-four.
+pub const MAX_SUBJECTS: u16 = 64;
 
 /// Identifies something an NPC can remember.
 ///
@@ -486,6 +491,19 @@ impl MemoryStore {
         self.capacity
     }
 
+    /// Bytes this store holds, whatever it has used.
+    ///
+    /// The slot array is the whole story: `capacity × subjects × 16`, whether or not a
+    /// single relationship exists. Reported rather than estimated, so a game can size
+    /// a budget before it spawns and so ADR 0016's claims are checked by a test rather
+    /// than by arithmetic in a document.
+    #[must_use]
+    pub fn footprint(&self) -> usize {
+        self.slots.capacity() * core::mem::size_of::<MemorySlot>()
+            + self.owners.capacity() * core::mem::size_of::<Option<NpcId>>()
+            + self.free.capacity() * core::mem::size_of::<u32>()
+    }
+
     /// How many subjects each NPC can remember.
     #[must_use]
     pub const fn subjects(&self) -> u16 {
@@ -860,6 +878,43 @@ mod tests {
 
     fn store() -> MemoryStore {
         MemoryStore::new(64, 4)
+    }
+
+    #[test]
+    fn the_footprint_is_the_stride_times_the_capacity() {
+        // ADR 0016's claim, checked rather than calculated in prose: the slot array is
+        // `capacity x subjects x 16` bytes, with a row-bookkeeping constant on top that
+        // does not scale with subjects.
+        for subjects in [1_u16, 4, 16, 32, 64] {
+            let rows = 10_000_u32;
+            let store = MemoryStore::new(rows, subjects);
+            let slots = rows as usize * usize::from(subjects) * SLOT_BYTES;
+            let overhead = store.footprint() - slots;
+            assert_eq!(
+                store.subjects(),
+                subjects,
+                "a store sizes to what it is asked for, not to the ceiling"
+            );
+            assert!(
+                overhead <= rows as usize * 24,
+                "{subjects} subjects: {overhead} bytes of bookkeeping exceeds the model"
+            );
+            eprintln!(
+                "{subjects:>2} subjects x {rows} rows: {} bytes ({slots} slots + {overhead} bookkeeping)",
+                store.footprint()
+            );
+        }
+    }
+
+    #[test]
+    fn sixty_four_subjects_costs_four_times_sixteen() {
+        let sixteen = MemoryStore::new(10_000, 16).footprint();
+        let sixty_four = MemoryStore::new(10_000, 64).footprint();
+        let ratio = sixty_four as f64 / sixteen as f64;
+        assert!(
+            (3.9..4.1).contains(&ratio),
+            "the stride quadruples while the bookkeeping does not: {ratio}"
+        );
     }
 
     fn slot_size_is_pinned() {

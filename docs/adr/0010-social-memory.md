@@ -1,6 +1,6 @@
 # 0010 — Social memory as a bounded, integer, two-tier store
 
-Status: Accepted
+Status: Accepted (amended by ADR 0016: the subject ceiling is sixty-four, not sixteen)
 
 ## Context
 
