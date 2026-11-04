@@ -90,6 +90,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The telemetry example's layout is computed from the subject count rather than
   hard-coded: sixty-four columns used to put the panel 600 pixels off the canvas.
 
+- `compat/`: the forward direction of save compatibility (ADR 0014, layer 4). Its own
+  workspace, pinned to the `v0.1.0-rc.1` tag rather than a path, run in CI over the
+  committed corpus: loads what it understands, refuses what it does not by name, never
+  panics. First release candidate tagged.
+- The telemetry example's chart is derived from the subject count, and its render is
+  committed at `docs/images/registry-telemetry.png` so a layout regression is visible.
+
 ### Documentation
 
 - ADR 0011: how social memory integrates with the virtual-cost stride scheduler —

@@ -1,6 +1,7 @@
 # 0014 — Save compatibility is tested against committed files and a pinned old build
 
 - Status: Accepted
+- Layer 4 landed at `v0.1.0-rc.1`; see "The pinned build, as built" below
 - Date: 2026-11-04
 - Relates to: ADR 0012 (format version 1), ADR 0013 (version 2 and the registry)
 
@@ -124,6 +125,34 @@ own checksums".
 This is the layer that pays for `ImplausibleCount` existing: a file claiming four
 billion records must be rejected before the `Vec::with_capacity` that would try to
 allocate them.
+
+## The pinned build, as built
+
+`compat/` is its own workspace with one dependency:
+
+```toml
+bevy-flock = { git = "https://github.com/greysquirr3l/bevy-flock", tag = "v0.1.0-rc.1", features = ["memory"] }
+```
+
+A path dependency would defeat the entire exercise, so the pin is a tag and CI rebuilds
+against it. Run over the committed corpus, the released build reports:
+
+```text
+v1/basic.bflk              LoadsUntrusted  decoded, and untrusted restore refused: MissingSubjectRegistry { version: 1 }
+v2/canonical.bflk          Loads           decoded and restored: 2 store records, 1 archived
+v2 with version 99         RefusesVersion  refused by number: version 99
+v2 with one flipped bit    Decides         refused with a typed error: ChecksumMismatch { section: "registry" }
+```
+
+Four cases, three verdicts a released build is allowed: it loads what it understands,
+refuses what it does not *by name*, and never panics. The fourth case — a forged
+version — is the one that matters most, because the tempting implementation is to read
+the fields it recognises and hope.
+
+The harness synthesises its future files rather than committing them, which is the one
+place this record departs from "commit the bytes": a file from the future has no writer
+to preserve it, and a committed forgery would have to be regenerated every time the
+version number moved.
 
 ## What this framework does not test
 

@@ -1,0 +1,21 @@
+# The forward direction of compatibility (ADR 0014, layer 4).
+#
+# Deliberately its own workspace and deliberately *not* a path dependency: this crate
+# must compile against a released build, not against the tree it sits in. A path
+# dependency here would test the current reader reading current files, which is the
+# one pair that cannot disagree.
+[package]
+name = "bevy-flock-compat"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[dependencies]
+bevy-flock = { git = "https://github.com/greysquirr3l/bevy-flock", tag = "v0.1.0-rc.1", features = ["memory"] }
+
+[workspace]
+
+[[bin]]
+name = "compat"
+path = "src/main.rs"

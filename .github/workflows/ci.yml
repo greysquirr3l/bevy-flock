@@ -98,3 +98,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --bench crowd --no-run
+
+  compat:
+    name: Compat (v0.1.0-rc.1 reads current fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: compat
+      # The forward direction: a released build reading files this tree wrote. Pinned
+      # by tag in compat/Cargo.toml, so this job goes red when a format change would
+      # break players rather than when a test notices (ADR 0014).
+      - run: cargo run --manifest-path compat/Cargo.toml

@@ -54,6 +54,11 @@ dashboard; that must not require the crate to depend on a charting library. The
 example wants to show the shape of the problem to a human; that must not require the
 crate to own a drawing.
 
+![Registry fragmentation and ghost accumulation](../images/registry-telemetry.png)
+
+The picture above is the example's own output, rendered from the SVG and committed, so
+a change in the numbers or the layout shows up in a diff.
+
 SVG is written by hand: no plotting dependency, deterministic output, and a file a
 designer can open in a browser.
 
