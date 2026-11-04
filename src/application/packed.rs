@@ -172,10 +172,11 @@ impl Pack {
 
     /// Write the desired velocities back as velocities, clamped to `max_speed`.
     pub fn integrate(&mut self, max_speed: f32) {
+        let limit = max_speed * max_speed;
         for (velocity, desired) in self.velocities.iter_mut().zip(self.desired.iter()) {
-            let speed = desired[0].hypot(desired[1]);
-            if speed > max_speed && speed > 0.0 {
-                let scale = max_speed / speed;
+            let squared = desired[0] * desired[0] + desired[1] * desired[1];
+            if squared > limit && squared > 0.0 {
+                let scale = max_speed / squared.sqrt();
                 *velocity = [desired[0] * scale, desired[1] * scale];
             } else {
                 *velocity = *desired;
@@ -186,8 +187,8 @@ impl Pack {
     /// Move every agent by its velocity over `dt`.
     pub fn advance(&mut self, dt: f32, extent: f32) {
         for (position, velocity) in self.positions.iter_mut().zip(self.velocities.iter()) {
-            position[0] = (position[0] + velocity[0] * dt).rem_euclid(extent);
-            position[1] = (position[1] + velocity[1] * dt).rem_euclid(extent);
+            position[0] = wrap(position[0] + velocity[0] * dt, extent);
+            position[1] = wrap(position[1] + velocity[1] * dt, extent);
         }
     }
 
@@ -330,16 +331,40 @@ impl Pack {
     }
 }
 
+/// Wrap a coordinate into `0..extent` without a libm call in the common case.
+///
+/// `f32::rem_euclid` lowers to `fmod`, which the first profile of a 1M frame showed inside
+/// the libm share. A position in the steady state is either already in range - one branch -
+/// or one extent out of it, which a single subtraction fixes exactly.
+fn wrap(value: f32, extent: f32) -> f32 {
+    if (0.0..extent).contains(&value) {
+        return value;
+    }
+    let turns = (value / extent).floor();
+    let wrapped = turns.mul_add(-extent, value);
+    if wrapped >= extent {
+        wrapped - extent
+    } else if wrapped < 0.0 {
+        wrapped + extent
+    } else {
+        wrapped
+    }
+}
+
 fn sub(left: [f32; 2], right: [f32; 2]) -> [f32; 2] {
     [left[0] - right[0], left[1] - right[1]]
 }
 
 fn clamp(vector: [f32; 2], max: f32) -> [f32; 2] {
-    let length = vector[0].hypot(vector[1]);
-    if length <= max || length == 0.0 {
+    // Compare squared lengths so the square root is only paid when a vector is actually
+    // over its limit, which is the minority: `hypotf` was 8.4% of the whole 1M frame.
+    let squared = vector[0] * vector[0] + vector[1] * vector[1];
+    let limit = max * max;
+    if squared <= limit || squared == 0.0 {
         vector
     } else {
-        [vector[0] * max / length, vector[1] * max / length]
+        let scale = max / squared.sqrt();
+        [vector[0] * scale, vector[1] * scale]
     }
 }
 

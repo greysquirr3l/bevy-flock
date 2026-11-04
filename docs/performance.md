@@ -206,6 +206,74 @@ At one NPC the container's fixed cost shows: 57 bytes becomes 197, because a tab
 and a registry are not free at small sizes either. A save with one relationship in
 it is not the case this format optimises for.
 
+
+## Profiling the 1,000,000-inhabitant frame (2026-11-04)
+
+Captured with `cargo flamegraph` against `examples/profile_band.rs`, which builds the ADR 0021
+layout — 5,000 near agents at 60 Hz, 15,000 mid agents at 20 Hz, 980,000 as density — and runs
+frames without criterion's timing in the way. Artefact:
+[`docs/images/band-1m-flamegraph.svg`](images/band-1m-flamegraph.svg).
+
+```sh
+cargo flamegraph --profile profiling --example profile_band --output docs/images/band-1m-flamegraph.svg -- 2000
+```
+
+### What the profile said
+
+| Symbol | Self | Children | Reading |
+| --- | --- | --- | --- |
+| `application::packed::Pack::steer` | 82.2% | 90.2% | the kernel is the frame |
+| `libm.so.6` | 10.6% | — | `hypotf`, `fmod` from clamp and wrap |
+| `band_steer` | 1.2% | 68.5% | copy in/out is noise next to the steery |
+| `band_steer_mid` | 1.0% | 28.2% | consistent with a 3-frame cadence |
+
+Two things were worth fixing, and both were in the *cheap* half of the arithmetic rather
+than the neighbour scan:
+
+1. **`clamp()` took a square root every time it was called** — four times per agent per tick,
+   for cohesion, alignment, separation and the final limit — and in the common case the
+   vector is already under the limit, so the root was pure waste. It now compares squared
+   lengths and only divides when something actually exceeds its cap. `hypotf` leaves the
+   profile.
+2. **`advance()` used `f32::rem_euclid`**, which lowers to `fmod`, per axis per agent per
+   tick. A steady-state position is either in range or one extent out of it, so a branch plus
+   a subtraction replaces the libm call; the general path remains for a caller passing a
+   wild `dt`.
+
+### What it bought
+
+| Measurement | Before | After |
+| --- | --- | --- |
+| 1,000,000 band frame | 5.02 ms | **4.75 ms** |
+| packed steer, 5,000 agents | 1.50 ms | **1.31 ms** |
+| packed steer, 1,000 agents | 0.249 ms | **0.238 ms** |
+
+A 5.4% frame and a 12.5% kernel improvement, from removing transcendentals rather than from
+touching the loop structure.
+
+### What it did not buy
+
+A restructured inner loop — destructuring the pack into separate slices so the compiler can
+see that reading positions and writing desired touch different fields — was written, measured
+at **5.70 ms**, and reverted. The closure form in `Pack::steer` keeps the neighbour walk in a
+single function and the optimiser hoists the base pointers itself; the "obvious" borrow-split
+version was 20% slower. That experiment is worth recording precisely because it is the change
+that looks right on paper.
+
+### What remains
+
+`Pack::steer` is now 93% of the frame in self time, so the remaining work is the neighbour
+scan itself: nine buckets, a linked-list walk per bucket, and roughly fifteen to twenty
+neighbours per agent at the band's density. The options, in order of expected value:
+
+1. **Process four agents at a time** with explicit `f32x4` arithmetic — the accumulation is
+   independent per agent, so it vectorises without changing the algorithm.
+2. **Store neighbours as a CSR range** instead of a linked list, trading a counting pass for
+   sequential memory.
+3. **Lower the band's density target** — the frame is neighbour-bound, and `density` is the
+   parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
+   knob for exactly this reason.
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.

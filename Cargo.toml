@@ -128,6 +128,13 @@ significant_drop_tightening = "allow"
 # Benchmarks run on the settings a game actually ships with: default release,
 # no LTO. Flattering the numbers with `lto = "fat"` would measure a build nobody
 # uses. Debug symbols stay on so a profile can be read against the source.
+# Release-shaped, with symbols. `cargo flamegraph --profile profiling` then produces a
+# flamegraph whose frames are readable rather than a wall of unresolved addresses.
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = false
+
 [profile.bench]
 debug = true
 
