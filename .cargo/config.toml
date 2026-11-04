@@ -1,0 +1,18 @@
+[build]
+# Bevy's dynamic linking is a development speed-up, not a shipping option.
+# Enable it yourself with `cargo run --features bevy/dynamic_linking` when
+# iterating on a game; it is not enabled here because a crate cannot turn it on
+# for its dependents without surprising them.
+
+[target.wasm32-unknown-unknown]
+# Determinism claims cover wasm, so keep the atomics story explicit rather than
+# letting a transitive dependency change it silently.
+rustflags = ["-C", "target-feature=+simd128"]
+
+[alias]
+# The preflight this repository's plan.toml runs, in one word. The lint profile
+# and its documented exceptions live in Cargo.toml's `[lints.clippy]` table, so
+# there is exactly one place to argue with them.
+preflight = "clippy --all-targets --all-features -- -D warnings"
+l = "clippy --all-targets --all-features -- -D warnings"
+t = "test --all-features"

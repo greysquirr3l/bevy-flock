@@ -1,0 +1,15 @@
+# Per-lint configuration. The lint *selection* lives in Cargo.toml's
+# `[lints.clippy]` table; this file only tunes thresholds.
+
+# Bevy 0.20's MSRV. Clippy uses it to avoid suggesting APIs the crate cannot use.
+msrv = "1.97.1"
+
+# Systems legitimately take many parameters: grid, config, scratch buffer, query.
+# A crowd system with fewer than eight is a system that has hidden a resource.
+too-many-arguments-threshold = 8
+
+# The steering query is a six-element tuple; the domain's generic types run deep.
+type-complexity-threshold = 400
+
+# `Vec3` and `NpcId` are cheap and Copy; a reference to either is noise.
+avoid-breaking-exported-api = false

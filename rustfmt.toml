@@ -1,0 +1,8 @@
+# Stable-only options. The import-grouping knobs (`group_imports`,
+# `imports_granularity`) are nightly-only, and a repo whose `cargo fmt --check`
+# needs nightly is a repo where contributors' formatting disagrees with CI.
+edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"
