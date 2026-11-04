@@ -7,6 +7,8 @@
 
 pub mod cost;
 pub mod ids;
+#[cfg(feature = "memory")]
+pub mod memory;
 pub mod population;
 pub mod rng;
 pub mod spatial;
@@ -16,6 +18,11 @@ pub mod tick;
 
 pub use cost::VirtualCost;
 pub use ids::{GroupId, NpcId, SimSeed, SlotId};
+#[cfg(feature = "memory")]
+pub use memory::{
+    DecayPolicy, Encounter, EncounterKind, MemoryArchive, MemoryIndex, MemorySlot, MemoryStore,
+    NpcMemories, SubjectId,
+};
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;
 pub use spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};

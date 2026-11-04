@@ -431,6 +431,46 @@ then = "a trace record lists every candidate, its score and the winning reason"
 
 # ─── Phase 1: Foundations ────────────────────────────────────────────────────
 
+[[capabilities]]
+name        = "nemesis-memory"
+title       = "Nemesis Memory"
+description = "NPCs remember the subjects they have met — the player, a party, each other — cheaply enough that the remembering is a property of who is nearby rather than of how many NPCs exist."
+requirements = [
+    "MUST store memory in a bounded, pre-allocated structure sized by the number of *eligible* NPCs and subjects, never by the population, and MUST reject enrolment past capacity with a typed result instead of allocating.",
+    "MUST keep a memory slot at a fixed, asserted size so the store's cost is `capacity × subjects × slot` and cannot drift silently.",
+    "MUST treat any subject uniformly: a player, a party member, a pet or another NPC are the same kind of thing to the store.",
+    "MUST decay memory deterministically from `now - last_seen` at read time, with no per-tick pass over stored memories and no floating-point arithmetic anywhere in the decay path.",
+    "MUST reach zero: a faded memory reads as absent, never as a permanent sliver of hostility or affection.",
+    "MUST offer a cold tier that keeps a record for an NPC that left the eligible set, with a bounded capacity and an eviction rule that is a pure function of stored values.",
+    "MUST expose retention as a caller decision — forget on release, park in the cold tier, or serialise into a save — and MUST NOT choose one on the game's behalf.",
+    "MUST be feature-gated and add no dependency when enabled.",
+    "MUST document that memory keyed to a recycled slot identity is a hazard, and require unique identity or a generation counter for remembered NPCs.",
+]
+[[capabilities.scenarios]]
+name = "first-meeting"
+when = "an eligible NPC records an encounter with a subject it has never met"
+then = "recall returns a slot with one encounter, a non-zero familiarity and valence matching the encounter kind"
+[[capabilities.scenarios]]
+name = "grudge-forms"
+when = "a subject that was helped then attacks the same NPC"
+then = "the NPC's valence for that subject turns negative and `is_grudge` reports true, without the earlier kindness being erased outright"
+[[capabilities.scenarios]]
+name = "forgetting"
+when = "a memory is read after its decay half-life has elapsed many times over"
+then = "the read reports no memory at all rather than a residual value"
+[[capabilities.scenarios]]
+name = "eligibility-bounded"
+when = "an eleventh-thousandth NPC is enrolled into a store built for ten thousand"
+then = "enrolment fails with a typed result, the store's allocation is unchanged, and no other NPC's memory is disturbed"
+[[capabilities.scenarios]]
+name = "left-behind"
+when = "an NPC with a grudge leaves the eligible set and the game parks its record"
+then = "the record can be restored to another store with the same valence, encounter count and flags"
+[[capabilities.scenarios]]
+name = "replay-parity"
+when = "two stores are fed identical encounters in identical order on different machines"
+then = "every recalled and decayed value agrees exactly"
+
 [[phases]]
 name  = "Foundations"
 order = 1
@@ -1088,6 +1128,112 @@ evaluation_criteria = [
 name  = "Society and Voice"
 order = 5
 
+[[phases.tasks]]
+slug      = "memory-store"
+kind      = "feature"
+title     = "Nemesis memory store and cold tier"
+goal     = "Give an NPC a bounded, deterministic memory of the subjects it has met, sized by who is eligible to remember rather than by how many NPCs exist."
+depends_on = ["domain-vocabulary", "deterministic-rng"]
+implements = ["nemesis-memory", "deterministic-simulation"]
+hints = [
+    "Flat slot array indexed `memory_index × subjects + subject`; one allocation for the whole crowd. A `Vec` per NPC is the shape this decision exists to reject, and the ADR says why.",
+    "`MemorySlot` is sixteen bytes with the size asserted at compile time, because the cost model is `capacity × subjects × 16` and a careless field would double it.",
+    "`MemoryIndex` is issued by `enrol` and stored on the entity, the way `NpcId` is; the store keeps no map from `NpcId` to a row.",
+    "Valence blends three parts history to one part news, in `i32` arithmetic with an explicit saturating conversion, so one bad afternoon does not erase a friendship.",
+    "Decay halves the *magnitude* and reapplies the sign. Arithmetic `>>` on a negative value converges to -1, which would make a grudge permanent at one point of hostility — a test must pin the value reaching zero.",
+    "`DecayPolicy::NONE` exists because a game may want a grudge that never fades, and that has to be expressible rather than a special case.",
+    "The cold tier is a bounded `BTreeMap` with eviction by lowest total familiarity then lowest `NpcId`; iteration order is part of the eviction rule, so a hash map is the wrong container.",
+    "`release` returns a `NpcMemories` the caller can drop, park or serialise. The library must not pick a retention policy for the game.",
+    "`implant` restores a slot exactly; reconstructing by replaying encounters would decay it twice and lose the original encounter kind.",
+    "Free-list reuse is LIFO and double release is a no-op, so a churning eligibility set never hands one row to two NPCs.",
+]
+test_hints = [
+    "Slot size asserted as a test as well as a const, so a future refactor that pads the struct fails loudly.",
+    "Blend test with exact expected integers for help-then-attack and attack-then-help.",
+    "Saturation test: 70,000 encounters leave counts at `u16::MAX` rather than wrapping.",
+    "Decay test across the half-life boundaries, asserting the faded value is exactly zero and that `NONE` never decays.",
+    "Sweep test proving only faded rows are freed and the freed count is exact.",
+    "Archive test proving the faintest record is evicted and ties break by identifier.",
+    "Round-trip test: release, park, restore, and recall the original valence, encounters and flags.",
+    "Determinism test: two stores fed identical events agree on every decayed read.",
+    "Rejection test: an unknown index, an out-of-range subject and a double release all fail without writing.",
+    "Benchmark asserting the per-NPC cost of remember, recall, decayed recall and sweep.",
+]
+must_haves = [
+    "Store allocation is sized by capacity and subjects, asserted in a test.",
+    "Decay is lazy, integer, and reaches zero.",
+    "Cold tier evicts deterministically.",
+    "Retention policy lives in the caller, not the store.",
+]
+evaluation_criteria = [
+    "Recall costs single-digit nanoseconds per NPC in the benchmark.",
+    "Sweeping a full store is measured and documented as a slow-cadence operation, not a per-frame one.",
+    "The ADR records why per-NPC vectors, hash maps and embeddings were rejected.",
+]
+[[phases.tasks]]
+slug      = "encounter-perception"
+kind      = "feature"
+title     = "Encounter perception and eligibility"
+goal     = "Detect encounters between eligible NPCs and registered subjects, write them into the store, and enrol or release NPCs as the level-of-detail tiers move them — with the retention choice left to configuration."
+depends_on = ["memory-store", "ecs-core-plugin", "lod-think-scheduler"]
+implements = ["nemesis-memory", "crowd-motion", "pluggable-logic"]
+hints = [
+    "Subjects are registered entities with a dense `SubjectId`; the plugin keeps the mapping and rejects duplicate registration.",
+    "Encounter detection is a radius query against subjects only, not against the crowd: the spatial index already answers it, and the number of subjects is small by construction.",
+    "A rate limit per (NPC, subject) pair stops a conversation that ticks every frame from becoming ten thousand memories a second; the limiter is deterministic and tick-based.",
+    "Eligibility follows the think scheduler's tiers: an NPC entering the near or mid tier is enrolled, one leaving is released according to `Retention::{Forget, Park, Persist}` in `MemoryConfig`.",
+    "Parking writes to the archive; persisting emits an event the game can serialise. Both are the game's choice, expressed as configuration, not code the library runs.",
+    "Re-enrolment restores from the archive when the NPC returns, so a grudge survives a trip out of the near tier instead of being paid for twice.",
+    "Systems run in `FlockSet::Perception` before cognition, so a think always sees memory from the current tick.",
+]
+test_hints = [
+    "Two agents that meet once produce exactly one encounter; ten frames of proximity still produce one after the rate limit.",
+    "An NPC leaving the near tier with `Park` can be restored with its valence intact after a hundred ticks out of range.",
+    "`Forget` releases the row and a returning NPC recalls nothing.",
+    "Enrolling past capacity is a drop-and-warn event, not a panic.",
+    "Determinism test: identical spawn, movement and encounter sequences produce identical stores on two runs.",
+]
+must_haves = [
+    "Encounter detection costs O(eligible NPCs in radius × subjects), never O(population × subjects).",
+    "Retention is configuration, and all three strategies are tested.",
+    "Feature-gated: a build without `memory` compiles and pays nothing.",
+]
+evaluation_criteria = [
+    "A 10,000-NPC scene with four subjects holds a steady frame time with memory enabled, measured against the same scene without it.",
+    "The plugin documents the recycled-identity hazard at the point where configuration is read.",
+]
+[[phases.tasks]]
+slug      = "memory-in-cognition"
+kind      = "feature"
+title     = "Memory as a cognition input"
+goal     = "Make what an NPC remembers available to behaviour trees and utility scoring, and define the promotion threshold where a scalar relationship becomes authored content."
+depends_on = ["memory-store", "behavior-tree-engine", "utility-scoring"]
+implements = ["nemesis-memory", "pluggable-logic", "dialog-and-barks"]
+hints = [
+    "Expose memory to leaves through the blackboard: `memory_valence`, `memory_familiarity` and `memory_flags` keys written once per think, so a tree reads integers and never touches the store.",
+    "A `Recall` leaf family: `HasGrudge`, `RemembersSubject`, `FamiliarityAbove`. They are leaves like any other and declare their cost, so the calibration gate covers them.",
+    "Utility scoring reads the same keys; a consideration that scales with familiarity is enough to make a guard who knows you behave differently from one who does not.",
+    "Promotion: when a slot crosses a configured threshold (familiarity and valence magnitude), emit a `PromotableRelationship` event. The library stores the scalar; dialogue and naming decide what the NPC says about it.",
+    "Wire the built-in archetypes: guards gain a grudge branch, merchants a familiarity discount, urchins a fear response. Every change is visible in the pinned cost table.",
+    "Memory writes stay in the perception stage; cognition only reads, so a think is still a pure function of components, blackboard and store.",
+]
+test_hints = [
+    "A guard whose subject attacked it selects the hostile branch; the same guard with no memory does not.",
+    "A merchant who remembers a subject offers the discount branch; a stranger does not.",
+    "Decayed memory produces the neutral branch without any explicit clearing step.",
+    "Promotion fires once per relationship, not once per tick.",
+    "The pinned archetype cost table is updated deliberately when a branch is added.",
+    "Determinism test: a scripted encounter sequence produces the same branch choices on two runs.",
+]
+must_haves = [
+    "Leaves read integers from the blackboard; nothing in a tick reaches into the store.",
+    "Promotion is an event, not hard-coded dialogue.",
+    "Archetype trees still cost what the calibration table says.",
+]
+evaluation_criteria = [
+    "The think cost with memory enabled is measured and stays inside the documented budget at 10,000 NPCs.",
+    "A game can disable the built-in branches and keep the store, or keep the store and ignore the branches.",
+]
 [[phases.tasks]]
 slug      = "dialog-graph-engine"
 kind      = "feature"

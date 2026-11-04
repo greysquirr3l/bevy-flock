@@ -29,6 +29,11 @@ pub use crate::behavior::{
 pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
 pub use crate::domain::cost::VirtualCost;
 pub use crate::domain::ids::{GroupId, NpcId, SimSeed};
+#[cfg(feature = "memory")]
+pub use crate::domain::memory::{
+    DecayPolicy, Encounter, EncounterKind, MemoryArchive, MemoryIndex, MemorySlot, MemoryStore,
+    NpcMemories, SubjectId,
+};
 pub use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 pub use crate::domain::spatial::SpatialGridConfig;
 pub use crate::domain::steering::SteeringParams;

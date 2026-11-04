@@ -19,6 +19,7 @@ const RECYCLED_BIT: u32 = 1 << 31;
 /// ordering. Two NPCs with the same `NpcId` in one world is an engine bug, not a
 /// game bug, and the population bookkeeping exists to make it unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NpcId(u32);
 
 impl NpcId {
@@ -68,6 +69,7 @@ impl fmt::Display for NpcId {
 
 /// Identifier of a slot in a recycled population pool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SlotId(u32);
 
 impl SlotId {

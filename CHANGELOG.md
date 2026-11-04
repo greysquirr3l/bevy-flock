@@ -27,6 +27,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `NpcBrain`: a component holding a shared tree, a per-NPC cursor and the cached
   cost, ready for the scheduler task to drive.
 
+- Nemesis memory behind the `memory` feature (ADR 0010): `MemoryStore`, a flat
+  array of 16-byte slots indexed by eligibility and subject, with lazy integer
+  decay, a LIFO free list, and exact `implant`/`release` round-tripping.
+- `MemoryArchive`, a bounded cold tier that evicts the faintest record by lowest
+  total familiarity then lowest `NpcId`, so eviction is a pure function of what is
+  stored.
+- `DecayPolicy` with half-life in ticks and a `NONE` variant for grudges that never
+  fade; memory decays to exactly zero rather than to a permanent sliver.
+- `benches/memory.rs`: remember 7.7 ns, recall 5.5 ns, decayed recall 8.5 ns, sweep
+  6.9 ns per NPC over 16,384 eligible NPCs.
+
 ### Changed
 
 - `LeafBehavior::tick` and `abort` take `&self`: a leaf is a shared function over
