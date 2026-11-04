@@ -22,6 +22,7 @@ it and both stay in the tree.
 | [0008](0008-fallible-constructors.md) | Parse, don't validate; no panic paths in library code | Accepted |
 | [0009](0009-virtual-cost-stride-scheduler.md) | Cognition scheduled against a virtual cost by start-time fair queueing | Accepted |
 | [0010](0010-social-memory.md) | Social memory as a bounded, integer, two-tier store | Accepted |
+| [0011](0011-memory-and-the-scheduler.md) | Memory enters the scheduler as cost and weight, never as a tier | Accepted |
 
 ## Reading order
 

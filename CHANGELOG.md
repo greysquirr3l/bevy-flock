@@ -46,6 +46,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `VirtualCost::DEFAULT` is 40 vns — several times the priciest built-in leaf —
   rather than an arbitrary 1,000.
 
+### Documentation
+
+- ADR 0011: how social memory integrates with the virtual-cost stride scheduler —
+  cost as declared leaves, weight as a clamped boost, eligibility following the
+  scheduler, and the feedback loop those rules close.
+
 ### Planned
 
 The budgeted think scheduler, the utility scorer, the continuum ambient tier,
