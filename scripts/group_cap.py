@@ -52,23 +52,66 @@ def recommend(threads: float, cores: int) -> int:
     usable = max(1.0, threads)
     return max(1, min(cores, int(cores // usable)))
 
-EVIDENCE = """
-Measured, six cores, ADR 0032 (a longer bar is a slower group):
+EVIDENCE = """\
+Measured on six cores (ADR 0032, both amendments). A longer bar is a slower group.
 
-  eight single-threaded crate builds
+  eight single-threaded crate builds            one crate alone: 5 s
     sequential           24 s   ##############################   100%
     capped at 3 (half)   15 s   ###################...........    62%
-    capped at 6          10 s   ############..................    42%
+    capped at 6 (cores)  10 s   ############..................    42%
     uncapped, 8 at once   8 s   ##########....................    33%
 
-  three workspace builds, each cargo -j6
+  twelve single-threaded crate builds           plan group 1 is 11
+    sequential           24 s   ##############################   100%
+    capped at 3 (half)   15 s   ###################...........    62%
+    capped at 6 (cores)   9 s   ###########...................    38%
+    uncapped, 12 at once  8 s   ##########....................    33%
+
+  three workspace builds, each `cargo -j6`      45 s each alone
     sequential           45 s   ##############################   100%
     concurrent           43 s   #############################.    96%
-    concurrent, isolated 46 s   ##############################  102%
+    concurrent, isolated 46 s   ##############################   102%
 
-The first shape is hurt by a cap; the second is not helped by one. Threads per task is the variable,
-which is why this script measures it instead of counting tasks.
+The first two shapes are hurt by a cap; the third is not helped by one. Threads per task is the
+variable, which is why this script measures it instead of counting tasks. Isolation loses in the
+third shape because three cold dependency trees oversubscribe six cores.
 """
+
+
+def self_test() -> int:
+    """The recommendation has to agree with every shape ADR 0032 measured."""
+    failures = []
+
+    def check(condition: bool, message: str) -> None:
+        if not condition:
+            failures.append(message)
+
+    # One thread per task on six cores: fill the machine, never cap at half.
+    check(recommend(1.0, 6) == 6, f"one-thread task on 6 cores gave {recommend(1.0, 6)}, wanted 6")
+    # A task that already fills the machine runs alone.
+    check(recommend(6.0, 6) == 1, f"six-thread task on 6 cores gave {recommend(6.0, 6)}, wanted 1")
+    check(recommend(4.0, 8) == 2, f"four-thread task on 8 cores gave {recommend(4.0, 8)}, wanted 2")
+    # Never exceed the cores, even for a task cheaper than one core (a warm cache measures < 1).
+    check(recommend(0.4, 6) == 6, f"sub-core task gave {recommend(0.4, 6)}, wanted 6 (the core count)")
+    check(recommend(0.0, 4) == 4, f"zero-thread task gave {recommend(0.0, 4)}, wanted 4")
+    # Single core machines still admit one task.
+    check(recommend(5.0, 1) == 1, f"1-core machine gave {recommend(5.0, 1)}, wanted 1")
+
+    # Every evidence row must carry a wall time and a percentage, or the table is decoration.
+    rows = [line for line in EVIDENCE.splitlines() if line.strip().startswith((
+        "sequential", "capped", "uncapped", "concurrent"))]
+    check(len(rows) == 11, f"expected 11 evidence rows, found {len(rows)}")
+    for row in rows:
+        check(row.rstrip().endswith("%"), f"row has no percentage: {row!r}")
+    for shape in ("eight single-threaded", "twelve single-threaded", "three workspace builds"):
+        check(shape in EVIDENCE, f"evidence is missing the {shape!r} shape")
+
+    for failure in failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print(f"self-test: {len(rows)} evidence rows and 6 recommendation cases agree with ADR 0032")
+    return 0
 
 
 def main() -> int:
@@ -76,7 +119,11 @@ def main() -> int:
     parser.add_argument("--measure", metavar="CMD", help="time this command once to infer threads")
     parser.add_argument("--threads", type=float, help="threads one task uses, if already known")
     parser.add_argument("--evidence", action="store_true", help="print the measured tables")
+    parser.add_argument("--self-test", action="store_true", help="check the recommendation and tables")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     cores = os.cpu_count() or 1
     threads = args.threads
@@ -91,7 +138,10 @@ def main() -> int:
         print(f"measured: wall {wall:.1f}s, cpu {cpu:.1f}s -> {threads:.1f} threads per task")
 
     if threads is None:
-        parser.error("give --measure or --threads")
+        if args.evidence:
+            print(EVIDENCE.strip())
+            return 0
+        parser.error("give --measure, --threads or --evidence")
 
     cap = recommend(threads, cores)
     print(f"cores {cores}, threads per task {threads:.1f} -> cap {cap} task(s) at a time")
@@ -104,7 +154,7 @@ def main() -> int:
         print("  this task uses several cores; oversubscribing it costs more than it overlaps")
 
     if args.evidence:
-        print(EVIDENCE)
+        print(EVIDENCE.strip())
     return 0
 
 

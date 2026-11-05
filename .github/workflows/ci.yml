@@ -21,6 +21,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  scripts:
+    name: Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The cap advisor states measured numbers; its self-test checks the tables still carry them
+      # and that the recommendation reproduces every shape ADR 0032 measured.
+      - run: python3 scripts/group_cap.py --self-test
+      - run: python3 -m py_compile scripts/*.py
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

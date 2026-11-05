@@ -7,3 +7,6 @@
 *.profraw
 compat/target
 perf.data*
+
+# Python bytecode from the diagnostics scripts
+__pycache__/
