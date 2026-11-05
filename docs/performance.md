@@ -362,6 +362,54 @@ ordering is the optimisation; the vector width is a multiplier.
 The milestone sign-off, including the open churn finding, is in
 [`release-checklist.md`](release-checklist.md).
 
+## Group scaling: cores against threads per task (2026-11-05)
+
+ADR 0033 caps a group at `nproc / threads_per_task`. That rule was measured on one machine at one
+core count when it was written, so the sweep was repeated with the process pinned to 1, 2, 3 and 6
+cores, cold target directory per task, two shapes: a task that is one crate's codegen (one thread)
+and a task that is six crates built in parallel (six threads, the shape a workspace `cargo build`
+has).
+
+![Wall clock and speedup against core count, for one-thread and six-thread tasks](images/scaling-curves.png)
+
+Eight one-crate tasks on six cores:
+
+| admitted at once | wall | speedup |
+| --- | --- | --- |
+| 1 | 30 s | 1.0x |
+| 2 | 15 s | 2.0x |
+| 3 | 11 s | 2.7x |
+| 6 | 8 s | 3.8x |
+| 8 | 5 s | 6.0x |
+
+Three six-crate tasks on six cores:
+
+| admitted at once | wall | speedup |
+| --- | --- | --- |
+| 1 | 8 s | 1.0x |
+| 2 | 6 s | 1.3x |
+| 3 | 5 s | 1.6x |
+
+What the curves show, and what they cost ADR 0033:
+
+- **The cap formula picks the right order of magnitude and slightly under-admits bursty work.** For
+  one-thread tasks the formula says 6 on six cores; measured, 6 gives 8 s and admitting all 8 gives
+  5 s. These tasks have an I/O-heavy start (cargo resolving, reading, spawning rustc) that overlaps
+  productively, so a mild oversubscription beats exact-core packing. On two cores the ordering
+  reverses (2 gives 15 s, 3 gives 17 s), so the effect is not a free lunch — it is bursty work that
+  occasionally has a core idle. `cap = nproc / threads` is a floor with headroom, not an optimum, and
+  ADR 0033 now says so.
+- **Threads per task dominate.** A six-thread task alone on six cores reaches only 4.0x against one
+  core; three of them together reach 6.4x. Capping that shape at one task would leave a third of the
+  machine idle, which is why the policy measures threads instead of counting tasks.
+- **Concurrency beyond a task's own thread count buys nothing.** A six-thread task on three cores
+  takes 12 s whether one, two or three are admitted; it is already queueing for cores internally.
+
+Reproduce with `scripts/scaling_sweep.sh docs/data/scaling-sweep.json` (about nine minutes on six
+cores, every run pinned with `taskset`) then `python3 scripts/scaling_curves.py
+docs/data/scaling-sweep.json docs/images/scaling-curves.png`. The raw rows are checked in beside this
+document.
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.

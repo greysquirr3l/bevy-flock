@@ -25,6 +25,20 @@ The two shapes that matter differ by 2× in the same group size:
 A single-crate task leaves five cores idle if you cap it; a workspace build oversubscribes the machine
 if you do not. Both numbers are measured in ADR 0032 and printed by `--evidence`.
 
+### Validation across core counts (2026-11-05)
+
+The rule was measured on six cores only when it was written, so it was re-measured with the process
+pinned to 1, 2, 3 and 6 cores (`scripts/scaling_sweep.sh`, figure in `docs/performance.md`).
+
+- **The formula is a floor with headroom, not an optimum.** On six cores, one-thread tasks: cap 6
+  gives 8 s, admitting all 8 gives 5 s. Bursty compile work overlaps its I/O start, so mild
+  oversubscription wins — but on two cores the ordering reverses (cap 2 gives 15 s, cap 3 gives 17 s).
+  The policy therefore states the cap as a *minimum* admission rate and permits admitting up to the
+  task count when tasks are bursty; it does not pretend to compute an optimum.
+- **Threads per task dominates the curve**, as the formula assumes: a six-thread task alone reaches
+  4.0x, three together 6.4x, and on three cores all three arrangements take 12 s because the task is
+  already queueing for cores internally.
+
 ## 2. Group sizes come from wiggum, not from the plan file
 
 `wiggum validate` injects up to two audit tasks (`integration-wiring`, `stub-cleanup`) that no phase

@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Group scaling measured at 1, 2, 3 and 6 cores, both task shapes.** `scripts/scaling_sweep.sh`
+  pins every run with `taskset` and gives each task a cold target directory; `scripts/scaling_curves.py`
+  plots wall clock and speedup with the raw rows checked in at `docs/data/scaling-sweep.json`. Findings:
+  the cap formula is a floor with headroom (six one-thread tasks take 8 s, all eight take 5 s, because
+  cargo's I/O start overlaps), threads per task dominates the curve, and a six-thread task is already
+  queue-limited on three cores. ADR 0033 records all three, including the case where the formula
+  under-admits.
+
+
 - **ADR 0033 states the group capping policy once.** `cap = nproc / threads_per_task`, measured per
   task rather than assumed, with group sizes taken from `wiggum validate` because wiggum injects audit
   tasks the phases do not declare (23 authored, 24 scheduled, measured). `scripts/group_cap.py` gains
