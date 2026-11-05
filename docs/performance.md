@@ -360,6 +360,29 @@ slots and splitting those writes needs either a slot-indexed output buffer or ca
 scratch. ADR 0044 records the plan and the honest expectation: 2–3× on top, not 6×, for the same
 bandwidth reason.
 
+## Perception and obstacle rebuilds (2026-11-05)
+
+`cargo bench --bench crowd -- perception`, ten samples, `--release`.
+
+| Case | Time | Per unit |
+| --- | ---: | ---: |
+| 10,000 observers against 128 live records | 27.6 ms | 2.8 µs observer, 22 ns record |
+| 512 observers against 4,096 live records | 75.3 ms | 147 µs observer |
+| 64×64 rebuild, 32 obstacles | 3.7 µs | one full publish |
+
+Reading these honestly: perception is linear in live records per observer, so the number that
+matters is the *second* row's density, and 4,096 live stimuli inside one 40 m square is a
+pathological case — a real crowd has tens of things happening at once, not thousands. At 128 live
+records and the default six-tick interval, a 10,000-NPC crowd that perceives on every tick of its
+band costs 4.6 ms a frame; the interval and the buffer capacity are the two knobs, and both exist
+so a game can size this to what its world actually does. There is no spatial index over the
+buffer yet: that is the next lever if a game needs thousands of live stimuli, and it is listed in
+the ADR as the known limit rather than pretended away.
+
+The obstacle rebuild is a non-issue at 64×64: one publish is 3.7 µs, so even a 1,024-cell budget
+spread over 16 frames is noise next to a steering pass. Its cost scales with the grid and the
+obstacle count, not with the population.
+
 ## Reciprocal avoidance, on and off (2026-11-05)
 
 `cargo bench --bench crowd -- crowd_avoidance`, `--release`, default features (`simd` and

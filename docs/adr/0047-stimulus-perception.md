@@ -59,9 +59,27 @@ a replay perceives on exactly the same ticks.
 
 ## Measurements
 
-The pass is O(records × observers-due), not O(observers × entities). `docs/performance.md` records
-the cost of a 4,096-record buffer with 10,000 observers at the default interval; the design target
-is that it stays inside the mid-band budget, which is a fraction of the steering frame.
+The pass is O(live records × observers-due), not O(observers × entities). Measured
+(`cargo bench --bench crowd -- perception`):
+
+| Case | Time | Per unit |
+| --- | ---: | ---: |
+| 10,000 observers, 128 live records | 27.6 ms | 2.8 µs observer |
+| 512 observers, 4,096 live records | 75.3 ms | 147 µs observer |
+
+At the default six-tick interval the first row is ~4.6 ms a frame for a 10,000-NPC crowd that
+perceives on every tick of its band, which is inside a mid-band budget and well outside a reflex
+one — hence the interval, which is the scheduler's knob in miniature.
+
+Two optimisations are already in: the squared-distance reject avoids a square root for records
+that are out of range, and the cone test compares against `cos · |offset|` rather than normalising.
+Together they took the 4,096-record case from 87.1 ms to 75.3 ms.
+
+**Known limit:** there is no spatial index over the buffer, so a game with thousands of live
+stimuli pays linearly. Adding one (bucket the records, scan the buckets the hearing radius
+overlaps) is the obvious next step and is deliberately not pretended away here: the capacity and
+the interval are the two knobs that make the current cost acceptable, and a game that needs more
+should size its buffer to what its world actually does.
 
 ## Consequences
 

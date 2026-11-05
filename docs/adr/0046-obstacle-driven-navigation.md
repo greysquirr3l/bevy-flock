@@ -69,10 +69,11 @@ resource or the system.
 
 ## Measurements
 
-Rasterising a 32×32 grid fully blocked by one footprint (1,024 cells) takes 1 step at the default
-budget and 64 steps at a 16-cell budget; `ObstacleNav::finish` is a test helper, not a production
-path. The per-tick cost is bounded by `cells_per_tick` writes plus a sort of the obstacle list,
-which `docs/performance.md` records for a realistic obstacle count.
+`cargo bench --bench crowd -- perception`, one full publish of a 64×64 grid with 32 obstacles:
+**3.7 µs**. A rebuild is therefore invisible next to a steering pass, and the budget exists for the
+pathological case (a 512×512 grid, or an obstacle list that changes every frame) rather than for
+the common one. The per-tick cost is bounded by `cells_per_tick` writes plus one sort of the
+obstacle list; `ObstacleNav::finish` is a test helper, not a production path.
 
 ## Consequences
 

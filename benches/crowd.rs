@@ -286,6 +286,94 @@ fn bench_avoidance(c: &mut Criterion) {
     group.finish();
 }
 
+/// Perception and obstacle rebuilds: the two costs ADRs 0046 and 0047 promise to record.
+///
+/// Audiences are read-only, so this measures the pass a game would pay at a mid-band cadence:
+/// 512 observers against a full 4,096-record buffer, and a 64x64 rebuild with 32 obstacles.
+fn bench_perception(c: &mut Criterion) {
+    use bevy_flock::domain::obstacle_nav::{ObstacleFootprint, ObstacleNav, ObstacleNavConfig};
+    use bevy_flock::domain::stimulus::{
+        OpenAir, PerceptionQuery, Stimulus, StimulusBuffer, StimulusKind, perceive,
+    };
+    use bevy_flock::domain::tick::Tick;
+    use bevy_math::Vec3;
+
+    let mut group = c.benchmark_group("perception");
+    group.sample_size(20);
+
+    let mut buffer = StimulusBuffer::new(4_096).expect("buffer");
+    for index in 0..4_096_u32 {
+        #[allow(clippy::cast_precision_loss)]
+        let angle = index as f32 * 0.37;
+        let radius = 2.0 + (index % 40) as f32;
+        buffer.push(Stimulus::new(
+            if index % 3 == 0 {
+                StimulusKind::Sound
+            } else {
+                StimulusKind::Sight
+            },
+            Vec3::new(libm::cosf(angle) * radius, 0.0, libm::sinf(angle) * radius),
+            30.0,
+            0.8,
+            Tick::ZERO,
+        ));
+    }
+    let query = PerceptionQuery::new();
+    group.bench_function("10000_observers_128_records", |b| {
+        let mut small = StimulusBuffer::new(128).expect("buffer");
+        for record in buffer.iter().take(128) {
+            small.push(*record);
+        }
+        b.iter(|| {
+            let mut seen = 0_usize;
+            for index in 0..10_000_u32 {
+                #[allow(clippy::cast_precision_loss)]
+                let angle = index as f32 * 0.011;
+                let observer = Vec3::new(libm::cosf(angle) * 12.0, 0.0, libm::sinf(angle) * 12.0);
+                seen += perceive(&small, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+            }
+            black_box(seen);
+        });
+    });
+    group.bench_function("512_observers_4096_records", |b| {
+        b.iter(|| {
+            let mut seen = 0_usize;
+            for index in 0..512_u32 {
+                #[allow(clippy::cast_precision_loss)]
+                let angle = index as f32 * 0.11;
+                let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
+                seen += perceive(&buffer, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+            }
+            black_box(seen);
+        });
+    });
+
+    let config = ObstacleNavConfig::try_new(Vec3::ZERO, 64, 64, 1.0)
+        .expect("bounds")
+        .with_budget(1_000_000);
+    let obstacles: Vec<ObstacleFootprint> = (0..32)
+        .map(|index| {
+            #[allow(clippy::cast_precision_loss)]
+            let x = 2.0 + (index % 8) as f32 * 7.5;
+            #[allow(clippy::cast_precision_loss)]
+            let z = 2.0 + (index / 8) as f32 * 15.0;
+            ObstacleFootprint::new(Vec3::new(x, 0.0, z), Vec3::new(x + 3.0, 2.0, z + 6.0))
+                .expect("footprint")
+        })
+        .collect();
+    group.bench_function("obstacle_rebuild_64x64_32_obstacles", |b| {
+        b.iter(|| {
+            let mut nav = ObstacleNav::new(config);
+            nav.request(&obstacles);
+            while nav.is_staging() {
+                nav.step();
+            }
+            black_box(nav.version());
+        });
+    });
+    group.finish();
+}
+
 /// The ECS query path against cell size (ADR 0031's open question).
 ///
 /// The steering kernel wants 6-10 agents a bucket, which in a one-kilometre volume means 7-9 m
@@ -351,6 +439,7 @@ criterion_group!(
     bench_spatial_queries,
     bench_steering,
     bench_kernel,
-    bench_avoidance
+    bench_avoidance,
+    bench_perception
 );
 criterion_main!(benches);

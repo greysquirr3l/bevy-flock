@@ -119,11 +119,17 @@ impl Stimulus {
     /// carries — a shout heard three seconds ago is a rumour, not a location.
     #[must_use]
     pub fn strength_at(self, observer: Vec3, now: Tick) -> f32 {
-        if !self.is_live(now) || self.radius <= 0.0 {
-            return 0.0;
-        }
-        let distance = observer.distance(self.position);
-        if distance > self.radius {
+        self.strength_at_distance(observer.distance(self.position), now)
+    }
+
+    /// The same, with the distance already known.
+    ///
+    /// Perception computes the distance once to reject out-of-range records, so handing it back
+    /// here saves the second square root per record per observer — which at 4,096 records and
+    /// 512 observers is two million square roots a pass.
+    #[must_use]
+    pub fn strength_at_distance(self, distance: f32, now: Tick) -> f32 {
+        if !self.is_live(now) || self.radius <= 0.0 || distance > self.radius {
             return 0.0;
         }
         let distance_falloff = 1.0 - (distance / self.radius);
@@ -347,24 +353,29 @@ pub fn perceive(
         if !stimulus.is_live(now) {
             continue;
         }
-        let distance = observer.distance(stimulus.position);
         let limit = match stimulus.kind {
             StimulusKind::Sight => query.sight_radius.min(stimulus.radius),
             _ => query.hearing_radius.min(stimulus.radius),
         };
-        if distance > limit {
+        // Squared first: most records in a full buffer are out of range, and a comparison saves
+        // the square root for the ones that are not.
+        let distance_squared = (stimulus.position - observer).length_squared();
+        if distance_squared > limit * limit {
             continue;
         }
+        let distance = distance_squared.sqrt();
         if stimulus.kind.uses_field_of_view() && query.field_of_view > -1.0 {
-            let direction = (stimulus.position - observer).normalize_or_zero();
-            if forward.dot(direction) < query.field_of_view {
+            // The cone test without a normalize: comparing the dot against `cos * |offset|` is the
+            // same predicate, and saves a square root and a divide per record per observer.
+            let offset = stimulus.position - observer;
+            if forward.dot(offset) < query.field_of_view * distance {
                 continue;
             }
         }
         if stimulus.kind.is_occluded() && occluder.blocks(observer, stimulus.position) {
             continue;
         }
-        let strength = stimulus.strength_at(observer, now);
+        let strength = stimulus.strength_at_distance(distance, now);
         if strength <= 0.0 {
             continue;
         }
