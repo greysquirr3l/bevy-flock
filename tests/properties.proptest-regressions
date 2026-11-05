@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bb86d651095ef322a856866648717089ca0c5afced33de2d01ec78b3f74628de # shrinks to points = [Vec3(0.0, 22.321978, 0.0), Vec3(0.0, 0.0, 0.0)], radius = 33.03479

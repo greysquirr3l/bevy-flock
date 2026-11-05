@@ -111,10 +111,15 @@ proptest! {
             })
             .collect();
         expected.sort_by_key(|(id, _)| *id);
-        let got: Vec<(NpcId, f32)> = found
+        // The index promises the *set* of neighbours, not an order: it walks cells, and
+        // cell order is a function of the grid, not of identity. Sorting both sides is
+        // what makes this a test of agreement rather than a test of one implementation's
+        // iteration order.
+        let mut got: Vec<(NpcId, f32)> = found
             .iter()
             .map(|n: &Neighbour| (n.id, n.distance_squared.sqrt()))
             .collect();
+        got.sort_by_key(|(id, _)| *id);
         prop_assert_eq!(got.len(), expected.len());
         for ((got_id, got_distance), (want_id, want_distance)) in got.iter().zip(expected.iter()) {
             prop_assert_eq!(got_id, want_id);

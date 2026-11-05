@@ -22,6 +22,7 @@ use crate::domain::ids::NpcId;
 use crate::domain::tick::Tick;
 use bevy_ecs::prelude::*;
 use bevy_transform::prelude::Transform;
+use core::fmt::Write as _;
 use smallvec::SmallVec;
 
 /// How often the expensive crowd sample is taken, in ticks.
@@ -264,6 +265,193 @@ pub fn check_world(world: &mut World) -> SmallVec<[Violation; 8]> {
     violations
 }
 
+/// Why an NPC did that: the state a behaviour decision was taken from.
+///
+/// The one question a crowd makes hard to answer. A tree path tells you which branch ran;
+/// it does not tell you that the branch ran because the NPC was hungry, in a bad mood and
+/// standing next to a remembered friend. This prints the whole input set — tier, weight,
+/// tree, cursor, mood, needs, blackboard, memory view, group — so a playtest report can
+/// say "the guard ignored you" and the log can say why.
+///
+/// Debug-only in spirit: it allocates a `String` and walks every blackboard slot, so it
+/// belongs behind a key press or a test, not in a per-frame path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplainError {
+    /// No such entity.
+    NoSuchEntity,
+    /// The entity exists but is not an NPC this crate knows about.
+    NotAnNpc,
+}
+
+impl core::fmt::Display for ExplainError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoSuchEntity => formatter.write_str("no such entity"),
+            Self::NotAnNpc => formatter.write_str("entity is not an NPC"),
+        }
+    }
+}
+
+impl core::error::Error for ExplainError {}
+
+/// Explain one NPC's current state, in a form a human can read in a log.
+///
+/// Takes the whole world because the answer spans components that no single system owns,
+/// and deliberately does it on demand: a crowd of ten thousand cannot afford this per
+/// frame, and nobody wants it per frame.
+pub fn explain_npc(world: &mut World, entity: Entity) -> Result<String, ExplainError> {
+    let Some(entity_ref) = world.get_entity_mut(entity).ok() else {
+        return Err(ExplainError::NoSuchEntity);
+    };
+    let Some(npc) = entity_ref.get::<Npc>().copied() else {
+        return Err(ExplainError::NotAnNpc);
+    };
+    let mut out = String::new();
+    let _ = writeln!(out, "npc {:?} (entity {:?})", npc.0, entity);
+    if let Some(identity) = entity_ref.get::<crate::adapters::primary::components::NpcIdentity>() {
+        let _ = writeln!(out, "  identity: {identity:?}");
+    }
+    if let Some(tier) = entity_ref.get::<crate::adapters::primary::cognition::NpcTier>() {
+        let _ = writeln!(out, "  tier: {:?}", tier.0);
+    }
+    if let Some(weight) = entity_ref.get::<crate::adapters::primary::cognition::NpcThinkWeight>() {
+        let _ = writeln!(out, "  think weight: {:?}", weight.0);
+    }
+    if let Some(brain) = entity_ref.get::<crate::adapters::primary::components::NpcBrain>() {
+        let cursor = brain.cursor();
+        let _ = writeln!(
+            out,
+            "  tree: {} nodes, depth {} (cursor: {} frames deep)",
+            brain.tree().len(),
+            brain.tree().depth(),
+            cursor.depth_used()
+        );
+        let _ = writeln!(out, "  declared think cost: {:?}", brain.cost());
+    } else {
+        let _ = writeln!(out, "  tree: none (this NPC is not thinking)");
+    }
+    if let Some(mood) = entity_ref.get::<NpcMood>() {
+        let _ = writeln!(out, "  mood: {:?}", mood.0);
+    }
+    if let Some(needs) = entity_ref.get::<crate::adapters::primary::components::NpcNeeds>() {
+        let _ = writeln!(out, "  needs: {:?}", needs.0);
+    }
+    if let Some(member) = entity_ref.get::<crate::adapters::primary::components::FlockMember>() {
+        let _ = writeln!(out, "  group: {:?}", member.group);
+    }
+    if let Some(board) = entity_ref.get::<crate::adapters::primary::cognition::NpcBlackboard>() {
+        let mut slots: SmallVec<[(u16, String); 8]> = SmallVec::new();
+        for (key, value) in board.0.iter() {
+            slots.push((key.get(), format!("{value:?}")));
+        }
+        slots.sort_unstable_by_key(|(key, _)| *key);
+        if slots.is_empty() {
+            let _ = writeln!(out, "  blackboard: empty");
+        } else {
+            let _ = writeln!(out, "  blackboard:");
+            for (key, value) in slots {
+                let _ = writeln!(out, "    [{key}] {value}");
+            }
+        }
+    }
+    if let Some(row) = entity_ref.get::<crate::adapters::primary::memory_bridge::NpcMemoryRow>() {
+        let _ = writeln!(out, "  memory row: {}", row.0.get());
+    }
+    Ok(out)
+}
+
+/// One label a debug overlay should draw.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebugLabel {
+    /// The entity the label belongs to.
+    pub entity: Entity,
+    /// Where to draw it.
+    pub position: bevy_math::prelude::Vec3,
+    /// What to draw.
+    pub text: String,
+}
+
+/// Labels a game's own debug renderer can draw.
+///
+/// The crate does not render: it produces the list and lets the game put it on screen
+/// with whatever gizmo, sprite or text system it already has. That is the same division
+/// of labour as the render plan (ADR 0040).
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct DebugOverlay {
+    /// The labels, in draw order.
+    pub labels: Vec<DebugLabel>,
+}
+
+/// What, if anything, to put in the overlay.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct DebugOverlayConfig {
+    /// Whether the overlay is collected at all. Off by default.
+    pub enabled: bool,
+    /// How many labels at most.
+    pub max_labels: usize,
+    /// Only label NPCs this close to the camera or player, in metres.
+    pub radius: f32,
+}
+
+impl Default for DebugOverlayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_labels: 32,
+            radius: 30.0,
+        }
+    }
+}
+
+/// Collect labels for the NPCs nearest the origin, for a game to draw.
+///
+/// Sorted by distance so the nearest bots win the budget, which is what makes an overlay
+/// useful while walking through a crowd: the labels you can read are the ones you are
+/// standing next to.
+pub fn collect_debug_overlay(
+    config: Res<DebugOverlayConfig>,
+    mut overlay: ResMut<DebugOverlay>,
+    brains: Query<(
+        Entity,
+        &Npc,
+        &Transform,
+        Option<&crate::adapters::primary::cognition::NpcTier>,
+        Option<&crate::adapters::primary::components::NpcBrain>,
+    )>,
+) {
+    overlay.labels.clear();
+    if !config.enabled {
+        return;
+    }
+    let radius = config.radius.max(0.0);
+    let mut picked: SmallVec<[(f32, DebugLabel); 32]> = SmallVec::new();
+    for (entity, npc, transform, tier, brain) in &brains {
+        let distance = transform.translation.length();
+        if distance > radius {
+            continue;
+        }
+        let text = match (tier, brain) {
+            (Some(tier), Some(brain)) => {
+                format!("{:?} {:?} d{}", npc.0, tier.0, brain.cursor().depth_used())
+            }
+            (Some(tier), None) => format!("{:?} {:?}", npc.0, tier.0),
+            _ => format!("{:?}", npc.0),
+        };
+        picked.push((
+            distance,
+            DebugLabel {
+                entity,
+                position: transform.translation,
+                text,
+            },
+        ));
+    }
+    picked.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
+    for (_, label) in picked.into_iter().take(config.max_labels) {
+        overlay.labels.push(label);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +554,101 @@ mod tests {
                 .iter()
                 .any(|violation| matches!(violation, Violation::OutsideTheTiers(_)))
         );
+    }
+
+    #[test]
+    fn an_explanation_says_what_the_npc_is_thinking_with() {
+        let mut app = app();
+        let tree = std::sync::Arc::new(
+            crate::behavior::tree::BehaviorTree::try_from_spec(
+                crate::behavior::tree::NodeSpec::Action(0),
+            )
+            .expect("a leaf is a tree"),
+        );
+        let entity = app
+            .world_mut()
+            .spawn((
+                Npc(NpcId::unique(31)),
+                Transform::from_xyz(1.0, 0.0, 0.0),
+                crate::adapters::primary::components::NpcBrain::new(
+                    tree,
+                    crate::domain::cost::VirtualCost::new(7),
+                ),
+                crate::adapters::primary::cognition::NpcBlackboard::default(),
+            ))
+            .id();
+        {
+            let world = app.world_mut();
+            let mut entity_mut = world.entity_mut(entity);
+            let mut board = entity_mut
+                .get_mut::<crate::adapters::primary::cognition::NpcBlackboard>()
+                .expect("board");
+            let _ = board.0.set(
+                crate::adapters::primary::perception::KEY_PLAYER_SEEN,
+                crate::behavior::blackboard::Value::Bool(true),
+            );
+        }
+        let text = explain_npc(app.world_mut(), entity).expect("an NPC can be explained");
+        assert!(text.contains("npc"), "{text}");
+        assert!(text.contains("declared think cost"), "{text}");
+        assert!(
+            text.contains("[20]"),
+            "the blackboard key should be listed: {text}"
+        );
+    }
+
+    #[test]
+    fn explaining_a_stranger_is_an_error_not_a_panic() {
+        let mut app = app();
+        assert_eq!(
+            explain_npc(app.world_mut(), Entity::PLACEHOLDER),
+            Err(ExplainError::NoSuchEntity)
+        );
+        let entity = app.world_mut().spawn(()).id();
+        assert_eq!(
+            explain_npc(app.world_mut(), entity),
+            Err(ExplainError::NotAnNpc)
+        );
+    }
+
+    #[test]
+    fn the_overlay_is_empty_until_it_is_asked_for() {
+        let mut app = app();
+        app.init_resource::<DebugOverlay>()
+            .init_resource::<DebugOverlayConfig>()
+            .add_systems(Update, collect_debug_overlay);
+        for id in 0..4 {
+            app.world_mut().spawn((
+                Npc(NpcId::unique(id)),
+                Transform::from_xyz(id as f32, 0.0, 0.0),
+            ));
+        }
+        app.update();
+        assert!(app.world().resource::<DebugOverlay>().labels.is_empty());
+        app.world_mut().resource_mut::<DebugOverlayConfig>().enabled = true;
+        app.update();
+        assert_eq!(app.world().resource::<DebugOverlay>().labels.len(), 4);
+    }
+
+    #[test]
+    fn the_overlay_draws_the_nearest_labels_within_its_budget() {
+        let mut app = app();
+        app.init_resource::<DebugOverlay>()
+            .insert_resource(DebugOverlayConfig {
+                enabled: true,
+                max_labels: 2,
+                radius: 10.0,
+            })
+            .add_systems(Update, collect_debug_overlay);
+        for (id, x) in [(0, 9.0), (1, 1.0), (2, 5.0), (3, 50.0)] {
+            app.world_mut()
+                .spawn((Npc(NpcId::unique(id)), Transform::from_xyz(x, 0.0, 0.0)));
+        }
+        app.update();
+        let overlay = app.world().resource::<DebugOverlay>();
+        assert_eq!(overlay.labels.len(), 2);
+        assert_eq!(overlay.labels[0].position.x, 1.0);
+        assert_eq!(overlay.labels[1].position.x, 5.0);
     }
 
     #[test]

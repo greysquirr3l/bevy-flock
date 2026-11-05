@@ -32,6 +32,7 @@ that means:
 | Behaviour trees: flat compiled nodes, resume, abort, cooldown, timeout, parallel | **Shipped** |
 | Leaf catalogue with declared costs and per-archetype trees | **Shipped** |
 | Social memory: bounded slot store, cold archive, lazy decay (`memory` feature) | **Shipped (opt-in)** |
+| Memory in cognition: enrolment by proximity, three-integer views, grudge/friend leaves (ADR 0041) | **Shipped (opt-in)** |
 | Versioned save format with a subject registry and a committed fixture corpus | **Shipped (opt-in)** |
 | Diagnostics: ghost rows, orphan slots, SVG graphs (`registry_telemetry` example) | **Shipped (opt-in)** |
 | Guarded state machines with dwell times | **Shipped** |
@@ -55,6 +56,9 @@ that means:
 | Physics, replication and render ports — no engine dependency (ADR 0040) | **Shipped** |
 | Versioned snapshots and compatibility corpus (ADR 0012-0014) | **Shipped (opt-in)** |
 | Property-based tests for the invariants that must hold for every input | **Shipped** |
+| "Why did it do that": one-call state dump for any NPC (ADR 0042) | **Shipped** |
+| Debug overlay as data, off by default, drawn by the game (ADR 0042) | **Shipped** |
+| Decoder robustness: libFuzzer targets plus a stable corruption suite | **Shipped** |
 | Rendering, avian and replicon *adapters* (the ports are here; the engines are yours) | Deliberately not shipped |
 
 The full task plan lives in [`plan.toml`](plan.toml), including the capability
@@ -140,7 +144,56 @@ let mut registry = FlockRegistry::new();
 let greet = registry.register_leaf("greet", Greet)?;
 ```
 
+### Memory in a crowd, and why it is opt-in
+
+Memory is a fixed resource: a row capacity and a subject ceiling. The crate spends it
+nearest-first, so the NPCs a player can actually meet are the ones who remember them, and
+publishes the strongest memory as three blackboard integers once per tick. A tree asks
+"do I know you?" for the price of a slot lookup.
+
+```rust
+use bevy_flock::prelude::*;
+
+let mut app = App::new();
+app.add_plugins(FlockPlugin::new(FlockConfig::preset(CrowdPreset::QuietVillage)));
+// Defaults: 24 m enrolment radius, 64 new rows per tick, a capacity of a tenth of
+// the crowd. Add `MemoryBridgePlugin` yourself to choose differently.
+app.insert_resource(MemoryConfig::default().with_publish_radius(30.0));
+
+// Register the three memory leaves, then use them like any other.
+let mut registry = FlockRegistry::new();
+let memory = MemoryLeaves::register(&mut registry)?;
+let tree = BehaviorTree::try_from_spec(selector(vec![
+    action(memory.greet_friend),
+    action(memory.shun_grudge),
+    action(memory.recognise),
+]))?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Turn the `memory` feature off and every one of those leaves simply answers
+`Failure`: the trees still compile, the crowd still runs, and nobody remembers anybody.
+That asymmetry is the point — games author one set of trees (ADR 0041).
+
+### When an NPC does something inexplicable
+
+```rust
+use bevy_flock::prelude::*;
+
+// One call, one string: tier, think weight, tree depth, cursor, mood, needs, group,
+// every blackboard slot sorted by key, and the memory row if there is one.
+let why = explain_npc(app.world_mut(), entity)?;
+println!("{why}");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`explain_npc` allocates, because it is for logs, tests and debug keys — not for frames.
+The overlay is the same bargain: `collect_debug_overlay` fills a `DebugOverlay` with the
+nearest labels and the game draws them, and `DebugOverlayConfig::enabled` is `false` by
+default so the system costs one branch (ADR 0042).
+
 ## Determinism, precisely
+
 
 The guarantee is: *same binary, same platform, same features, same seed and the
 same tick count produce the same world state*. That is what the tests assert, by

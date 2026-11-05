@@ -5,6 +5,8 @@ pub mod cognition;
 pub mod components;
 pub mod dialogue;
 pub mod grouping;
+#[cfg(feature = "memory")]
+pub mod memory_bridge;
 pub mod observability;
 pub mod perception;
 pub mod plugin;

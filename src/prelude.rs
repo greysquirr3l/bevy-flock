@@ -27,7 +27,18 @@ pub use crate::behavior::{
     sequence, timeout,
 };
 
+#[cfg(feature = "memory")]
+pub use crate::adapters::primary::memory_bridge::{MemoryBridgeStats, MemoryConfig, NpcMemoryRow};
+pub use crate::adapters::primary::observability::{
+    DebugLabel, DebugOverlay, DebugOverlayConfig, ExplainError, collect_debug_overlay, explain_npc,
+};
+#[cfg(feature = "memory")]
+pub use crate::adapters::primary::plugin::MemoryBridgePlugin;
 pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
+pub use crate::behavior::memory_leaves::{
+    GRUDGE_VALENCE, GreetFriend, KEY_MEMORY_FAMILIARITY, KEY_MEMORY_FLAGS, KEY_MEMORY_VALENCE,
+    MemoryLeaves, RECOGNITION_THRESHOLD, RecogniseKnown, Remembered, ShunGrudge, WARM_VALENCE,
+};
 pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
 pub use crate::domain::continuum::{AmbientField, CellId, CellState, Occupation};
 pub use crate::domain::cost::VirtualCost;

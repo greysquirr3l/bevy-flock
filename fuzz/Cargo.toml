@@ -1,0 +1,40 @@
+# Fuzz targets for the hostile-input surfaces: the save decoder, the authored trees and
+# the dialogue graphs. Run with `cargo +nightly fuzz run save_decode` from this directory.
+#
+# This is a separate workspace member so a normal `cargo test` does not need nightly, and
+# so the fuzzing corpus and artifacts do not pollute the library's target directory.
+[package]
+name = "bevy-flock-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bevy-flock = { path = "..", features = ["memory", "serde"] }
+
+[[bin]]
+name = "save_decode"
+path = "fuzz_targets/save_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tree_ron"
+path = "fuzz_targets/tree_ron.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dialog_ron"
+path = "fuzz_targets/dialog_ron.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -18,6 +18,7 @@ pub mod bark;
 pub mod blackboard;
 pub mod dialog;
 pub mod leaves;
+pub mod memory_leaves;
 pub mod provider;
 pub mod registry;
 pub mod social;
@@ -34,6 +35,10 @@ pub use dialog::{
     Condition, DialogChoice, DialogError, DialogGraph, DialogNode, DialogSession, Speaker,
 };
 pub use leaves::StandardLeaves;
+pub use memory_leaves::{
+    GRUDGE_VALENCE, GreetFriend, KEY_MEMORY_FAMILIARITY, KEY_MEMORY_FLAGS, KEY_MEMORY_VALENCE,
+    MemoryLeaves, RECOGNITION_THRESHOLD, RecogniseKnown, Remembered, ShunGrudge, WARM_VALENCE,
+};
 pub use provider::{
     DialogContext, DialogPrompt, DialogProvider, DialogReply, ProviderQueue, ReplySource,
     TemplateProvider,

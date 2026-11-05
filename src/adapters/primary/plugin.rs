@@ -365,6 +365,36 @@ impl FlockPlugin {
     }
 }
 
+/// The `memory` bridge, as a plugin so [`FlockPlugin`] can include it conditionally.
+///
+/// Split out because the store's capacity is a game's decision, not the crowd's: a game
+/// that wants forty thousand rows says so by adding this plugin with its own
+/// [`MemoryConfig`] and capacity instead of accepting whatever the crowd happened to
+/// pick. [`FlockPlugin`] adds the default when the feature is on.
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MemoryBridgePlugin;
+
+#[cfg(feature = "memory")]
+impl Plugin for MemoryBridgePlugin {
+    fn build(&self, app: &mut App) {
+        let population = app
+            .world()
+            .get_resource::<FlockConfig>()
+            .map_or(1_024, |config| config.population.get());
+        // Rows are 16 bytes per subject; a tenth of the crowd is a defensible default
+        // for a game that never thinks about it, and the enrolment budget spreads the
+        // rest over the ticks that follow.
+        let capacity = (population / 10).clamp(64, 16_384) as u32;
+        crate::adapters::primary::memory_bridge::register(
+            app,
+            crate::adapters::primary::memory_bridge::MemoryConfig::default(),
+            capacity,
+            16,
+        );
+    }
+}
+
 impl Plugin for FlockPlugin {
     fn build(&self, app: &mut App) {
         // The schedule's capacity is the configured population: an NPC beyond it is a
@@ -382,6 +412,8 @@ impl Plugin for FlockPlugin {
             .init_resource::<SpawnQueue>()
             .init_resource::<FlockStats>()
             .init_resource::<crate::adapters::primary::perception::PerceptionConfig>()
+            .init_resource::<crate::adapters::primary::observability::DebugOverlay>()
+            .init_resource::<crate::adapters::primary::observability::DebugOverlayConfig>()
             .init_resource::<crate::adapters::primary::grouping::Groups>()
             .init_resource::<crate::adapters::primary::grouping::NpcIndex>()
             .init_resource::<crate::adapters::primary::observability::CrowdPulse>()
@@ -428,6 +460,7 @@ impl Plugin for FlockPlugin {
                     crate::adapters::primary::perception::forget_the_absent,
                     crate::adapters::primary::observability::sample_crowd,
                     crate::adapters::primary::observability::count_frames,
+                    crate::adapters::primary::observability::collect_debug_overlay,
                     crate::adapters::primary::dialogue::produce_barks,
                     crate::adapters::primary::dialogue::tick_dialog,
                     crate::adapters::primary::render::build_render_plan,
@@ -451,6 +484,11 @@ impl Plugin for FlockPlugin {
                     .in_set(FlockSet::AdvanceTick),
             );
 
+        // Memory is opt-in at build time as well as at compile time: the store's
+        // capacity is the game's bill, so it comes with the config rather than with
+        // the crowd. Defaults are chosen for a game that does not care.
+        #[cfg(feature = "memory")]
+        app.add_plugins(MemoryBridgePlugin);
         // A game that added `BoidsPlugin` first (with its own steering config) is
         // respected: adding it twice would panic, and silently overriding the
         // config the game just registered would be worse than either.

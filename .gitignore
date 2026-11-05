@@ -132,3 +132,10 @@ RUN_LOG.md
 
 # IDEs and editors
 .vscode/
+
+# Fuzzing build products and the corpus. The corpus is worth sharing eventually, but not
+# in the same repository as the library: it is large, binary and grows without bound.
+fuzz/target
+fuzz/corpus
+fuzz/artifacts
+fuzz/Cargo.lock

@@ -67,3 +67,5 @@ replay.
 | [0038](0038-barks-are-budgeted.md) | Barks are a bounded, cooldown-gated channel with a per-frame cap | Accepted |
 | [0039](0039-world-director.md) | The director decides, the board applies: policies as values, decisions traced | Accepted |
 | [0040](0040-optional-integrations-are-ports.md) | Physics, networking and rendering are ports, not dependencies | Accepted |
+| [0041](0041-memory-in-cognition.md) | Memory reaches a tree as three integers; enrolment by proximity and budget | Accepted |
+| [0042](0042-diagnostics-and-fuzzing.md) | Explain on demand, overlay as data, decoders fuzzed on two layers | Accepted |

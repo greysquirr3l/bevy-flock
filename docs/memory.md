@@ -84,3 +84,27 @@ rest of the kernel was waiting on memory and sampling as stalls inside the same 
    cell-major order rather than index order. At 1M agents that is 8 MB written in a scattered
    pattern per tick. If the next profile shows write-allocate traffic, the fix is a copy pass
    that reorders writes, not a faster kernel.
+
+## Reaching a behaviour tree
+
+The store answers "what does this NPC remember about that person" in `O(subjects)`. A tree
+asks it several times a tick from arbitrary branches, so the answer is lifted out once:
+`adapters::primary::memory_bridge` writes the strongest subject's valence, familiarity and
+encounter flags into three blackboard slots (`KEY_MEMORY_*`), and
+`behavior::memory_leaves::Remembered::read` turns them into one small struct with three
+predicates — `is_known`, `is_friend`, `is_grudge`.
+
+Three rules make the view safe to read blindly:
+
+- **Familiarity gates it.** A valence without familiarity is not a memory, so a decayed
+  grudge cannot turn every stranger into an enemy.
+- **Flags outrank intensity.** `Attacked` and `Robbed` survive a decay that softened the
+  valence: a grudge is an event, not a feeling.
+- **Absence means stranger.** No slots is `None`, not zeroes, so "I have never met you" and
+  "I am indifferent to you" stay distinct.
+
+Enrolment is by proximity and budget (`MemoryConfig::publish_radius`, `enrol_budget`), so
+the rows go to the NPCs the player can actually meet, nearest first. When the store fills,
+`MemoryBridgeStats::budget_bound` says so instead of the bridge evicting the relationship
+the player spent longest building. Cleared views are counted separately: "the town forgot
+me" and "the town never knew me" are different bugs.

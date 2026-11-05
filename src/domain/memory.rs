@@ -104,6 +104,17 @@ impl SubjectId {
 pub struct MemoryIndex(u32);
 
 impl MemoryIndex {
+    /// A handle from a raw index.
+    ///
+    /// For restoring a row that was persisted, or for a test that wants a specific
+    /// one. It is not a capability: the store checks every handle against its own
+    /// ownership table ([`MemoryStore::is_enrolled`], [`MemoryStore::owner`]), so a
+    /// forged index addresses nothing rather than someone else's memory.
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
     /// The raw index, for storage in a component.
     #[must_use]
     pub const fn get(self) -> u32 {
@@ -419,6 +430,40 @@ impl DecayPolicy {
     }
 }
 
+/// The ordering [`select_enrolment`] uses: nearest first, then by identity.
+///
+/// Exposed so a caller holding more than a pair — the ECS bridge needs the entity as
+/// well as the id and the distance — can sort by the same rule instead of re-deriving
+/// it and drifting.
+#[must_use]
+pub fn enrolment_order(left: (NpcId, f32), right: (NpcId, f32)) -> core::cmp::Ordering {
+    left.1
+        .total_cmp(&right.1)
+        .then_with(|| left.0.cmp(&right.0))
+}
+
+/// Who gets a memory row when the player walks into a market.
+///
+/// The store is a fixed resource — a row capacity and a subject ceiling — so something
+/// has to choose which NPCs are worth remembering the player, and it has to choose the
+/// same way on every run. The rule is:
+///
+/// 1. nearest first, because proximity to the player is the only reason these rows
+///    exist at all: memory is granted to the NPCs the player can actually meet;
+/// 2. ties broken by identity, so two people at the same distance resolve the same way
+///    in a replay;
+/// 3. truncated to `limit`, the per-tick enrolment budget, so a player teleporting
+///    into a packed square cannot enrol a thousand rows in one frame.
+///
+/// Returns the sorted prefix that fits the budget. The slice is sorted in place so a
+/// caller can reuse it for a diagnostic without sorting twice.
+pub fn select_enrolment(candidates: &mut [(NpcId, f32)], limit: usize) -> &[(NpcId, f32)] {
+    candidates.sort_unstable_by(|left, right| enrolment_order(*left, *right));
+    let kept = limit.min(candidates.len());
+    // `kept` is derived from `len()`, so the range is in bounds by construction.
+    candidates.get(..kept).unwrap_or(candidates)
+}
+
 /// Everything one NPC remembers, lifted out of the store.
 ///
 /// Returned by [`MemoryStore::release`] so the caller can drop it, park it in a
@@ -457,6 +502,7 @@ impl NpcMemories {
 /// growing, because a crowd simulation that allocates under load is a crowd
 /// simulation that hitches.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "memory", derive(bevy_ecs::prelude::Resource))]
 pub struct MemoryStore {
     subjects: u16,
     capacity: u32,
@@ -554,6 +600,27 @@ impl MemoryStore {
         Some(MemoryIndex(index))
     }
 
+    /// Enrol the nearest candidates, up to `limit` new rows.
+    ///
+    /// Returns how many rows were created. A candidate already enrolled is skipped
+    /// rather than counted, so a tick that sees the same crowd twice does not report
+    /// work it did not do; a full store stops early, and the returned count is how the
+    /// caller knows the crowd outgrew the budget.
+    pub fn enrol_nearest(&mut self, candidates: &[(NpcId, f32)], limit: usize) -> u32 {
+        let mut enrolled = 0;
+        for (npc, _) in candidates.iter().take(limit) {
+            if self.enrolled().any(|(_, owner)| owner == *npc) {
+                continue;
+            }
+            if self.enrol(*npc).is_some() {
+                enrolled += 1;
+            } else {
+                break;
+            }
+        }
+        enrolled
+    }
+
     /// Whether an index still belongs to the NPC it was issued to.
     #[must_use]
     pub fn is_enrolled(&self, index: MemoryIndex) -> bool {
@@ -628,6 +695,46 @@ impl MemoryStore {
             .filter(|slot| !slot.is_empty())
     }
 
+    /// The single strongest memory this NPC holds about anyone, decayed to `now`.
+    ///
+    /// This is the read a behaviour tree makes: not "what do you remember about
+    /// subject 3" but "who matters most to you right now". It is O(subjects), which
+    /// is a fixed bound rather than a crowd-sized one, and it is called only for the
+    /// minds close enough to care (see `MemoryConfig::publish_radius`).
+    ///
+    /// Ties break to the lower subject, so two people remembered equally well always
+    /// resolve the same way and a replay agrees with the run it replays.
+    #[must_use]
+    pub fn strongest_recall(
+        &self,
+        index: MemoryIndex,
+        now: Tick,
+        decay: DecayPolicy,
+    ) -> Option<(SubjectId, i16, u16, u16)> {
+        if !self.is_enrolled(index) {
+            return None;
+        }
+        let mut best: Option<(SubjectId, i16, u16, u16)> = None;
+        for raw in 0..self.subjects {
+            let subject = SubjectId::new(raw);
+            let Some(slot) = self.recall(index, subject) else {
+                continue;
+            };
+            let familiarity = decay.familiarity_at(slot, now);
+            if familiarity == 0 {
+                // Faded to nothing: the answer a tree wants is "no memory", not a
+                // slot with a zero in it.
+                continue;
+            }
+            let valence = decay.valence_at(slot, now);
+            let candidate = (subject, valence, familiarity, slot.flags);
+            best = match best {
+                Some(current) if current.2 >= familiarity => Some(current),
+                _ => Some(candidate),
+            };
+        }
+        best
+    }
     /// What this NPC remembers, decayed to `now`.
     ///
     /// Returns `None` when the memory has faded to nothing, which is the answer a
@@ -1428,6 +1535,101 @@ mod tests {
             zero.subjects(),
             1,
             "a store with no subjects would be useless"
+        );
+    }
+
+    #[test]
+    fn enrolment_takes_the_nearest_first_and_breaks_ties_by_identity() {
+        let mut candidates = [
+            (NpcId::unique(7), 12.0_f32),
+            (NpcId::unique(3), 2.0_f32),
+            (NpcId::unique(9), 2.0_f32),
+            (NpcId::unique(1), 40.0_f32),
+        ];
+        let kept = select_enrolment(&mut candidates, 3);
+        // Two people at 2 m: the lower identity goes first, so a replay agrees.
+        assert_eq!(
+            kept.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![NpcId::unique(3), NpcId::unique(9), NpcId::unique(7)]
+        );
+        assert_eq!(select_enrolment(&mut candidates, 0).len(), 0);
+        let all = select_enrolment(&mut candidates, 99);
+        assert_eq!(all.len(), 4);
+        assert_eq!(all.last().map(|(id, _)| *id), Some(NpcId::unique(1)));
+    }
+
+    #[test]
+    fn enrol_nearest_skips_rows_that_already_exist() {
+        let mut store = MemoryStore::new(8, 4);
+        let candidates = [(NpcId::unique(1), 1.0_f32), (NpcId::unique(2), 2.0)];
+        assert_eq!(store.enrol_nearest(&candidates, 8), 2);
+        // A second pass adds nobody: the same crowd seen again is not new work.
+        assert_eq!(store.enrol_nearest(&candidates, 8), 0);
+        assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn enrol_nearest_stops_at_the_row_capacity() {
+        let mut store = MemoryStore::new(2, 4);
+        let candidates = [
+            (NpcId::unique(1), 1.0_f32),
+            (NpcId::unique(2), 2.0),
+            (NpcId::unique(3), 3.0),
+        ];
+        // Two rows exist, so the third candidate is left out rather than dropped in
+        // silence: the count is what tells the caller the crowd outgrew the budget.
+        assert_eq!(store.enrol_nearest(&candidates, 8), 2);
+        assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn the_strongest_recall_is_the_familiar_one_and_not_the_merely_recent_one() {
+        let mut store = MemoryStore::new(4, 8);
+        let index = store.enrol(NpcId::unique(1)).expect("row");
+        let stranger = SubjectId::new(0);
+        let friend = SubjectId::new(3);
+        for _ in 0..4 {
+            store.remember(
+                index,
+                stranger,
+                &Encounter::new(EncounterKind::Spoke, Tick::new(10)),
+            );
+        }
+        for _ in 0..40 {
+            store.remember(
+                index,
+                friend,
+                &Encounter::new(EncounterKind::Traded, Tick::new(10)).with_valence(400),
+            );
+        }
+        let now = Tick::new(20);
+        let (subject, valence, familiarity, _flags) = store
+            .strongest_recall(index, now, DecayPolicy::MINUTE)
+            .expect("something is remembered");
+        assert_eq!(subject, friend);
+        assert!(
+            familiarity > 30,
+            "the friend should dominate: {familiarity}"
+        );
+        assert!(valence > 0);
+
+        // With no decay allowance at all the answer does not change, but a memory that
+        // has faded to nothing disappears rather than reporting a zero.
+        let later = Tick::new(20 + 3_600 * 20);
+        assert!(
+            store
+                .strongest_recall(index, later, DecayPolicy::MINUTE)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn strongest_recall_is_none_for_a_row_that_was_never_enrolled() {
+        let store = MemoryStore::new(4, 8);
+        assert!(
+            store
+                .strongest_recall(MemoryIndex(0), Tick::new(1), DecayPolicy::NONE)
+                .is_none()
         );
     }
 
