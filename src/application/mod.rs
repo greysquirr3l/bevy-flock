@@ -6,7 +6,12 @@
 //! on when they were called.
 
 pub use crowd::{Crowd, CrowdParams, CrowdReport};
+pub use director::{
+    AlarmField, AmbientDirector, Beat, Director, DirectorBoard, DirectorCommand, DirectorCommands,
+    DirectorError, DirectorInputs, ScriptedDirector, TracedCommand,
+};
 pub mod crowd;
+pub mod director;
 pub mod packed;
 pub mod schedule;
 pub mod tiered;

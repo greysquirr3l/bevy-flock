@@ -14,11 +14,15 @@
 //! [`blackboard`] is the small typed store they all share.
 
 pub mod archetypes;
+pub mod bark;
+pub mod dialog;
+pub mod provider;
 pub mod blackboard;
 pub mod leaves;
 pub mod registry;
 pub mod state_machine;
 pub mod tree;
+pub mod utility;
 
 pub use archetypes::ArchetypeLogic;
 pub use blackboard::{BLACKBOARD_CAPACITY, Blackboard, BlackboardKey, Value};
@@ -28,6 +32,20 @@ pub use registry::{
     NpcLogic, NpcLogicContext, RegistryDispatch, WorldDirector,
 };
 pub use state_machine::{Guard, StateMachine, Transition, always, never};
+pub use bark::{
+    BarkCategory, BarkError, BarkEvent, BarkLine, BarkQueue, BarkRequest, BarkState, BarkTable,
+};
+pub use dialog::{
+    Condition, DialogChoice, DialogError, DialogGraph, DialogNode, DialogSession, Speaker,
+};
+pub use provider::{
+    DialogContext, DialogPrompt, DialogProvider, DialogReply, ProviderQueue, ReplySource,
+    TemplateProvider,
+};
+pub use utility::{
+    BehaviorId, CandidateScore, Consideration, Curve, Explanation, Inhibition, Input, Selection,
+    UtilityEntry, UtilityError, UtilitySet, UtilityTable, MAX_CONSIDERATIONS,
+};
 pub use tree::{
     BehaviorTree, LeafContext, LeafDispatch, LeafId, NodeKind, NodeSpec, ParallelPolicy, Status,
     TreeCursor, TreeError, action, condition, cooldown, invert, parallel, repeat_until_fail,
