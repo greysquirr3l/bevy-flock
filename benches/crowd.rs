@@ -286,14 +286,21 @@ fn bench_avoidance(c: &mut Criterion) {
     group.finish();
 }
 
-/// Perception and obstacle rebuilds: the two costs ADRs 0046 and 0047 promise to record.
+/// Perception, its index, and obstacle rebuilds: the costs ADRs 0046 and 0047 promise to record.
 ///
 /// Audiences are read-only, so this measures the pass a game would pay at a mid-band cadence:
-/// 512 observers against a full 4,096-record buffer, and a 64x64 rebuild with 32 obstacles.
+/// 512 observers against a full 4,096-record buffer in two densities, the same through the bucket
+/// index, the index rebuild itself, and a 64x64 obstacle rebuild with 32 obstacles.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one function per measured area keeps the report readable; splitting it would \
+              duplicate the fixture"
+)]
 fn bench_perception(c: &mut Criterion) {
     use bevy_flock::domain::obstacle_nav::{ObstacleFootprint, ObstacleNav, ObstacleNavConfig};
     use bevy_flock::domain::stimulus::{
-        OpenAir, PerceptionQuery, Stimulus, StimulusBuffer, StimulusKind, perceive,
+        OpenAir, PerceptionQuery, Stimulus, StimulusBuffer, StimulusIndex, StimulusKind, perceive,
+        perceive_indexed,
     };
     use bevy_flock::domain::tick::Tick;
     use bevy_math::Vec3;
@@ -318,26 +325,8 @@ fn bench_perception(c: &mut Criterion) {
             Tick::ZERO,
         ));
     }
-    let query = PerceptionQuery::new();
-    group.bench_function("10000_observers_128_records", |b| {
-        let mut small = StimulusBuffer::new(128).expect("buffer");
-        for record in buffer.iter().take(128) {
-            small.push(*record);
-        }
-        b.iter(|| {
-            let mut seen = 0_usize;
-            for index in 0..10_000_u32 {
-                #[allow(clippy::cast_precision_loss)]
-                let angle = index as f32 * 0.011;
-                let observer = Vec3::new(libm::cosf(angle) * 12.0, 0.0, libm::sinf(angle) * 12.0);
-                seen += perceive(&small, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
-            }
-            black_box(seen);
-        });
-    });
-    // The same 512 observers and 4,096 records, spread over 400 m instead of 40. Almost nothing is
-    // within the 45 m hearing radius, and a linear scan cannot tell: this is the measurement that
-    // says the cost is spatial-blind, and the number an index would recover.
+    // The same records over 400 m instead of 40: almost nothing is in range, and a linear scan
+    // cannot tell. This is the measurement that says the cost is spatial-blind.
     let mut spread = StimulusBuffer::new(4_096).expect("buffer");
     for record in buffer.iter() {
         spread.push(Stimulus {
@@ -345,28 +334,76 @@ fn bench_perception(c: &mut Criterion) {
             ..*record
         });
     }
-    group.bench_function("512_observers_4096_records_spread_400m", |b| {
+    let query = PerceptionQuery::new();
+
+    let mut index = StimulusIndex::new();
+    index.rebuild(&buffer, Tick::ZERO, 22.5);
+    let mut spread_index = StimulusIndex::new();
+    spread_index.rebuild(&spread, Tick::ZERO, 22.5);
+
+    let observers = |b: &mut criterion::Bencher, buffer: &StimulusBuffer| {
         b.iter(|| {
             let mut seen = 0_usize;
-            for index in 0..512_u32 {
+            for observer_index in 0..512_u32 {
                 #[allow(clippy::cast_precision_loss)]
-                let angle = index as f32 * 0.11;
+                let angle = observer_index as f32 * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
-                seen += perceive(&spread, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+                seen += perceive(buffer, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+            }
+            black_box(seen);
+        });
+    };
+    group.bench_function("512_observers_4096_records", |b| observers(b, &buffer));
+    group.bench_function("512_observers_4096_records_spread_400m", |b| {
+        observers(b, &spread);
+    });
+    group.bench_function("512_observers_4096_records_indexed", |b| {
+        b.iter(|| {
+            let mut seen = 0_usize;
+            for observer_index in 0..512_u32 {
+                #[allow(clippy::cast_precision_loss)]
+                let angle = observer_index as f32 * 0.11;
+                let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
+                seen += perceive_indexed(
+                    &buffer,
+                    &index,
+                    observer,
+                    Vec3::X,
+                    Tick::ZERO,
+                    &query,
+                    &OpenAir,
+                )
+                .len();
             }
             black_box(seen);
         });
     });
-    group.bench_function("512_observers_4096_records", |b| {
+    group.bench_function("512_observers_4096_records_spread_400m_indexed", |b| {
         b.iter(|| {
             let mut seen = 0_usize;
-            for index in 0..512_u32 {
+            for observer_index in 0..512_u32 {
                 #[allow(clippy::cast_precision_loss)]
-                let angle = index as f32 * 0.11;
+                let angle = observer_index as f32 * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
-                seen += perceive(&buffer, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+                seen += perceive_indexed(
+                    &spread,
+                    &spread_index,
+                    observer,
+                    Vec3::X,
+                    Tick::ZERO,
+                    &query,
+                    &OpenAir,
+                )
+                .len();
             }
             black_box(seen);
+        });
+    });
+    group.bench_function("rebuild_4096_records", |b| {
+        let mut index = StimulusIndex::new();
+        b.iter(|| {
+            index.rebuild(&buffer, Tick::ZERO, 22.5);
+            black_box(index.live());
         });
     });
 

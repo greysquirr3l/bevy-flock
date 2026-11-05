@@ -178,6 +178,10 @@ pub struct StimulusBuffer {
     items: Vec<Stimulus>,
     cursor: usize,
     capacity: usize,
+    /// The axis-aligned box around every live record's *sphere*, maintained on push and swept on
+    /// `retain_live`. Min and max are exact operations, so this can never exclude a record that is
+    /// visible: it is a conservative prune, not an approximation.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 impl StimulusBuffer {
@@ -195,6 +199,7 @@ impl StimulusBuffer {
             items: Vec::with_capacity(capacity),
             cursor: 0,
             capacity,
+            bounds: None,
         })
     }
 
@@ -204,6 +209,11 @@ impl StimulusBuffer {
         self.capacity
     }
 
+    /// The record at a ring slot, for an index that stores slots rather than copies.
+    #[must_use]
+    pub fn get(&self, slot: usize) -> Option<&Stimulus> {
+        self.items.get(slot)
+    }
     /// How many records are held.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -221,6 +231,7 @@ impl StimulusBuffer {
     /// Returns whether a live record was overwritten, which is the signal a game wants if it can
     /// afford to grow the buffer instead.
     pub fn push(&mut self, stimulus: Stimulus) -> bool {
+        self.grow_bounds(stimulus);
         if self.items.len() < self.capacity {
             self.items.push(stimulus);
             if self.items.len() == self.capacity {
@@ -243,13 +254,46 @@ impl StimulusBuffer {
         let before = self.items.len();
         self.items.retain(|item| item.is_live(now));
         self.cursor = 0;
+        // Recomputed rather than shrunk: a box that only grows would keep pruning correct but
+        // would slowly stop pruning anything, and the sweep is already O(records).
+        let mut bounds: Option<(Vec3, Vec3)> = None;
+        for stimulus in &self.items {
+            let reach = Vec3::splat(stimulus.radius.max(0.0));
+            let (low, high) = (stimulus.position - reach, stimulus.position + reach);
+            bounds = Some(match bounds {
+                Some((min, max)) => (min.min(low), max.max(high)),
+                None => (low, high),
+            });
+        }
+        self.bounds = bounds;
         before - self.items.len()
+    }
+
+    /// The box around every live record's sphere, if there is a record at all.
+    ///
+    /// An observer outside this box expanded by its own reach cannot perceive anything, which is
+    /// the cheapest prune in the module: one comparison per observer for a crowd where the action
+    /// is in one corner of the level.
+    #[must_use]
+    pub const fn bounds(&self) -> Option<(Vec3, Vec3)> {
+        self.bounds
+    }
+
+    fn grow_bounds(&mut self, stimulus: Stimulus) {
+        let reach = Vec3::splat(stimulus.radius.max(0.0));
+        let low = stimulus.position - reach;
+        let high = stimulus.position + reach;
+        self.bounds = Some(match self.bounds {
+            Some((min, max)) => (min.min(low), max.max(high)),
+            None => (low, high),
+        });
     }
 
     /// Forget everything.
     pub fn clear(&mut self) {
         self.items.clear();
         self.cursor = 0;
+        self.bounds = None;
     }
 
     /// The records, oldest first.
@@ -306,6 +350,19 @@ impl PerceptionQuery {
         self
     }
 
+    /// The largest distance any record can be perceived from under this query.
+    ///
+    /// A record's own radius can only shorten its reach, never lengthen it, so this is the window
+    /// an index must cover to miss nothing.
+    #[must_use]
+    pub fn max_limit(&self) -> f32 {
+        if self.sight_radius.is_finite() && self.hearing_radius.is_finite() {
+            self.sight_radius.max(self.hearing_radius).max(0.0)
+        } else {
+            0.0
+        }
+    }
+
     /// Set how many results one observer keeps.
     #[must_use]
     pub const fn with_max_results(mut self, max: usize) -> Self {
@@ -334,11 +391,17 @@ pub struct Perceived {
     pub strength: f32,
 }
 
-/// What `observer` can perceive right now.
+/// What one observer perceives, scanning the whole buffer.
 ///
-/// The results are ordered by descending strength, then by kind for a stable tie-break, then by
-/// position, so two identical worlds produce identical lists. At most
-/// [`PerceptionQuery::max_results`] are returned.
+/// The simplest correct implementation, and the reference the indexed path is compared against.
+/// It also prunes in O(1): an observer outside the buffer's bounding box expanded by its own reach
+/// cannot perceive anything, and in a level where the action is in one corner that is most of the
+/// crowd.
+///
+/// # Panics
+///
+/// Never: the result is bounded by `query.max_results` and every slot is written through a
+/// checked path.
 #[must_use]
 pub fn perceive(
     buffer: &StimulusBuffer,
@@ -349,61 +412,460 @@ pub fn perceive(
     occluder: &dyn Occluder,
 ) -> SmallVec<[Perceived; 8]> {
     let mut found = SmallVec::<[Perceived; 8]>::new();
+    if !buffer_reaches(buffer, observer, query.max_limit()) {
+        return found;
+    }
     let forward = forward.normalize_or_zero();
     for stimulus in buffer.iter() {
-        if !stimulus.is_live(now) {
-            continue;
+        consider(
+            stimulus, observer, forward, now, query, occluder, &mut found,
+        );
+    }
+    found
+}
+
+/// What one observer perceives, reading only the records the index says are in range.
+///
+/// Identical output to [`perceive`> by construction: the index is a candidate filter whose
+/// candidate set is a superset of the records that can pass the exact predicates, and the kept
+/// slots are chosen by a total order over the records themselves, so the order candidates are
+/// visited in cannot change the answer. `the_index_agrees_with_the_linear_scan` holds it to that
+/// over a randomised buffer.
+#[must_use]
+pub fn perceive_indexed(
+    buffer: &StimulusBuffer,
+    index: &StimulusIndex,
+    observer: Vec3,
+    forward: Vec3,
+    now: Tick,
+    query: &PerceptionQuery,
+    occluder: &dyn Occluder,
+) -> SmallVec<[Perceived; 8]> {
+    // When the observer's window covers the grid there is nothing to prune, and the measured
+    // answer is that scanning the buffer is 34% faster than walking copied entries. Take that path
+    // rather than pretending the index is free: this function is then never slower than
+    // [`perceive`], which is what lets a caller default to it.
+    if index.prunes_nothing(observer, query.max_limit()) {
+        return perceive(buffer, observer, forward, now, query, occluder);
+    }
+    let mut found = SmallVec::<[Perceived; 8]>::new();
+    let forward = forward.normalize_or_zero();
+    index.for_each_candidate(observer, query.max_limit(), |stimulus| {
+        consider(
+            stimulus, observer, forward, now, query, occluder, &mut found,
+        );
+    });
+    found
+}
+
+impl StimulusIndex {
+    /// Whether an observer's window contains every live record, in which case the index prunes
+    /// nothing and the caller should scan the buffer instead.
+    ///
+    /// Deliberately not "does the window cover the grid": the grid is padded by the biggest record
+    /// radius, so a dense world has empty columns the window need not reach, and a grid-shaped test
+    /// measured `false` on exactly the case where the index has nothing to offer.
+    #[must_use]
+    pub fn prunes_nothing(&self, observer: Vec3, limit: f32) -> bool {
+        self.live == 0 || self.candidate_count(observer, limit) >= self.live
+    }
+}
+
+/// A uniform bucket grid over the buffer's live records, rebuilt once per perception pass.
+///
+/// # Why this is exact, not approximate
+///
+/// A record is perceived only if `distance(observer, record) <= limit`, and
+/// `limit = min(query radius, record radius) <= query.max_limit()`. So every record that can pass
+/// the exact predicates has its **centre** inside `observer ± max_limit()`. Insert each record
+/// into the single cell containing its centre, and scan every cell overlapping `observer ±
+/// max_limit()`: the candidate set is a superset of the perceivable records, with no record
+/// visited twice and no predicate weakened. The exact test in [`consider`] then decides, exactly
+/// as it does in the linear scan.
+///
+/// That is the whole bit-identical argument. Three facts carry it:
+///
+/// 1. **Superset.** Cell coverage is derived from `max_limit`, which bounds every record's own
+///    limit, so nothing perceivable is outside the window.
+/// 2. **No duplicates.** A record lives in exactly one cell, so a visitor sees it at most once and
+///    the bounded insertion cannot count it twice.
+/// 3. **Order irrelevance.** The kept slots are chosen by [`ranks`], a total order over the record
+///    fields that appear in the result, so the order candidates arrive in cannot change the
+///    answer. Bucket traversal is still made canonical (row-major cells, ring order within a
+///    cell) so a run is reproducible to the instruction, but correctness does not depend on it.
+///
+/// The grid is sized from the buffer's bounds, and the cell size grows (by powers of two) if the
+/// grid would exceed [`MAX_CELLS`], so a level measured in kilometres cannot allocate a grid
+/// measured in metres. Growing the cell only ever adds candidates; it never loses one.
+#[derive(Debug, Clone)]
+pub struct StimulusIndex {
+    origin: Vec3,
+    cell: f32,
+    cols: u32,
+    rows: u32,
+    /// CSR offsets: cell `i` owns `entries[starts[i]..starts[i + 1]]`.
+    starts: Vec<u32>,
+    /// Per-cell write cursors, used only while filling. Kept as a field so a rebuild does not
+    /// allocate; the fill must not use `starts` itself, or it destroys the offsets it needs.
+    cursors: Vec<u32>,
+    /// The records themselves, copied at rebuild. Copies rather than buffer slots because a slot
+    /// costs a second indirection per candidate, which measured as 19% on the dense case — the one
+    /// case where an index has nothing to prune.
+    entries: Vec<Stimulus>,
+    live: usize,
+}
+
+/// The most cells an index will build before it coarsens the grid instead.
+pub const MAX_CELLS: usize = 1 << 16;
+
+impl Default for StimulusIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StimulusIndex {
+    /// An empty index. Buffers are allocated on the first [`rebuild`](Self::rebuild) and reused.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            origin: Vec3::ZERO,
+            cell: 1.0,
+            cols: 0,
+            rows: 0,
+            starts: Vec::new(),
+            cursors: Vec::new(),
+            entries: Vec::new(),
+            live: 0,
         }
-        let limit = match stimulus.kind {
-            StimulusKind::Sight => query.sight_radius.min(stimulus.radius),
-            _ => query.hearing_radius.min(stimulus.radius),
+    }
+
+    /// How many live records the index covers.
+    #[must_use]
+    pub const fn live(&self) -> usize {
+        self.live
+    }
+
+    /// The grid's cell size after any coarsening.
+    #[must_use]
+    pub const fn cell(&self) -> f32 {
+        self.cell
+    }
+
+    /// The grid's dimensions.
+    #[must_use]
+    pub const fn grid(&self) -> (u32, u32) {
+        (self.cols, self.rows)
+    }
+
+    /// Whether the index holds nothing and a caller can skip perception entirely.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.live == 0
+    }
+
+    /// Forget every cell, keeping the allocations.
+    pub fn clear(&mut self) {
+        self.starts.clear();
+        self.cursors.clear();
+        self.entries.clear();
+        self.cols = 0;
+        self.rows = 0;
+        self.live = 0;
+    }
+
+    /// Lay the live records out again. `cell` is the requested cell size; it is raised if the grid
+    /// would otherwise exceed [`MAX_CELLS`].
+    ///
+    /// Rebuild once per perception pass, not per observer: the whole point is that the layout is
+    /// shared by every observer due this tick.
+    pub fn rebuild(&mut self, buffer: &StimulusBuffer, now: Tick, cell: f32) {
+        self.clear();
+        let Some((min, max)) = buffer.bounds() else {
+            return;
         };
-        // Squared first: most records in a full buffer are out of range, and a comparison saves
-        // the square root for the ones that are not.
-        let distance_squared = (stimulus.position - observer).length_squared();
-        if distance_squared > limit * limit {
-            continue;
+        let mut cell = if cell.is_finite() && cell > 0.0 {
+            cell
+        } else {
+            1.0
+        };
+        let mut cols = 0_u32;
+        let mut rows = 0_u32;
+        for _ in 0..32 {
+            cols = usize_to_u32((max.x - min.x) / cell).saturating_add(1);
+            rows = usize_to_u32((max.z - min.z) / cell).saturating_add(1);
+            if (cols as usize) * (rows as usize) <= MAX_CELLS {
+                break;
+            }
+            cell *= 2.0;
         }
-        let distance = distance_squared.sqrt();
-        if stimulus.kind.uses_field_of_view() && query.field_of_view > -1.0 {
-            // The cone test without a normalize: comparing the dot against `cos * |offset|` is the
-            // same predicate, and saves a square root and a divide per record per observer.
-            let offset = stimulus.position - observer;
-            if forward.dot(offset) < query.field_of_view * distance {
-                continue;
+        self.origin = Vec3::new(min.x, 0.0, min.z);
+        self.cell = cell;
+        self.cols = cols;
+        self.rows = rows;
+
+        let cells = (cols as usize) * (rows as usize);
+        if self.starts.len() < cells + 1 {
+            self.starts.resize(cells + 1, 0);
+        } else {
+            for slot in self.starts.iter_mut().take(cells + 1) {
+                *slot = 0;
             }
         }
-        if stimulus.kind.is_occluded() && occluder.blocks(observer, stimulus.position) {
-            continue;
+
+        // Pass one: count into `starts[i + 1]`, then prefix-sum so `starts[i]` is cell i's start
+        // and `starts[i + 1]` its end.
+        for stimulus in buffer.iter() {
+            if !stimulus.is_live(now) {
+                continue;
+            }
+            self.live += 1;
+            if let Some(cell_index) = self.cell_of(stimulus.position)
+                && let Some(count) = self.starts.get_mut(cell_index + 1)
+            {
+                *count += 1;
+            }
         }
-        let strength = stimulus.strength_at_distance(distance, now);
-        if strength <= 0.0 {
-            continue;
+        for index in 1..=cells {
+            let previous = self.starts.get(index - 1).copied().unwrap_or(0);
+            if let Some(count) = self.starts.get_mut(index) {
+                *count += previous;
+            }
         }
-        if query.max_results == 0 {
-            continue;
+        let total = self.starts.get(cells).copied().unwrap_or(0) as usize;
+        self.entries.clear();
+        self.entries.resize(
+            total,
+            Stimulus::new(StimulusKind::Custom(0), Vec3::ZERO, 0.0, 0.0, now),
+        );
+        if self.cursors.len() < cells {
+            self.cursors.resize(cells, 0);
         }
-        let candidate = Perceived {
-            kind: stimulus.kind,
-            position: stimulus.position,
-            distance,
-            strength,
-        };
-        // Bounded insertion rather than collect-then-sort: `max_results` is six by default, and a
-        // dense buffer can put thousands of records inside the hearing radius. Keeping the best
-        // few as we go costs one comparison per slot and no allocation, where sorting everything
-        // cost a sort per observer and a growth of the result vector the caller never sees.
-        let slot = found.partition_point(|existing| ranks(existing, &candidate) == Ordering::Less);
-        if slot >= query.max_results {
-            continue;
+        for index in 0..cells {
+            let start = self.starts.get(index).copied().unwrap_or(0);
+            if let Some(cursor) = self.cursors.get_mut(index) {
+                *cursor = start;
+            }
         }
-        if found.len() == query.max_results {
-            found.pop();
+
+        // Pass two in ring order, advancing each cell's cursor: entries land in ring order inside
+        // every cell, which is the canonical order the docs promise. The cursors are separate from
+        // `starts` because writing through `starts` would destroy the offsets the reader needs.
+        for stimulus in buffer.iter() {
+            if !stimulus.is_live(now) {
+                continue;
+            }
+            let Some(cell_index) = self.cell_of(stimulus.position) else {
+                continue;
+            };
+            let Some(cursor) = self.cursors.get_mut(cell_index) else {
+                continue;
+            };
+            if let Some(target) = self.entries.get_mut(*cursor as usize) {
+                *target = *stimulus;
+                *cursor += 1;
+            }
         }
-        found.insert(slot, candidate);
     }
-    debug_assert!(found.len() <= query.max_results);
-    found
+
+    /// Visit every record that could be perceived from `observer`, given the query's largest reach.
+    ///
+    /// Order is canonical: row-major over cells, ring order inside a cell. A closer look at the
+    /// contract: `visit` may be called for a record the exact predicates then reject. It is never
+    /// called twice for the same record, and it is never *not* called for a record the exact
+    /// predicates would accept.
+    pub fn for_each_candidate(&self, observer: Vec3, limit: f32, mut visit: impl FnMut(&Stimulus)) {
+        let Some((x0, x1, z0, z1)) = self.window(observer, limit) else {
+            return;
+        };
+        // A window that covers the grid has nothing to prune, and walking cells would pay the
+        // per-cell offset lookups for nothing: one flat pass over the entries is the same set,
+        // cheaper, and order is irrelevant to the answer (see the type docs).
+        if x0 == 0 && z0 == 0 && x1 + 1 == self.cols && z1 + 1 == self.rows {
+            for stimulus in &self.entries {
+                visit(stimulus);
+            }
+            return;
+        }
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let cell_index = (z as usize) * (self.cols as usize) + (x as usize);
+                let (Some(&from), Some(&to)) =
+                    (self.starts.get(cell_index), self.starts.get(cell_index + 1))
+                else {
+                    continue;
+                };
+                if let Some(range) = self.entries.get(from as usize..to as usize) {
+                    for stimulus in range {
+                        visit(stimulus);
+                    }
+                }
+            }
+        }
+    }
+
+    /// How many records [`for_each_candidate`](Self::for_each_candidate) would visit.
+    ///
+    /// The number a test can assert on instead of a wall clock, and the number a game can gate on.
+    #[must_use]
+    pub fn candidate_count(&self, observer: Vec3, limit: f32) -> usize {
+        let Some((x0, x1, z0, z1)) = self.window(observer, limit) else {
+            return 0;
+        };
+        let mut total = 0;
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let cell_index = (z as usize) * (self.cols as usize) + (x as usize);
+                let (Some(&from), Some(&to)) =
+                    (self.starts.get(cell_index), self.starts.get(cell_index + 1))
+                else {
+                    continue;
+                };
+                total += (to - from) as usize;
+            }
+        }
+        total
+    }
+
+    /// The cells overlapping `observer ± limit`, clamped into the grid.
+    ///
+    /// Clamping can only add cells (both ends move inward to the nearest edge), so an observer
+    /// outside the grid scans the nearest column or row and the exact predicates reject the
+    /// candidates. That is cheaper than a special case and cannot lose a record, because every
+    /// record is inside the grid by construction.
+    fn window(&self, observer: Vec3, limit: f32) -> Option<(u32, u32, u32, u32)> {
+        if self.cols == 0 || self.rows == 0 || !limit.is_finite() {
+            return None;
+        }
+        let limit = limit.max(0.0);
+        let inv = 1.0 / self.cell;
+        let max_x = (self.cols - 1) as f32;
+        let max_z = (self.rows - 1) as f32;
+        let clamp = |value: f32, high: f32| -> u32 {
+            if value.is_nan() {
+                0
+            } else {
+                usize_to_u32(value.max(0.0).min(high))
+            }
+        };
+        let x0 = clamp(((observer.x - limit - self.origin.x) * inv).floor(), max_x);
+        let x1 = clamp(((observer.x + limit - self.origin.x) * inv).floor(), max_x);
+        let z0 = clamp(((observer.z - limit - self.origin.z) * inv).floor(), max_z);
+        let z1 = clamp(((observer.z + limit - self.origin.z) * inv).floor(), max_z);
+        Some((x0, x1, z0, z1))
+    }
+
+    /// The single cell containing a point, clamped into the grid.
+    fn cell_of(&self, point: Vec3) -> Option<usize> {
+        if self.cols == 0 || self.rows == 0 {
+            return None;
+        }
+        let inv = 1.0 / self.cell;
+        let x = ((point.x - self.origin.x) * inv).floor();
+        let z = ((point.z - self.origin.z) * inv).floor();
+        if x.is_nan() || z.is_nan() {
+            return None;
+        }
+        let x = usize_to_u32(x.max(0.0).min((self.cols - 1) as f32));
+        let z = usize_to_u32(z.max(0.0).min((self.rows - 1) as f32));
+        Some((z as usize) * (self.cols as usize) + (x as usize))
+    }
+}
+
+/// A non-negative, finite float to `u32`, saturating rather than wrapping.
+fn usize_to_u32(value: f32) -> u32 {
+    if value.is_nan() || value <= 0.0 {
+        return 0;
+    }
+    if value >= u32::MAX as f32 {
+        return u32::MAX;
+    }
+    value as u32
+}
+
+/// Whether any record could possibly reach an observer, using the buffer's bounding box.
+#[inline]
+fn buffer_reaches(buffer: &StimulusBuffer, observer: Vec3, reach: f32) -> bool {
+    let Some((min, max)) = buffer.bounds() else {
+        return false;
+    };
+    let edge = Vec3::splat(reach.max(0.0));
+    observer
+        .max(min - edge)
+        .min(max + edge)
+        .abs_diff_eq(observer, 1.0e-4)
+}
+
+/// Test one record against one observer and keep it if it wins a slot.
+///
+/// `#[inline(always)]`: this runs once per record per observer — two million times in the dense
+/// benchmark — and the extraction that let the linear and indexed paths share it cost 30% at those
+/// counts while it was a real call.
+///
+/// Every predicate lives here and only here, so the linear and indexed paths cannot drift apart:
+/// an index decides which records reach this function, never what it answers.
+#[expect(
+    clippy::inline_always,
+    reason = "two million calls per pass: measured 30% slower without forced inlining, and the \
+              body is the shared predicate set the indexed path must not duplicate"
+)]
+#[inline(always)]
+fn consider(
+    stimulus: &Stimulus,
+    observer: Vec3,
+    forward: Vec3,
+    now: Tick,
+    query: &PerceptionQuery,
+    occluder: &dyn Occluder,
+    found: &mut SmallVec<[Perceived; 8]>,
+) {
+    if !stimulus.is_live(now) || query.max_results == 0 {
+        return;
+    }
+    let limit = match stimulus.kind {
+        StimulusKind::Sight => query.sight_radius.min(stimulus.radius),
+        _ => query.hearing_radius.min(stimulus.radius),
+    };
+    // Squared first: most records in a full buffer are out of range, and a comparison saves the
+    // square root for the ones that are not.
+    let distance_squared = (stimulus.position - observer).length_squared();
+    if distance_squared > limit * limit {
+        return;
+    }
+    let distance = distance_squared.sqrt();
+    if stimulus.kind.uses_field_of_view() && query.field_of_view > -1.0 {
+        // The cone test without a normalize: comparing the dot against `cos * |offset|` is the
+        // same predicate, and saves a square root and a divide per record per observer.
+        let offset = stimulus.position - observer;
+        if forward.dot(offset) < query.field_of_view * distance {
+            return;
+        }
+    }
+    if stimulus.kind.is_occluded() && occluder.blocks(observer, stimulus.position) {
+        return;
+    }
+    let strength = stimulus.strength_at_distance(distance, now);
+    if strength <= 0.0 {
+        return;
+    }
+    let candidate = Perceived {
+        kind: stimulus.kind,
+        position: stimulus.position,
+        distance,
+        strength,
+    };
+    // Bounded insertion rather than collect-then-sort: `max_results` is six by default, and a
+    // dense buffer can put thousands of records inside the hearing radius. Keeping the best few
+    // as we go costs one comparison per slot and no allocation, where sorting everything cost a
+    // sort per observer and a growth of the result vector the caller never sees.
+    let slot = found.partition_point(|existing| ranks(existing, &candidate) == Ordering::Less);
+    if slot >= query.max_results {
+        return;
+    }
+    if found.len() == query.max_results {
+        found.pop();
+    }
+    found.insert(slot, candidate);
 }
 
 /// The order an observer notices things in: strongest first, then nearest, then by kind and
@@ -413,6 +875,7 @@ pub fn perceive(
 /// cannot disagree about a tie. The bounded insertion above depends on it: `partition_point`
 /// needs a predicate that is monotone over the slice, which an order with an arbitrary tie-break
 /// would not give.
+#[inline]
 fn ranks(a: &Perceived, b: &Perceived) -> Ordering {
     b.strength
         .total_cmp(&a.strength)
@@ -685,6 +1148,298 @@ mod tests {
             .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+
+    /// A tiny deterministic generator: the tests need spread-out pseudo-random positions, and a
+    /// fixed sequence is what makes a failure reproducible.
+    fn lcg(seed: &mut u32) -> f32 {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        ((*seed >> 8) & 0xffff) as f32 / 65_535.0
+    }
+
+    fn scattered(count: usize, extent: f32, seed: u32) -> StimulusBuffer {
+        let mut buffer = buffer(count.max(1));
+        let mut state = seed;
+        for _ in 0..count {
+            let x = (lcg(&mut state) - 0.5) * extent;
+            let z = (lcg(&mut state) - 0.5) * extent;
+            let kind = if lcg(&mut state) < 0.33 {
+                StimulusKind::Sound
+            } else {
+                StimulusKind::Sight
+            };
+            let radius = 2.0 + lcg(&mut state) * 40.0;
+            let intensity = 0.2 + lcg(&mut state) * 0.8;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let emitted = Tick::new((lcg(&mut state) * 5.0) as u64);
+            buffer.push(Stimulus::new(kind, at(x, z), radius, intensity, emitted));
+        }
+        buffer
+    }
+
+    fn same(left: &[Perceived], right: &[Perceived]) -> bool {
+        left.len() == right.len()
+            && left.iter().zip(right).all(|(a, b)| {
+                a.kind == b.kind
+                    && a.position == b.position
+                    && a.distance.total_cmp(&b.distance) == Ordering::Equal
+                    && a.strength.total_cmp(&b.strength) == Ordering::Equal
+            })
+    }
+
+    #[test]
+    fn the_index_agrees_with_the_linear_scan() {
+        // The parity test the bit-identical claim rests on: randomised world, randomised observers
+        // (including ones outside the bounds and ones with nothing in range), both paths compared
+        // element for element.
+        let buffer = scattered(600, 300.0, 0x5eed);
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::ZERO, 12.0);
+        assert_eq!(index.live(), 600);
+        let query = PerceptionQuery::new();
+        let mut state = 0xabcd_u32;
+        let mut compared = 0_usize;
+        for _ in 0..400 {
+            let observer = at(
+                (lcg(&mut state) - 0.5) * 400.0,
+                (lcg(&mut state) - 0.5) * 400.0,
+            );
+            let forward = Vec3::new(lcg(&mut state) - 0.5, 0.0, lcg(&mut state) - 0.5);
+            let linear = perceive(&buffer, observer, forward, Tick::ZERO, &query, &OpenAir);
+            let indexed = perceive_indexed(
+                &buffer,
+                &index,
+                observer,
+                forward,
+                Tick::ZERO,
+                &query,
+                &OpenAir,
+            );
+            assert!(
+                same(&linear, &indexed),
+                "indexed path disagreed at {observer}: {linear:?} vs {indexed:?}"
+            );
+            compared += linear.len();
+        }
+        // The sample has to actually observe something, or the test proves nothing.
+        assert!(compared > 50, "only {compared} perceptions compared");
+    }
+
+    #[test]
+    fn the_index_agrees_when_records_were_pushed_in_another_order() {
+        // Two buffers with the same records published in different orders must agree, and both
+        // must agree with the linear path. This is what makes the total order load-bearing.
+        let forward = StimulusBuffer::new(64).expect("buffer");
+        let mut forwards = forward;
+        let mut backwards = StimulusBuffer::new(64).expect("buffer");
+        let records: std::vec::Vec<Stimulus> = (0..40_u8)
+            .map(|index| {
+                let x = f32::from(index) * 1.5 - 30.0;
+                Stimulus::new(StimulusKind::Sound, at(x, x * 0.5), 25.0, 0.5, Tick::ZERO)
+            })
+            .collect();
+        for record in &records {
+            forwards.push(*record);
+        }
+        for record in records.iter().rev() {
+            backwards.push(*record);
+        }
+        let mut index = StimulusIndex::new();
+        index.rebuild(&forwards, Tick::ZERO, 8.0);
+        let mut other = StimulusIndex::new();
+        other.rebuild(&backwards, Tick::ZERO, 8.0);
+        let query = PerceptionQuery::new();
+        let observer = at(0.0, 0.0);
+        let first = perceive_indexed(
+            &forwards,
+            &index,
+            observer,
+            Vec3::X,
+            Tick::ZERO,
+            &query,
+            &OpenAir,
+        );
+        let second = perceive_indexed(
+            &backwards,
+            &other,
+            observer,
+            Vec3::X,
+            Tick::ZERO,
+            &query,
+            &OpenAir,
+        );
+        let linear = perceive(&forwards, observer, Vec3::X, Tick::ZERO, &query, &OpenAir);
+        assert_eq!(first.len(), 6, "the sample should fill every slot");
+        assert!(same(&first, &second), "insertion order changed the answer");
+        assert!(same(&linear, &first), "the two paths disagree");
+    }
+
+    #[test]
+    fn the_index_visits_far_fewer_candidates_when_the_world_is_spread() {
+        // The point of the index, asserted on a count rather than a clock.
+        let buffer = scattered(2_000, 600.0, 0x1234);
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::ZERO, 10.0);
+        let query = PerceptionQuery::new();
+        let reach = query.max_limit();
+        let observer = at(0.0, 0.0);
+        let candidates = index.candidate_count(observer, reach);
+        assert!(
+            candidates < 2_000 / 8,
+            "the index offered {candidates} candidates of 2,000 records"
+        );
+        // And a coarse grid over the same world still visits every record, so coarsening is safe.
+        let mut coarse = StimulusIndex::new();
+        coarse.rebuild(&buffer, Tick::ZERO, 1_000.0);
+        assert_eq!(coarse.candidate_count(observer, reach), 2_000);
+    }
+
+    #[test]
+    fn an_observer_outside_the_bounds_perceives_nothing() {
+        let mut buffer = buffer(8);
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(100.0, 100.0),
+            30.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        let query = PerceptionQuery::new();
+        assert!(
+            perceive(&buffer, at(0.0, 0.0), Vec3::X, Tick::ZERO, &query, &OpenAir).is_empty(),
+            "the bounding box did not prune a distant observer"
+        );
+        // An observer just inside the box keeps working, so the prune is conservative.
+        assert_eq!(
+            perceive(
+                &buffer,
+                at(80.0, 100.0),
+                Vec3::X,
+                Tick::ZERO,
+                &query,
+                &OpenAir
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_record_with_a_long_radius_is_found_from_a_far_cell() {
+        // A shout carries further than the cell it was published in; the window is sized from the
+        // query, not from the cell, which is what makes centre-only insertion safe.
+        let mut buffer = buffer(4);
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(70.0, 0.0),
+            200.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(-70.0, 0.0),
+            200.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::ZERO, 5.0);
+        let query = PerceptionQuery::new().with_ranges(50.0, 80.0);
+        let seen = perceive_indexed(
+            &buffer,
+            &index,
+            at(0.0, 0.0),
+            Vec3::X,
+            Tick::ZERO,
+            &query,
+            &OpenAir,
+        );
+        assert_eq!(
+            seen.len(),
+            2,
+            "a long-radius record was lost by the bucketing"
+        );
+    }
+
+    #[test]
+    fn a_huge_level_coarsens_the_grid_instead_of_allocating_it() {
+        let mut buffer = buffer(4);
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(0.0, 0.0),
+            5.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(50_000.0, 50_000.0),
+            5.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::ZERO, 1.0);
+        let (cols, rows) = index.grid();
+        assert!(
+            (cols as usize) * (rows as usize) <= MAX_CELLS,
+            "grid was {}x{cols} cells",
+            index.grid().1
+        );
+        assert!(index.cell() > 1.0, "the cell size was not coarsened");
+    }
+
+    #[test]
+    fn rebuilding_twice_allocates_nothing_new() {
+        let buffer = scattered(200, 120.0, 0x99);
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::ZERO, 6.0);
+        let capacity = index.entries.capacity();
+        let offsets = index.starts.capacity();
+        for _ in 0..4 {
+            index.rebuild(&buffer, Tick::ZERO, 6.0);
+        }
+        assert_eq!(
+            index.entries.capacity(),
+            capacity,
+            "entries grew on a rebuild"
+        );
+        assert_eq!(
+            index.starts.capacity(),
+            offsets,
+            "offsets grew on a rebuild"
+        );
+    }
+
+    #[test]
+    fn an_expired_record_leaves_the_index_on_the_next_rebuild() {
+        let mut buffer = buffer(8);
+        buffer.push(Stimulus::new(
+            StimulusKind::Sound,
+            at(1.0, 0.0),
+            20.0,
+            1.0,
+            Tick::ZERO,
+        ));
+        // A one-tick shout that has expired by the time the index is rebuilt at tick ten.
+        buffer.push(
+            Stimulus::new(StimulusKind::Sound, at(2.0, 0.0), 20.0, 1.0, Tick::ZERO).with_ttl(1),
+        );
+        let mut index = StimulusIndex::new();
+        index.rebuild(&buffer, Tick::new(10), 4.0);
+        assert_eq!(index.live(), 1, "an expired record was indexed");
+        let query = PerceptionQuery::new();
+        let seen = perceive_indexed(
+            &buffer,
+            &index,
+            at(0.0, 0.0),
+            Vec3::X,
+            Tick::new(10),
+            &query,
+            &OpenAir,
+        );
+        assert_eq!(seen.len(), 1);
     }
 
     #[test]

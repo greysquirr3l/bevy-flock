@@ -70,7 +70,9 @@ The pass is O(live records × observers-due), not O(observers × entities). Meas
 
 At the default six-tick interval the first row is ~3.6 ms a frame for a 10,000-NPC crowd that
 perceives on every tick of its band, which is inside a mid-band budget and well outside a reflex
-one — hence the interval, which is the scheduler's knob in miniature.
+one — hence the interval, which is the scheduler's knob in miniature. The two 4,096-record rows
+are the same work at two densities; the rest of this document is about closing the gap between
+them.
 
 Three optimisations are already in, and they are worth separating because they say which costs are
 left:
@@ -85,59 +87,94 @@ left:
 
 Together they took the dense case from 87.1 ms to 35.8 ms.
 
-## The linear cost, and the three steps that remove it
+## The linear cost, and what was done about it
 
 Per observer, the pass is O(R) in the number of *live records*, whether those records are on top
-of the observer or on the other side of the level. The table above is the proof: the same 4,096
-records cost 35.8 ms when they are crammed into a 40 m square and 9.3 ms when they are spread over
-400 m, because in the spread case almost every record fails the range test. That 9.3 ms — 4.4 ns
-per record per observer — is the **scan tax**: pure cost of looking at records that are nowhere
-near. An index removes the tax, not the work, and that is the whole of the future plan.
+of the observer or on the other side of the level. Two measurements make that concrete:
 
-The steps are ordered by benefit per unit of risk, and each is a separate decision:
+- The same 4,096 records cost 36.4 ms when crammed into a 40 m square and 9.6 ms spread over 400 m,
+  because in the spread case almost every record fails the range test.
+- That 9.6 ms is the **scan tax**: 18 µs per observer for records that are nowhere near.
 
-1. **Observer-side early-out, no new data structure.** The buffer maintains the union sphere of its
-   live records on insert and sweep — one add, one full recompute per tick, O(R) and vectorised by
-   nothing in particular. An observer outside that sphere returns an empty list in O(1). In a
-   100,000-NPC level where forty things are happening in one corner, this is the difference
-   between 10,000 observers paying and the few hundred near the action paying, and it costs one
-   bounding-sphere test per observer. This is the step to take first.
-2. **A bucketed index over the records.** A uniform grid whose cell is
-   `max(sight_radius, hearing_radius) / 2`; each record is inserted into every cell its own radius
-   overlaps, so a 45 m shout at a 22.5 m cell spans at most 5×5 cells and a 3 m footstep spans one.
-   An observer scans the cells its limit overlaps plus one ring, then runs every exact predicate
-   unchanged — range, cone, occlusion and strength are still computed per candidate, so the answer
-   is identical, only the candidate set is smaller. Cost is O(cells) to clear and rebuild per
-   perception tick, amortised across every observer due that tick, which is why it is worth
-   building once per tick rather than per observer. Gains where the ratio of query radius to world
-   extent is small: 4,096 records spread over 400 m with a 45 m hearing radius drops from 4,096
-   candidates per observer to roughly 50.
-3. **Band-scoped observer sets.** Perception is mid-band work, so only observers in the bands that
-   consume it should pay, and each band gets its own interval. This is scheduler integration, not
-   index work, and it is where the 100,000 case is actually won: the crowd at reflex tier does not
-   need a stimulus list, it needs to not walk into a wall.
+Two of the three planned steps shipped with this ADR (the third is scheduler work and stays open):
 
-### What every step must preserve
+### 1. The buffer's bounding box
 
-- **Bit-identical output.** Any index must produce exactly what the linear scan produces, held by a
-  parity test over a randomised buffer (`index_matches_the_linear_scan`), in the same spirit as
-  `the_bounded_insert_keeps_exactly_the_best_slots`, which guards the top-k swap already made.
-- **A canonical candidate order.** The comparator is a total order (`strength`, `distance`, `kind`,
-  `position.x`, `position.z`, all `total_cmp`), so bucket traversal order cannot change the result
-  — but only as long as ties are broken by a field and not by arrival. A test that shuffles the
-  buffer and compares must pass.
-- **No steady-frame allocation.** The bucket array and the union sphere are sized from `capacity`
-  and reused; a `Vec` rebuilt per tick would be a regression the allocator test would catch.
-- **The exact predicates stay exact.** No approximation of the cone, no early acceptance. An index
-  is allowed to skip candidates, never to add or soften one.
+`StimulusBuffer` keeps the axis-aligned box around every live record's *sphere*, updated on `push`
+and recomputed on `retain_live`. Min and max are exact operations, so this can never exclude a
+record that is visible — it is a conservative prune, not an approximation. An observer outside that
+box expanded by its own reach returns an empty list in O(1): in a level where the action is in one
+corner, that is most of the crowd, for one comparison each.
 
-### What reopens this decision
+### 2. The bucketed index
 
-The plan carries a `stimulus-spatial-index` task, and the trigger is a measurement rather than a
-feeling: reopen when the dense case of `crowd_perception` exceeds 25% of a 16.6 ms frame at the
-reference population, or when a game reports more than 256 live records in a level. Until then the
-capacity and the interval are the two knobs, and a game should size its buffer to what its world
-actually does rather than to the worst case.
+`StimulusIndex` is a uniform grid over the live records, rebuilt once per perception pass and read
+by every observer due that tick.
+
+**The grid.** `origin` is the minimum corner of the buffer's box; `cols`/`rows` are
+`ceil(extent / cell) + 1` over x and z; every record sits in the single cell containing its centre.
+If the grid would exceed `MAX_CELLS` (2^16) the cell size doubles until it fits, so a level
+measured in kilometres cannot allocate a grid measured in metres. Coarsening only ever adds
+candidates.
+
+**The layout.** A counting sort into CSR: `starts[i]..starts[i + 1]` is cell `i`'s slice of
+`entries`. The fill uses a separate cursor array — writing through `starts` would destroy the
+offsets the reader needs, which is exactly the bug the parity test caught on the first attempt.
+Entries are filled in ring order, so every cell's slice is in ring order: canonical, reproducible,
+and free of hash iteration.
+
+**The candidates.** The window is `observer ± query.max_limit()`, clamped into the grid.
+
+### Why the output is bit-identical to the linear scan
+
+Three facts, and each has a test:
+
+1. **Superset.** A record is perceived only if `dist <= limit`, and `limit = min(query radius,
+   record radius) <= query.max_limit()`. Therefore every perceivable record's centre lies inside
+   the window, therefore its cell is scanned. Nothing perceivable is skipped. (The window is sized
+   from the *query's* maximum reach, not the record's, which is why centre-only insertion is safe
+   for a 45 m shout as well as a 3 m footstep — `a_record_with_a_long_radius_is_found_from_a_far_cell`.)
+2. **No duplication.** One record lives in one cell, so the visitor sees it at most once and the
+   bounded insertion cannot count it twice.
+3. **Order irrelevance.** The kept slots are chosen by `ranks`, a total order over exactly the
+   fields that appear in `Perceived` (strength, distance, kind, position x, position z, all
+   `total_cmp`). The set of candidates determines the answer, so the order they arrive in cannot.
+   Two records identical in all five fields are also identical in output, so even a tie that
+   straddles `max_results` cannot change the list.
+
+`the_index_agrees_with_the_linear_scan` drives 400 randomised observers against 600 randomised
+records and compares both paths element for element, including observers outside the box and
+observers with nothing in range; `the_index_agrees_when_records_were_pushed_in_another_order`
+publishes the same records in reverse and checks all three lists agree. Predicates are not
+duplicated: `consider` is the only place a record is tested, and an index only decides which
+records reach it.
+
+### The fallback that keeps it never-slower
+
+When the window contains every live record the index can prune nothing, and measuring showed that
+walking copied entries is then 34% *slower* than scanning the buffer. `perceive_indexed` checks
+`prunes_nothing` (candidates ≥ live) and delegates to `perceive` in that case. That is what makes
+"always call `perceive_indexed`" a safe default: it is exactly `perceive` where there is nothing to
+prune, and 2.4× faster where there is.
+
+Deliberately not "does the window cover the grid": the grid is padded by the largest record radius,
+so a dense world has empty columns the window need not reach, and the grid-shaped test reported
+`false` on precisely the case where the index had nothing to offer. The measurement caught that,
+not the reasoning.
+
+### 3. Band-scoped observer sets (open)
+
+Only observers in bands that consume perception should pay, each with its own interval. That is
+scheduler integration, not index work, and it is where the 100,000 case is won. It stays in the
+plan as `band-scoped-perception`.
+
+### Measured
+
+| Case | Linear | Indexed |
+| --- | ---: | ---: |
+| 512 observers, 4,096 records, 40 m square | 36.4 ms | 36.4 ms (fallback) |
+| 512 observers, 4,096 records, 400 m square | 9.6 ms | 4.0 ms (2.4x) |
+| Rebuild of that 4,096-record grid | — | 69 µs per pass |
 
 ### Rejected for the index
 

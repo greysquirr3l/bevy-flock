@@ -368,14 +368,28 @@ bandwidth reason.
 | --- | ---: | ---: |
 | 10,000 observers against 128 live records | 21.7 ms | 2.2 µs observer |
 | 512 observers against 4,096 live records in a 40 m square | 35.8 ms | 70 µs observer |
-| 512 observers against 4,096 live records spread over 400 m | 9.3 ms | 18 µs observer |
+| 512 observers against 4,096 live records spread over 400 m | 9.6 ms | 19 µs observer |
 | 64×64 rebuild, 32 obstacles | 3.7 µs | one full publish |
 
-The two 4,096-record rows are the interesting pair: same record count, same code, 3.9× apart,
+The two 4,096-record rows are the interesting pair: same record count, same code, 3.8× apart,
 because a linear scan pays the same price for a record on the far side of the level as for one on
-top of the observer. That 9.3 ms floor — 4.4 ns per record per observer — is the scan tax an index
-would remove; ADR 0047 plans the three steps that remove it and names the measurement that reopens
-the decision.
+top of the observer. That 9.6 ms floor — 4.7 ns per record per observer — was the scan tax.
+
+Half of it is gone. The buffer now keeps a conservative bounding box, so an observer with nothing
+nearby returns in O(1), and a `StimulusIndex` buckets the live records so an observer only examines
+its own neighbourhood:
+
+| Case | Linear | Indexed | |
+| --- | ---: | ---: | --- |
+| 4,096 records, 40 m square | 36.4 ms | 36.4 ms | index has nothing to prune, so it delegates |
+| 4,096 records, 400 m square | 9.6 ms | 4.0 ms | **2.4× faster** |
+| grid rebuild, 4,096 records | — | 69 µs | amortised over every observer due that tick |
+
+The index is bit-identical to the linear scan by construction (candidate superset, no duplicates,
+total order) and the parity tests drive randomised worlds to prove it; ADR 0047 records the
+argument. Band-scoped observer sets — only observers whose tier consumes perception pay, each with
+its own interval — remain open as `band-scoped-perception`, and that is where the 100,000 case is
+won.
 
 Three optimisations are already banked, the largest being bounded insertion into the six result
 slots instead of collect-sort-truncate: 87.1 ms → 35.8 ms on the dense case. At 128 live records

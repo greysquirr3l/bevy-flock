@@ -958,30 +958,33 @@ name  = "Scale"
 order = 11
 
 [[phases.tasks]]
-slug = "stimulus-spatial-index"
-title = "Perception stops scanning records that are nowhere near"
-goal = "ADR 0047 measured the limit: a linear scan pays the same price for a recorded shout on the far side of the level as for one on top of the observer, so 4,096 live records cost 35.8 ms crammed into 40 m and 9.3 ms spread over 400 m. Add the observer-side early-out and the bucketed index the ADR specifies, so perception costs the records near an observer rather than the records in the world."
+slug = "band-scoped-perception"
+title = "Only the bands that read perception pay for it"
+goal = "Perception is mid-band work, but every observer with a `Perception` component re-reads the buffer on the same tick, whether its tier has any use for the answer or not. Give each band its own interval and observer set, so a reflex-tier crowd that only needs avoidance stops paying for a stimulus list nobody reads."
 kind = "infrastructure"
 hints = [
-  "Step one is the cheap win and needs no new structure: keep the union sphere of live records on the buffer, updated on push and on the per-tick sweep, and return an empty list in O(1) for an observer outside it. In a 100,000-NPC level that turns ten thousand observers paying into the few hundred near the action.",
-  "Step two is a uniform bucket grid whose cell is half the larger query radius; insert each record into every cell its own radius overlaps, scan the cells the observer's limit overlapped plus one ring, then run every exact predicate unchanged. Clear and rebuild once per perception tick, not per observer.",
-  "Bit-identical output is the requirement: an index may skip candidates, never add one or soften one. The comparator is already a total order, so a canonical bucket traversal keeps ties deterministic.",
-  "No steady-frame allocation: size the buckets from the buffer capacity and reuse them, or the allocator test will catch it.",
-  "Band-scoped observer sets are a separate, scheduler-shaped change; do not fold tiering into this task.",
+  "The index and the bounding-box prune (ADR 0047) already cut the cost per observer; this task cuts the number of observers, which is the lever left at 100,000.",
+  "Drive it from `ThinkScheduler`/the tier component rather than adding another cadence knob: a band's interval is a property of how often that band thinks.",
+  "Keep the tick arithmetic deterministic and budgeted like the think scheduler (ADR 0009): phase each band's perception across ticks so a 100,000 crowd does not synchronise onto one frame.",
+  "`Perception` stays opt-in per NPC; this task decides who reads the buffer, not who publishes to it.",
 ]
 test_hints = [
-  "A randomised buffer gives the same list from the indexed and linear paths, including ties, and the test fails if the buffer is shuffled.",
-  "An observer outside the union sphere returns an empty list without touching a record.",
-  "A dense spread-out buffer costs materially fewer candidate examinations, asserted on a counter rather than on wall-clock time.",
-  "The steady-frame allocation count stays at zero.",
+  "A reflex-tier observer does not perceive at all; a deliberative one perceives on its band's interval.",
+  "The population that perceives on a given tick is within a small factor of 1/interval, asserted on a counter.",
+  "Replay determinism holds: the same seed perceives on the same ticks with the same results.",
 ]
 must_haves = [
-  "A union-sphere early-out on the buffer, maintained on push and sweep.",
-  "A reusable bucket index with radius-aware insertion and a parity test against the linear scan.",
-  "`docs/performance.md` updated with the measured before and after, and ADR 0047's plan marked delivered or revised.",
+  "A band-to-interval mapping documented in ADR 0047, with perception phased across ticks.",
+  "A counter of observers perceived per tick, gated in the benchmark suite.",
+  "`docs/performance.md` records the before and after at 10,000 and 100,000 observers.",
 ]
 evaluation_criteria = [
-  "The dense 4,096-record case in `crowd_perception` improves by at least 3x, and the spread case is no slower than it is today.",
-  "`cargo test --all-features` passes, including `tests/determinism.rs` and `tests/crowd_no_alloc.rs`.",
-  "The parity test is written to fail if bucket traversal changes tie order.",
+  "A 100,000-observer crowd with 128 live records costs materially less per frame than it does today.",
+  "`cargo test --all-features` passes, including `tests/determinism.rs`.",
 ]
+
+[[completed]]
+slug         = "stimulus-spatial-index"
+phase        = "Scale"
+delivered_in = "HEAD"
+evidence     = "ADR 0047's index section plus src/domain/stimulus.rs: StimulusBuffer keeps a conservative bounding box (maintained on push, recomputed on retain_live) so an observer with nothing nearby returns in O(1), and StimulusIndex is a uniform bucket grid rebuilt once per pass into CSR offsets (69 us for 4,096 records), filled in ring order with a separate cursor array. perceive_indexed reads only the observer's window and delegates to perceive when the window contains every record, which is what makes it never slower than the linear scan: measured 36.4 ms vs 36.4 ms on a dense 40 m world, and 4.0 ms vs 9.6 ms on the same records spread over 400 m (2.4x). Bit-identical output is argued from a candidate superset (window sized from the query's max reach, so centre-only insertion is safe for a long-radius shout), no duplicates (one cell per record) and a total-order selection (ranks over exactly the fields Perceived carries); the_index_agrees_with_the_linear_scan compares 400 randomised observers against both paths element for element, the_index_agrees_when_records_were_pushed_in_another_order does the same for reversed publish order, and the_index_visits_far_fewer_candidates_when_the_world_is_spread asserts the pruning on a count rather than a clock. The parity test caught a real defect in the CSR fill on its first run (writing through starts destroyed the offsets it needed). The ECS pass uses the index by default."

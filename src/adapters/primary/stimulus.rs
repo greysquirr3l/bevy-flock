@@ -37,7 +37,7 @@ use crate::adapters::primary::plugin::FlockSet;
 use crate::application::SimClock;
 use crate::domain::stimulus::{
     Occluder, OpenAir, Perceived, PerceptionQuery, Stimulus, StimulusBuffer, StimulusError,
-    StimulusKind, perceive,
+    StimulusIndex, StimulusKind, perceive_indexed,
 };
 
 /// Something that publishes itself into the world's stimulus buffer every tick it lives.
@@ -240,6 +240,7 @@ impl StimulusBufferResource {
 pub fn perceive_stimuli(
     clock: Res<SimClock>,
     stimuli: Res<StimulusBufferResource>,
+    mut index: Local<StimulusIndex>,
     observers: Query<
         (&Transform, &NpcVelocity, &mut PerceivedStimuli),
         (With<Perception>, With<Npc>),
@@ -250,14 +251,24 @@ pub fn perceive_stimuli(
         return;
     }
     let query = stimuli.query;
+    // Laid out once for every observer due this tick: half the query's reach is the sweet spot
+    // (a window spans about five cells a side), and the index coarsens itself if a level would
+    // need more than `MAX_CELLS` of them. A `Local` so the buffers survive between passes and the
+    // rebuild allocates nothing after the first frame.
+    index.rebuild(
+        &stimuli.buffer,
+        clock.tick,
+        (query.max_limit() * 0.5).max(1.0),
+    );
     for (transform, velocity, mut perceived) in observers {
         let forward = if velocity.0.length_squared() > f32::EPSILON {
             velocity.0
         } else {
             Vec3::Z
         };
-        perceived.0 = perceive(
+        perceived.0 = perceive_indexed(
             &stimuli.buffer,
+            &index,
             transform.translation,
             forward,
             clock.tick,

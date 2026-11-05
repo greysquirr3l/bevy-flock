@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before truncating to `max_results`; it now inserts in order into a bounded result set, which
   costs one comparison per slot and no allocation. 75.7 ms → 35.8 ms on the dense benchmark, and
   `the_bounded_insert_keeps_exactly_the_best_slots` is the parity test against the old behaviour.
+- **Perception stops scanning the whole world (ADR 0047).** `StimulusBuffer` keeps a conservative
+  bounding box, so an observer with nothing nearby returns in O(1); `StimulusIndex` buckets the live
+  records into a uniform grid rebuilt once per pass (69 µs for 4,096 records) and `perceive_indexed`
+  reads only the observer's neighbourhood. Identical output to the linear scan — candidate superset,
+  one cell per record, total-order selection — held by two randomised parity tests, and the dense
+  case falls back to the linear scan so it is never slower. 4,096 records over 400 m: 9.6 ms → 4.0 ms.
+  The ECS pass uses the index by default.
 - **Three fixes found by the above.** `steer_flock` wrote the kernel's desired velocity as
   `(x, 0, y)`, dropping vertical and lateral motion; it now writes all three axes. Sorting a
   `LinkTable` placed same-key edges after every equal key, leaving insertion order to decide ties.
