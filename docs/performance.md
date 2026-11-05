@@ -549,3 +549,6 @@ the grid rebuild is a small share. `MAX_CELLS` therefore stays; `SpatialGridConf
 is the knob for a game that steers more of its crowd.
 
 ![Occupancy of the 7 m and 9 m grids at 100,000 agents](images/occupancy-7m-9m.png)
+
+The re-open trigger is enforced: `cargo bench --bench crowd -- flock_frame_cell` then
+`python3 scripts/cell_size_gate.py` (3% warn, 10% fail), which is what CI's `cell-size-gate` job runs.

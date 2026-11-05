@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **ADR 0031's re-open trigger is now a CI gate.** `scripts/cell_size_gate.py` reads the
+  `flock_frame_cell` estimates and compares 9 m against 13.5 m: below a 3% saving the decision
+  stands, 3-10% annotates the run, above 10% the build fails and the ADR is wrong. The thresholds
+  are asymmetric because a runner cannot resolve 3% and a flapping gate gets disabled. The
+  `cell-size-gate` CI job runs the benchmark and the script on every push, and the plan carries the
+  dependency as `cell-size-reopen-gate`, which watches the `benchmark-suite` regression-gate work.
+
+
 - **The cell budget is configurable, and the ECS sweep says leave the default alone (ADR 0031).**
   `SpatialGridConfig::max_cells` and `with_cell_budget` let a game raise the grid past 2^20 cells;
   `BoidsConfig::with_grid` exposes it through the plugin. Measured whole-frame time at 10,000 and

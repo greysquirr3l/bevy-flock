@@ -1041,6 +1041,30 @@ name  = "Proof"
 order = 8
 
 [[phases.tasks]]
+slug      = "cell-size-reopen-gate"
+kind      = "infrastructure"
+title     = "Keep ADR 0031's cell-size decision honest: gate, then re-decide"
+goal     = "Turn ADR 0031's re-open trigger into something a machine checks, and make the decision change itself when tiering moves the numbers the ADR was based on."
+depends_on = ["benchmark-suite"]
+implements = ["performance-budget", "ambient-tier"]
+hints = [
+    "The trigger is measured, not remembered: CI runs `flock_frame_cell` and scripts/cell_size_gate.py on every push. Below 3% saving the decision stands, 3-10% annotates the run, above 10% the job fails and the ADR is wrong.",
+    "ADR 0031 left the budget at 2^20 because tiering caps the steered population at a few thousand, so a kernel win on 5% of the crowd is inside the noise. The cause of that cap, `ambient-population-tier`, is delivered (see [[completed]]), so this task cannot depend on it: the dependency is `benchmark-suite`, the live regression-gate work this job is a member of. The causal link is recorded here instead - if a future task tunes the tier ceiling or the scheduler's calibration gate and raises the steered share, that task takes this one as a dependency, in the other direction.",
+    "The fail threshold is 10%, not 3%, because criterion on a shared runner cannot resolve 3% honestly; a gate that flaps gets disabled, and a disabled gate is worse than no gate. The warn band is where a human looks.",
+    "When the gate fires: raise SpatialGridConfig's default max_cells, re-run examples/grid_sweep.rs and flock_frame_cell, record the numbers in ADR 0031 as an amendment, and only then close this task.",
+    "Deliberately not automated: choosing a new default. The gate reports; the decision stays a recorded judgement with measured support.",
+    "This task is a standing watch, not a one-shot: it stays open until the gate fires and the amendment is written, and it closes only when the numbers say the question is settled.",
+]
+test_hints = [
+    "python3 scripts/cell_size_gate.py exits 0 on the committed measurements (0.3% saving) and 2 when handed a synthetic 15% saving.",
+    "The gate job is green on a clean tree and red on a branch where the 9 m case is artificially slowed by 15%.",
+    "The plan's dependency edge is real: `depends_on` names the task that would move the numbers, so a reader can follow the trigger to its cause.",
+]
+evaluation_criteria = [
+    "CI fails when a finer grid would be worth more than 10% of a frame, and does not fail for noise.",
+    "ADR 0031 points at this task and this task points back, so neither can be read as settled while the other is open.",
+]
+[[phases.tasks]]
 slug      = "benchmark-suite"
 kind      = "feature"
 title     = "Criterion benchmarks at 1, 10k, 100k and 1M, with a regression gate"
@@ -1284,6 +1308,18 @@ the completion notes rather than in a claim:
 # from, the commit that delivered it, and the code or record that proves it.
 # Kept rather than deleted, because a plan that forgets its history is how a team
 # re-litigates a decision it already made.
+
+[[completed]]
+slug         = "transposed-crowd-kernel"
+phase        = "Proof"
+delivered_in = "e5d0050"
+evidence     = "ADR 0030 plus src/application/crowd.rs behind `simd`: a cell-major SoA copy built by the same counting sort as the order, blocks of four agents that share a cell with each neighbour broadcast into all four lanes, and a scalar road for buckets too small to fill a block and for ambient-tier agents. Measured at 10,000 agents: planar 7.36 -> 5.78 ms (-22%), volumetric 6.12 -> 4.85 ms (-21%), dense 114.9 -> 81.8 ms (-29%). Parity is a test (the_transposed_road_agrees_with_the_scalar_road, identical counters and desired velocities within 1e-4) and Crowd::steer_scalar stays public as the reference."
+
+[[completed]]
+slug         = "cell-sizing-and-budget"
+phase        = "Proof"
+delivered_in = "642342a..e7e3592"
+evidence     = "ADR 0031 with two sweeps: examples/grid_sweep.rs (kernel against cell size at 10,000 and 100,000 agents) and flock_frame_cell (whole frame at 13.5 m/2^20, 9 m/2^21 and 7 m/2^22). Findings: the road wins at every density tested (so `simd` became a default feature), the kernel wants 6-10 agents per bucket, and the frame does not care about cell size at all (7.29 vs 7.29 vs 7.26 ms at 10,000; 77.0 vs 77.8 vs 80.4 ms at 100,000) because tiering caps the steered population. Consequence: MAX_CELLS stays at 2^20 and the budget became per-config (SpatialGridConfig::max_cells, with_cell_budget, BoidsConfig::with_grid). docs/images/occupancy-7m-9m.png records the occupancy distribution; scripts/cell_size_gate.py plus the CI cell-size-gate job enforce the re-open trigger."
 
 [[completed]]
 slug         = "ci-and-supply-chain"

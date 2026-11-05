@@ -129,6 +129,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --locked --bench crowd --no-run
 
+  cell-size-gate:
+    name: Cell-size re-open gate (ADR 0031)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Measure the frame at 13.5 m and 9 m
+        run: >-
+          cargo bench --locked --bench crowd -- flock_frame_cell
+          --warm-up-time 0.5 --measurement-time 2 --sample-size 10
+      - name: Fail if the finer grid is worth more than 10% of a frame
+        run: python3 scripts/cell_size_gate.py --warn 3 --fail 10
   compat:
     name: Compat (v0.1.0-rc.1 reads current fixtures)
     runs-on: ubuntu-latest

@@ -150,9 +150,13 @@ Re-open this decision if any of these become true, each with its own measurement
 3. **The rebuild stops being cheap**: if a future grid rebuild grows superlinearly in cells, the
    2.9M case's 1% becomes the leading edge of something worse.
 
-Timeline: none of these are scheduled. The knob exists, the benchmark is permanent
-(`cargo bench --bench crowd -- flock_frame_cell`), and the next decision waits for a profile that
-shows the frame, not the kernel, wanting finer cells.
+Timeline: none of these are scheduled, because none of the triggers has fired — but trigger 1 is no
+longer something a human has to remember. It is a CI job (`cell-size-gate`), a script
+(`scripts/cell_size_gate.py`, 3% warn, 10% fail) and a plan task (`cell-size-reopen-gate`) that
+depends on the live `benchmark-suite` work. The thresholds are asymmetric on purpose: criterion on a
+shared runner cannot resolve 3% honestly, and a gate that flaps gets disabled, which is worse than no
+gate at all. The gate reports; choosing a new default stays a recorded judgement with measured
+support behind it.
 
 ## Reproducing
 
