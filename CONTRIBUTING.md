@@ -90,5 +90,10 @@ short and it is measured:
   churn, not 3 minutes.
 - **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
   compilations measures the machine.
+- **Cap compile-heavy groups at about half the cores.** Three tasks on six cores already run at 33%
+  efficiency, and `CARGO_TARGET_DIR` isolation does not recover it (46 s isolated against 43 s
+  shared, measured). The shared target directory is the right default; isolation is a debugging tool.
+- **The plan's groups are dependency-derived, not capacity-aware.** Group 1 schedules eleven tasks;
+  taking them all at once on a small machine is slower than taking three.
 
 `CELL_SIZE_GATE` and the other CI jobs are unaffected: each job has its own runner and cache.

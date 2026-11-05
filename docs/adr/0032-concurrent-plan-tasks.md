@@ -53,9 +53,55 @@ That is the only hard rule this experiment produced.
    it — 36 s of a group is not worth the setup — but a group whose tasks both build from cold should
    use it, because two cold builds serialise inside one target directory and overlap inside two.
 
-## What this does not answer
+## Amendment: three tasks, measured (same day)
 
-Whether a group of *five* tasks contending for cores is faster than the same five in sequence. The
-two-task group is dominated by the build lock, and a benchmark that shares a machine with three
-compilations measures the machine, not the code — which is why benchmark-bearing tasks belong in a
-group of their own, the same way CI gives them their own runner.
+Decision 4 above said a group building from cold "should use isolation, because two cold builds
+serialise inside one target directory and overlap inside two". Three tasks on a six-core machine say
+that is wrong, and this is the correction.
+
+Three genuinely different compile tasks — `--all-features`, `--no-default-features`,
+`--features memory,serde` — each configuration starting from a cold target directory so the numbers
+measure compilation rather than cache warm-up:
+
+| configuration | wall | vs baseline | efficiency (3 tasks) |
+| --- | --- | --- | --- |
+| one target, sequential | 45 s | 100% | 33% |
+| one target, concurrent | 43 s | 105% | 35% |
+| three targets, concurrent | 46 s | 98% | 33% |
+| three targets, sequential | 82 s | 55% | 18% |
+
+**The lock is nearly free (45 s → 43 s, +4%).** ADR 0032 called the build lock "latency, not
+correctness" and implied a real cost. There is almost none: a serialised `cargo` build still uses
+every core, so queueing three CPU-bound builds costs what running them on a contended machine costs
+anyway.
+
+**Isolation does not pay at this size (46 s vs 43 s).** Three cold target directories rebuild the
+dependency tree three times; on six cores, three `cargo` invocations each defaulting to `-j6`
+oversubscribe eighteen compiler threads onto six and the overlap is eaten by contention. Isolation
+bought a 44% win against *sequential isolated* work (82 s → 46 s), which is the wrong comparison —
+against the shared cache it bought nothing.
+
+**Feature subsets come free from a shared cache.** The third task (`memory,serde`, a subset of
+`all-features`) compiled in 0 s in the shared directory. That is the mechanism behind the two-task
+result: a shared target directory is not just a cache, it is a cache of *overlapping* work, and a
+group whose tasks share a feature lineage is cheaper together than apart.
+
+### What replaces decision 4
+
+- **Keep the shared target directory as the default**, even cold. Isolation is not a performance
+  win on a six-core box; it is a diagnostic tool for a corrupted cache and a requirement only when
+  tasks must not share feature unification at all (for example a `--no-default-features` build that
+  must prove it does not link an optional dependency).
+- **Cap a compile-heavy group at about half the cores.** Three tasks on six cores is at the edge;
+  the plan's group 1 schedules *eleven*, which on this machine would spend its wall time in the
+  scheduler. The plan's grouping is dependency-derived and says nothing about capacity — that is a
+  gap, and it is now a known one rather than an assumed non-issue.
+- **Benchmark-bearing tasks still get their own group.** That part of the original decision stands
+  and is strengthened: with three compilations running, the machine cannot measure 3% of a frame.
+
+## What this still does not answer
+
+Whether a group of *eleven* tasks — the size the plan actually schedules — is faster than eleven in
+sequence. Three tasks on six cores already show efficiency falling to 33% and isolation failing to
+recover it; the useful experiment at that size is a scheduler that admits work by CPU count rather
+than a dependency graph alone, and that is a change to the orchestration, not to this repository.

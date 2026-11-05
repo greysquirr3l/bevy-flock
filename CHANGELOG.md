@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **ADR 0032 amended: the build lock is nearly free and `CARGO_TARGET_DIR` isolation does not pay.**
+  Three cold compile tasks on six cores: one target sequential 45 s, one target concurrent 43 s
+  (+4%), three targets concurrent 46 s, three targets sequential 82 s. The original advice to isolate
+  a cold-building group was wrong — three cold dependency trees oversubscribe six cores and give back
+  what the overlap won. The shared target directory stays the default; isolation is now documented as
+  a debugging tool, and compile-heavy groups are capped at about half the cores.
+
+
 - **ADR 0031's re-open trigger is now a CI gate.** `scripts/cell_size_gate.py` reads the
   `flock_frame_cell` estimates and compares 9 m against 13.5 m: below a 3% saving the decision
   stands, 3-10% annotates the run, above 10% the build fails and the ADR is wrong. The thresholds
