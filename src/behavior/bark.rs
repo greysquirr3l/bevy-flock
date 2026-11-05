@@ -13,11 +13,11 @@
 //! Everything is integer and deterministic: given the same tick, the same table
 //! and the same seed, the same NPC says the same thing.
 
-use std::collections::VecDeque;
-use smallvec::SmallVec;
 use crate::domain::ids::NpcId;
 use crate::domain::rng::RngStream;
 use crate::domain::tick::Tick;
+use smallvec::SmallVec;
+use std::collections::VecDeque;
 
 /// The most bark lines one table may hold.
 pub const MAX_BARK_LINES: usize = 512;
@@ -99,6 +99,7 @@ impl BarkCategory {
 /// One authored line.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub struct BarkLine {
     /// What it is for.
     pub category: BarkCategory,
@@ -457,7 +458,9 @@ mod tests {
         let mut rng = RngStream::new(SimSeed::new(3), 9);
         let mut last = None;
         for _ in 0..50 {
-            let pick = table.pick(BarkCategory::Idle, last, &mut rng).expect("a line");
+            let pick = table
+                .pick(BarkCategory::Idle, last, &mut rng)
+                .expect("a line");
             assert_ne!(Some(pick), last, "the same idle line twice in a row");
             last = Some(pick);
         }
@@ -471,8 +474,12 @@ mod tests {
         }
         let table = BarkTable::new(lines).expect("table");
         let mut rng = RngStream::new(SimSeed::new(3), 9);
-        let first = table.pick(BarkCategory::Alarm, None, &mut rng).expect("line");
-        let second = table.pick(BarkCategory::Alarm, Some(first), &mut rng).expect("line");
+        let first = table
+            .pick(BarkCategory::Alarm, None, &mut rng)
+            .expect("line");
+        let second = table
+            .pick(BarkCategory::Alarm, Some(first), &mut rng)
+            .expect("line");
         assert_eq!(first, second);
     }
 

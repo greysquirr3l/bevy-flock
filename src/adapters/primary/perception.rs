@@ -12,15 +12,15 @@
 //! than by making perception expensive for everyone. Distance is the cheap default
 //! and it is enough to make a town feel inhabited.
 
-use smallvec::SmallVec;
-use bevy_ecs::prelude::*;
-use bevy_transform::prelude::Transform;
 use crate::adapters::primary::cognition::NpcBlackboard;
 use crate::adapters::primary::components::Npc;
-use crate::behavior::blackboard::{BlackboardKey, Value};
 use crate::application::SimClock;
+use crate::behavior::blackboard::{BlackboardKey, Value};
 use crate::domain::ids::NpcId;
 use crate::domain::tick::Tick;
+use bevy_ecs::prelude::*;
+use bevy_transform::prelude::Transform;
+use smallvec::SmallVec;
 
 /// The blackboard key set when a player character is within notice range.
 pub const KEY_PLAYER_SEEN: BlackboardKey = BlackboardKey::new(20);
@@ -127,7 +127,7 @@ impl NoticedPeople {
     }
 
     /// The remembered people, newest first.
-    #[must_use]
+    #[must_use = "iterators are lazy and do nothing unless consumed"]
     pub fn iter(&self) -> impl Iterator<Item = (NpcId, Tick)> + '_ {
         self.seen.iter().copied()
     }
@@ -241,9 +241,7 @@ mod tests {
             Some(Tick::ZERO)
         );
         let seen = {
-            let mut query = app
-                .world_mut()
-                .query::<(&Npc, &NpcBlackboard)>();
+            let mut query = app.world_mut().query::<(&Npc, &NpcBlackboard)>();
             query
                 .iter(app.world())
                 .find(|(npc, _)| npc.0 == NpcId::unique(1))

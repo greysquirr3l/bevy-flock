@@ -310,10 +310,10 @@ impl GridNavSource {
                         break;
                     }
                 }
-                if blocked {
-                    if let Some(cell) = walkable.get_mut(y as usize * width as usize + x as usize) {
-                        *cell = false;
-                    }
+                if blocked
+                    && let Some(cell) = walkable.get_mut(y as usize * width as usize + x as usize)
+                {
+                    *cell = false;
                 }
             }
         }
@@ -326,7 +326,8 @@ impl GridNavSource {
 
     /// Walkability at signed coordinates, out-of-range reading as unwalkable.
     fn walkable_at(&self, x: i32, y: i32) -> bool {
-        if x < 0 || y < 0 || x >= i32::from(self.bounds.width) || y >= i32::from(self.bounds.height) {
+        if x < 0 || y < 0 || x >= i32::from(self.bounds.width) || y >= i32::from(self.bounds.height)
+        {
             return false;
         }
         self.walkable
@@ -376,8 +377,10 @@ impl NavSource for GridNavSource {
             // No corner cutting: a diagonal step requires both orthogonal cells to be
             // walkable, otherwise an agent slips through the diagonal gap between two
             // walls and the navmesh stops describing the level.
-            if dx != 0 && dy != 0 && (!self.is_walkable(NavCell::new(nx as u16, cell.y))
-                || !self.is_walkable(NavCell::new(cell.x, ny as u16)))
+            if dx != 0
+                && dy != 0
+                && (!self.is_walkable(NavCell::new(nx as u16, cell.y))
+                    || !self.is_walkable(NavCell::new(cell.x, ny as u16)))
             {
                 continue;
             }
@@ -405,8 +408,7 @@ impl NavSource for GridNavSource {
             self.bounds.origin.x + (f32::from(cell.x) + 0.5) * self.bounds.cell_size,
             self.bounds.origin.y,
             self.bounds.origin.z + (f32::from(cell.y) + 0.5) * self.bounds.cell_size,
-        ) + Vec3::new(0.0, 0.0, 0.0)
-            * half
+        ) + Vec3::new(0.0, 0.0, 0.0) * half
     }
 
     fn version(&self) -> NavVersion {
@@ -425,7 +427,9 @@ mod tests {
     #[test]
     fn cells_convert_both_ways() {
         let grid = grid();
-        let cell = grid.cell_of(Vec3::new(2.5, 0.0, 3.5)).expect("inside the grid");
+        let cell = grid
+            .cell_of(Vec3::new(2.5, 0.0, 3.5))
+            .expect("inside the grid");
         assert_eq!(cell, NavCell::new(2, 3));
         let centre = grid.center_of(cell);
         assert_eq!(grid.cell_of(centre), Some(cell));
@@ -519,7 +523,7 @@ mod tests {
 
     /// A hand-authored source: an annulus, walkable between two radii.
     ///
-    /// This is the "custom NavSource implementation demonstrated in a test" the
+    /// This is the "custom `NavSource` implementation demonstrated in a test" the
     /// plan asks for: no grid, no bitmap, just a rule.
     struct Ring {
         bounds: NavBounds,
@@ -535,23 +539,36 @@ mod tests {
 
         fn is_walkable(&self, cell: NavCell) -> bool {
             let point = self.center_of(cell) - self.centre;
-            let radius = (point.x * point.x + point.z * point.z).sqrt();
+            let radius = point.x.hypot(point.z);
             (self.inner..=self.outer).contains(&radius)
         }
 
         fn neighbours(&self, cell: NavCell, out: &mut SmallVec<[(NavCell, u32); 8]>) {
             let mut candidates = SmallVec::new();
-            GridNavSource::open(Vec3::ZERO, self.bounds.width, self.bounds.height, self.bounds.cell_size)
-                .map(|grid| grid.neighbours(cell, &mut candidates))
-                .ok();
+            GridNavSource::open(
+                Vec3::ZERO,
+                self.bounds.width,
+                self.bounds.height,
+                self.bounds.cell_size,
+            )
+            .map(|grid| grid.neighbours(cell, &mut candidates))
+            .ok();
             out.clear();
-            out.extend(candidates.into_iter().filter(|(next, _)| self.is_walkable(*next)));
+            out.extend(
+                candidates
+                    .into_iter()
+                    .filter(|(next, _)| self.is_walkable(*next)),
+            );
         }
 
         fn cell_of(&self, position: Vec3) -> Option<NavCell> {
             let x = (position.x / self.bounds.cell_size).floor();
             let y = (position.z / self.bounds.cell_size).floor();
-            if x < 0.0 || y < 0.0 || x >= f32::from(self.bounds.width) || y >= f32::from(self.bounds.height) {
+            if x < 0.0
+                || y < 0.0
+                || x >= f32::from(self.bounds.width)
+                || y >= f32::from(self.bounds.height)
+            {
                 return None;
             }
             Some(NavCell::new(x as u16, y as u16))

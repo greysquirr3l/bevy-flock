@@ -13,13 +13,13 @@
 //! (sampled once a second) and the spawn statistics, and its outputs are a handful
 //! of commands; a crowd of a million costs the same to direct as a crowd of ten.
 
-use bevy_ecs::prelude::*;
 use crate::adapters::primary::observability::CrowdPulse;
+use crate::application::SimClock;
 use crate::application::director::{
     AmbientDirector, Director, DirectorBoard, DirectorCommand, DirectorCommands, DirectorInputs,
 };
-use crate::application::SimClock;
 use crate::domain::tick::Tick;
+use bevy_ecs::prelude::*;
 
 /// How many ticks make an in-game hour by default.
 pub const DEFAULT_TICKS_PER_HOUR: u64 = 600;
@@ -50,8 +50,9 @@ impl core::fmt::Debug for CrowdDirector {
         f.debug_struct("CrowdDirector")
             .field("policy", &self.policy.label())
             .field("decisions", &self.decisions)
+            .field("ticks_per_hour", &self.ticks_per_hour)
             .field("commands", &self.commands.as_slice())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -80,6 +81,12 @@ impl CrowdDirector {
     /// Swap the policy without losing the board or the alarm field.
     pub fn set_policy(&mut self, policy: Box<dyn Director + Send + Sync>) {
         self.policy = policy;
+    }
+
+    /// How many ticks this director treats as an in-game hour.
+    #[must_use]
+    pub const fn ticks_per_hour(&self) -> u64 {
+        self.ticks_per_hour
     }
 
     /// The policy's label.
@@ -174,11 +181,11 @@ pub fn run_world_director(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::primary::observability::Diagnostics;
+    use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
+    use crate::application::director::{Beat, ScriptedDirector};
     use bevy_app::App;
     use bevy_math::Vec3;
-    use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
-    use crate::adapters::primary::observability::Diagnostics;
-    use crate::application::director::{Beat, ScriptedDirector};
 
     fn app_with_script(beats: Vec<Beat>) -> App {
         let mut app = App::new();

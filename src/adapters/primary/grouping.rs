@@ -12,10 +12,10 @@
 //! entities to identities and outlives the entity just long enough for the removal
 //! to be attributed.
 
-use std::collections::BTreeMap;
-use bevy_ecs::prelude::*;
-use crate::domain::groups::{GroupError, GroupStore, Formation};
+use crate::domain::groups::{Formation, GroupError, GroupStore};
 use crate::domain::ids::{GroupId, NpcId};
+use bevy_ecs::prelude::*;
+use std::collections::BTreeMap;
 
 /// The group this entity belongs to.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,7 +71,7 @@ impl Groups {
     /// The group an entity's identity belongs to.
     #[must_use]
     pub fn group_of(&self, npc: NpcId) -> Option<GroupId> {
-        self.0.group_of(npc).map(|group| group.id())
+        self.0.group_of(npc).map(crate::domain::groups::Group::id)
     }
 }
 
@@ -117,7 +117,10 @@ impl NpcIndex {
 /// Record newly spawned NPCs in the index.
 pub fn index_new_npcs(
     mut index: ResMut<NpcIndex>,
-    npcs: Query<(Entity, &crate::adapters::primary::components::Npc), Added<crate::adapters::primary::components::Npc>>,
+    npcs: Query<
+        (Entity, &crate::adapters::primary::components::Npc),
+        Added<crate::adapters::primary::components::Npc>,
+    >,
 ) {
     for (entity, npc) in &npcs {
         index.insert(entity, npc.0);
@@ -166,24 +169,21 @@ pub fn assign_formation_slots(
         if group.formation() == Formation::Free {
             continue;
         }
-        let Some(leader) = groups.0.get(member.0).map(|group| group.leader()) else {
+        let Some(leader) = groups
+            .0
+            .get(member.0)
+            .map(crate::domain::groups::Group::leader)
+        else {
             continue;
         };
         if leader == npc.0 {
             continue;
         }
-        let Some((_, transform)) = leaders
-            .iter()
-            .find(|(marker, _)| marker.0 == member.0)
-        else {
+        let Some((_, transform)) = leaders.iter().find(|(marker, _)| marker.0 == member.0) else {
             continue;
         };
         let yaw = transform.rotation.to_euler(bevy_math::EulerRot::YXZ).0;
-        if let Ok(Some(slot)) =
-            groups
-                .0
-                .slot_target(npc.0, transform.translation, yaw, 1.6)
-        {
+        if let Ok(Some(slot)) = groups.0.slot_target(npc.0, transform.translation, yaw, 1.6) {
             target.0 = slot;
         }
     }
@@ -192,18 +192,15 @@ pub fn assign_formation_slots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_app::{App, Update};
-    use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
     use crate::adapters::primary::components::Npc;
+    use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
+    use bevy_app::{App, Update};
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(FlockPlugin::new(FlockConfig::default()));
         app.init_resource::<Groups>().init_resource::<NpcIndex>();
-        app.add_systems(
-            Update,
-            (index_new_npcs, reconcile_despawns).chain(),
-        );
+        app.add_systems(Update, (index_new_npcs, reconcile_despawns).chain());
         app
     }
 
@@ -212,23 +209,46 @@ mod tests {
         let mut app = app();
         let leader = NpcId::unique(1);
         let member = NpcId::unique(2);
-        let group = app.world_mut().resource_mut::<Groups>().create(leader, Formation::Ring).expect("group");
-        app.world_mut().resource_mut::<Groups>().join(group, member).expect("join");
+        let group = app
+            .world_mut()
+            .resource_mut::<Groups>()
+            .create(leader, Formation::Ring)
+            .expect("group");
+        app.world_mut()
+            .resource_mut::<Groups>()
+            .join(group, member)
+            .expect("join");
 
         let leader_entity = app
             .world_mut()
             .spawn((Npc(leader), GroupMember(group), GroupLeader(group)))
             .id();
-        let member_entity = app.world_mut().spawn((Npc(member), GroupMember(group))).id();
+        let member_entity = app
+            .world_mut()
+            .spawn((Npc(member), GroupMember(group)))
+            .id();
         app.update();
-        assert!(app.world().resource::<NpcIndex>().get(member_entity).is_some());
+        assert!(
+            app.world()
+                .resource::<NpcIndex>()
+                .get(member_entity)
+                .is_some()
+        );
 
         app.world_mut().despawn(member_entity);
         app.update();
         let store = app.world().resource::<Groups>();
         assert!(store.0.group_of(member).is_none());
-        assert_eq!(store.0.get(group).map(|group| group.len()), Some(1));
-        assert!(app.world().resource::<NpcIndex>().get(member_entity).is_none());
+        assert_eq!(
+            store.0.get(group).map(crate::domain::groups::Group::len),
+            Some(1)
+        );
+        assert!(
+            app.world()
+                .resource::<NpcIndex>()
+                .get(member_entity)
+                .is_none()
+        );
         let _ = leader_entity;
     }
 
@@ -237,18 +257,31 @@ mod tests {
         let mut app = app();
         let leader = NpcId::unique(9);
         let member = NpcId::unique(4);
-        let group = app.world_mut().resource_mut::<Groups>().create(leader, Formation::Ring).expect("group");
-        app.world_mut().resource_mut::<Groups>().join(group, member).expect("join");
+        let group = app
+            .world_mut()
+            .resource_mut::<Groups>()
+            .create(leader, Formation::Ring)
+            .expect("group");
+        app.world_mut()
+            .resource_mut::<Groups>()
+            .join(group, member)
+            .expect("join");
         let leader_entity = app
             .world_mut()
             .spawn((Npc(leader), GroupMember(group), GroupLeader(group)))
             .id();
-        let _ = app.world_mut().spawn((Npc(member), GroupMember(group))).id();
+        let _ = app
+            .world_mut()
+            .spawn((Npc(member), GroupMember(group)))
+            .id();
         app.update();
         app.world_mut().despawn(leader_entity);
         app.update();
         let store = app.world().resource::<Groups>();
-        assert_eq!(store.0.get(group).map(|group| group.leader()), Some(member));
+        assert_eq!(
+            store.0.get(group).map(crate::domain::groups::Group::leader),
+            Some(member)
+        );
     }
 
     #[test]
@@ -280,7 +313,9 @@ mod tests {
             .spawn((
                 Npc(member),
                 GroupMember(group),
-                crate::adapters::primary::components::NpcTarget(bevy_math::Vec3::new(1.0, 0.0, 1.0)),
+                crate::adapters::primary::components::NpcTarget(bevy_math::Vec3::new(
+                    1.0, 0.0, 1.0,
+                )),
             ))
             .id();
         app.update();
@@ -288,7 +323,12 @@ mod tests {
             .world()
             .get::<crate::adapters::primary::components::NpcTarget>(member_entity)
             .copied();
-        assert_eq!(target, Some(crate::adapters::primary::components::NpcTarget(bevy_math::Vec3::new(1.0, 0.0, 1.0))));
+        assert_eq!(
+            target,
+            Some(crate::adapters::primary::components::NpcTarget(
+                bevy_math::Vec3::new(1.0, 0.0, 1.0)
+            ))
+        );
     }
 
     #[test]

@@ -6,15 +6,15 @@
 //! portable to a server binary that never links a renderer.
 
 pub mod cognition;
+pub mod continuum;
+pub mod cost;
 pub mod flow;
 pub mod generator;
 pub mod groups;
-pub mod nav;
-pub mod continuum;
-pub mod cost;
 pub mod ids;
 #[cfg(feature = "memory")]
 pub mod memory;
+pub mod nav;
 pub mod population;
 pub mod rng;
 #[cfg(feature = "memory")]
@@ -29,21 +29,23 @@ pub mod tick;
 pub mod weight;
 
 pub use cost::VirtualCost;
-pub use flow::{FlowCache, FlowField, FlowKey, FlowLookup, FlowSolver, FlowTarget, SolveProgress, solve};
+pub use flow::{
+    FlowCache, FlowField, FlowKey, FlowLookup, FlowSolver, FlowTarget, SolveProgress, solve,
+};
 pub use generator::{
     ArchetypeEntry, ArchetypeTable, Generator, GeneratorError, Name, NameStyle, NpcBlueprint, TagId,
 };
 pub use groups::{
-    FactionId, FactionMatrix, Formation, Group, GroupError, GroupSnapshot, GroupStore, QueuedDirective,
-    Relation, MAX_FACTIONS, MAX_NESTING_DEPTH,
+    FactionId, FactionMatrix, Formation, Group, GroupError, GroupSnapshot, GroupStore,
+    MAX_FACTIONS, MAX_NESTING_DEPTH, QueuedDirective, Relation,
 };
-pub use nav::{GridNavSource, NavBounds, NavCell, NavError, NavSource, NavVersion};
 pub use ids::{GroupId, NpcId, SimSeed, SlotId};
 #[cfg(feature = "memory")]
 pub use memory::{
     DecayPolicy, Encounter, EncounterKind, MemoryArchive, MemoryIndex, MemorySlot, MemoryStore,
     NpcMemories, SubjectId,
 };
+pub use nav::{GridNavSource, NavBounds, NavCell, NavError, NavSource, NavVersion};
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;
 #[cfg(feature = "memory")]

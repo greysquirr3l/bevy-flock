@@ -389,6 +389,12 @@ impl Plugin for FlockPlugin {
             .init_resource::<crate::adapters::primary::world_director::AmbientMood>()
             .init_resource::<crate::adapters::primary::world_director::CrowdAlarms>()
             .init_resource::<crate::adapters::primary::world_director::CrowdDirector>()
+            .init_resource::<crate::adapters::primary::render::CrowdView>()
+            .init_resource::<crate::adapters::primary::render::RenderPlan>()
+            .init_resource::<crate::adapters::primary::dialogue::Barks>()
+            .init_resource::<crate::adapters::primary::dialogue::DialogHub>()
+            .init_resource::<crate::adapters::primary::dialogue::DialogOutbox>()
+            .init_resource::<crate::adapters::primary::perception::PerceptionConfig>()
             .configure_sets(
                 Update,
                 (
@@ -422,6 +428,9 @@ impl Plugin for FlockPlugin {
                     crate::adapters::primary::perception::forget_the_absent,
                     crate::adapters::primary::observability::sample_crowd,
                     crate::adapters::primary::observability::count_frames,
+                    crate::adapters::primary::dialogue::produce_barks,
+                    crate::adapters::primary::dialogue::tick_dialog,
+                    crate::adapters::primary::render::build_render_plan,
                 )
                     .chain()
                     .in_set(FlockSet::Perception),

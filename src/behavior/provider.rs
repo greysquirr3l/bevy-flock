@@ -19,12 +19,12 @@
 //! service) and the simulation never learns. Requiring an async runtime would have
 //! made this crate's runtime decision for every game that uses it.
 
-use std::collections::VecDeque;
-use smallvec::SmallVec;
 use crate::behavior::bark::{BarkCategory, BarkTable};
 use crate::domain::ids::NpcId;
 use crate::domain::rng::RngStream;
 use crate::domain::tick::Tick;
+use smallvec::SmallVec;
+use std::collections::VecDeque;
 
 /// The most prompts that may be in flight before new ones are refused.
 pub const MAX_INFLIGHT: usize = 32;
@@ -156,9 +156,7 @@ impl DialogProvider for TemplateProvider {
 impl TemplateProvider {
     /// Build the reply for a prompt from the table.
     fn answer(&mut self, prompt: DialogPrompt, now: Tick) -> Option<DialogReply> {
-        let line = self
-            .table
-            .pick(prompt.category, None, &mut self.rng)?;
+        let line = self.table.pick(prompt.category, None, &mut self.rng)?;
         let text = self.table.text(line)?.to_owned();
         Some(DialogReply {
             npc: prompt.npc,
@@ -280,7 +278,10 @@ impl ProviderQueue {
         for reply in fresh {
             // A reply for a prompt that already fell back is discarded rather than
             // shown twice.
-            let still_wanted = self.inflight.iter().any(|entry| entry.prompt.npc == reply.npc);
+            let still_wanted = self
+                .inflight
+                .iter()
+                .any(|entry| entry.prompt.npc == reply.npc);
             if !still_wanted {
                 self.discarded_late = self.discarded_late.saturating_add(1);
                 continue;
@@ -379,7 +380,7 @@ mod tests {
         TemplateProvider::new(BarkTable::starter().expect("table"), 7)
     }
 
-    fn prompt(npc: u32, at: u64, deadline: u64) -> DialogPrompt {
+    fn prompt(npc: u32, _at: u64, deadline: u64) -> DialogPrompt {
         DialogPrompt {
             npc: NpcId::unique(npc),
             category: BarkCategory::Greeting,
@@ -410,7 +411,11 @@ mod tests {
         assert!(queue.submit(prompt(1, 0, 5), Tick::ZERO));
         provider.submit(prompt(1, 0, 5));
         // Before the deadline nothing is produced.
-        assert!(queue.tick(&mut provider, &mut fallback, Tick::new(2)).is_empty());
+        assert!(
+            queue
+                .tick(&mut provider, &mut fallback, Tick::new(2))
+                .is_empty()
+        );
         // At the deadline the fallback speaks.
         let replies = queue.tick(&mut provider, &mut fallback, Tick::new(5));
         assert_eq!(replies.len(), 1);

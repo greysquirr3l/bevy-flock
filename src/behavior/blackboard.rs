@@ -14,6 +14,7 @@ pub const BLACKBOARD_CAPACITY: usize = 16;
 
 /// A working-memory slot identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlackboardKey(u16);
 
 impl BlackboardKey {

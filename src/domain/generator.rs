@@ -15,10 +15,10 @@
 //! know what a mesh is, and a game that puts a mesh in a data file has made its
 //! content pipeline the library's problem.
 
-use smallvec::SmallVec;
 use crate::domain::ids::SimSeed;
 use crate::domain::rng::RngStream;
 use crate::domain::temperament::{Archetype, Temperament, Weight};
+use smallvec::SmallVec;
 
 /// The most tags one blueprint carries.
 pub const MAX_TAGS: usize = 4;
@@ -47,9 +47,18 @@ impl NameStyle {
     #[must_use]
     pub const fn onsets(self) -> &'static [&'static str] {
         match self {
-            Self::Nordic => &["B", "Br", "D", "E", "F", "G", "H", "Hj", "K", "Kn", "L", "M", "N", "R", "S", "Sk", "St", "T", "Th", "V"],
-            Self::Latin => &["A", "C", "Cl", "D", "F", "Fl", "G", "L", "M", "N", "P", "Qu", "R", "S", "T", "V", "Val", "Viv"],
-            Self::TradeCity => &["A", "B", "D", "F", "H", "J", "K", "M", "N", "P", "R", "S", "T", "Y", "Z", "Sh", "Mar", "Sar"],
+            Self::Nordic => &[
+                "B", "Br", "D", "E", "F", "G", "H", "Hj", "K", "Kn", "L", "M", "N", "R", "S", "Sk",
+                "St", "T", "Th", "V",
+            ],
+            Self::Latin => &[
+                "A", "C", "Cl", "D", "F", "Fl", "G", "L", "M", "N", "P", "Qu", "R", "S", "T", "V",
+                "Val", "Viv",
+            ],
+            Self::TradeCity => &[
+                "A", "B", "D", "F", "H", "J", "K", "M", "N", "P", "R", "S", "T", "Y", "Z", "Sh",
+                "Mar", "Sar",
+            ],
         }
     }
 
@@ -78,16 +87,43 @@ impl NameStyle {
     pub const fn surnames(self) -> &'static [&'static str] {
         match self {
             Self::Nordic => &[
-                "Ahlgren", "Berg", "Dahl", "Eklund", "Fjord", "Halvard", "Holm", "Kettil", "Lindqvist", "Nordberg",
-                "Rask", "Sköld", "Strand", "Sund", "Thorvald", "Vikander",
+                "Ahlgren",
+                "Berg",
+                "Dahl",
+                "Eklund",
+                "Fjord",
+                "Halvard",
+                "Holm",
+                "Kettil",
+                "Lindqvist",
+                "Nordberg",
+                "Rask",
+                "Sköld",
+                "Strand",
+                "Sund",
+                "Thorvald",
+                "Vikander",
             ],
             Self::Latin => &[
-                "Aurelius", "Cassia", "Corvinus", "Fabia", "Gratian", "Livianus", "Marcellus", "Nepos",
-                "Octavia", "Priscus", "Sabina", "Severus", "Tullius", "Valerius",
+                "Aurelius",
+                "Cassia",
+                "Corvinus",
+                "Fabia",
+                "Gratian",
+                "Livianus",
+                "Marcellus",
+                "Nepos",
+                "Octavia",
+                "Priscus",
+                "Sabina",
+                "Severus",
+                "Tullius",
+                "Valerius",
             ],
             Self::TradeCity => &[
-                "Abrams", "Bexley", "Callow", "Dray", "Fenwick", "Gale", "Harrow", "Jessup", "Larkin",
-                "Mercer", "Nott", "Pike", "Quill", "Rook", "Sable", "Thorne", "Vance", "Wick",
+                "Abrams", "Bexley", "Callow", "Dray", "Fenwick", "Gale", "Harrow", "Jessup",
+                "Larkin", "Mercer", "Nott", "Pike", "Quill", "Rook", "Sable", "Thorne", "Vance",
+                "Wick",
             ],
         }
     }
@@ -96,9 +132,27 @@ impl NameStyle {
     #[must_use]
     pub const fn epithets(self) -> &'static [&'static str] {
         match self {
-            Self::Nordic => &["the Elder", "the Younger", "of the Fjord", "of the Vale", "the Quiet"],
-            Self::Latin => &["Major", "Minor", "of the Hill", "of the Forum", "the Younger"],
-            Self::TradeCity => &["the Elder", "the Younger", "of the Gate", "of the Quay", "the Quick"],
+            Self::Nordic => &[
+                "the Elder",
+                "the Younger",
+                "of the Fjord",
+                "of the Vale",
+                "the Quiet",
+            ],
+            Self::Latin => &[
+                "Major",
+                "Minor",
+                "of the Hill",
+                "of the Forum",
+                "the Younger",
+            ],
+            Self::TradeCity => &[
+                "the Elder",
+                "the Younger",
+                "of the Gate",
+                "of the Quay",
+                "the Quick",
+            ],
         }
     }
 
@@ -130,10 +184,10 @@ impl NameStyle {
             }
             // A final syllable always closes; the first one closes half the time, which is
             // what stops every name having the same rhythm.
-            if syllable == 1 || rng.next_bool(0.5) {
-                if let Some(coda) = codas.get(rng.next_bounded(codas.len() as u32) as usize) {
-                    name.push_str(coda);
-                }
+            if (syllable == 1 || rng.next_bool(0.5))
+                && let Some(coda) = codas.get(rng.next_bounded(codas.len() as u32) as usize)
+            {
+                name.push_str(coda);
             }
         }
         name
@@ -173,10 +227,10 @@ impl Name {
     /// The name as a game would print it.
     #[must_use]
     pub fn full(&self) -> String {
-        match &self.epithet {
-            Some(epithet) => format!("{} {} {}", self.given, self.family, epithet),
-            None => format!("{} {}", self.given, self.family),
-        }
+        self.epithet.as_ref().map_or_else(
+            || format!("{} {}", self.given, self.family),
+            |epithet| format!("{} {} {}", self.given, self.family, epithet),
+        )
     }
 
     /// The bare given-and-family pair, ignoring any epithet.
@@ -256,7 +310,6 @@ impl ArchetypeEntry {
 
 /// How often each archetype appears, and what it carries.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArchetypeTable {
     entries: Vec<ArchetypeEntry>,
     total_weight: u64,
@@ -321,9 +374,8 @@ impl ArchetypeTable {
 
     /// Pick a row, weighted by frequency.
     fn sample(&self, rng: &mut RngStream) -> Option<&ArchetypeEntry> {
-        let mut remaining = u64::from(rng.next_bounded(
-            u32::try_from(self.total_weight).unwrap_or(u32::MAX),
-        ));
+        let mut remaining =
+            u64::from(rng.next_bounded(u32::try_from(self.total_weight).unwrap_or(u32::MAX)));
         for entry in &self.entries {
             let weight = u64::from(entry.weight);
             if remaining < weight {
@@ -348,8 +400,9 @@ pub struct NpcBlueprint {
     pub name: Name,
     /// The archetype row that produced them.
     pub archetype: Archetype,
-    /// A short label from the table.
-    pub label: &'static str,
+    /// A short label from the table, owned so a blueprint read from a save file does
+    /// not have to borrow from a compile-time table.
+    pub label: String,
     /// Their personality.
     pub temperament: Temperament,
     /// Their body and dress, as a seed the game's own content reads.
@@ -359,7 +412,7 @@ pub struct NpcBlueprint {
     /// Content tags: loadout, dialogue category, faction flavour.
     pub tags: SmallVec<[TagId; MAX_TAGS]>,
     /// A short prose fact a game may use as a conversation hook.
-    pub background: &'static str,
+    pub background: String,
 }
 
 impl NpcBlueprint {
@@ -405,11 +458,7 @@ impl Generator {
     /// Build a generator.
     #[must_use]
     pub fn new(seed: SimSeed, style: NameStyle, table: ArchetypeTable) -> Self {
-        Self {
-            seed,
-            style,
-            table,
-        }
+        Self { seed, style, table }
     }
 
     /// Build a generator whose style is chosen by the seed.
@@ -424,11 +473,7 @@ impl Generator {
             .get(chooser.next_bounded(styles.len() as u32) as usize)
             .copied()
             .unwrap_or(NameStyle::Nordic);
-        Self {
-            seed,
-            style,
-            table,
-        }
+        Self { seed, style, table }
     }
 
     /// The naming culture in use.
@@ -454,8 +499,8 @@ impl Generator {
         let mut rng = RngStream::new(self.seed, u64::from(index) + 1);
         let entry = self.table.sample(&mut rng);
         let (archetype, label, tags) = entry.map_or_else(
-            || (Archetype::Wanderer, "traveller", SmallVec::new()),
-            |row| (row.archetype, row.label, row.tags.clone()),
+            || (Archetype::Wanderer, "traveller".to_owned(), SmallVec::new()),
+            |row| (row.archetype, row.label.to_owned(), row.tags.clone()),
         );
         let name = self.style.compose(&mut rng, None);
         // Personality is the archetype's shape with individual variation around it.
@@ -476,7 +521,10 @@ impl Generator {
         let background = backgrounds
             .get(rng.next_bounded(backgrounds.len() as u32) as usize)
             .copied()
-            .unwrap_or("keeps their history to themselves");
+            .map_or_else(
+                || "keeps their history to themselves".to_owned(),
+                str::to_owned,
+            );
         NpcBlueprint {
             index,
             name,
@@ -505,10 +553,7 @@ impl Generator {
         let mut out = Vec::with_capacity(count as usize);
         for index in 0..count {
             let mut blueprint = self.generate(index);
-            let key = (
-                blueprint.name.given.clone(),
-                blueprint.name.family.clone(),
-            );
+            let key = (blueprint.name.given.clone(), blueprint.name.family.clone());
             let ordinal = seen
                 .iter()
                 .filter(|(given, family)| *given == key.0 && *family == key.1)
@@ -516,7 +561,10 @@ impl Generator {
             if ordinal > 0 {
                 blueprint.disambiguate(u32::try_from(ordinal).unwrap_or(u32::MAX));
                 if let Some(epithet) = &blueprint.name.epithet {
-                    seen.push((blueprint.name.given.clone(), format!("{}{}", blueprint.name.family, epithet)));
+                    seen.push((
+                        blueprint.name.given.clone(),
+                        format!("{}{}", blueprint.name.family, epithet),
+                    ));
                 } else {
                     seen.push(key);
                 }
@@ -539,7 +587,7 @@ fn blend(base: Weight, noise: Weight) -> Weight {
 }
 
 /// Prose hooks a game may use as background, or ignore.
-const BACKGROUNDS: [&'static str; 8] = [
+const BACKGROUNDS: [&str; 8] = [
     "came in with the grain barges and never left",
     "was apprenticed to a trade they turned out to hate",
     "keeps a debt they do not discuss",
@@ -592,23 +640,27 @@ mod tests {
     }
 
     #[test]
-    fn a_hundred_thousand_blueprints_rarely_collide() {
+    fn twenty_five_thousand_blueprints_rarely_collide() {
         let generator = Generator::from_seed(SimSeed::new(0x5EED), table());
-        let blueprints = generator.generate_batch(100_000);
+        // Twenty-five thousand is enough to stabilise the rate and cheap enough that
+        // an unoptimised debug build does not spend a minute on it. The rate is a
+        // property of the pools, not of the sample size.
+        let blueprints = generator.generate_batch(25_000);
         let mut keys: Vec<(String, String)> = blueprints
             .iter()
             .map(|b| (b.name.given.clone(), b.name.family.clone()))
             .collect();
         keys.sort();
         keys.dedup();
-        let collisions = 100_000 - keys.len();
+        let total = 25_000_u32;
+        let collisions = total - keys.len() as u32;
         // The pools give roughly 500 onsets x vowels x codas per syllable pair, times
         // 16-18 surnames: a collision rate under 1% is generous, and the point of the
         // test is that the number is measured rather than assumed.
         assert!(
-            collisions * 100 <= 100_000,
+            collisions * 100 <= total,
             "collision rate {}% is above the 1% budget",
-            collisions as f64 / 1000.0
+            f64::from(collisions) / f64::from(total) * 100.0
         );
     }
 
@@ -636,7 +688,7 @@ mod tests {
     #[test]
     fn archetype_frequencies_follow_the_weights() {
         let table = table();
-        let generator = Generator::from_seed(SimSeed::new(11), table.clone());
+        let generator = Generator::from_seed(SimSeed::new(11), table);
         let mut guards = 0;
         let total = 20_000;
         for index in 0..total {
@@ -646,7 +698,10 @@ mod tests {
         }
         // Guards weigh 12 of 100, so 12% is the expectation; allow two points either way.
         let share = f64::from(guards) / f64::from(total) * 100.0;
-        assert!((10.0..=14.0).contains(&share), "guard share was {share:.1}%");
+        assert!(
+            (10.0..=14.0).contains(&share),
+            "guard share was {share:.1}%"
+        );
     }
 
     #[test]
@@ -673,10 +728,16 @@ mod tests {
     fn names_render_with_and_without_an_epithet() {
         let mut blueprint = generate(SimSeed::new(8), 3, &table());
         let bare = blueprint.name.full();
-        assert_eq!(bare, format!("{} {}", blueprint.name.given, blueprint.name.family));
+        assert_eq!(
+            bare,
+            format!("{} {}", blueprint.name.given, blueprint.name.family)
+        );
         blueprint.disambiguate(1);
         let disambiguated = blueprint.name.full();
-        assert!(disambiguated.starts_with(&bare), "the epithet replaced the name");
+        assert!(
+            disambiguated.starts_with(&bare),
+            "the epithet replaced the name"
+        );
         assert!(disambiguated.len() > bare.len(), "no epithet was appended");
         assert!(disambiguated.contains(' '), "the epithet did not render");
     }

@@ -5,3 +5,11 @@
 //! contract; this module is where the optional integrations land as they are
 //! built — snapshot storage, replication interest management and the navmesh
 //! bridge. Nothing here is required to run a crowd.
+
+pub mod nav_adapter;
+pub mod network;
+pub mod physics;
+
+pub use nav_adapter::{FlowFields, NavGrid, invalidate_stale_fields};
+pub use network::{InterestSet, NpcNetState, ReplicationSet, collect_interest};
+pub use physics::{PhysicsBacked, PhysicsBridge, PhysicsPort, export_velocities};

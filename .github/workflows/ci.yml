@@ -173,6 +173,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --locked --bench crowd --no-run
+      # The newer benches: cognition (the scheduler), groups, flow fields and the
+      # replication wire format. They compile here and are run on demand locally.
+      - run: cargo bench --locked --all-features --benches --no-run
+  examples:
+    name: Examples run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # An example that does not run is a broken promise in the README, so the cheap
+      # ones are executed rather than merely compiled.
+      - run: cargo build --locked --all-features --examples
+      - run: cargo run --release --locked --example hello_flock
+      - run: cargo run --release --locked --example custom_behavior
+      - run: cargo run --release --locked --all-features --example tavern_dialog
+      - run: cargo run --release --locked --all-features --example ambient_metropolis
 
   cell-size-gate:
     name: Cell-size re-open gate (ADR 0031)

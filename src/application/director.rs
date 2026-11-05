@@ -23,9 +23,9 @@
 //! writing a fear component to every NPC near a fire — is exactly the O(n) stall
 //! this crate exists to avoid.
 
+use crate::domain::tick::Tick;
 use bevy_math::Vec3;
 use smallvec::SmallVec;
-use crate::domain::tick::Tick;
 
 /// How many commands a director may emit in one decision.
 pub const MAX_COMMANDS: usize = 8;
@@ -261,14 +261,15 @@ impl Director for AmbientDirector {
             market
         } else if (17.0..21.0).contains(&hour) {
             evening
-        } else if hour >= 22.0 || hour < 6.0 {
+        } else if !(6.0..22.0).contains(&hour) {
             night
         } else {
             weekday
         };
         // Tension drags the mood down; an alarm count above a handful is a bad day.
         let tension_drag = inputs.tension.clamp(0.0, 1.0) * 0.4;
-        let alarm_drag = (f32::from(u16::try_from(inputs.alarms).unwrap_or(u16::MAX)) * 0.05).min(0.3);
+        let alarm_drag =
+            (f32::from(u16::try_from(inputs.alarms).unwrap_or(u16::MAX)) * 0.05).min(0.3);
         self.mood = (target - tension_drag - alarm_drag).clamp(-1.0, 1.0);
         out.push(DirectorCommand::Mood {
             value: self.mood,
@@ -281,7 +282,9 @@ impl Director for AmbientDirector {
         if quiet {
             let until = inputs.tick.get().saturating_add(self.decision_interval * 2);
             self.quiet_until = Some(Tick::new(until));
-            out.push(DirectorCommand::Quiesce { ttl_ticks: until.saturating_sub(inputs.tick.get()) });
+            out.push(DirectorCommand::Quiesce {
+                ttl_ticks: until.saturating_sub(inputs.tick.get()),
+            });
         }
         // Nobody has been seen for a long time: the ambient tier can shrink.
         if inputs.ticks_since_player.is_some_and(|ticks| ticks > 3_600) {
@@ -571,7 +574,10 @@ impl DirectorBoard {
                 // short enough that a street recovers.
                 self.alarms.raise(position, strength, radius, at, 600);
             }
-            DirectorCommand::Calm { at: position, radius } => {
+            DirectorCommand::Calm {
+                at: position,
+                radius,
+            } => {
                 self.alarms.calm(position, radius, at);
             }
             DirectorCommand::Mood { .. }
@@ -627,7 +633,10 @@ mod tests {
         }
         let midnight = moods.first().copied().unwrap_or(0.0);
         let midmorning = moods.get(10).copied().unwrap_or(0.0);
-        assert!(midmorning > midnight, "the market should be busier than midnight");
+        assert!(
+            midmorning > midnight,
+            "the market should be busier than midnight"
+        );
     }
 
     #[test]
@@ -637,7 +646,10 @@ mod tests {
         director.decide(&inputs(0), &mut out);
         out.clear();
         director.decide(&inputs(1), &mut out);
-        assert!(out.is_empty(), "the director decided twice inside one interval");
+        assert!(
+            out.is_empty(),
+            "the director decided twice inside one interval"
+        );
     }
 
     #[test]
@@ -647,10 +659,11 @@ mod tests {
         busy.alarms = 4;
         let mut out = DirectorCommands::new();
         director.decide(&busy, &mut out);
-        assert!(out
-            .as_slice()
-            .iter()
-            .any(|command| matches!(command, DirectorCommand::Quiesce { .. })));
+        assert!(
+            out.as_slice()
+                .iter()
+                .any(|command| matches!(command, DirectorCommand::Quiesce { .. }))
+        );
         assert!(director.mood() < 0.0);
     }
 

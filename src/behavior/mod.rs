@@ -15,39 +15,41 @@
 
 pub mod archetypes;
 pub mod bark;
-pub mod dialog;
-pub mod provider;
 pub mod blackboard;
+pub mod dialog;
 pub mod leaves;
+pub mod provider;
 pub mod registry;
+pub mod social;
 pub mod state_machine;
 pub mod tree;
 pub mod utility;
 
 pub use archetypes::ArchetypeLogic;
-pub use blackboard::{BLACKBOARD_CAPACITY, Blackboard, BlackboardKey, Value};
-pub use leaves::StandardLeaves;
-pub use registry::{
-    Directive, DirectiveKind, DirectorContext, FlockRegistry, GroupDirector, LeafBehavior,
-    NpcLogic, NpcLogicContext, RegistryDispatch, WorldDirector,
-};
-pub use state_machine::{Guard, StateMachine, Transition, always, never};
 pub use bark::{
     BarkCategory, BarkError, BarkEvent, BarkLine, BarkQueue, BarkRequest, BarkState, BarkTable,
 };
+pub use blackboard::{BLACKBOARD_CAPACITY, Blackboard, BlackboardKey, Value};
 pub use dialog::{
     Condition, DialogChoice, DialogError, DialogGraph, DialogNode, DialogSession, Speaker,
 };
+pub use leaves::StandardLeaves;
 pub use provider::{
     DialogContext, DialogPrompt, DialogProvider, DialogReply, ProviderQueue, ReplySource,
     TemplateProvider,
 };
-pub use utility::{
-    BehaviorId, CandidateScore, Consideration, Curve, Explanation, Inhibition, Input, Selection,
-    UtilityEntry, UtilityError, UtilitySet, UtilityTable, MAX_CONSIDERATIONS,
+pub use registry::{
+    Directive, DirectiveKind, DirectorContext, FlockRegistry, GroupDirector, LeafBehavior,
+    NpcLogic, NpcLogicContext, RegistryDispatch, WorldDirector,
 };
+pub use social::{AvoidKnown, GreetKnown, GreetingGuard, KEY_TALK_TO, KEY_WARY_OF};
+pub use state_machine::{Guard, StateMachine, Transition, always, never};
 pub use tree::{
     BehaviorTree, LeafContext, LeafDispatch, LeafId, NodeKind, NodeSpec, ParallelPolicy, Status,
     TreeCursor, TreeError, action, condition, cooldown, invert, parallel, repeat_until_fail,
     selector, sequence, timeout,
+};
+pub use utility::{
+    BehaviorId, CandidateScore, Consideration, Curve, Explanation, Inhibition, Input,
+    MAX_CONSIDERATIONS, Selection, UtilityEntry, UtilityError, UtilitySet, UtilityTable,
 };

@@ -16,10 +16,10 @@
 //!   door that opens invalidates the fields built against the old layout, instead
 //!   of leaving a crowd walking through a wall that is no longer there.
 
-use std::collections::BinaryHeap;
+use crate::domain::nav::{NavBounds, NavCell, NavSource, NavVersion};
 use bevy_math::{Vec2, Vec3};
 use smallvec::SmallVec;
-use crate::domain::nav::{NavBounds, NavCell, NavSource, NavVersion};
+use std::collections::BinaryHeap;
 
 /// Bytes one cached field costs beyond its two `Vec`s, for the memory report.
 pub const FLOW_FIELD_OVERHEAD_BYTES: usize = core::mem::size_of::<FlowField>();
@@ -140,7 +140,9 @@ impl FlowField {
     /// Bytes this field occupies.
     #[must_use]
     pub fn bytes(&self) -> usize {
-        FLOW_FIELD_OVERHEAD_BYTES + self.cost.len() * core::mem::size_of::<u32>() + self.dir.len() * 8
+        FLOW_FIELD_OVERHEAD_BYTES
+            + self.cost.len() * core::mem::size_of::<u32>()
+            + self.dir.len() * 8
     }
 
     /// Build the direction array from a completed cost field.
@@ -180,7 +182,10 @@ impl FlowField {
                     // geometrically direct one.
                     let delta = source.center_of(next) - source.center_of(cell);
                     let planar = Vec2::new(delta.x, delta.z);
-                    let drop = f32::from(u16::try_from((own - next_cost).min(u32::from(u16::MAX))).unwrap_or(u16::MAX));
+                    let drop = f32::from(
+                        u16::try_from((own - next_cost).min(u32::from(u16::MAX)))
+                            .unwrap_or(u16::MAX),
+                    );
                     sum += planar.normalize_or_zero() * drop;
                 }
                 if let Some(slot) = self.dir.get_mut(index) {
@@ -227,7 +232,10 @@ impl FlowSolver {
             *slot = 0;
         }
         let mut heap = BinaryHeap::new();
-        heap.push(std::cmp::Reverse((0, target.cell.index(bounds.width) as u32)));
+        heap.push(std::cmp::Reverse((
+            0,
+            target.cell.index(bounds.width) as u32,
+        )));
         Self {
             bounds,
             version: source.version(),
@@ -450,6 +458,7 @@ impl FlowCache {
     /// # Errors
     ///
     /// As [`FlowCache::new`] at construction; lookups themselves cannot fail.
+    #[allow(clippy::indexing_slicing)] // `position` came from `iter().position`.
     pub fn field_for(
         &mut self,
         source: &dyn NavSource,
@@ -547,15 +556,20 @@ mod tests {
         let field = solve(&grid, target);
         let near = Vec3::new(4.1, 0.0, 4.1);
         let direction = field.sample(near, &grid);
-        assert!(direction.x > 0.0 && direction.y > 0.0, "should walk into the centre");
+        assert!(
+            direction.x > 0.0 && direction.y > 0.0,
+            "should walk into the centre"
+        );
     }
 
     #[test]
     fn unreachable_cells_have_no_direction() {
         let mut grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
         // Wall off a corner entirely.
-        grid.add_obstacle(NavCell::new(6, 0), NavCell::new(6, 7)).expect("wall");
-        grid.add_obstacle(NavCell::new(0, 6), NavCell::new(7, 6)).expect("wall");
+        grid.add_obstacle(NavCell::new(6, 0), NavCell::new(6, 7))
+            .expect("wall");
+        grid.add_obstacle(NavCell::new(0, 6), NavCell::new(7, 6))
+            .expect("wall");
         let target = FlowTarget::at_cell(&grid, NavCell::new(2, 2));
         let field = solve(&grid, target);
         let trapped = NavCell::new(7, 7);
@@ -616,7 +630,11 @@ mod tests {
             let _ = cache.field_for(&grid, target);
             assert!(cache.len() <= 4);
         }
-        assert!(cache.bytes() <= budget, "cache grew to {} bytes", cache.bytes());
+        assert!(
+            cache.bytes() <= budget,
+            "cache grew to {} bytes",
+            cache.bytes()
+        );
         assert!(cache.evictions() > 0, "nothing was ever evicted");
     }
 
@@ -634,10 +652,7 @@ mod tests {
 
     #[test]
     fn a_cache_needs_room_for_one_field() {
-        assert_eq!(
-            FlowCache::new(0).unwrap_err(),
-            FlowCacheError::ZeroCapacity
-        );
+        assert_eq!(FlowCache::new(0).unwrap_err(), FlowCacheError::ZeroCapacity);
     }
 
     #[test]

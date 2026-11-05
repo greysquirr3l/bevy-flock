@@ -15,6 +15,7 @@ use crate::error::ConfigError;
 /// convert at the edge via [`TicksPerSecond::delta_seconds`], and any state that
 /// would otherwise be stored as elapsed seconds is stored as a tick count so it
 /// survives a replay exactly.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Tick(u64);
 

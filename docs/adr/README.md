@@ -61,3 +61,9 @@ replay.
 | [0032](0032-concurrent-plan-tasks.md) | Concurrent plan tasks: build cache safe, git index not | Accepted |
 | [0033](0033-group-cap-policy.md) | Group capping: cap by threads, size groups from wiggum, enforce in CI | Accepted |
 | [0034](0034-scaling-regression-suite.md) | Scaling regression suite: gate on speedup ratios, refuse mismatched fixtures | Accepted |
+| [0035](0035-behaviour-tree-node-set.md) | Ten composites and decorators, stateless shared leaves, allocation-free ticks | Accepted |
+| [0036](0036-utility-scoring.md) | Utility scoring beside trees: curves, inhibition, count compensation, explain | Accepted |
+| [0037](0037-dialog-graphs.md) | Dialog graphs are validated before they are played | Accepted |
+| [0038](0038-barks-are-budgeted.md) | Barks are a bounded, cooldown-gated channel with a per-frame cap | Accepted |
+| [0039](0039-world-director.md) | The director decides, the board applies: policies as values, decisions traced | Accepted |
+| [0040](0040-optional-integrations-are-ports.md) | Physics, networking and rendering are ports, not dependencies | Accepted |

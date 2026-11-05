@@ -32,8 +32,8 @@
 //! same deterministic, allocation-free model as the rest of cognition: a session
 //! is a few integers, and the text is borrowed from the loaded graph.
 
-use smallvec::SmallVec;
 use crate::behavior::blackboard::{Blackboard, BlackboardKey, Value};
+use smallvec::SmallVec;
 
 /// The most choices one node may offer.
 pub const MAX_CHOICES: usize = 6;
@@ -171,7 +171,7 @@ impl DialogGraph {
     #[cfg(feature = "serde")]
     pub fn from_ron(source: &str) -> Result<Self, DialogError> {
         let graph: Self = ron::from_str(source).map_err(|error| DialogError::Parse {
-            line: error.span.start.line,
+            line: error.position.line,
             message: error.code.to_string(),
         })?;
         graph.validate()?;
@@ -224,6 +224,9 @@ impl DialogGraph {
     /// # Errors
     ///
     /// As [`DialogGraph::new`].
+    // Seven checks in a row, each one a paragraph in ADR 0037; splitting them would
+    // scatter the argument that the set is complete.
+    #[allow(clippy::too_many_lines)]
     pub fn validate(&self) -> Result<(), DialogError> {
         if self.nodes.is_empty() {
             return Err(DialogError::Empty);
@@ -363,6 +366,9 @@ pub struct DialogSession {
     finished: bool,
 }
 
+// A session is a small `Copy` handle and the accessors read better as methods on a
+// borrowed session than as functions taking one by value.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 impl DialogSession {
     /// The node the conversation is on.
     #[must_use]
@@ -394,7 +400,10 @@ impl DialogSession {
             return out;
         };
         for choice in &node.choices {
-            if choice.requires.is_none_or(|condition| condition.holds(blackboard)) {
+            if choice
+                .requires
+                .is_none_or(|condition| condition.holds(blackboard))
+            {
                 out.push(choice);
             }
         }
@@ -680,7 +689,10 @@ mod tests {
                     id: 0,
                     speaker: Speaker::Npc,
                     text: "Choose.".to_owned(),
-                    choices: vec![DialogChoice::new("Wrong way.", 1), DialogChoice::new("Leave.", 3)],
+                    choices: vec![
+                        DialogChoice::new("Wrong way.", 1),
+                        DialogChoice::new("Leave.", 3),
+                    ],
                 },
                 DialogNode {
                     id: 1,

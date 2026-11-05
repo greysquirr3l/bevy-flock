@@ -13,6 +13,7 @@ use crate::domain::tick::Tick;
 use crate::error::ConfigError;
 
 /// A probability-like scalar in `0.0..=1.0`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Weight(f32);
 
@@ -84,6 +85,7 @@ impl fmt::Display for Weight {
 /// The first five are the Big Five, because a model that designers already know
 /// beats a model invented for this crate. The last three are the axes a game
 /// actually asks for by name.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Temperament {
     /// Openness to novelty: high means curious, low means conventional.
@@ -203,6 +205,7 @@ impl Temperament {
 }
 
 /// A coarse personality preset a generator can weight against.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Archetype {
     /// A soldier, watchman or gatekeeper.
@@ -251,6 +254,7 @@ impl fmt::Display for Archetype {
 /// Fixed-size rather than a map: four floats fit in a cache line, and a need
 /// system that allocates is a need system that costs more than the cognition it
 /// feeds.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Needs {
     /// Physical tiredness; low means exhausted.
@@ -408,6 +412,7 @@ impl NeedChannel {
 /// Two continuous axes compose (a happy crowd under threat becomes tense, not
 /// undefined), whereas a mood enum forces every consumer to enumerate
 /// transitions by hand.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mood {
     /// How positive the NPC feels, in `-1.0..=1.0`.

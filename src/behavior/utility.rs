@@ -36,8 +36,9 @@
 //! silenced it. That is what makes "why did this NPC do that" answerable from the
 //! output alone, which is a requirement rather than a nicety.
 
-use smallvec::SmallVec;
 use crate::behavior::blackboard::{Blackboard, BlackboardKey, Value};
+use smallvec::SmallVec;
+use std::fmt::Write as _;
 
 /// The most considerations one utility set may hold.
 pub const MAX_CONSIDERATIONS: usize = 8;
@@ -423,17 +424,14 @@ impl Explanation {
                     .iter()
                     .find(|candidate| candidate.id == selection.id)
                     .map_or("unknown", |candidate| candidate.label);
-                out.push_str(&format!(
-                    "chose {label} at {:.3}",
-                    selection.score
-                ));
+                let _ = write!(out, "chose {label} at {:.3}", selection.score);
                 if let Some((runner_up, score)) = selection.runner_up {
                     let label = self
                         .candidates
                         .iter()
                         .find(|candidate| candidate.id == runner_up)
                         .map_or("unknown", |candidate| candidate.label);
-                    out.push_str(&format!(" (runner-up {label} at {score:.3})"));
+                    let _ = write!(out, " (runner-up {label} at {score:.3})");
                 }
                 out.push('\n');
             }
@@ -445,8 +443,9 @@ impl Explanation {
                 .iter()
                 .map(|(value, weight)| format!("{value:.2}×{weight:.2}"))
                 .collect();
-            out.push_str(&format!(
-                "  {:<16} score {:.3} (raw {:.3}) {}{}\n",
+            let _ = writeln!(
+                out,
+                "  {:<16} score {:.3} (raw {:.3}) {}{}",
                 candidate.label,
                 candidate.score,
                 candidate.raw,
@@ -455,8 +454,12 @@ impl Explanation {
                 } else {
                     contributions.join(" ")
                 },
-                if candidate.inhibited { "  [inhibited]" } else { "" },
-            ));
+                if candidate.inhibited {
+                    "  [inhibited]"
+                } else {
+                    ""
+                },
+            );
         }
         out
     }
@@ -609,12 +612,10 @@ mod tests {
     fn table() -> UtilityTable {
         let mut chat = UtilitySet::new();
         chat.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
-        chat.push(
-            Consideration::keyed(KEY_FEAR).with_curve(Curve::Linear {
-                slope: -1.0,
-                intercept: 1.0,
-            }),
-        )
+        chat.push(Consideration::keyed(KEY_FEAR).with_curve(Curve::Linear {
+            slope: -1.0,
+            intercept: 1.0,
+        }))
         .expect("push");
         let mut eat = UtilitySet::new();
         eat.push(Consideration::keyed(KEY_HUNGER).with_curve(Curve::Step { threshold: 0.5 }))
@@ -637,7 +638,10 @@ mod tests {
         for curve in Curve::SIMPLE {
             for input in [-1.0, 0.0, 0.25, 0.5, 1.0, 4.0, f32::NAN] {
                 let value = curve.evaluate(input);
-                assert!((0.0..=1.0).contains(&value), "{curve:?} at {input} gave {value}");
+                assert!(
+                    (0.0..=1.0).contains(&value),
+                    "{curve:?} at {input} gave {value}"
+                );
             }
         }
     }
@@ -692,7 +696,10 @@ mod tests {
         let blackboard = board(0.0, 0.6, 0.6);
         let selection = table.select(&blackboard).expect("a winner");
         assert_eq!(selection.id, BehaviorId::new(1));
-        assert_eq!(selection.runner_up.map(|(id, _)| id), Some(BehaviorId::new(2)));
+        assert_eq!(
+            selection.runner_up.map(|(id, _)| id),
+            Some(BehaviorId::new(2))
+        );
     }
 
     #[test]
@@ -703,10 +710,12 @@ mod tests {
         let afraid = table.select(&board(0.95, 0.9, 0.1)).expect("a winner");
         assert_eq!(afraid.id, BehaviorId::new(2), "fear did not cancel chat");
         let explanation = table.explain(&board(0.95, 0.9, 0.1));
-        assert!(explanation
-            .candidates
-            .iter()
-            .any(|candidate| candidate.inhibited));
+        assert!(
+            explanation
+                .candidates
+                .iter()
+                .any(|candidate| candidate.inhibited)
+        );
     }
 
     #[test]
@@ -721,7 +730,12 @@ mod tests {
             threshold: 0.5,
         });
         assert!(table.select(&board(0.0, 1.0, 0.0)).is_none());
-        assert!(table.explain(&board(0.0, 1.0, 0.0)).text().contains("nothing"));
+        assert!(
+            table
+                .explain(&board(0.0, 1.0, 0.0))
+                .text()
+                .contains("nothing")
+        );
     }
 
     #[test]
@@ -729,7 +743,10 @@ mod tests {
         let text = table().explain(&board(0.0, 0.7, 0.2)).text();
         assert!(text.contains("chat"), "{text}");
         assert!(text.contains("runner-up"), "{text}");
-        assert!(text.contains('×'), "per-consideration weights are missing: {text}");
+        assert!(
+            text.contains('×'),
+            "per-consideration weights are missing: {text}"
+        );
     }
 
     #[test]

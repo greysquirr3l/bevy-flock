@@ -40,16 +40,27 @@ that means:
 | Virtual-cost fair-queue think scheduler (ADR 0009) | **Shipped** |
 | Proximity weights with hysteresis, wired to the scheduler | **Shipped** |
 | Tiered cognition: reflex, reactive, deliberative, social (ADR 0017) | **Shipped** |
-| Ambient continuum: population as density past the manifest band (ADR 0018) | Proposed |
-| Continuum ambient tier (millions of inhabitants) | Planned |
-| Dialogue graphs, barks, facts | Planned |
+| Ambient continuum: population as density past the manifest band (ADR 0018) | **Shipped** |
+| Continuum ambient tier (millions of inhabitants, nine gates) | **Shipped** |
+| Procedural NPC generation: names, temperament, needs, backgrounds (ADR 0035 context) | **Shipped** |
+| Behaviour tree node set: six composites, four decorators, allocation-free ticks (ADR 0035) | **Shipped** |
+| Utility scoring: curves, inhibition, count compensation, explain (ADR 0036) | **Shipped** |
+| Groups, formations and faction relations (ADR 0039 context, ADR 0021) | **Shipped** |
+| World director: mood, events, alarms and a decision trace (ADR 0039) | **Shipped** |
+| Encounter perception: who noticed whom, and for how long | **Shipped** |
+| Dialogue graphs, facts and conversation state, validated at load (ADR 0037) | **Shipped** |
+| Barks: bounded queue, per-category cooldowns, per-frame cap (ADR 0038) | **Shipped** |
+| Dialog provider seam: an asynchronous line source off the tick (ADR 0037) | **Shipped** |
+| Navigation port, flow-field cache and a hand-authored source (ADR 0040) | **Shipped** |
+| Physics, replication and render ports — no engine dependency (ADR 0040) | **Shipped** |
 | Versioned snapshots and compatibility corpus (ADR 0012-0014) | **Shipped (opt-in)** |
-| Render adapters, avian, replicon | Planned |
+| Property-based tests for the invariants that must hold for every input | **Shipped** |
+| Rendering, avian and replicon *adapters* (the ports are here; the engines are yours) | Deliberately not shipped |
 
-The full 40-task plan lives in [`plan.toml`](plan.toml), including the
-capability contracts and the acceptance scenarios each future task must satisfy.
-Anything above marked *Planned* has a specification and a test plan, not an
-implementation — treat this table as the source of truth.
+The full task plan lives in [`plan.toml`](plan.toml), including the capability
+contracts and the acceptance scenarios each future task must satisfy. Anything
+marked *Planned* has a specification and a test plan, not an implementation — treat
+this table as the source of truth.
 
 ## Why another crowd crate
 

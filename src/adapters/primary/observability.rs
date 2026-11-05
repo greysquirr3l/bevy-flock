@@ -16,13 +16,13 @@
 //!   share an identity", which otherwise shows up as two people who agree about
 //!   everything for the rest of the session.
 
-use smallvec::SmallVec;
-use bevy_ecs::prelude::*;
-use bevy_transform::prelude::Transform;
 use crate::adapters::primary::components::{LodTier, Npc, NpcMood};
 use crate::application::SimClock;
 use crate::domain::ids::NpcId;
 use crate::domain::tick::Tick;
+use bevy_ecs::prelude::*;
+use bevy_transform::prelude::Transform;
+use smallvec::SmallVec;
 
 /// How often the expensive crowd sample is taken, in ticks.
 pub const SAMPLE_INTERVAL: u64 = 60;
@@ -229,10 +229,10 @@ pub fn check_world(world: &mut World) -> SmallVec<[Violation; 8]> {
         .collect();
     identities.sort_unstable_by_key(|(id, _)| *id);
     for pair in identities.windows(2) {
-        if let [first, second] = pair {
-            if first.0 == second.0 {
-                violations.push(Violation::DuplicateIdentity(first.0));
-            }
+        if let [first, second] = pair
+            && first.0 == second.0
+        {
+            violations.push(Violation::DuplicateIdentity(first.0));
         }
     }
     let mut query = world.query::<(Entity, &LodTier)>();
@@ -317,7 +317,8 @@ mod tests {
     #[test]
     fn the_digest_changes_with_the_population_and_is_stable_otherwise() {
         let mut app = app();
-        app.world_mut().spawn((Npc(NpcId::unique(1)), LodTier::Near, Transform::default()));
+        app.world_mut()
+            .spawn((Npc(NpcId::unique(1)), LodTier::Near, Transform::default()));
         let first = app.world().resource::<Diagnostics>().digest();
         let second = app.world().resource::<Diagnostics>().digest();
         assert_eq!(first, second);
@@ -343,8 +344,10 @@ mod tests {
     #[test]
     fn duplicate_identities_are_caught() {
         let mut app = app();
-        app.world_mut().spawn((Npc(NpcId::unique(7)), LodTier::Near, Transform::default()));
-        app.world_mut().spawn((Npc(NpcId::unique(7)), LodTier::Near, Transform::default()));
+        app.world_mut()
+            .spawn((Npc(NpcId::unique(7)), LodTier::Near, Transform::default()));
+        app.world_mut()
+            .spawn((Npc(NpcId::unique(7)), LodTier::Near, Transform::default()));
         let violations = check_world(app.world_mut());
         assert_eq!(
             violations.as_slice(),
@@ -355,11 +358,14 @@ mod tests {
     #[test]
     fn an_npc_without_a_tier_is_caught() {
         let mut app = app();
-        app.world_mut().spawn((Npc(NpcId::unique(9)), Transform::default()));
+        app.world_mut()
+            .spawn((Npc(NpcId::unique(9)), Transform::default()));
         let violations = check_world(app.world_mut());
-        assert!(violations
-            .iter()
-            .any(|violation| matches!(violation, Violation::OutsideTheTiers(_))));
+        assert!(
+            violations
+                .iter()
+                .any(|violation| matches!(violation, Violation::OutsideTheTiers(_)))
+        );
     }
 
     #[test]

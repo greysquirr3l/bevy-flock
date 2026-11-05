@@ -91,6 +91,10 @@ unreachable_pub = "warn"
 # idiomatic spelling and not something this crate should paper over.
 
 [lints.clippy]
+# Bevy hands systems their parameters by value (`Res<T>`, `Query<..>`): the signature
+# is the framework's, not an inefficiency to fix, and taking them by reference does not
+# compile. Every other lint in this profile still applies to ordinary functions.
+needless_pass_by_value = "allow"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
@@ -156,6 +160,10 @@ required-features = ["memory"]
 name = "registry_telemetry"
 required-features = ["memory"]
 
+[[example]]
+name = "tavern_dialog"
+required-features = ["serde"]
+
 [[bench]]
 name = "think"
 harness = false
@@ -178,4 +186,20 @@ required-features = ["memory"]
 
 [[bench]]
 name = "band"
+harness = false
+
+[[bench]]
+name = "cognition"
+harness = false
+
+[[bench]]
+name = "group"
+harness = false
+
+[[bench]]
+name = "flow"
+harness = false
+
+[[bench]]
+name = "replication"
 harness = false

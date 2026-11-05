@@ -22,11 +22,11 @@
 //! own size, which is what keeps a 10,000-member crowd from paying O(n) when a
 //! directive is issued.
 
-use std::collections::BTreeMap;
-use bevy_math::{Vec3, Vec2};
-use smallvec::SmallVec;
 use crate::domain::ids::{GroupId, NpcId};
 use crate::domain::tick::Tick;
+use bevy_math::{Vec2, Vec3};
+use smallvec::SmallVec;
+use std::collections::BTreeMap;
 
 /// The most factions a matrix can describe.
 pub const MAX_FACTIONS: u8 = 16;
@@ -159,12 +159,23 @@ impl FactionMatrix {
     /// # Errors
     ///
     /// [`GroupError::UnknownFaction`] for an id the matrix was not built for.
-    pub fn set(&mut self, a: FactionId, b: FactionId, relation: Relation) -> Result<(), GroupError> {
+    pub fn set(
+        &mut self,
+        a: FactionId,
+        b: FactionId,
+        relation: Relation,
+    ) -> Result<(), GroupError> {
         if a.0 >= self.size {
-            return Err(GroupError::UnknownFaction { faction: a.0, size: self.size });
+            return Err(GroupError::UnknownFaction {
+                faction: a.0,
+                size: self.size,
+            });
         }
         if b.0 >= self.size {
-            return Err(GroupError::UnknownFaction { faction: b.0, size: self.size });
+            return Err(GroupError::UnknownFaction {
+                faction: b.0,
+                size: self.size,
+            });
         }
         let code = relation.code();
         for (x, y) in [(a.0, b.0), (b.0, a.0)] {
@@ -189,6 +200,7 @@ impl FactionMatrix {
     }
 
     /// Bytes the matrix occupies.
+    #[allow(clippy::unused_self)] // A method reads better than a free function here.
     #[must_use]
     pub const fn bytes(&self) -> usize {
         core::mem::size_of::<Self>()
@@ -250,7 +262,7 @@ impl Formation {
             Self::Column => Some(Vec3::new(0.0, 0.0, spacing * (index + 1.0))),
             Self::Wedge => {
                 let rank = (index / 2.0).floor() + 1.0;
-                let side = if u16::from(slot as u16) % 2 == 0 { 1.0 } else { -1.0 };
+                let side = if slot.is_multiple_of(2) { 1.0 } else { -1.0 };
                 Some(Vec3::new(side * rank * spacing * 0.75, 0.0, rank * spacing))
             }
             Self::Ring => {
@@ -338,7 +350,7 @@ impl Group {
     }
 
     /// The members, in slot order.
-    #[must_use]
+    #[must_use = "iterators are lazy and do nothing unless consumed"]
     pub fn members(&self) -> impl Iterator<Item = NpcId> + '_ {
         self.slots.iter().filter_map(|slot| *slot)
     }
@@ -360,7 +372,10 @@ impl Group {
 
     /// The directives still standing at `now`.
     pub fn active_directives(&self, now: Tick) -> impl Iterator<Item = QueuedDirective> + '_ {
-        self.directives.iter().copied().filter(move |d| d.is_active(now))
+        self.directives
+            .iter()
+            .copied()
+            .filter(move |d| d.is_active(now))
     }
 
     /// Whether the group is nested under another.
@@ -474,7 +489,9 @@ impl GroupStore {
     ///
     /// [`GroupError::UnknownGroup`] for an id that is not live.
     pub fn set_faction(&mut self, id: GroupId, faction: FactionId) -> Result<(), GroupError> {
-        let group = self.get_mut(id).ok_or(GroupError::UnknownGroup { group: id })?;
+        let group = self
+            .get_mut(id)
+            .ok_or(GroupError::UnknownGroup { group: id })?;
         group.faction = Some(faction);
         Ok(())
     }
@@ -494,7 +511,9 @@ impl GroupStore {
             }
             return Err(GroupError::AlreadyGrouped { npc });
         }
-        let group = self.get_mut(id).ok_or(GroupError::UnknownGroup { group: id })?;
+        let group = self
+            .get_mut(id)
+            .ok_or(GroupError::UnknownGroup { group: id })?;
         let slot = group
             .slots
             .iter()
@@ -516,7 +535,9 @@ impl GroupStore {
     ///
     /// [`GroupError::UnknownGroup`] or [`GroupError::NotAMember`].
     pub fn leave(&mut self, id: GroupId, npc: NpcId) -> Result<u16, GroupError> {
-        let group = self.get_mut(id).ok_or(GroupError::UnknownGroup { group: id })?;
+        let group = self
+            .get_mut(id)
+            .ok_or(GroupError::UnknownGroup { group: id })?;
         let Some(slot) = group.slots.iter().position(|entry| *entry == Some(npc)) else {
             return Err(GroupError::NotAMember { npc, group: id });
         };
@@ -554,9 +575,11 @@ impl GroupStore {
 
     /// Dissolve a group, detaching it from its parent.
     pub fn dissolve(&mut self, id: GroupId) {
-        let Some(index) = self.groups.iter().position(|group| {
-            group.as_ref().is_some_and(|group| group.id == id)
-        }) else {
+        let Some(index) = self
+            .groups
+            .iter()
+            .position(|group| group.as_ref().is_some_and(|group| group.id == id))
+        else {
             return;
         };
         let Some(Some(group)) = self.groups.get(index) else {
@@ -567,10 +590,10 @@ impl GroupStore {
         for member in members {
             self.member_index.remove(&member);
         }
-        if let Some(parent_id) = parent {
-            if let Some(parent) = self.get_mut(parent_id) {
-                parent.children.retain(|child| *child != id);
-            }
+        if let Some(parent_id) = parent
+            && let Some(parent) = self.get_mut(parent_id)
+        {
+            parent.children.retain(|child| *child != id);
         }
         if let Some(slot) = self.groups.get_mut(index) {
             *slot = None;
@@ -591,7 +614,9 @@ impl GroupStore {
             .ok_or(GroupError::UnknownGroup { group: parent })?
             .is_child();
         if parent_is_child {
-            return Err(GroupError::NestingTooDeep { depth: MAX_NESTING_DEPTH });
+            return Err(GroupError::NestingTooDeep {
+                depth: MAX_NESTING_DEPTH,
+            });
         }
         let child_group = self
             .get_mut(child)
@@ -618,7 +643,9 @@ impl GroupStore {
         tick: Tick,
         ttl_ticks: u64,
     ) -> Result<(), GroupError> {
-        let group = self.get_mut(id).ok_or(GroupError::UnknownGroup { group: id })?;
+        let group = self
+            .get_mut(id)
+            .ok_or(GroupError::UnknownGroup { group: id })?;
         if group.directives.len() >= 4 {
             group.directives.remove(0);
         }
@@ -790,19 +817,33 @@ mod tests {
         matrix
             .set(FactionId::new(1), FactionId::new(2), Relation::Hostile)
             .expect("set");
-        assert_eq!(matrix.get(FactionId::new(2), FactionId::new(1)), Relation::Hostile);
-        assert_eq!(matrix.get(FactionId::new(1), FactionId::new(1)), Relation::Ally);
-        assert_eq!(matrix.get(FactionId::new(0), FactionId::new(3)), Relation::Neutral);
+        assert_eq!(
+            matrix.get(FactionId::new(2), FactionId::new(1)),
+            Relation::Hostile
+        );
+        assert_eq!(
+            matrix.get(FactionId::new(1), FactionId::new(1)),
+            Relation::Ally
+        );
+        assert_eq!(
+            matrix.get(FactionId::new(0), FactionId::new(3)),
+            Relation::Neutral
+        );
     }
 
     #[test]
     fn a_faction_outside_the_matrix_is_refused_on_write_and_neutral_on_read() {
         let mut matrix = FactionMatrix::new(2).expect("matrix");
         assert!(matches!(
-            matrix.set(FactionId::new(2), FactionId::new(0), Relation::Ally).unwrap_err(),
+            matrix
+                .set(FactionId::new(2), FactionId::new(0), Relation::Ally)
+                .unwrap_err(),
             GroupError::UnknownFaction { .. }
         ));
-        assert_eq!(matrix.get(FactionId::new(9), FactionId::new(0)), Relation::Neutral);
+        assert_eq!(
+            matrix.get(FactionId::new(9), FactionId::new(0)),
+            Relation::Neutral
+        );
     }
 
     #[test]
@@ -922,7 +963,10 @@ mod tests {
             .slot_target(npc(2), anchor, 0.0, 1.5)
             .expect("member")
             .expect("slot");
-        assert!((first - again).length() < 1e-5, "a column should not reshuffle");
+        assert!(
+            (first - again).length() < 1e-5,
+            "a column should not reshuffle"
+        );
     }
 
     #[test]
@@ -942,7 +986,9 @@ mod tests {
         let _ = store.join(a, npc(2)).expect("join");
         let b = store.create(npc(3), Formation::Column).expect("b");
         store.nest(b, a).expect("nest");
-        store.issue(a, DirectiveKind::Hold, Tick::ZERO, 10).expect("issue");
+        store
+            .issue(a, DirectiveKind::Hold, Tick::ZERO, 10)
+            .expect("issue");
         let snapshot = store.snapshot();
         assert_eq!(snapshot.groups, 2);
         assert_eq!(snapshot.members, 3);
