@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Crowd steering is cell-major (ADR 0026).** `steer_flock` now gathers the crowd into arrays in
+  spatial-grid order, steers it with one pass per agent over the cells in range, and scatters the
+  results. The model is unchanged — same weights, same priority truncation, same arrival curve —
+  and a parity test holds it within 1e-3 of `desired_velocity`. What went away is the per-agent
+  `Vec<Neighbour>`, the distance sort inside `SpatialGrid::radius`, and the second and third
+  passes over the neighbour buffer: `flock_frame/10000` fell from **18.2 ms to 7.71 ms** (130 fps,
+  2.2× inside the 16.6 ms budget), 100,000 agents from 192 ms to 73.5 ms, and a steady frame
+  allocates nothing (`tests/crowd_no_alloc.rs`).
+- **The crowd no longer averages an agent into its own cohesion.** The grid returns an agent as
+  its own nearest neighbour, and the old loop divided the alignment and cohesion sums by a count
+  that included it, diluting both by `1/n`. The kernel excludes the agent, which is what the
+  equations meant; `the_kernel_does_not_average_an_agent_into_its_own_cohesion` pins the old bias
+  so the difference is documented rather than discovered in a changelog.
+- New: `FlockSteerReport` publishes what the last steering pass cost (`steered`, `isolated`,
+  `pairs`, `cells`), and `steer_flock_reference` keeps the old per-agent path available for games
+  that want to inspect neighbour lists.
+
+
+
 ### Reproducibility
 
 - `Cargo.lock` and `compat/Cargo.lock` are committed, and every CI job runs `--locked`, with a

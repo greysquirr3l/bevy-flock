@@ -170,18 +170,19 @@ Run them yourself:
 cargo bench --bench crowd
 ```
 
-A headless frame — spawn drain, grid rebuild, steering, integration — on an
-8-vCPU ARM64 box:
+A headless frame — spawn drain, grid rebuild, steering, integration — on the
+6-vCPU ARM64 reference host described in [`docs/performance.md`](docs/performance.md):
 
 | NPCs | Frame | Per agent |
 | --- | --- | --- |
-| 1 | 1.00 ms | — |
-| 1,000 | 2.47 ms | 2.5 µs |
-| 10,000 | 18.2 ms | 1.8 µs |
-| 100,000 | 192 ms | 1.9 µs |
+| 1 | 1.01 ms | — |
+| 1,000 | 1.63 ms | 1.6 µs |
+| 10,000 | 7.7 ms | 0.77 µs |
+| 100,000 | 73.5 ms | 0.74 µs |
 
 Per-agent cost is flat because neighbour queries are local: a radius-8 m query is
-138 ns at 1,000 agents and 552 ns at 100,000.
+138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz
+frame with 2.2× of margin — the ADR 0026 kernel cut that frame from 18.2 ms.
 
 The first version of the spatial index cost **37 ms for a crowd of one**, because
 it materialised 15.6 million cells every tick. The second fixed that and lost 4×

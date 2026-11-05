@@ -75,28 +75,31 @@ quoted interval, which is the intended relationship between this section and the
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 1.00 ms | — |
-| `flock_frame/1000` | 2.47 ms | 2.5 µs |
-| `flock_frame/10000` | 18.2 ms | 1.8 µs |
-| `flock_frame_large/100000` | 192 ms | 1.9 µs |
+| `flock_frame/1` | 1.01 ms | — |
+| `flock_frame/1000` | 1.63 ms | 1.6 µs |
+| `flock_frame/10000` | **7.71 ms** | 0.77 µs |
+| `flock_frame_large/100000` | 73.5 ms | 0.74 µs |
 | `spatial_query/radius_8m/1000` | 138 ns | — |
 | `spatial_query/radius_8m/10000` | 185 ns | — |
 | `spatial_query/radius_8m/100000` | 552 ns | — |
 | `steering_step/32_neighbours` | 152 ns | — |
 
-Two things to read from that table:
+Four things to read from that table:
 
-- **Per-agent cost is flat.** 1.8–2.5 µs from one agent to a hundred thousand,
-  because the index makes each agent's work local.
-- **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns
-  at 100,000: the index walks the same 27 cells, and the cells are fuller.
-- **The 10,000 row misses 60 Hz.** 18.2 ms is 55 fps against a 16.6 ms budget: this
-  pipeline — boids steering for every agent, every frame — is the *steering* cost, and it
-  is the reason the band path exists. `band_frame/1000000_total_5000_manifested` carries
-  1,000,000 inhabitants with 5,000 manifested and steering at 3.80 ms, because the packed
-  kernel does the same neighbour work with the loop inverted and four lanes wide. If your
-  scene is 10,000 agents that all need to think and steer at 60 Hz, the crowd path does not
-  reach it on this host and the band path is the one to use.
+- **Per-agent cost is flat, and it halved.** 1.6 µs at a thousand agents and 0.74 µs at a
+  hundred thousand, because the index makes each agent's work local and the kernel now walks
+  its neighbours once instead of three times (ADR 0026).
+- **10,000 agents fit a 60 Hz frame with room to spare.** 7.71 ms against the 16.6 ms budget
+  is 130 fps, and 2.2× of margin. The same crowd cost 18.2 ms before the kernel was rewritten:
+  the frame was 92% steering, and the steering was 1.79 µs per agent.
+- **The fixed cost is the grid, not the crowd.** 1.01 ms of `flock_frame/1` is
+  `rebuild_spatial_grid` at the default 1 km volume; the other 6.7 ms of the 10,000 row is
+  everything that scales with agents. A playable area of 200 m across drops the fixed part to
+  ~20 µs.
+- **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns at 100,000:
+  the index walks the same 27 cells, and the cells are fuller. Those numbers are unchanged by
+  ADR 0026 because the grid is unchanged — the crowd kernel bypasses `SpatialGrid::radius`
+  rather than changing it.
 
 The 1.00 ms at N=1 is the grid rebuild's fixed cost at the default 1 km volume
 (405,000 cells after coarsening). It is the price of dense cells, which the query
@@ -145,7 +148,10 @@ Dense cells, with a **budget of 2^20 cells** and automatic coarsening when a
 volume would exceed it. The default 1 km volume coarsens from 4 m to 13.5 m cells
 (405,000 cells, 1.6 MB) and rebuilds in about a millisecond.
 
-The budget itself was tuned by measurement:
+The budget itself was tuned by measurement. These are the numbers the tuning was done on, with
+the per-agent steering loop as it stood then: ADR 0026 has since cut the steering half of every
+row by roughly two thirds, which changes the absolute times here and not the ordering that the
+choice rests on.
 
 | Cell budget | 1 NPC | 1,000 | 10,000 | 100,000 |
 | --- | --- | --- | --- | --- |

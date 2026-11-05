@@ -44,6 +44,7 @@ use crate::adapters::primary::components::{
 };
 use crate::adapters::primary::plugin::FlockSet;
 use crate::application::SimClock;
+use crate::application::{Crowd, CrowdParams, CrowdReport};
 use crate::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{AgentState, SteeringParams, desired_velocity};
 use crate::domain::tick::TicksPerSecond;
@@ -148,6 +149,13 @@ impl Default for BoidsConfig {
 #[derive(Resource, Debug)]
 pub struct FlockSpatialGrid(pub SpatialGrid);
 
+/// What the last steering pass cost and covered.
+///
+/// Published rather than discarded so a game can watch its own crowd: `isolated` climbing means
+/// the population has thinned out, `pairs` climbing means it has clumped.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct FlockSteerReport(pub CrowdReport);
+
 /// The components steering reads and writes for one NPC.
 ///
 /// A named alias rather than an inline tuple: the query appears in signatures,
@@ -205,6 +213,7 @@ impl Plugin for BoidsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config)
             .insert_resource(FlockSpatialGrid::default())
+            .insert_resource(FlockSteerReport::default())
             .configure_sets(
                 Update,
                 (
@@ -240,11 +249,15 @@ pub fn rebuild_spatial_grid(
     grid.0.build();
 }
 
-/// Ask every NPC for the velocity it wants.
+/// Ask every NPC for the velocity it wants, through the cell-major kernel.
 ///
-/// Reads the grid and current velocity; writes [`NpcDesiredVelocity`]. The
-/// neighbour buffer is a `Local`, so a frame that steers 100,000 NPCs allocates
-/// once, on the first frame, and never again.
+/// Gathers the crowd into arrays in grid-cell order, steers it with one pass per agent over the
+/// cells in range, and writes [`NpcDesiredVelocity`] back. The buffers live in a `Local`, so a
+/// steady frame allocates nothing; `tests/crowd_no_alloc.rs` holds that.
+///
+/// This is the path ADR 0026 records. The model is unchanged — the same weights, the same
+/// priority truncation, the same arrival curve — but the loop is inverted, and the distance sort
+/// and the per-agent `Vec<Neighbour>` are gone.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are taken by value by construction"
@@ -252,18 +265,67 @@ pub fn rebuild_spatial_grid(
 pub fn steer_flock(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
+    mut crowd: Local<Crowd>,
+    mut entities: Local<Vec<Entity>>,
+    gather: Query<(
+        Entity,
+        &Transform,
+        &NpcVelocity,
+        Option<&NpcTarget>,
+        Option<&LodTier>,
+    )>,
+    mut desired: Query<&mut NpcDesiredVelocity>,
+    mut report: ResMut<FlockSteerReport>,
+) {
+    let params = CrowdParams::from_steering(&config.params);
+    crowd.configure_from_grid(&grid.0);
+    crowd.begin();
+    entities.clear();
+    for (entity, transform, velocity, target, tier) in &gather {
+        // Ambient-tier NPCs are population mass: neighbours to everyone, steered by nobody.
+        let steers = !matches!(tier, Some(LodTier::Ambient));
+        entities.push(entity);
+        crowd.push(
+            [transform.translation.x, transform.translation.z],
+            [velocity.0.x, velocity.0.z],
+            target.map(|target| [target.0.x, target.0.z]),
+            steers,
+        );
+    }
+
+    report.0 = crowd.steer(&params);
+
+    for (index, entity) in entities.iter().enumerate() {
+        let Ok(mut slot) = desired.get_mut(*entity) else {
+            continue;
+        };
+        slot.0 = crowd
+            .desired(index)
+            .map_or(Vec3::ZERO, |desired| Vec3::new(desired[0], 0.0, desired[1]));
+    }
+}
+
+/// The per-agent reference implementation, kept for the parity tests and for callers who need
+/// neighbours they can inspect.
+///
+/// Not in the schedule: it materialises a sorted `Vec<Neighbour>` per agent, which is the cost
+/// [`steer_flock`] exists to remove.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by construction"
+)]
+pub fn steer_flock_reference(
+    grid: Res<FlockSpatialGrid>,
+    config: Res<BoidsConfig>,
     mut scratch: Local<Vec<Neighbour>>,
     mut query: SteerQuery,
 ) {
     let params = config.params;
     for (transform, velocity, mut desired, target, member, tier) in &mut query {
-        // Ambient-tier NPCs are not individual agents; they are population mass.
         if matches!(tier, Some(LodTier::Ambient)) {
             desired.0 = Vec3::ZERO;
             continue;
         }
-        // A group member steers, but the steering itself is unchanged by
-        // membership: directors influence targets, not physics.
         let _ = member;
 
         grid.0
