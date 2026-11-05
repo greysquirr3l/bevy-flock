@@ -541,6 +541,8 @@ tasks = [] # every task in this phase is finished
 
 [[phases]]
 name  = "Ship"
+# Every task in this phase is delivered; the list stays so the phase keeps its shape.
+tasks = []
 order = 9
 
 [security]
@@ -596,154 +598,6 @@ the completion notes rather than in a claim:
 # from, the commit that delivered it, and the code or record that proves it.
 # Kept rather than deleted, because a plan that forgets its history is how a team
 # re-litigates a decision it already made.
-
-[[phases.tasks]]
-slug      = "prelude-rustdoc-book"
-kind      = "feature"
-title     = "Rustdoc, mdbook guide and diagrams"
-goal     = "Documentation that teaches the model — tiers, budgets, determinism, extension points — not just the signatures."
-depends_on = []
-implements = ["api-ergonomics", "observability"]
-hints = [
-    "In place: rustdoc with -D warnings on every public item, a prelude, and ARCHITECTURE.md. Remaining: the mdbook guide and the diagrams it needs.",
-    "Crate-level rustdoc: pitch, quickstart, the three-tier model diagram, the schedule diagram, a feature-flag matrix table, and a 'where to go next' map. `#![doc = include_str!(\"../README.md\")]` only if the README is genuinely the right front page.",
-    "`book/` mdbook: Getting Started, Core Concepts (ticks, determinism, tiers, budgets), Crowds and Steering, Cognition, Dialogue and Barks, Ambient Populations, Performance Tuning, Extending, Migration, Troubleshooting.",
-    "Every chapter has a runnable snippet or a link to an example; no chapter is prose-only.",
-    "Diagrams as committed sources (mermaid or d2) rendered in CI, not screenshots.",
-    "`docs/performance.md` explains the budget model and how to read the stats snapshot, with real measured numbers from the benchmark suite.",
-    "`cargo doc --all-features --no-deps` must be warning-free under `RUSTDOCFLAGS=-D warnings`.",
-]
-test_hints = [
-    "Doc tests: every code block in rustdoc and the book marked `rust` compiles (book snippets extracted into `tests/book_snippets.rs` by a small xtask).",
-    "Link check: `cargo doc` with `-D warnings` passes and no intra-doc link is broken.",
-    "Book builds in CI (`mdbook build book`).",
-]
-must_haves = [
-    "Every public item documented with at least one example.",
-    "Book builds and all chapters exist.",
-    "Diagrams committed as sources.",
-]
-evaluation_criteria = [
-    "A reader can go from zero to a tuned 10,000-NPC crowd using only the book.",
-    "Documented numbers match the committed benchmark artifacts.",
-]
-
-[[phases.tasks]]
-slug      = "cell-size-reopen-gate"
-kind      = "infrastructure"
-title     = "Keep ADR 0031's cell-size decision honest: gate, then re-decide"
-goal     = "Turn ADR 0031's re-open trigger into something a machine checks, and make the decision change itself when tiering moves the numbers the ADR was based on."
-depends_on = []
-implements = ["performance-budget", "ambient-tier"]
-hints = [
-    "The trigger is measured, not remembered: CI runs `flock_frame_cell` and scripts/cell_size_gate.py on every push. Below 3% saving the decision stands, 3-10% annotates the run, above 10% the job fails and the ADR is wrong.",
-    "ADR 0031 left the budget at 2^20 because tiering caps the steered population at a few thousand, so a kernel win on 5% of the crowd is inside the noise. The cause of that cap, `ambient-population-tier`, is delivered (see [[completed]]), so this task cannot depend on it: the dependency is `benchmark-suite`, the live regression-gate work this job is a member of. The causal link is recorded here instead - if a future task tunes the tier ceiling or the scheduler's calibration gate and raises the steered share, that task takes this one as a dependency, in the other direction.",
-    "The fail threshold is 10%, not 3%, because criterion on a shared runner cannot resolve 3% honestly; a gate that flaps gets disabled, and a disabled gate is worse than no gate. The warn band is where a human looks.",
-    "When the gate fires: raise SpatialGridConfig's default max_cells, re-run examples/grid_sweep.rs and flock_frame_cell, record the numbers in ADR 0031 as an amendment, and only then close this task.",
-    "Deliberately not automated: choosing a new default. The gate reports; the decision stays a recorded judgement with measured support.",
-    "This task is a standing watch, not a one-shot: it stays open until the gate fires and the amendment is written, and it closes only when the numbers say the question is settled.",
-    "Verified concurrent with examples-showcase in group 3 (ADR 0032): 36.3 s wall, the gate PASSing at 0.1% while an --all-features example build ran in the same worktree. Mixed feature sets cost 3 s of recompilation, not a rebuild.",
-]
-test_hints = [
-    "python3 scripts/cell_size_gate.py exits 0 on the committed measurements (0.3% saving) and 2 when handed a synthetic 15% saving.",
-    "The gate job is green on a clean tree and red on a branch where the 9 m case is artificially slowed by 15%.",
-    "The plan's dependency edge is real: `depends_on` names the task that would move the numbers, so a reader can follow the trigger to its cause.",
-]
-evaluation_criteria = [
-    "CI fails when a finer grid would be worth more than 10% of a frame, and does not fail for noise.",
-    "ADR 0031 points at this task and this task points back, so neither can be read as settled while the other is open.",
-]
-[[phases.tasks]]
-slug      = "docs-site-and-readme"
-kind      = "feature"
-title     = "README that convinces, book that teaches, comparison that holds up"
-goal     = "The front door: a README that states the promise and proves it, and a book that makes the promise usable."
-depends_on = ["prelude-rustdoc-book"]
-implements = ["api-ergonomics", "observability"]
-hints = [
-    "In place: README with the measured tables, status matrix and quickstart; docs/performance.md; twenty-five ADRs. Remaining: the book, a migration guide once 0.1.0 ships, and the comparison that survives a sceptical reader.",
-    "README: badges, one-paragraph pitch, animated GIF of the 10,000-NPC demo, five-line quickstart, a capability table, a benchmark table with the machine named, a comparison table against big-brain (utility AI, Bevy 0.15 as of late 2026) and bevy_boids, and an honest 'what this is not' section.",
-    "Every claim in the README links to the test, benchmark or example that proves it. No unlinked adjectives.",
-    "Publish the book to GitHub Pages from CI, versioned per release.",
-    "`docs/comparison.md` with what each alternative does better — credibility comes from not pretending otherwise.",
-    "A three-minute 'from zero to crowd' walkthrough in the README, verified verbatim on a fresh clone.",
-]
-test_hints = [
-    "Link check on README and book passes in CI.",
-    "The quickstart is executed verbatim in CI (`cargo test --doc` plus a script that copies it into a temp crate).",
-    "Benchmark table numbers equal the committed artifacts.",
-]
-must_haves = [
-    "README with proof links for every claim.",
-    "Book published from CI.",
-    "Comparison table with the alternatives named.",
-]
-evaluation_criteria = [
-    "A sceptical reader can verify every number in the README in under ten minutes.",
-    "The fresh-clone walkthrough works exactly as written.",
-]
-
-[[phases.tasks]]
-slug      = "release-and-community"
-kind      = "infrastructure"
-title     = "First release: versioning, publishing and contribution path"
-goal     = "Ship 0.1.0 to crates.io with a changelog, a contribution path and a release process that is boring on purpose."
-depends_on = ["docs-site-and-readme"]
-implements = ["api-ergonomics"]
-hints = [
-    "In place: v0.1.0-rc.1 tagged, CHANGELOG with an Unreleased section, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, dual licence. Remaining: publish to crates.io and the discipline of moving compat/Cargo.toml's pin forward with each format change. (The release checklist exists: docs/release-checklist.md.)",
-    "`cargo-release` or a release workflow: version bump, changelog from conventional commits (git-cliff), tag, `cargo publish --dry-run`, publish, GitHub release with the changelog extracted.",
-    "`CHANGELOG.md` shows the 0.1.0 feature list grouped by phase, written for humans.",
-    "`CONTRIBUTING.md`: how to run preflight, how to add a behaviour, how to add a benchmark, the ADR requirement for design changes, and the review checklist.",
-    "Issue templates for bug (with `flock_report()` output required), feature request, and performance regression (with benchmark id).",
-    "Publish checklist as a script (`xtask release-check`) that verifies: clean tree, green CI, changelog entry, version consistency, `cargo package` contents, semver-checks pass.",
-    "`docs/roadmap.md` stating what comes after 0.1.0 (scripting bridge, GPU crowd fields, navmesh baking) so the 0.1.0 boundary is legible.",
-]
-test_hints = [
-    "`cargo package --list` contains only intended files and `cargo publish --dry-run` succeeds.",
-    "Release check script fails on a dirty tree and on a version mismatch (verified).",
-    "Changelog generation produces a non-empty entry for the release.",
-]
-must_haves = [
-    "0.1.0 published (or publish-dry-run green with the user's token absent).",
-    "Changelog, contributing guide and issue templates present.",
-    "One-command release check.",
-]
-evaluation_criteria = [
-    "A stranger can clone, run preflight, and open a correct PR using CONTRIBUTING.md alone.",
-    "`cargo semver-checks` passes against the published 0.1.0 baseline.",
-]
-
-[[phases.tasks]]
-slug      = "cross-platform-audit"
-kind      = "audit"
-title     = "Cross-platform, wasm and feature-matrix audit"
-goal     = "Prove the crate builds and behaves everywhere it claims, and that the feature matrix is orthogonal rather than nominally present."
-depends_on = []
-implements = ["headless-parity", "deterministic-simulation"]
-hints = [
-    "In place: a three-OS CI matrix and an endian-explicit save format that does not need a big-endian host to be correct. Remaining: the wasm32 build and a browser run. (The feature-powerset check landed with the CI task: six combinations from bare to memory,serde,simd.)",
-    "Build matrix: default, `--no-default-features`, each feature alone, each pair that the docs claim composes, `--all-features`, and wasm32 for the headless and 2D sets.",
-    "Run the determinism suite on all three desktop platforms plus wasm (wasm via a headless browser runner if practical; otherwise document the gap explicitly rather than claiming coverage).",
-    "Check MSRV actually builds: a CI job with the pinned toolchain and `-Zminimal-versions` style dependency resolution where practical.",
-    "Audit for accidental platform assumptions: path separators, `Instant`, file system access, thread counts, endianness assumptions in any byte-level code.",
-    "Produce `docs/audits/platform-YYYY-MM.md` with the matrix as a table and the gaps named.",
-]
-test_hints = [
-    "Every cell of the documented matrix is a CI job or explicitly documented as not covered.",
-    "wasm build of the headless feature set is green.",
-    "MSRV job is green.",
-]
-must_haves = [
-    "Feature matrix table in the docs matches CI exactly.",
-    "Gaps named rather than hidden.",
-]
-evaluation_criteria = [
-    "No feature combination in the docs fails to compile.",
-    "No platform-specific code outside a `cfg`-guarded adapter.",
-]
-
-# ─── Policy ──────────────────────────────────────────────────────────────────
 
 [[completed]]
 slug         = "transposed-crowd-kernel"
@@ -1017,17 +871,17 @@ phase        = "Proof"
 delivered_in = "d50b203"
 evidence     = "Four runnable examples: `hello_flock` (a crowd in five lines), `custom_behavior` (a leaf, a utility option, a director policy and a formation), `tavern_dialog` (an authored, validated, played conversation) and `ambient_metropolis` (perception, barks, render plan and director together). The CI `examples` job runs them."
 [[completed]]
-slug         = ""
+slug         = "memory-in-cognition"
 phase        = "Society and Voice"
 delivered_in = "11da367"
 evidence     = "`adapters::primary::memory_bridge` enrols the NPCs nearest a player up to a per-tick budget (`enrol_budget`, nearest first through `enrolment_order`, the same comparator `select_enrolment` uses), publishes each enrolled NPC's strongest memory as three blackboard integers once per tick (`KEY_MEMORY_VALENCE`/`FAMILIARITY`/`FLAGS`), and clears the view when the player leaves without touching the row. `behavior::memory_leaves` reads it in `RecogniseKnown`, `ShunGrudge` and `GreetFriend` (registered as a set by `MemoryLeaves::register`), with familiarity gating the view, flags outranking intensity and absence meaning stranger. The leaves are not feature-gated, so one tree works with memory on or off. Tests: eight leaf tests, five bridge unit tests, four plugin-level integration tests in `tests/memory_bridge.rs` (enrolment, publication, an empty radius, and a row surviving the player leaving). ADR 0041."
 [[completed]]
-slug         = ""
+slug         = "diagnostics-and-explain"
 phase        = "Developer Experience"
 delivered_in = "11da367"
 evidence     = "`observability::explain_npc` dumps identity, tier, think weight, tree size and cursor depth, mood, needs, group, every blackboard slot sorted by key and the memory row in one call, returning `ExplainError` for a missing entity or a non-NPC instead of panicking. `DebugOverlay`/`DebugOverlayConfig`/`collect_debug_overlay` produce nearest-first labels for the game to draw, disabled by default so the system costs one branch; the crate still links no renderer. Both are covered by unit tests in the module. ADR 0042."
 [[completed]]
-slug         = ""
+slug         = "property-and-fuzz-tests"
 phase        = "Proof"
 delivered_in = "11da367"
 evidence     = "Property tests in `tests/properties.rs` cover the blackboard's capacity and no-lost-write rule, RNG reproducibility, spatial-index agreement with brute force (as a set: the index never promised an order), network round trips, weight range and monotonic ticks. Fuzzing has two layers: three libFuzzer targets under `fuzz/` (`save_decode`, `tree_ron`, `dialog_ron`) and a stable `tests/fuzz_decoders.rs` that asserts every truncation of a valid save is rejected, that sampled bit flips are either rejected or re-encodable, that a lying magic/version fails closed, and that 512 pseudo-random inputs and an empty input are refused — all without a panic. ADR 0042."

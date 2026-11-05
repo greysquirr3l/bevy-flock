@@ -16,7 +16,6 @@ use crate::behavior::registry::LeafBehavior;
 use crate::behavior::social::KEY_TALK_TO;
 use crate::behavior::tree::{LeafContext, Status};
 use crate::domain::cost::VirtualCost;
-use crate::domain::memory::EncounterKind;
 
 /// How the strongest remembered subject feels about the NPC, signed. Negative is
 /// hostile.
@@ -25,7 +24,15 @@ pub const KEY_MEMORY_VALENCE: BlackboardKey = BlackboardKey::new(40);
 /// How well the NPC knows that subject, `0..=65535`, already decayed.
 pub const KEY_MEMORY_FAMILIARITY: BlackboardKey = BlackboardKey::new(41);
 
-/// The encounter-kind flags of that memory (see [`EncounterKind::flag`]).
+/// The encounter-kind flags of that memory.
+///
+/// Mirrors `domain::memory::EncounterKind::flag`, which lives behind the `memory`
+/// feature: the values are a wire format between the bridge and these leaves, so they are
+/// restated here rather than imported. A test in `domain::memory` pins the two together.
+pub const FLAG_ATTACKED: u16 = 1 << 2;
+/// Flag bit for a robbery, mirroring `EncounterKind::Robbed`.
+pub const FLAG_ROBBED: u16 = 1 << 3;
+/// The encounter-kind flags of that memory, as written by the bridge.
 pub const KEY_MEMORY_FLAGS: BlackboardKey = BlackboardKey::new(42);
 
 /// Familiarity at which an NPC treats someone as known rather than as a stranger.
@@ -76,7 +83,7 @@ impl Remembered {
     /// Whether this subject did something hostile, by flag rather than by intensity.
     #[must_use]
     pub fn is_grudge(self) -> bool {
-        let hostile = EncounterKind::Attacked.flag() | EncounterKind::Robbed.flag();
+        let hostile = FLAG_ATTACKED | FLAG_ROBBED;
         self.flags & hostile != 0 || self.valence <= GRUDGE_VALENCE
     }
 
@@ -284,12 +291,22 @@ mod tests {
         );
     }
 
+    /// The leaves restate the flag bits rather than import them, so the two definitions
+    /// have to agree. This is the test that makes the duplication safe.
+    #[cfg(feature = "memory")]
+    #[test]
+    fn the_restated_flag_bits_match_the_encounter_kinds() {
+        use crate::domain::memory::EncounterKind;
+        assert_eq!(FLAG_ATTACKED, EncounterKind::Attacked.flag());
+        assert_eq!(FLAG_ROBBED, EncounterKind::Robbed.flag());
+    }
+
     #[test]
     fn a_grudge_is_recognised_by_flag_even_when_the_valence_is_positive() {
         let mut blackboard = board(Some(Remembered {
             valence: 0,
             familiarity: 40,
-            flags: EncounterKind::Robbed.flag(),
+            flags: FLAG_ROBBED,
         }));
         assert_eq!(
             ShunGrudge.tick(&mut context(&mut blackboard)),

@@ -354,6 +354,7 @@ pub fn explain_npc(world: &mut World, entity: Entity) -> Result<String, ExplainE
             }
         }
     }
+    #[cfg(feature = "memory")]
     if let Some(row) = entity_ref.get::<crate::adapters::primary::memory_bridge::NpcMemoryRow>() {
         let _ = writeln!(out, "  memory row: {}", row.0.get());
     }

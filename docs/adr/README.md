@@ -69,3 +69,4 @@ replay.
 | [0040](0040-optional-integrations-are-ports.md) | Physics, networking and rendering are ports, not dependencies | Accepted |
 | [0041](0041-memory-in-cognition.md) | Memory reaches a tree as three integers; enrolment by proximity and budget | Accepted |
 | [0042](0042-diagnostics-and-fuzzing.md) | Explain on demand, overlay as data, decoders fuzzed on two layers | Accepted |
+| [0043](0043-docs-and-release-shape.md) | Documentation and release shape: book, README verification, release gate | Accepted |

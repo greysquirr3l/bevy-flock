@@ -113,6 +113,60 @@ jobs:
       - run: cargo check --locked --no-default-features --features "${{ matrix.features }}"
       - run: cargo test --locked --lib --no-default-features --features "${{ matrix.features }}"
 
+  release:
+    # RELEASING.md promises this job: on a tag it repeats the checklist, checks the
+    # type-level API against the last published release, and proves the package builds.
+    name: Release gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --locked
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        continue-on-error: true # no baseline tag before the first release
+        with:
+          feature-group: all-features
+      - run: python3 scripts/group_cap.py --self-test
+      - run: python3 scripts/scaling_regression.py --self-test
+      - run: python3 scripts/scaling_report.py --check
+  wasm:
+    name: wasm32 build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - ""
+          - "memory"
+          - "memory,serde"
+          - "memory,simd"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # docs/platforms.md claims these four configurations compile for wasm; this is the
+      # job that keeps the claim true.
+      - run: cargo check --locked --target wasm32-unknown-unknown --features "${{ matrix.features }}"
+  portability:
+    name: Build and test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The crate has no platform-specific code, and this job is what proves it stays
+      # that way rather than merely being true today.
+      - run: cargo test --locked --lib --all-features
   lockfile:
     name: Lockfiles current
     runs-on: ubuntu-latest

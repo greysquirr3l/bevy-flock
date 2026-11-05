@@ -12,7 +12,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bevy", "crowd", "npc", "simulation", "gamedev"]
 categories = ["game-development", "simulation"]
-exclude = ["docs/", "benches/", "examples/", ".github/"]
+# Benches and examples ship with the package: a reader can run what the README
+# claims without cloning, and excluding them made `cargo package` warn about every
+# `[[bench]]` target on every publish. `docs/` and CI stay out.
+exclude = ["docs/", ".github/"]
 # The published crate ships code and docs only. Benchmarks and examples live in
 # the repository so that dev-only dependencies never reach a consumer's graph.
 

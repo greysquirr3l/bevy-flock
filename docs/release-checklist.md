@@ -94,7 +94,15 @@ contract, and the README quotes it.
       `CODE_OF_CONDUCT.md`.
 - [x] Every public item documented; `#![warn(missing_docs)]` in force.
 - [x] 23 ADRs, indexed in `docs/adr/README.md`, including the decisions that were reversed.
-- [x] Examples run: `hello_flock`, `registry_telemetry`, `profile_band`, `memory_probe`.
+- [x] Examples run: `hello_flock`, `registry_telemetry`, `profile_band`, `memory_probe`,
+      `horde_100k`, `tavern_dialog`, `custom_behavior`, `ambient_metropolis`.
+- [x] Platform and feature audit recorded in `docs/platforms.md`, with the two
+      `--no-default-features` failures it found fixed and a `wasm` CI job that keeps the
+      table true.
+- [x] `cargo package --locked` is warning-free and the crate ships its benches and
+      examples, so a reader can run what the README claims.
+- [x] The book (`docs/book/src`) covers zero-to-tuned in eight chapters, and the README's
+      ten-minute verification section links every claim to the artifact that pins it.
 - [ ] `cargo package` / `cargo publish --dry-run` — to run immediately before tagging.
 - [ ] CHANGELOG entry for `0.1.0` moved out of `[Unreleased]`.
 

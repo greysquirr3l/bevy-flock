@@ -1,0 +1,21 @@
+# The book is a directory of Markdown, not a build product: `mdbook build` is an optional
+# convenience, and every chapter is readable as-is in the repository or on the forge.
+[book]
+title = "bevy-flock"
+authors = ["Nick Campbell", "bevy-flock contributors"]
+description = "Deterministic, tiered NPC crowds for Bevy"
+language = "en"
+src = "src"
+
+[build]
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/greysquirr3l/bevy-flock"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+curly-quotes = true
+
+[output.html.fold]
+enable = true
+level = 1

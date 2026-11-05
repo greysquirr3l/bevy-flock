@@ -66,6 +66,38 @@ contracts and the acceptance scenarios each future task must satisfy. Anything
 marked *Planned* has a specification and a test plan, not an implementation — treat
 this table as the source of truth.
 
+## Verify it in ten minutes
+
+Every number above is a committed artifact, not a claim. From a fresh clone:
+
+```sh
+cargo build --locked                                  # ~2 min cold
+cargo test  --locked --lib                            # the unit suite, no network
+cargo run   --locked --release --example hello_flock  # a crowd, headless, prints a report
+cargo bench --locked --bench crowd -- flock_frame     # the frame numbers in the table above
+cargo bench --locked --bench tiers -- tier_frame      # the tier numbers in the corpus
+```
+
+| Claim in this README | Where it is pinned |
+| --- | --- |
+| 10,000 agents in 9.18 ms | `benches/crowd.rs`, table in [`docs/performance.md`](docs/performance.md) |
+| Per-agent cost is flat | same table, 1,000 / 10,000 / 100,000 rows |
+| Same seed, same world | `tests/determinism.rs`, whole-world digest |
+| No allocation in a tick | `tests/tree_no_alloc.rs`, `tests/crowd_no_alloc.rs` |
+| A tick never allocates at scale | `Local` neighbour buffer, `benches/crowd.rs` steady state |
+| 30.5 MiB per million NPCs | [`docs/memory.md`](docs/memory.md), cachegrind run |
+| Feature matrix compiles | [`docs/platforms.md`](docs/platforms.md), `wasm` + `portability` CI jobs |
+| Performance has not regressed | `scripts/scaling_regression.py`, `scaling-regression` CI job |
+
+If a number here and a number you measure disagree by more than the tolerance those scripts
+use, that is a bug report, not a difference of opinion.
+
+## The book
+
+[`docs/book/src/`](docs/book/src/SUMMARY.md) is the long form: getting started, the model,
+crowds at scale, behaviour, memory, extending, debugging, and what it costs. It is Markdown,
+so it reads on a forge without a build step; `mdbook build docs/book` produces the HTML.
+
 ## Why another crowd crate
 
 `big-brain` is utility AI for Bevy and last shipped against Bevy 0.15; `bevy_boids`
@@ -106,11 +138,16 @@ one 400 ms hitch:
 
 ```rust
 let config = FlockConfig {
-    population: PopulationSize::clamped(100_000),
-    spawn_budget: 4_096, // entities per frame
+    population: PopulationSize::clamped(10_000), // the design target for one crowd
+    spawn_budget: 4_096,                         // entities per frame
     ..FlockConfig::default()
 };
 ```
+
+`MAX_POPULATION` is 10,000,000 and the spawner will honour it, but past about 10,000 the answer
+is a band rather than a bigger `population`: the near ring is entities, the far ring is a density
+field, and the frame cost tracks what is manifested rather than what exists. `BandPlugin` is the adapter, and
+[`docs/book/src/crowds-at-scale.md`](docs/book/src/crowds-at-scale.md) is the walkthrough.
 
 Behaviour is data:
 
@@ -133,7 +170,9 @@ and logic a game writes is registered once:
 struct Greet;
 
 impl LeafBehavior for Greet {
-    fn tick(&mut self, ctx: &mut LeafContext<'_>) -> Status {
+    // `&self`: one instance serves the whole crowd, so per-NPC state lives on the
+    // blackboard, never in a field.
+    fn tick(&self, ctx: &mut LeafContext<'_>) -> Status {
         // read ctx.blackboard, write what the next leaf needs
         Status::Success
     }

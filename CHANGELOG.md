@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **The book, and a README you can check.** `docs/book/src` is an eight-chapter guide
+  (getting started, the model, crowds at scale, behaviour, memory, extending, debugging,
+  costs) that reads as Markdown on a forge and builds with `mdbook`. The README gains a
+  ten-minute verification section: every claim it makes is mapped to the test, benchmark or
+  script that pins it.
+- **Platform and feature audit (`docs/platforms.md`).** Nine host configurations and four
+  `wasm32-unknown-unknown` configurations are now compiled and recorded, and the audit found
+  a real bug: with `--no-default-features`, the memory leaves and the diagnostics reached
+  into `memory`-gated modules, so the server build did not compile. The leaves now restate
+  the encounter flag values with a test that pins them to `EncounterKind::flag`. New CI jobs:
+  `wasm` (four configurations) and `portability` (Windows and macOS `--all-features`).
+- **A release process (`RELEASING.md`)** with a tag-triggered `release` CI job that packages
+  the crate, checks the API against the last published release and re-runs the decision
+  scripts. `cargo package --locked` is warning-free; benches and examples now ship with the
+  package so every `[[bench]]` target stops warning on publish.
 
 - **The engine, not just the crowd.** The remaining open plan tasks land together
   (ADRs 0035-0040). Behaviour trees gain the full node set — six composites, four
