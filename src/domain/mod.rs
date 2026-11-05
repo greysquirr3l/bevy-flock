@@ -16,6 +16,7 @@ pub mod rng;
 #[cfg(feature = "memory")]
 pub mod saves;
 pub mod spatial;
+pub mod spawn;
 pub mod steering;
 #[cfg(feature = "memory")]
 pub mod telemetry;
@@ -35,6 +36,7 @@ pub use rng::RngStream;
 #[cfg(feature = "memory")]
 pub use saves::{LoadReport, MAGIC, MemorySnapshot, Origin, SaveError, SaveRecord, SavedSlot};
 pub use spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
+pub use spawn::{DEFAULT_SPACING, Placement};
 pub use steering::{SteeringParams, SteeringWeights};
 #[cfg(feature = "memory")]
 pub use telemetry::{Sample, measure, references_to, retire};

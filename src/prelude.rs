@@ -17,6 +17,7 @@ pub use crate::adapters::primary::components::{
 };
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
+    spawn_position,
 };
 
 pub use crate::behavior::{
@@ -40,6 +41,7 @@ pub use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 #[cfg(feature = "memory")]
 pub use crate::domain::saves::{LoadReport, MemorySnapshot, Origin, SaveError, SaveRecord};
 pub use crate::domain::spatial::SpatialGridConfig;
+pub use crate::domain::spawn::{DEFAULT_SPACING, Placement};
 pub use crate::domain::steering::SteeringParams;
 pub use crate::domain::temperament::{Archetype, Temperament};
 pub use crate::domain::tick::{Tick, TicksPerSecond};

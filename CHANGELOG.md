@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Spawn placement is a validated type (ADR 0027).** `Placement` offers four answers —
+  `spiral` (the default, 1.6 m, draw-free and compact at any population), `uniform_disc`,
+  `uniform_rect` and `fixed` (authored positions, cycled when the population is larger than the
+  list) — and `FlockConfig::with_placement` validates the choice against the simulated volume
+  before it reaches the spawner. That check is the point: a crowd placed outside the grid does not
+  fail loudly, it piles into the border cells and the frame gets slower. Random placements draw
+  from each NPC's own stream, after temperament and archetype, so a replay scatters the same people
+  into the same spots and switching to an authored list changes nobody's identity.
+- `FlockConfig` is no longer `Copy` (a placement may own a list of points) and `FlockPlugin` is
+  `Clone` instead; `spawn_position(index)` remains as the default placement's answer.
+
+
+
 ### Changed
 
 - **Crowd steering is cell-major (ADR 0026).** `steer_flock` now gathers the crowd into arrays in

@@ -22,8 +22,10 @@ use crate::boids::{BoidsConfig, BoidsPlugin};
 use crate::domain::ids::{NpcId, SimSeed};
 use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 use crate::domain::rng::RngStream;
+use crate::domain::spawn::Placement;
 use crate::domain::temperament::{Archetype, Temperament};
 use crate::domain::tick::TicksPerSecond;
+use crate::error::ConfigError;
 
 /// The ordered stages of a flock frame.
 ///
@@ -108,6 +110,7 @@ impl CrowdPreset {
             mode: PopulationMode::Unique,
             seed: SimSeed::default(),
             ticks_per_second: TicksPerSecond::SIXTY,
+            placement: Placement::default(),
             spawn_budget: 4_096,
             boids,
         }
@@ -118,7 +121,7 @@ impl CrowdPreset {
 ///
 /// Every field is either a validated newtype or a validated config, so a
 /// `FlockConfig` in hand is already a valid configuration.
-#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+#[derive(Resource, Debug, Clone, PartialEq)]
 pub struct FlockConfig {
     /// How many NPCs to spawn at startup.
     pub population: PopulationSize,
@@ -132,6 +135,13 @@ pub struct FlockConfig {
     pub spawn_budget: u32,
     /// Steering, grid and acceleration settings.
     pub boids: BoidsConfig,
+    /// Where NPCs stand when they are spawned.
+    ///
+    /// Defaults to the golden-angle spiral, which is compact at any population. Use
+    /// [`FlockConfig::with_placement`] rather than assigning the field: the setter validates the
+    /// placement against the simulated volume, which is the difference between a crowd and a
+    /// crowd piled into the grid's border cells.
+    pub placement: Placement,
 }
 
 impl FlockConfig {
@@ -139,6 +149,19 @@ impl FlockConfig {
     #[must_use]
     pub fn preset(preset: CrowdPreset) -> Self {
         preset.config()
+    }
+
+    /// Place NPCs with this strategy, validated against the simulated volume.
+    ///
+    /// # Errors
+    ///
+    /// Returns the placement's own complaint: a spacing or radius that is not finite and
+    /// positive, a rectangle with its corners swapped, an empty list of positions, or an area
+    /// that reaches outside the grid volume (see [`Placement::validate`]).
+    pub fn with_placement(mut self, placement: Placement) -> Result<Self, ConfigError> {
+        placement.validate(&self.boids.grid())?;
+        self.placement = placement;
+        Ok(self)
     }
 
     /// Change the population.
@@ -328,7 +351,7 @@ impl FlockStats {
 /// app.update();
 /// assert!(app.flock_stats().population() > 0);
 /// ```
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FlockPlugin {
     /// The configuration to install.
     pub config: FlockConfig,
@@ -354,7 +377,7 @@ impl Plugin for FlockPlugin {
         ))
         .insert_resource(WeightConfig::default())
         .insert_resource(TierConfig::default())
-        .insert_resource(self.config)
+        .insert_resource(self.config.clone())
             .insert_resource(SimClock::new(self.config.ticks_per_second))
             .init_resource::<SpawnQueue>()
             .init_resource::<FlockStats>()
@@ -426,7 +449,9 @@ pub fn drain_spawn_queue(
             .get(archetype_index)
             .copied()
             .unwrap_or(Archetype::Wanderer);
-        let position = spawn_position(id.index());
+        // Position last: the spiral and an authored list draw nothing from the stream, so the
+        // temperaments and archetypes above are the same whatever the placement is.
+        let position = config.placement.position(id.index(), &mut rng);
 
         commands.spawn(NpcBundle {
             npc: Npc(id),
@@ -448,18 +473,21 @@ pub fn drain_spawn_queue(
     stats.pending = queue.pending();
 }
 
-/// Where the `index`-th NPC starts.
+/// Where the `index`-th NPC starts under the default placement.
 ///
-/// A golden-angle spiral: even coverage of a disc with no two NPCs stacked, so a
-/// fresh crowd looks placed rather than dumped. Deterministic by construction.
+/// A golden-angle spiral with 1.6 m spacing: even coverage of a disc with no two NPCs stacked, so
+/// a fresh crowd looks placed rather than dumped. Deterministic by construction, and identical to
+/// [`Placement::spiral`] with [`crate::domain::spawn::DEFAULT_SPACING`].
+///
+/// Kept as a free function because it is the answer for the common case and callers should not
+/// have to construct a placement to ask for it; a game that wants anything else passes a
+/// [`Placement`] to [`FlockConfig::with_placement`].
 #[must_use]
 pub fn spawn_position(index: u32) -> Vec3 {
-    const GOLDEN_ANGLE: f32 = 2.399_963_2;
-    const SPACING: f32 = 1.6;
-    let ring = index as f32;
-    let angle = ring * GOLDEN_ANGLE;
-    let radius = SPACING * libm::sqrtf(ring);
-    Vec3::new(libm::cosf(angle) * radius, 0.0, libm::sinf(angle) * radius)
+    // The spiral consumes no draws, so the stream is a formality; naming one keeps the call
+    // honest about what `Placement::position` expects.
+    let mut unused = RngStream::for_npc(SimSeed::new(0), NpcId::unique(0));
+    Placement::default().position(index, &mut unused)
 }
 
 /// Spawning conveniences on [`App`].

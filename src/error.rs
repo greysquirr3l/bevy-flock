@@ -67,6 +67,31 @@ pub enum ConfigError {
         /// Which budget was wrong.
         field: &'static str,
     },
+    /// A collection that must hold at least one entry held none.
+    #[error("{kind} is empty, which would leave nothing to simulate")]
+    Empty {
+        /// What was empty, named as the configuration spells it.
+        kind: &'static str,
+    },
+    /// A spawn placement reaches outside the volume it will be simulated in.
+    ///
+    /// The grid clamps stray positions into the nearest cell, so this does not fail loudly at
+    /// runtime: it looks like a slow frame, because every stray agent lands in a border cell.
+    #[error(
+        "{field} on {axis} = {value} is outside the simulated volume {min}..={max} on that axis"
+    )]
+    PlacementOutsideGrid {
+        /// The field that left the volume.
+        field: &'static str,
+        /// The axis it left on.
+        axis: char,
+        /// The offending coordinate.
+        value: f32,
+        /// The volume's lower bound on that axis.
+        min: f32,
+        /// The volume's upper bound on that axis.
+        max: f32,
+    },
 }
 
 /// A registry rejected a registration.

@@ -190,6 +190,37 @@ at scale. What shipped is the third design, and
 [`docs/performance.md`](docs/performance.md) has both losing designs, their
 numbers, and why they lost — a benchmark table without the failures is marketing.
 
+### Placing the crowd
+
+The default is a golden-angle spiral at 1.6 m spacing: compact at any population, and draw-free, so
+it changes nothing about the people a seed produces. Anything else is a `Placement`, validated
+against the simulated volume before it can reach the spawner — a crowd that reaches outside the
+grid does not fail loudly, it piles into the border cells and the frame gets slower.
+
+```rust
+use bevy_flock::prelude::*;
+
+// 400 people scattered over a district, reproducible from the seed.
+let config = FlockConfig::preset(CrowdPreset::CityAmbient)
+    .with_placement(Placement::uniform_disc(Vec3::new(120.0, 0.0, -40.0), 80.0))?;
+
+// Or exactly where the level says: doorways, stalls, patrol anchors.
+let config = FlockConfig::preset(CrowdPreset::QuietVillage)
+    .with_placement(Placement::fixed(vec![
+        Vec3::new(4.0, 0.0, 0.0),
+        Vec3::new(-4.0, 0.0, 2.0),
+    ]))?;
+
+// The same crowd shape as the default, from a different centre or spacing.
+let config = FlockConfig::preset(CrowdPreset::BattleHorde)
+    .with_placement(Placement::spiral_at(Vec3::new(0.0, 0.0, -60.0), 1.2))?;
+# Ok::<(), bevy_flock::error::ConfigError>(())
+```
+
+`Placement::uniform_rect` covers axis-aligned areas. Random placements draw from each NPC's own
+stream, so a replay scatters the same people into the same spots, and a population larger than an
+authored list cycles through it (the extras stand on earlier points until separation moves them).
+
 ### Cost per agent
 
 32 bytes of steering state per NPC (positions, velocities, desired, bucket chain, cell-major
