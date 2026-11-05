@@ -92,8 +92,10 @@ def chart() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--warn", type=float, default=3.0, help="warn above this saving (%)")
-    parser.add_argument("--fail", type=float, default=10.0, help="fail above this saving (%)")
+    # argparse runs help text through %-formatting, so a bare % must be doubled.
+    # Python 3.14 validates the format eagerly and raises on a malformed sequence.
+    parser.add_argument("--warn", type=float, default=3.0, help="warn above this saving (%%)")
+    parser.add_argument("--fail", type=float, default=10.0, help="fail above this saving (%%)")
     parser.add_argument("--chart", action="store_true", help="print the ASCII breakdown only")
     args = parser.parse_args()
 
