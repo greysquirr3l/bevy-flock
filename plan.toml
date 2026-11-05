@@ -1490,3 +1490,9 @@ slug         = "determinism-replay-tests"
 phase        = "Proof"
 delivered_in = "d5fab71"
 evidence     = "tests/determinism.rs: same seed produces the same 64-bit state digest, plus the replay test that would catch a wall clock entering the tick"
+
+[[completed]]
+slug         = "scaling-regression-suite"
+phase        = "Developer Experience"
+delivered_in = "4cc3164"
+evidence     = "scripts/scaling_regression.py gates CI on speedup ratios (thresholds widen to twice the measured spread, mismatched fixtures are refused, no shared core count fails), scripts/scaling_report.py generates docs/reports/scaling-report.md, and the sweep records milliseconds, repeats and a meta record against a fixture sized to the bundles (ADR 0034); dry runs: real matrix passes, an injected 45% slowdown fails at -29.7%"
