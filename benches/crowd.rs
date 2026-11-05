@@ -20,6 +20,7 @@
 use std::hint::black_box;
 
 use bevy_app::App;
+use bevy_flock::application::crowd::{Crowd, CrowdParams};
 use bevy_flock::domain::ids::{NpcId, SimSeed};
 use bevy_flock::domain::rng::RngStream;
 use bevy_flock::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
@@ -143,5 +144,58 @@ fn bench_steering(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_frames, bench_spatial_queries, bench_steering);
+/// The kernel on its own, planar and volumetric, so ADR 0029's scalar/SIMD comparison is measured
+/// on the same crowd rather than inferred from two different harnesses.
+fn bench_kernel(c: &mut Criterion) {
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let params = CrowdParams::from_steering(&SteeringParams::human_scale());
+    let mut group = c.benchmark_group("crowd_kernel");
+    group.throughput(Throughput::Elements(10_000));
+
+    for (label, spread, pack) in [
+        ("planar", 0.0_f32, 1.6_f32),
+        ("volumetric", 20.0, 1.6),
+        // A market square: 10,000 people inside 30 m, which is where buckets get crowded enough
+        // for four lanes to have four neighbours to work on.
+        ("dense", 0.0, 0.3),
+    ] {
+        let mut crowd = Crowd::default();
+        crowd.configure_from_grid(&grid);
+        crowd.begin();
+        for index in 0..10_000_u32 {
+            let step = index as f32;
+            let ring = pack * libm::sqrtf(step);
+            let angle = step * 2.399_963_2;
+            crowd.push(
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(step * 0.7) * spread,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
+                if index % 5 == 0 {
+                    Some([25.0, 8.0, -25.0])
+                } else {
+                    None
+                },
+                true,
+            );
+        }
+        group.bench_with_input(BenchmarkId::from_parameter(label), &label, |b, _| {
+            b.iter(|| {
+                let mut frame = crowd.clone();
+                black_box(frame.steer(&params));
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_frames,
+    bench_spatial_queries,
+    bench_steering,
+    bench_kernel
+);
 criterion_main!(benches);

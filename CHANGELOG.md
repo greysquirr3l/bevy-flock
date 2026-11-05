@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **SIMD was measured against the 3D crowd kernel and rejected (ADR 0029).** A structure-of-arrays,
+  four-neighbours-at-a-time scan with a scalar tail was built behind the `simd` feature, held to
+  parity with the scalar road in the same process, and benchmarked on planar, volumetric and dense
+  crowds: it lost by 16%, 26% and 8%, and AVX2 did not change the verdict. The scalar scan rejects
+  out-of-range neighbours before doing any work, and that is precisely what masked SIMD throws away.
+  The code is removed rather than flagged off; the `crowd_kernel` benchmark group and ADR 0029 keep
+  the measurement reproducible. The `simd` feature still vectorises the band kernel (ADR 0023),
+  where it wins.
+
+
 - **Crowds are three-dimensional (ADR 0028).** The steering kernel and the spawn placement no
   longer assume the plane `y = 0`: positions, velocities and desired velocities are `[f32; 3]`,
   cells come from all three axes with the grid's own arithmetic, and the scan walks a box of cells
