@@ -104,8 +104,10 @@ jobs:
           - "memory"
           - "serde"
           - "simd"
+          - "navmesh"
           - "memory,serde"
           - "memory,serde,simd"
+          - "navmesh,simd"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -144,6 +146,7 @@ jobs:
           - "memory"
           - "memory,serde"
           - "memory,simd"
+          - "navmesh"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
