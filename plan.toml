@@ -885,3 +885,33 @@ slug         = "property-and-fuzz-tests"
 phase        = "Proof"
 delivered_in = "11da367"
 evidence     = "Property tests in `tests/properties.rs` cover the blackboard's capacity and no-lost-write rule, RNG reproducibility, spatial-index agreement with brute force (as a set: the index never promised an order), network round trips, weight range and monotonic ticks. Fuzzing has two layers: three libFuzzer targets under `fuzz/` (`save_decode`, `tree_ron`, `dialog_ron`) and a stable `tests/fuzz_decoders.rs` that asserts every truncation of a valid save is rejected, that sampled bit flips are either rejected or re-encodable, that a lying magic/version fails closed, and that 512 pseudo-random inputs and an empty input are refused — all without a panic. ADR 0042."
+
+[[completed]]
+slug         = "prelude-rustdoc-book"
+phase        = "Developer Experience"
+delivered_in = "6fa4118"
+evidence     = "`docs/book/src` is an eight-chapter mdbook (introduction, getting started, the model, crowds at scale, behaviour, memory, extending, debugging, costs) with `book.toml` and a `SUMMARY.md` whose links were all checked. Every number in it is a committed one from `docs/performance.md` (9.18 ms at 10,000, 3.72/3.78 ms for the 100k/1M band frames, the tier composition table, the 64,000 reflex ceiling), and every snippet was checked against the shipped API — `LeafBehavior::tick(&self)` with `cost_hint`/`label`, `register_standard_leaves`, `Curve`/`Input::Key`, `StateMachine::transition_after`, `DirectorCommand::Mood`. ADR 0043."
+
+[[completed]]
+slug         = "docs-site-and-readme"
+phase        = "Developer Experience"
+delivered_in = "6fa4118"
+evidence     = "The README gains a ten-minute verification section: five commands from a fresh clone, then a table mapping each claim to the artifact that pins it (bench, whole-world digest, allocation tests, cachegrind footprint, platform audit, regression gate) and the statement that a disagreement beyond the gate's tolerance is a bug report. It also gains a book section, the corrected `LeafBehavior` signature, a correction that `MAX_POPULATION` is 10,000,000 with bands as the answer past ~10,000, and a band pointer. ADR 0043."
+
+[[completed]]
+slug         = "release-and-community"
+phase        = "Release"
+delivered_in = "6fa4118"
+evidence     = "`RELEASING.md` states the semver rules (a broken replay counts as a break), the local pre-release checklist, the tag procedure, the publish sequence, the yank policy and the support window. A tag-triggered `release` CI job repeats the checklist, runs `cargo package --locked`, checks the API against the last release with `cargo semver-checks` and re-runs the decision scripts. `cargo package --locked` was verified warning-free (125 files, 402 KiB compressed) after benches and examples were shipped rather than excluded, which removed nine publish warnings. ADR 0043."
+
+[[completed]]
+slug         = "cross-platform-audit"
+phase        = "Release"
+delivered_in = "6fa4118"
+evidence     = "`docs/platforms.md` records nine host feature configurations and four `wasm32-unknown-unknown` configurations, all compiled on 2026-11-05 with `--locked`, the absence of any OS-specific code in `src/` (no `cfg(unix)`, no `libc`, no `std::os`), and an explicit list of what is not claimed (no browser runtime test, no second-OS job until now). The audit found a real defect: `--no-default-features` did not compile, because the memory leaves imported a `memory`-gated module and the diagnostics read a gated component. Fixed by restating the encounter flag bits behind a test that pins them to `EncounterKind::flag` — which caught both values being wrong — and gating the diagnostics block. CI adds `wasm` (four configurations) and `portability` (Windows, macOS `--all-features`) jobs."
+
+[[completed]]
+slug         = "cell-size-reopen-gate"
+phase        = "Proof"
+delivered_in = "6fa4118"
+evidence     = "`scripts/cell_size_gate.py` reads the committed criterion estimates for the 7 m and 9 m cell budgets and fails when a finer grid would buy more than 10% of a frame, with a noise band so ordinary variance does not trip it; the `cell-size-gate` CI job runs it on every push, and the fail path was proven by perturbing an estimate. ADR 0031 and the task pointed at each other while both were open; both are now closed, with the sweep data and the occupancy figure committed under `docs/`."
