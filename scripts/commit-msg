@@ -1,0 +1,48 @@
+#!/bin/sh
+# Refuse a commit message carrying agent/tool attribution.
+#
+# Why commit-msg and not pre-commit: a pre-commit hook runs before the editor
+# opens, so the message does not exist yet. It can only check the staged tree.
+# This rule is about the message, so it belongs here.
+#
+# Deletes and amends can bypass --no-verify here the same as anywhere else.
+# This is a guard against a habit, not a security boundary.
+#
+# The history belongs to the person who made the changes. The explanation
+# belongs in the body of the message: what changed, why, and what was
+# verified. Nothing is lost by leaving the trailer off.
+
+message="$1"
+
+if [ ! -f "$message" ]; then
+    exit 0
+fi
+
+# Skip the commits git writes for you. A revert records its own Co-authored-by
+# for the original author, and blocking that would make reverting impossible.
+first_line=$(head -n 1 "$message")
+case "$first_line" in
+    Revert*|Merge*) exit 0 ;;
+esac
+
+if grep -qiE '^[[:space:]]*Co-Authored-By:[[:space:]]*(Copilot|claude|chatgpt|gemini|copilot\[bot\]|.*@users\.noreply\.github\.com)' "$message"; then
+    cat >&2 <<'MSG'
+
+  Blocked: the commit message carries an agent/tool attribution trailer.
+
+    Co-authored-by: Copilot <...>
+                     ^
+
+  This history belongs to the person who made the changes. Nothing is lost
+  by leaving the trailer off -- keep the body, which is where the actual
+  explanation belongs: what changed, why, and what was verified.
+
+  If this trailer is genuinely wanted, re-run with:
+
+    git commit --no-verify
+
+MSG
+    exit 1
+fi
+
+exit 0

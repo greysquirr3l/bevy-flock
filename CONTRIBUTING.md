@@ -91,6 +91,78 @@ docs(adr): record the libm decision
 The body explains *why*, and past tense for what changed is fine. Reference the
 plan task id (`T12`) when the commit implements one.
 
+No attribution trailers. The history belongs to the person who made the
+changes, and the `commit-msg` hook refuses a message carrying a
+`Co-authored-by:` trailer. Keep the body — that is where the explanation
+belongs: what changed, why, and what was verified.
+
+## Git hooks
+
+Install them once per clone:
+
+```sh
+./scripts/install-hooks.sh
+```
+
+The hooks live in [`scripts/`](scripts), so every machine runs the same
+checks. The installer copies them into `.git/hooks/` and leaves any hook
+that is not in that directory alone — `post-commit` and `post-merge` belong
+to `coraline hooks install` and `tralfamadore onboard`.
+
+### pre-push
+
+Runs the two CI checks that are cheap enough to run on every push:
+
+- `cargo fmt --all -- --check` — the same command the `fmt` job runs.
+- `cargo audit` — over every committed `Cargo.lock`, which is both the
+  workspace's and the compat crate's.
+
+It takes about four seconds. The rest of CI takes minutes, and a hook that
+takes ten minutes is a hook people disable.
+
+Two decisions worth knowing about:
+
+**Waivers come from [`deny.toml`](deny.toml).** `cargo audit` has no config
+file, so the hook reads the `id` fields out of `[advisories].ignore` in
+`deny.toml` and passes them as `--ignore`. There is one list, not two. If
+you add a waiver to `deny.toml`, the hook honours it immediately; if you
+only added it to a copy somewhere, CI and your pre-push would disagree.
+
+**It denies `unsound`, `unmaintained` and `yanked`, not just plain
+vulnerabilities.** `cargo audit` files those three under `warnings` rather
+than `vulnerabilities`, and exits zero for them by default — so a hook that
+read only `vulnerabilities.count` reported a lockfile carrying a
+use-after-free advisory as clean. The hook passes the three `-D` flags and
+reads every category out of the report, which is the same set `deny.toml`
+denies. A hook that passes where CI fails is worse than no hook: it hands
+out a clean bill of health on a graph CI would reject.
+
+A yanked crate is reported separately from an advisory, because the two
+have different remedies. An advisory can be waived in `deny.toml`; a
+yanked crate has no advisory id to ignore, so the only fix is to update the
+lockfile.
+
+A failed advisory scan is a hard block, including the case where the scan
+could not run at all. `cargo audit` exits 1 for a vulnerability *and* for a
+failure to fetch the advisory database, and the hook tells the two apart by
+whether the report is empty on stdout — a finding prints its report, a
+fetch failure prints nothing. A scan that did not run is not a scan that
+passed.
+
+If `cargo-audit` is not installed the hook says so and skips that half
+rather than failing; CI still catches it. Install it with
+`cargo install cargo-audit --locked`.
+
+`--no-verify` bypasses the hook. That is a guard against a habit, not a
+security boundary — CI runs the same checks and does not honour it.
+
+### commit-msg
+
+Refuses a commit message carrying a `Co-authored-by:` attribution trailer.
+The rule is about the message, so it lives in `commit-msg` rather than
+`pre-commit`: a pre-commit hook runs before the editor opens, so the message
+does not exist yet.
+
 ## Benchmarks
 
 Performance claims need numbers. Run:

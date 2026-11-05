@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# Pre-push hook: the two CI checks that are cheap enough to run locally and
+# that have caught real problems on this repository.
+#
+#   1. cargo fmt --all -- --check — mirrors the `fmt` job in ci.yml exactly.
+#   2. cargo audit               — the advisory scan, over every committed
+#                                  lockfile, with the waivers from deny.toml.
+#
+# Why these two and not the rest of CI: the others (clippy, the test matrix,
+# the feature powerset) take minutes. These take seconds. A hook that takes
+# ten minutes is a hook people disable, and a disabled hook is worse than no
+# hook, because it looks like a safety net.
+#
+# Why pre-push and not pre-commit: pre-commit runs before the commit is made,
+# so a `cargo fmt` that rewrites files cannot be used there without silently
+# amending what the author staged. Pre-push runs after the commit exists, so
+# the check is a check — it reports, it does not rewrite. The fix is
+# `cargo fmt --all && git commit --amend`, and the author stays in control of
+# what lands in the history.
+#
+# The waivers are read from deny.toml rather than hardcoded here, because
+# deny.toml is where the supply-chain policy already lives and a second list
+# would drift from it. cargo audit has no config file of its own, so the
+# list has to be passed on the command line; deny.toml is where it comes
+# from.
+#
+# `--no-verify` bypasses this, as it bypasses every git hook. It is a guard
+# against a habit, not a security boundary — CI runs the same checks and does
+# not honour it.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
+
+failed=0
+
+note() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
+bad() { printf '  \033[31m✗ %s\033[0m\n' "$1"; }
+good() { printf '  \033[32m✓ %s\033[0m\n' "$1"; }
+warn() { printf '  \033[33m! %s\033[0m\n' "$1"; }
+
+# ---------------------------------------------------------------------------
+# 1. Formatting
+# ---------------------------------------------------------------------------
+#
+# Exactly the command ci.yml's `fmt` job runs, so a green hook and a green
+# job mean the same thing. Note this covers the *workspace* only: the compat
+# crate is deliberately its own workspace, so it is not covered by CI's fmt
+# job either, and it is not covered here.
+
+note "cargo fmt --all -- --check"
+if cargo fmt --all -- --check; then
+  good "formatting is clean"
+else
+  bad "formatting is not clean"
+  printf '\n  Fix it with:\n\n    cargo fmt --all\n    git add -u\n    git commit --amend --no-edit\n\n'
+  failed=1
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Advisory scan
+# ---------------------------------------------------------------------------
+#
+# `cargo deny` is what CI runs, but it is a whole-policy tool: licences,
+# bans, sources, advisories. What a pre-push hook wants is the one question
+# a developer actually asks before pushing — "is there a new advisory in my
+# dependencies?" — and `cargo audit` answers exactly that, in about a
+# second, with a report a human can read.
+#
+# Every committed lockfile is scanned, not just the workspace one. The compat
+# crate is deliberately excluded from the workspace, so the root `cargo deny`
+# does not see its dependency graph at all; a `Cargo.lock` that is committed
+# is a dependency graph someone will build, and it deserves the same
+# scrutiny as the rest.
+#
+# The categories denied here are the ones deny.toml denies, and they are
+# named explicitly because `cargo audit`'s default is to report `unsound`,
+# `unmaintained` and `yanked` advisories without failing. An `unsound`
+# advisory is a use-after-free or an I/O-safety violation in a dependency —
+# a real defect, not a style note — and `cargo deny` treats it as an error.
+# A hook that passed where CI fails is worse than no hook, because it
+# reports a clean bill of health on a graph CI would reject. So
+# `-D unsound -D yanked -D unmaintained` is passed, which makes those
+# findings failures rather than notes.
+#
+# The findings are read out of the report by `scripts/audit_summary.py`, one
+# category at a time: cargo audit files a plain vulnerability under
+# `vulnerabilities` and the rest under `warnings`, so a reader that looks at
+# only one of them reports a lockfile carrying a use-after-free advisory as
+# clean.
+
+note "cargo audit"
+
+if ! command -v cargo-audit >/dev/null 2>&1; then
+  warn "cargo-audit is not installed — skipping the advisory scan"
+  printf '    Install it with: cargo install cargo-audit --locked\n'
+elif ! command -v python3 >/dev/null 2>&1; then
+  warn "python3 is not available — skipping the advisory scan"
+  printf '    It is only needed to read the JSON report.\n'
+else
+  # The waivers, read from deny.toml so there is exactly one list.
+  #
+  # Only the `id` fields inside `[advisories].ignore` are taken. The reason
+  # strings mention advisory ids too, and a waiver that appears in prose is
+  # not a waiver.
+  waivers="$(
+    awk '
+      /^\[advisories\]/ { in_section = 1; next }
+      /^\[/ { in_section = 0 }
+      in_section && /^ignore[[:space:]]*=/ { in_list = 1 }
+      in_section && in_list {
+        while (match($0, /id[[:space:]]*=[[:space:]]*"[^"]+"/)) {
+          found = substr($0, RSTART, RLENGTH)
+          gsub(/id[[:space:]]*=[[:space:]]*"/, "", found)
+          gsub(/"/, "", found)
+          print found
+          $0 = substr($0, RSTART + RLENGTH)
+        }
+        if (/\]/) in_list = 0
+      }
+    ' deny.toml
+  )"
+
+  # `cargo audit` rejects an id whose year is outside 2000..=2099, and it
+  # treats that as a fatal error rather than a warning — one malformed id
+  # would fail the whole scan. So the ids are checked here, where the
+  # message can say what is wrong.
+  ignore_args=()
+  for waiver in $waivers; do
+    if [[ "$waiver" =~ ^RUSTSEC-([0-9]{4})-([0-9]{4})$ ]]; then
+      year="${BASH_REMATCH[1]}"
+      if ((10#$year < 2000 || 10#$year > 2099)); then
+        bad "deny.toml waives '$waiver', whose year is outside the range cargo audit accepts"
+        failed=1
+        continue
+      fi
+    fi
+    ignore_args+=(--ignore "$waiver")
+  done
+
+  # Every lockfile that is committed to the repository.
+  #
+  # Empty-array expansion under `set -u` is an unbound-variable error before
+  # bash 4.4, and deny.toml can legitimately waive nothing. The `+` form
+  # expands to nothing when the array is empty and to the elements when it is
+  # not, on every bash that ships on macOS or Linux.
+  lockfiles="$(git ls-files '*Cargo.lock')"
+
+  for lockfile in $lockfiles; do
+    [ -f "$lockfile" ] || continue
+
+    # The report goes to stdout, the progress and the errors to stderr.
+    # The distinction matters: a *finding* prints its report on stdout and
+    # exits 1, and so does a *failure to fetch the advisory database* —
+    # but the failure prints nothing on stdout. Without this, a network
+    # hiccup would read as a vulnerability.
+    report="$(cargo audit -D unsound -D yanked -D unmaintained --json --file "$lockfile" \
+      ${ignore_args[@]+"${ignore_args[@]}"} 2>/dev/null)"
+    status=$?
+
+    if [ -z "$report" ]; then
+      bad "$lockfile — the advisory scan could not run"
+      printf '    cargo audit exited %s without producing a report.\n' "$status"
+      printf '    The usual cause is no network access to the advisory database.\n'
+      printf '    A scan that did not run is not a scan that passed.\n'
+      failed=1
+      continue
+    fi
+
+    summary="$(printf '%s' "$report" | python3 scripts/audit_summary.py)"
+    summary_status=$?
+
+    if [ "$summary_status" -eq 0 ]; then
+      good "$lockfile"
+      continue
+    fi
+
+    # A report that could not be parsed is not a report that found nothing.
+    if [ "$summary_status" -ne 1 ]; then
+      bad "$lockfile — could not read the advisory report"
+      failed=1
+      continue
+    fi
+
+    # A per-lockfile flag, not the global `failed`: one lockfile's finding
+    # must not suppress the next lockfile's report.
+    lockfile_failed=0
+
+    if printf '%s' "$summary" | grep -q 'advisory(ies) not waived'; then
+      bad "$lockfile — $(printf '%s' "$summary" | sed -n '1p')"
+      printf '    A waiver belongs in deny.toml, with a reason that says why the\n'
+      printf '    advisory is not reachable from this code.\n'
+      lockfile_failed=1
+    fi
+
+    # A yanked crate is not waivable. `cargo audit --ignore` takes advisory
+    # ids, and a yanked crate has none — the only fix is to move the
+    # lockfile off the yanked version.
+    if printf '%s' "$summary" | grep -q 'yanked crate(s)'; then
+      bad "$lockfile — $(printf '%s' "$summary" | sed -n '2p')"
+      printf '    A yanked crate cannot be waived; update the lockfile instead.\n'
+      lockfile_failed=1
+    fi
+
+    if [ "$lockfile_failed" -ne 0 ]; then
+      failed=1
+      continue
+    fi
+
+    # A non-zero exit with a report that claims no findings. That
+    # is cargo audit complaining about something other than a finding.
+    bad "$lockfile — the advisory scan reported a problem (exit $status)"
+    failed=1
+  done
+fi
+
+# ---------------------------------------------------------------------------
+# Verdict
+# ---------------------------------------------------------------------------
+
+if [ "$failed" -ne 0 ]; then
+  printf '\n\033[31mpush blocked\033[0m — the checks above did not pass.\n'
+  printf 'They are the same checks CI runs, so this push would have failed there.\n'
+  exit 1
+fi
+
+printf '\n\033[32mpush checks passed\033[0m\n'
+exit 0

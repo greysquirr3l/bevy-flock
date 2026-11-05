@@ -90,6 +90,9 @@ jobs:
       - run: python3 scripts/group_cap.py --self-test
       # The regression checker's thresholds, noise handling and fixture guards, without touching a compiler.
       - run: python3 scripts/scaling_regression.py --self-test
+      # The advisory report parser the pre-push hook reads with; a parser that misreads a report
+      # would pass a graph cargo deny rejects.
+      - run: python3 scripts/audit_summary.py --self-test
       # prose that restates a threshold drifts; the report and ADR must match the code and the baseline
       - run: python3 scripts/scaling_report.py --check
       # The lint policy lives in Cargo.toml and CI passes -D warnings; a file-level override would

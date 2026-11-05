@@ -218,6 +218,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`cognition`), groups, flow fields and replication. CI compiles every bench and runs the
   examples. 443 library tests, the whole integration suite and clippy at `-D warnings`
   across all targets and features.
+- **Git hooks are tracked, and the commit-msg hook refuses attribution trailers.** `scripts/pre-push`
+  runs the two CI checks that are cheap enough to run on every push — `cargo fmt --all -- --check` and
+  `cargo audit` over every committed lockfile, both the workspace's and the compat crate's, with the
+  waivers read out of `deny.toml` so there is one list rather than two. The scan denies `unsound`,
+  `unmaintained` and `yanked` and not just plain vulnerabilities: cargo audit files those three under
+  `warnings` and exits zero for them by default, so a reader of `vulnerabilities` alone calls a
+  lockfile carrying a use-after-free advisory clean. A scan that could not run is a block, not a pass.
+  `scripts/commit-msg` refuses a message carrying a `Co-authored-by:` trailer — the history belongs to
+  the person who made the changes, and the body is where the explanation belongs.
+  `scripts/install-hooks.sh` installs both and leaves the hooks it does not own alone.
+
 - **Scaling regression suite and a generated report (ADR 0034).** `scripts/scaling_regression.py` gates
   CI on speedup ratios rather than wall clock, so a four-core runner is not a regression: thresholds
   widen with the measured spread (`fail = max(25%, 2.0 x widest)`, `warn = max(12%, 1.5 x widest)`), a
