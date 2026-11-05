@@ -52,6 +52,9 @@ pub struct FlowField {
     target: FlowTarget,
     cost: Vec<u32>,
     dir: Vec<Vec2>,
+    /// The tag of the link each cell was reached through, or 0. Empty when the source had
+    /// no links, so a game that never opens a door pays nothing for the feature.
+    via: Vec<u16>,
     reachable: u32,
 }
 
@@ -137,12 +140,30 @@ impl FlowField {
         blend.normalize_or_zero()
     }
 
+    /// The tag of the link a cell was reached through, if any.
+    ///
+    /// This is how a behaviour tree learns that an agent's route uses the ladder rather
+    /// than the stairs: `flow.link_tag_at(cell) == Some(LinkTag::new(1))` is a fact, not a
+    /// guess, and it costs two bytes per cell only in a level that has links.
+    #[must_use]
+    pub fn link_tag_at(&self, cell: NavCell) -> Option<crate::domain::links::LinkTag> {
+        let tag = *self.via.get(cell.index(self.bounds.width))?;
+        (tag != 0).then_some(crate::domain::links::LinkTag(tag))
+    }
+
+    /// Whether this field followed any links.
+    #[must_use]
+    pub fn has_links(&self) -> bool {
+        !self.via.is_empty()
+    }
+
     /// Bytes this field occupies.
     #[must_use]
     pub fn bytes(&self) -> usize {
         FLOW_FIELD_OVERHEAD_BYTES
             + self.cost.len() * core::mem::size_of::<u32>()
             + self.dir.len() * 8
+            + self.via.len() * core::mem::size_of::<u16>()
     }
 
     /// Build the direction array from a completed cost field.
@@ -168,9 +189,39 @@ impl FlowField {
                     continue;
                 }
                 let mut sum = Vec2::ZERO;
+                // Ordinary steps and links both descend the field: a route that takes the
+                // ladder has to pull toward the ladder, or the desired velocity would walk
+                // an agent at a wall it is supposed to climb.
+                let mut nexts: SmallVec<[NavCell; 12]> = SmallVec::new();
                 let mut neighbours: SmallVec<[(NavCell, u32); 8]> = SmallVec::new();
                 source.neighbours(cell, &mut neighbours);
-                for (next, _) in neighbours {
+                nexts.extend(neighbours.iter().map(|(next, _)| *next));
+                let mut links: SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]> =
+                    SmallVec::new();
+                source.links_leaving(cell, &mut links);
+                nexts.extend(links.iter().map(|(next, _, _)| *next));
+                // Record the tag on the cell that *takes* the link, which is where an agent
+                // has to decide to climb rather than where it lands, and is the fact a tree
+                // wants. The cheapest link that still descends the field wins.
+                let mut best_link: Option<(u32, u16)> = None;
+                for (next, _step, tag) in links.iter().copied() {
+                    let Some(&next_cost) = self.cost.get(next.index(width)) else {
+                        continue;
+                    };
+                    if next_cost == u32::MAX || next_cost >= own {
+                        continue;
+                    }
+                    let drop = own - next_cost;
+                    if best_link.is_none_or(|(best, _)| drop > best) {
+                        best_link = Some((drop, tag.0));
+                    }
+                }
+                if let Some((_, tag)) = best_link
+                    && let Some(slot) = self.via.get_mut(index)
+                {
+                    *slot = tag;
+                }
+                for next in nexts {
                     let Some(&next_cost) = self.cost.get(next.index(width)) else {
                         continue;
                     };
@@ -217,6 +268,8 @@ pub struct FlowSolver {
     version: NavVersion,
     target: FlowTarget,
     cost: Vec<u32>,
+    /// Link tags per cell, empty when the source has no links.
+    via: Vec<u16>,
     heap: BinaryHeap<std::cmp::Reverse<(u32, u32)>>,
     expanded: u32,
     started: bool,
@@ -236,11 +289,17 @@ impl FlowSolver {
             0,
             target.cell.index(bounds.width) as u32,
         )));
+        let via = if source.has_links() {
+            vec![0_u16; bounds.cell_count()]
+        } else {
+            Vec::new()
+        };
         Self {
             bounds,
             version: source.version(),
             target,
             cost,
+            via,
             heap,
             expanded: 0,
             started: false,
@@ -289,16 +348,15 @@ impl FlowSolver {
             let mut neighbours: SmallVec<[(NavCell, u32); 8]> = SmallVec::new();
             source.neighbours(cell, &mut neighbours);
             for (next, step) in neighbours {
-                let next_index = next.index(width);
-                let candidate = cost.saturating_add(step);
-                let Some(slot) = self.cost.get_mut(next_index) else {
-                    continue;
-                };
-                if candidate < *slot {
-                    *slot = candidate;
-                    self.heap
-                        .push(std::cmp::Reverse((candidate, next_index as u32)));
-                }
+                self.relax(next, step, cost);
+            }
+            let mut links: SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]> =
+                SmallVec::new();
+            // Backward: the search grows from the target, so it crosses a link in reverse
+            // and charges its cost to the cell on the far side.
+            source.links_into(cell, &mut links);
+            for (next, step, _tag) in links {
+                self.relax(next, step, cost);
             }
         }
         if self.heap.is_empty() {
@@ -307,6 +365,20 @@ impl FlowSolver {
             SolveProgress::Running {
                 expanded: self.expanded,
             }
+        }
+    }
+
+    /// Lower the cost of a cell if this route is cheaper.
+    fn relax(&mut self, next: NavCell, step: u32, index_cost: u32) {
+        let next_index = next.index(self.bounds.width);
+        let candidate = index_cost.saturating_add(step);
+        let Some(slot) = self.cost.get_mut(next_index) else {
+            return;
+        };
+        if candidate < *slot {
+            *slot = candidate;
+            self.heap
+                .push(std::cmp::Reverse((candidate, next_index as u32)));
         }
     }
 
@@ -328,6 +400,7 @@ impl FlowSolver {
             target: self.target,
             cost: self.cost,
             dir: vec![Vec2::ZERO; self.bounds.cell_count()],
+            via: self.via,
             reachable: 0,
         }
         .finish(source)

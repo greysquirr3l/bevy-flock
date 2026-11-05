@@ -360,6 +360,27 @@ slots and splitting those writes needs either a slot-indexed output buffer or ca
 scratch. ADR 0044 records the plan and the honest expectation: 2–3× on top, not 6×, for the same
 bandwidth reason.
 
+## Reciprocal avoidance, on and off (2026-11-05)
+
+`cargo bench --bench crowd -- crowd_avoidance`, `--release`, default features (`simd` and
+`threads`), ten samples, Criterion's own warm-up. The crowd is the spawn spiral in three
+dimensions at 1.6 m spacing, which is denser than a real square and therefore a pessimistic
+measurement of the neighbour count.
+
+| Population | `steer_only` | `steer_and_avoid` | Avoidance alone |
+| ---------: | -----------: | ----------------: | --------------: |
+|     10,000 |     2.25 ms  |          3.27 ms  |       +1.01 ms  |
+|    100,000 |    25.74 ms  |         38.08 ms  |      +12.34 ms  |
+
+The first implementation was scalar and cost 3.96 ms at 10,000; moving it onto the same
+`SteeringRoad` the kernel uses (read the pre-pass snapshot, write disjoint slots) took it to
+1.01 ms, a 3.9x improvement, and the parallel and scalar passes are held to bit equality by
+`a_parallel_avoidance_pass_matches_the_scalar_one`.
+
+What this means in practice: avoidance costs about 45% of a steering frame at both sizes, because
+both are neighbour-pair bound and the density is the same. A game that tiers its crowd pays it on
+the steered agents only; ambient agents are avoided but do not avoid (ADR 0045).
+
 ## Four-agent SIMD steering (2026-11-04)
 
 ADR 0023. After the profiling pass the kernel was 93% of the frame in self time, so the next

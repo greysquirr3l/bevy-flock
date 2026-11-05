@@ -71,3 +71,7 @@ replay.
 | [0042](0042-diagnostics-and-fuzzing.md) | Explain on demand, overlay as data, decoders fuzzed on two layers | Accepted |
 | [0043](0043-docs-and-release-shape.md) | Documentation and release shape: book, README verification, release gate | Accepted |
 | [0044](0044-threaded-steering.md) | One frame, cut into slices: threads beat lanes, 2.0x at 10k and 2.8x at 100k | Accepted |
+| [0045](0045-reciprocal-local-avoidance.md) | Reciprocal avoidance: half the responsibility each, +1.0 ms at 10k | Accepted |
+| [0046](0046-obstacle-driven-navigation.md) | Obstacle navigation rebuilds in rows and publishes once | Accepted |
+| [0047](0047-stimulus-perception.md) | Stimuli are a bounded, decaying buffer observers read | Accepted |
+| [0048](0048-navigation-links-and-navmesh.md) | Links are search edges; the navmesh is an optional polygon source | Accepted |

@@ -26,6 +26,10 @@ that means:
 | Area | State |
 | --- | --- |
 | Boids and steering (separation, alignment, cohesion, seek, arrive) | **Shipped** |
+| Reciprocal local avoidance with per-NPC priority (ADR 0045) | **Shipped (on by default)** |
+| Obstacle-derived navigation that rebuilds in budgeted slices (ADR 0046) | **Shipped (opt-in)** |
+| Stimulus perception: sight cone, hearing, decay, occlusion hook (ADR 0047) | **Shipped (opt-in)** |
+| Navigation links and an optional polygon navmesh (ADR 0048, `navmesh` feature) | **Shipped** |
 | Deterministic spatial grid (radius, k-nearest) | **Shipped** |
 | Deterministic RNG with per-NPC streams (PCG32, reference-verified) | **Shipped** |
 | Budgeted, deterministic population spawning (unique and recycled) | **Shipped** |

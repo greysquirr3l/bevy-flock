@@ -40,11 +40,11 @@ use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
 use crate::adapters::primary::components::{
-    FlockMember, LodTier, Npc, NpcDesiredVelocity, NpcTarget, NpcVelocity,
+    FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcDesiredVelocity, NpcTarget, NpcVelocity,
 };
 use crate::adapters::primary::plugin::FlockSet;
 use crate::application::SimClock;
-use crate::application::{Crowd, CrowdParams, CrowdReport, SteeringRoad};
+use crate::application::{AvoidanceParams, Crowd, CrowdParams, CrowdReport, SteeringRoad};
 use crate::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{AgentState, SteeringParams, desired_velocity};
 use crate::domain::tick::TicksPerSecond;
@@ -60,6 +60,7 @@ pub struct BoidsConfig {
     grid: SpatialGridConfig,
     max_acceleration: f32,
     road: SteeringRoad,
+    avoidance: Option<AvoidanceParams>,
 }
 
 impl BoidsConfig {
@@ -89,6 +90,7 @@ impl BoidsConfig {
             grid,
             max_acceleration,
             road: SteeringRoad::Auto,
+            avoidance: Some(AvoidanceParams::new()),
         })
     }
 
@@ -147,6 +149,24 @@ impl BoidsConfig {
         self.road
     }
 
+    /// Turn reciprocal avoidance on or off, and set its numbers (ADR 0045).
+    ///
+    /// On by default with [`AvoidanceParams::new`]: two agents walking at each other in a
+    /// corridor should not pass through each other, and a crowd library where that needs
+    /// discovering is a crowd library that ships the bug. `None` restores pure boids steering
+    /// for a game that solves separation itself.
+    #[must_use]
+    pub fn with_avoidance(mut self, avoidance: Option<AvoidanceParams>) -> Self {
+        self.avoidance = avoidance;
+        self
+    }
+
+    /// The avoidance settings, if the pass runs.
+    #[must_use]
+    pub fn avoidance(&self) -> Option<AvoidanceParams> {
+        self.avoidance
+    }
+
     /// Change the acceleration limit.
     ///
     /// A non-finite or non-positive value is ignored and the previous limit is
@@ -170,6 +190,7 @@ impl Default for BoidsConfig {
             grid: SpatialGridConfig::default(),
             max_acceleration: 4.0,
             road: SteeringRoad::Auto,
+            avoidance: Some(AvoidanceParams::new()),
         }
     }
 }
@@ -199,6 +220,7 @@ type SteerQuery<'w, 's> = Query<
         Option<&'static NpcTarget>,
         Option<&'static FlockMember>,
         Option<&'static LodTier>,
+        Option<&'static NpcAvoidancePriority>,
     ),
 >;
 
@@ -302,6 +324,7 @@ pub fn steer_flock(
         &NpcVelocity,
         Option<&NpcTarget>,
         Option<&LodTier>,
+        Option<&NpcAvoidancePriority>,
     )>,
     mut desired: Query<&mut NpcDesiredVelocity>,
     mut report: ResMut<FlockSteerReport>,
@@ -311,7 +334,7 @@ pub fn steer_flock(
     crowd.configure_from_grid(&grid.0);
     crowd.begin();
     entities.clear();
-    for (entity, transform, velocity, target, tier) in &gather {
+    for (entity, transform, velocity, target, tier, priority) in &gather {
         // Ambient-tier NPCs are population mass: neighbours to everyone, steered by nobody.
         let steers = !matches!(tier, Some(LodTier::Ambient));
         entities.push(entity);
@@ -325,17 +348,30 @@ pub fn steer_flock(
             target.map(|target| [target.0.x, target.0.y, target.0.z]),
             steers,
         );
+        if let Some(priority) = priority {
+            crowd.set_priority(entities.len() - 1, priority.get());
+        }
     }
 
-    report.0 = crowd.steer(&params);
+    let mut crowd_report = crowd.steer(&params);
+
+    // One reciprocal pass over the same cell order, after every agent has said where it wants to
+    // go: correcting during steering would make the result depend on who was processed first.
+    // Ambient agents are in the buffers, so they are avoided without being steered.
+    if let Some(avoidance) = config.avoidance {
+        let avoided = crowd.avoid(&avoidance);
+        crowd_report.avoided = avoided.adjusted;
+        crowd_report.avoid_pairs = avoided.pairs;
+    }
+    report.0 = crowd_report;
 
     for (index, entity) in entities.iter().enumerate() {
         let Ok(mut slot) = desired.get_mut(*entity) else {
             continue;
         };
-        slot.0 = crowd
-            .desired(index)
-            .map_or(Vec3::ZERO, |desired| Vec3::new(desired[0], 0.0, desired[1]));
+        slot.0 = crowd.desired(index).map_or(Vec3::ZERO, |desired| {
+            Vec3::new(desired[0], desired[1], desired[2])
+        });
     }
 }
 
@@ -355,7 +391,7 @@ pub fn steer_flock_reference(
     mut query: SteerQuery,
 ) {
     let params = config.params;
-    for (transform, velocity, mut desired, target, member, tier) in &mut query {
+    for (transform, velocity, mut desired, target, member, tier, _priority) in &mut query {
         if matches!(tier, Some(LodTier::Ambient)) {
             desired.0 = Vec3::ZERO;
             continue;
@@ -500,6 +536,139 @@ mod tests {
             "velocity {} exceeded the per-tick limit {limit}",
             velocity.length()
         );
+    }
+
+    /// Two NPCs walking at each other down a corridor, with the soft separation weight off so
+    /// steering alone cannot keep them apart. Returns their closest approach in metres.
+    fn head_on(avoidance: Option<AvoidanceParams>) -> (f32, bool) {
+        let mut params = SteeringParams::human_scale();
+        params.weights.separation = 0.0;
+        let config = BoidsConfig::default()
+            .with_params(params)
+            .expect("valid params")
+            .with_avoidance(avoidance);
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(config));
+        let left = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-6.0, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(6.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)))
+            .id();
+        let mut closest = f32::MAX;
+        for _ in 0..360 {
+            app.update();
+            let left = app
+                .world()
+                .get::<Transform>(left)
+                .expect("transform")
+                .translation;
+            let right = app
+                .world()
+                .get::<Transform>(right)
+                .expect("transform")
+                .translation;
+            closest = closest.min(left.distance(right));
+        }
+        let left = app
+            .world()
+            .get::<Transform>(left)
+            .expect("transform")
+            .translation;
+        let right = app
+            .world()
+            .get::<Transform>(right)
+            .expect("transform")
+            .translation;
+        (closest, left.x < right.x)
+    }
+
+    #[test]
+    fn avoidance_stops_two_agents_walking_through_each_other() {
+        let (without, _) = head_on(None);
+        assert!(
+            without < 0.5,
+            "the fixture must overlap without avoidance, else it proves nothing (got {without})"
+        );
+        let (with, kept_order) = head_on(Some(AvoidanceParams::new()));
+        assert!(
+            with >= 0.7,
+            "the separation floor must hold for the whole approach (closest {with})"
+        );
+        assert!(kept_order, "they must not have swapped sides");
+    }
+
+    #[test]
+    fn avoidance_priority_decides_who_yields() {
+        // A cart (4.0) against a pedestrian (1.0), head-on: the pedestrian does the stepping
+        // aside, so the cart keeps far more of its speed along the corridor.
+        let mut params = SteeringParams::human_scale();
+        params.weights.separation = 0.0;
+        let config = BoidsConfig::default()
+            .with_params(params)
+            .expect("valid params")
+            .with_avoidance(Some(AvoidanceParams::new()));
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(config));
+        let cart = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-1.2, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .insert(NpcAvoidancePriority::new(4.0))
+            .id();
+        let person = app
+            .world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(0.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)))
+            .insert(NpcAvoidancePriority::new(1.0))
+            .id();
+        app.update();
+        let cart = app
+            .world()
+            .get::<NpcDesiredVelocity>(cart)
+            .expect("desired")
+            .0
+            .x;
+        let person = app
+            .world()
+            .get::<NpcDesiredVelocity>(person)
+            .expect("desired")
+            .0
+            .x;
+        assert!(
+            cart > -person,
+            "the cart must keep more of its speed than the pedestrian: cart {cart}, person {person}"
+        );
+    }
+
+    #[test]
+    fn avoidance_is_reported() {
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::default());
+        let left = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-1.2, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .id();
+        app.world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(0.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)));
+        app.update();
+        assert!(app.world().get::<Transform>(left).is_some());
+        let report = app.world().resource::<FlockSteerReport>().0;
+        assert_eq!(report.steered, 2);
+        assert!(report.avoid_pairs > 0, "the pair must be examined");
+        assert!(report.avoided > 0, "at least one agent must be corrected");
     }
 
     #[test]

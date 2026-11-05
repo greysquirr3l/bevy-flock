@@ -58,6 +58,42 @@ in total and 3.78 ms at a million is a 1.6% difference for ten times the populat
 only five thousand of them are entities. The 1,000,000 row re-measured at 3.80 ms during the
 reproducibility pass, which is the intended relationship between a table and a re-run.
 
+## Traversal: a ladder is an edge, not a special case
+
+A grid flow field answers "walk there". It cannot answer "walk there, up the ladder", so the
+usual workaround is a behaviour tree that teleports the NPC when it reaches a trigger. That works
+until two NPCs need to path to the same upstairs room and the tree has to reimplement A*.
+
+bevy-flock treats traversal as navigation data (ADR 0048):
+
+```rust,ignore
+use bevy_flock::domain::links::{LinkTag, NavLink};
+use bevy_flock::domain::nav::{GridNavSource, NavCell};
+
+let mut source = GridNavSource::open(Vec3::ZERO, 64, 64, 1.0)?;
+// A ladder from the ground floor to the mezzanine, four seconds of climbing.
+source.add_link(NavLink::new(
+    NavCell::new(12, 40),
+    NavCell::new(12, 8),
+    240,
+    LinkTag::new(1),
+))?; // cost in the solver's units: 240 is four seconds at 60 ticks
+
+// The field now routes through the ladder when it is the cheaper way,
+// and around when it is not.
+let field = solve(&source, FlowTarget::at_cell(&source, NavCell::new(50, 8)));
+assert_eq!(field.link_tag_at(NavCell::new(12, 40)), Some(LinkTag::new(1)));
+```
+
+The link is an edge in the same relaxation that builds the field, not a post-processed shortcut,
+so it can be the *only* route to a cell. The tag rides along in the field, which is what a leaf
+reads when it wants to know whether the route it is following goes up a ladder:
+
+```rust,ignore
+// In a tree: "if the way ahead is a ladder, slow down and play the climb".
+condition(|ctx| ctx.field_link_tag() == Some(LinkTag::new(1)))
+```
+
 ## The continuum: population as density
 
 `AmbientField` is the far layer, and it is deliberately boring: a sparse grid of cells, each

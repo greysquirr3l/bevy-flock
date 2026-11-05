@@ -12,8 +12,8 @@ pub use bevy_math::Vec3;
 pub use bevy_transform::prelude::Transform;
 
 pub use crate::adapters::primary::components::{
-    FlockMember, LodTier, Npc, NpcBrain, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcMood,
-    NpcNeeds, NpcTarget, NpcTemperament, NpcVelocity,
+    FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcBrain, NpcBundle, NpcDesiredVelocity,
+    NpcIdentity, NpcMood, NpcNeeds, NpcTarget, NpcTemperament, NpcVelocity,
 };
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
@@ -32,10 +32,16 @@ pub use crate::adapters::primary::memory_bridge::{MemoryBridgeStats, MemoryConfi
 pub use crate::adapters::primary::observability::{
     DebugLabel, DebugOverlay, DebugOverlayConfig, ExplainError, collect_debug_overlay, explain_npc,
 };
+pub use crate::adapters::primary::obstacle_nav::{
+    NavObstacle, ObstacleNavPlugin, ObstacleNavSettings, ObstacleNavState,
+};
 #[cfg(feature = "memory")]
 pub use crate::adapters::primary::plugin::MemoryBridgePlugin;
-pub use crate::application::SteeringRoad;
+pub use crate::adapters::primary::stimulus::{
+    PerceivedStimuli, Perception, PerceptionSettings, StimulusPlugin, StimulusSource,
+};
 pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
+pub use crate::application::{AvoidReport, AvoidanceParams, SteeringRoad};
 pub use crate::behavior::memory_leaves::{
     GRUDGE_VALENCE, GreetFriend, KEY_MEMORY_FAMILIARITY, KEY_MEMORY_FLAGS, KEY_MEMORY_VALENCE,
     MemoryLeaves, RECOGNITION_THRESHOLD, RecogniseKnown, Remembered, ShunGrudge, WARM_VALENCE,
@@ -55,5 +61,6 @@ pub use crate::domain::saves::{LoadReport, MemorySnapshot, Origin, SaveError, Sa
 pub use crate::domain::spatial::SpatialGridConfig;
 pub use crate::domain::spawn::{DEFAULT_SPACING, Placement};
 pub use crate::domain::steering::SteeringParams;
+pub use crate::domain::stimulus::{Perceived, Stimulus, StimulusKind};
 pub use crate::domain::temperament::{Archetype, Temperament};
 pub use crate::domain::tick::{Tick, TicksPerSecond};

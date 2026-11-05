@@ -6,8 +6,11 @@ pub mod components;
 pub mod dialogue;
 pub mod grouping;
 #[cfg(feature = "memory")]
+pub mod interaction;
+#[cfg(feature = "memory")]
 pub mod memory_bridge;
 pub mod observability;
+pub mod obstacle_nav;
 pub mod perception;
 pub mod plugin;
 pub mod render;
@@ -28,8 +31,16 @@ pub use dialogue::{
 pub use grouping::{
     GroupLeader, GroupMember, Groups, NpcIndex, index_new_npcs, reconcile_despawns,
 };
+#[cfg(feature = "memory")]
+pub use interaction::{
+    InteractionConfig, InteractionKind, InteractionLog, InteractionOutcome, InteractionPlugin,
+    InteractionQueue, InteractionRequest, Reaction, register, resolve_interactions, submit,
+};
 pub use observability::{
     CrowdPulse, Diagnostics, Violation, check_world, count_frames, sample_crowd,
+};
+pub use obstacle_nav::{
+    NavObstacle, ObstacleNavPlugin, ObstacleNavSettings, ObstacleNavState, rebuild_obstacle_nav,
 };
 pub use perception::{
     KEY_PLAYER_DISTANCE, KEY_PLAYER_SEEN, NoticedPeople, PerceptionConfig, PlayerCharacter,
@@ -40,4 +51,9 @@ pub use plugin::{
     SpawnQueue, drain_spawn_queue, recycled_mode, spawn_position,
 };
 pub use render::{CrowdView, RenderPlan, VisibleInstance, build_render_plan, tint_from_seed};
+pub use stimulus::{
+    PerceivedStimuli, Perception, PerceptionSettings, StimulusBufferResource, StimulusPlugin,
+    StimulusSource, emit_stimuli, perceive_stimuli,
+};
 pub use world_director::{AmbientMood, CrowdAlarms, CrowdDirector, run_world_director};
+pub mod stimulus;

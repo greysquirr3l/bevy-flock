@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
+  already gathers removes the excess closing speed between each pair, split by priority, so two
+  agents walking at each other stop at the separation floor instead of sharing space.
+  `NpcAvoidancePriority` (default 1.0) is how a game says who yields; `BoidsConfig::with_avoidance`
+  turns it off. On by default. The pass runs on the same `SteeringRoad` as steering, is held to bit
+  equality between the scalar and threaded roads, and allocates nothing in a steady frame. Measured
+  at 10,000 agents: 2.25 ms steering, 3.27 ms with avoidance; at 100,000: 25.74 ms and 38.08 ms.
+- **Obstacle-driven navigation (ADR 0046).** `ObstacleNavPlugin` plus a `NavObstacle` component
+  derive a `GridNavSource` from the world's blockers, rebuilding at most `cells_per_tick` cells a
+  frame, a whole row at a time, and publishing atomically: the version increments once, on the step
+  that finishes the rebuild, so no NPC ever paths against a half-built wall.
+- **Stimulus perception (ADR 0047).** `StimulusBuffer` is a bounded, decaying ring of sights,
+  sounds and smells; `perceive` applies range, cone, age and an optional `Occluder`. `StimulusPlugin`
+  publishes from `StimulusSource` entities and writes `PerceivedStimuli` per observer on a tick
+  interval, so a guard can lose sight of a target and search without a special case in its tree.
+- **Navigation links and an optional navmesh (ADR 0048).** `NavLink` with a cost and a `LinkTag`
+  participates in flow-field relaxation rather than being post-processed, so a ladder can be the
+  only route to a floor, and `FlowField::link_tag_at` tells a leaf what it is about to walk onto.
+  The `navmesh` feature adds a polygon source with area costs and a funnel, with the funnel's
+  pinch-restart branches fixed to advance the apex to the opposite corner.
+- **Three fixes found by the above.** `steer_flock` wrote the kernel's desired velocity as
+  `(x, 0, y)`, dropping vertical and lateral motion; it now writes all three axes. Sorting a
+  `LinkTable` placed same-key edges after every equal key, leaving insertion order to decide ties.
+  `Crowd::begin` and `Crowd::order_by_cell` now share a count reset, so the order is idempotent and
+  the avoidance pass can reuse it.
 - **Steering uses every core (ADR 0044).** `Crowd::steer` cuts a frame into contiguous slices of
   agents and hands them to the `ComputeTaskPool`, with `SteeringRoad { Auto, Wide, Threads, Scalar }`
   to pin the choice and `BoidsConfig::with_road` to set it. All four roads assert bit equality with

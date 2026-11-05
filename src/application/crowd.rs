@@ -41,6 +41,7 @@ use bevy_tasks::{ComputeTaskPool, TaskPool};
 #[cfg(feature = "simd")]
 use wide::f32x4;
 
+use crate::application::avoidance::{self, AvoidReport, AvoidanceParams};
 use crate::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{SteeringParams, accumulate};
 
@@ -126,6 +127,10 @@ pub struct CrowdReport {
     pub pairs: u64,
     /// Cells that held at least one agent.
     pub cells: u32,
+    /// Agents the avoidance pass adjusted. Zero when it is not configured.
+    pub avoided: u32,
+    /// Neighbour pairs the avoidance pass examined.
+    pub avoid_pairs: u64,
 }
 
 /// Agents as arrays, bucketed by the spatial grid's cells.
@@ -158,6 +163,10 @@ pub struct Crowd {
     sequential: bool,
     /// Where the loop runs; `Auto` unless a game asks otherwise.
     road: SteeringRoad,
+    /// How much each agent yields in the avoidance pass, 1.0 by default (ADR 0045).
+    priorities: Vec<f32>,
+    /// Scratch for the avoidance pass, so it writes a second buffer rather than in place.
+    corrected: Vec<[f32; 3]>,
     /// Cell-major component arrays, built by the same sort that produces `order` (ADR 0030).
     #[cfg(feature = "simd")]
     soa: Soa,
@@ -255,16 +264,13 @@ impl Crowd {
 
     /// Forget last frame's agents, keeping the allocations.
     pub fn begin(&mut self) {
-        for cell in self.touched.drain(..) {
-            if let Some(count) = self.counts.get_mut(cell as usize) {
-                *count = 0;
-            }
-        }
+        self.reset_counts();
         self.positions.clear();
         self.velocities.clear();
         self.targets.clear();
         self.flags.clear();
         self.desired.clear();
+        self.priorities.clear();
         self.cells.clear();
         self.order.clear();
     }
@@ -292,6 +298,7 @@ impl Crowd {
         self.targets.push(target.unwrap_or([0.0; 3]));
         self.flags.push(flags);
         self.desired.push([0.0; 3]);
+        self.priorities.push(1.0);
         self.cells.push(self.cell_of(position));
     }
 
@@ -305,6 +312,136 @@ impl Crowd {
         let y = clamp_axis((position[1] - self.min[1]) / self.cell_size, self.dims[1]);
         let z = clamp_axis((position[2] - self.min[2]) / self.cell_size, self.dims[2]);
         (z * self.dims[1] + y) * self.dims[0] + x
+    }
+
+    /// Set how much this agent yields in the avoidance pass.
+    ///
+    /// Above 1.0 is a guard who expects the crowd to move; below is a child who is moved around.
+    /// Ignored unless the value is finite and positive, so a broken number cannot make an agent
+    /// yield infinitely.
+    pub fn set_priority(&mut self, index: usize, priority: f32) {
+        if let Some(slot) = self.priorities.get_mut(index)
+            && priority.is_finite()
+            && priority > 0.0
+        {
+            *slot = priority;
+        }
+    }
+
+    /// An agent's avoidance priority, or the default when it has not been set.
+    #[must_use]
+    pub fn priority(&self, index: usize, params: &AvoidanceParams) -> f32 {
+        self.priorities
+            .get(index)
+            .copied()
+            .unwrap_or(params.priority)
+    }
+
+    /// Correct the frame's desired velocities so no pair shares space (ADR 0045).
+    ///
+    /// Runs after [`Crowd::steer`] and reads the neighbour set through the same cell order, so it
+    /// costs a second pass over pairs the grid already has in cache. The correction is applied to
+    /// the desired velocity, never to the position: an agent that has already overlapped is
+    /// separated over the horizon rather than snapped apart.
+    pub fn avoid(&mut self, params: &AvoidanceParams) -> AvoidReport {
+        match self.road {
+            SteeringRoad::Scalar | SteeringRoad::Wide => self.avoid_scalar(params),
+            SteeringRoad::Threads => self.avoid_parallel(params),
+            // `Auto` takes the pool exactly when steering would have: a crowd too small to pay
+            // for the split is a crowd whose avoidance should not pay for it either.
+            SteeringRoad::Auto => {
+                if pool_for(self.positions.len(), self.sequential).is_some() {
+                    self.avoid_parallel(params)
+                } else {
+                    self.avoid_scalar(params)
+                }
+            }
+        }
+    }
+
+    /// The avoidance pass, one agent at a time: the definition (ADR 0045).
+    pub fn avoid_scalar(&mut self, params: &AvoidanceParams) -> AvoidReport {
+        if !params.is_usable() || self.is_empty() {
+            return AvoidReport::default();
+        }
+        self.order_by_cell();
+        let mut report = AvoidReport::default();
+        let desired = std::mem::take(&mut self.desired);
+        // Written into a second buffer, never in place: an agent's neighbour must be judged on
+        // the velocity it intended at the start of the pass, or whoever is processed second
+        // under-corrects and walks through the first.
+        let mut corrected = std::mem::take(&mut self.corrected);
+        corrected.clear();
+        corrected.extend_from_slice(&desired);
+        {
+            let view = self.view();
+            let priorities = &self.priorities;
+            for (index, out) in corrected.iter_mut().enumerate() {
+                avoid_agent(&view, &desired, priorities, params, index, out, &mut report);
+            }
+        }
+        self.desired = corrected;
+        self.corrected = desired;
+        report
+    }
+
+    /// The same pass over the ECS compute pool (ADR 0044's road, applied to avoidance).
+    ///
+    /// Every agent reads the pre-pass snapshot and writes only its own slot of a second buffer,
+    /// so the split cannot change a float: `a_parallel_pass_matches_the_scalar_one` holds the two
+    /// to bit equality. Falls back to [`Crowd::avoid_scalar`] when there is no pool to use.
+    pub fn avoid_parallel(&mut self, params: &AvoidanceParams) -> AvoidReport {
+        let Some(pool) = pool_for(self.positions.len(), self.sequential) else {
+            return self.avoid_scalar(params);
+        };
+        if !params.is_usable() || self.is_empty() {
+            return AvoidReport::default();
+        }
+        self.order_by_cell();
+        let desired = std::mem::take(&mut self.desired);
+        let mut corrected = std::mem::take(&mut self.corrected);
+        corrected.clear();
+        corrected.extend_from_slice(&desired);
+        let chunk = corrected
+            .len()
+            .div_ceil(pool.thread_num() * 8)
+            .max(MIN_PARALLEL_CHUNK);
+        let priorities = &self.priorities;
+        // A shared reference, not the `Vec`: each task borrows the snapshot for the length of the
+        // scope, and only the slice of `corrected` it was handed is writable.
+        let snapshot: &[[f32; 3]] = &desired;
+        let avoid_params = *params;
+        let parts = {
+            let view = self.view();
+            pool.scope(|scope| {
+                for (chunk_index, slice) in corrected.chunks_mut(chunk).enumerate() {
+                    let first = chunk_index * chunk;
+                    scope.spawn(async move {
+                        let mut report = AvoidReport::default();
+                        for (offset, out) in slice.iter_mut().enumerate() {
+                            avoid_agent(
+                                &view,
+                                snapshot,
+                                priorities,
+                                &avoid_params,
+                                first + offset,
+                                out,
+                                &mut report,
+                            );
+                        }
+                        report
+                    });
+                }
+            })
+        };
+        self.desired = corrected;
+        self.corrected = desired;
+        let mut report = AvoidReport::default();
+        for part in parts {
+            report.pairs += part.pairs;
+            report.adjusted += part.adjusted;
+        }
+        report
     }
 
     /// The desired velocity written for an agent, if it was steered.
@@ -419,8 +556,22 @@ impl Crowd {
         report
     }
 
+    /// Zero the counts of every cell written last frame.
+    ///
+    /// Split out because both `begin` and `order_by_cell` need it: the order is rebuilt by the
+    /// avoidance pass as well as by `steer`, and a rebuild that did not zero first would double
+    /// every count and put each agent in the list twice.
+    fn reset_counts(&mut self) {
+        for cell in self.touched.drain(..) {
+            if let Some(count) = self.counts.get_mut(cell as usize) {
+                *count = 0;
+            }
+        }
+    }
+
     /// Counting sort of agent indices into cell order, touching only occupied cells.
     fn order_by_cell(&mut self) {
+        self.reset_counts();
         self.touched.clear();
         for cell in &self.cells {
             let index = *cell as usize;
@@ -845,6 +996,56 @@ impl ScanView<'_> {
         scan
     }
 
+    /// Call `visit` for every agent within `radius` of `position`, in cell order.
+    ///
+    /// The same window arithmetic as [`ScanView::scan`], with the accumulate left to the caller:
+    /// the avoidance pass wants neighbours one at a time, not their sums, and duplicating the
+    /// window walk keeps each loop readable and inlined.
+    fn for_each_neighbour(
+        &self,
+        index: usize,
+        position: [f32; 3],
+        radius: f32,
+        mut visit: impl FnMut(usize),
+    ) {
+        let radius_squared = radius * radius;
+        let window = self.window(position, radius);
+        let dim_x = i64::from(self.dims[0]);
+        let dim_y = i64::from(self.dims[1]);
+        for z in window.z0..=window.z1 {
+            let plane = (z * dim_y) * dim_x;
+            for y in window.y0..=window.y1 {
+                let row = plane + y * dim_x;
+                for x in window.x0..=window.x1 {
+                    let at = u32::try_from(row + x).unwrap_or(u32::MAX);
+                    let Some(&start) = self.start.get(at as usize) else {
+                        continue;
+                    };
+                    let length = self.counts.get(at as usize).copied().unwrap_or(0);
+                    for slot in start..start + length {
+                        let Some(&other) = self.order.get(slot as usize) else {
+                            continue;
+                        };
+                        let other = other as usize;
+                        if other == index {
+                            continue;
+                        }
+                        let Some(&other_position) = self.positions.get(other) else {
+                            continue;
+                        };
+                        let dx = position[0] - other_position[0];
+                        let dy = position[1] - other_position[1];
+                        let dz = position[2] - other_position[2];
+                        if dx * dx + dy * dy + dz * dz > radius_squared {
+                            continue;
+                        }
+                        visit(other);
+                    }
+                }
+            }
+        }
+    }
+
     /// The inclusive cell range that can hold anything within `radius` of `position`.
     ///
     /// One division per axis, not two: the previous version evaluated `axis_window` twice for
@@ -880,6 +1081,74 @@ impl ScanView<'_> {
             z1,
         }
     }
+}
+
+/// What an agent intends to do this tick: its desired velocity if it steers, else its own.
+///
+/// Avoidance reasons about intent, not about history: an agent that has decided to walk left
+/// should be predicted walking left, and an ambient agent that is simply standing there should be
+/// predicted standing there.
+/// The whole per-agent avoidance step, so both roads call the same code.
+///
+/// Reads only the pre-pass snapshot in `desired` and writes only `out`, which is what makes the
+/// pass safe to split across threads and bit-identical when it is.
+fn avoid_agent(
+    view: &ScanView<'_>,
+    desired: &[[f32; 3]],
+    priorities: &[f32],
+    params: &AvoidanceParams,
+    index: usize,
+    out: &mut [f32; 3],
+    report: &mut AvoidReport,
+) {
+    let flags = view.flags.get(index).copied().unwrap_or(0);
+    if flags & STEERS == 0 {
+        return;
+    }
+    let Some(&position) = view.positions.get(index) else {
+        return;
+    };
+    let velocity = intended(view, desired, index);
+    let priority = priorities.get(index).copied().unwrap_or(params.priority);
+    let reach = params.floor() + params.max_adjust * params.horizon;
+    let mut correction = [0.0_f32; 3];
+    let mut touched = false;
+    view.for_each_neighbour(index, position, reach, |other| {
+        let other_position = view.positions.get(other).copied().unwrap_or(position);
+        let other_velocity = intended(view, desired, other);
+        let other_priority = priorities.get(other).copied().unwrap_or(params.priority);
+        report.pairs += 1;
+        touched |= avoidance::solve_pair(
+            params,
+            position,
+            velocity,
+            priority,
+            other_position,
+            other_velocity,
+            other_priority,
+            &mut correction,
+        );
+    });
+    if touched {
+        *out = avoidance::apply(
+            params,
+            desired.get(index).copied().unwrap_or(*out),
+            correction,
+        );
+        report.adjusted += 1;
+    }
+}
+
+fn intended(view: &ScanView<'_>, desired: &[[f32; 3]], index: usize) -> [f32; 3] {
+    let flags = view.flags.get(index).copied().unwrap_or(0);
+    if flags & STEERS == 0 {
+        return view.velocities.get(index).copied().unwrap_or([0.0; 3]);
+    }
+    desired
+        .get(index)
+        .copied()
+        .or_else(|| view.velocities.get(index).copied())
+        .unwrap_or([0.0; 3])
 }
 
 /// Steer one agent into `out`: the whole per-agent step, so both roads call the same code.
@@ -1076,6 +1345,120 @@ mod tests {
         Vec3::new(point[0], point[1], point[2])
     }
 
+    /// Walk a pair of agents through each other and return the closest they came, in metres.
+    ///
+    /// The targets are behind each other, so steering alone drives them straight through: this is
+    /// the doorway case, and the only thing that can keep them apart is the avoidance pass.
+    fn head_on_run(avoid: bool) -> (f32, [f32; 3], [f32; 3], u64) {
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        // Separation weight off, so the soft force cannot keep them apart and the fixture models
+        // the case avoidance exists for: a doorway where pushing is outmatched by the traffic.
+        let mut params = params();
+        params.weights[0] = 0.0;
+        let avoidance = AvoidanceParams::new()
+            .with_separation(0.7)
+            .with_horizon(0.8);
+        let mut left = [-6.0_f32, 0.0, 0.0];
+        let mut right = [6.0_f32, 0.0, 0.0];
+        let mut left_velocity = [0.0_f32; 3];
+        let mut right_velocity = [0.0_f32; 3];
+        let step = 1.0 / 60.0;
+        let mut closest = f32::MAX;
+        let mut pairs = 0_u64;
+        for _ in 0..360 {
+            let mut crowd = Crowd::default();
+            crowd.configure_from_grid(&grid);
+            crowd.begin();
+            crowd.push(left, left_velocity, Some([9.0, 0.0, 0.0]), true);
+            crowd.push(right, right_velocity, Some([-9.0, 0.0, 0.0]), true);
+            let report = crowd.steer(&params);
+            assert_eq!(report.steered, 2);
+            if avoid {
+                // Only pairs inside the pass's reach are examined, so the count is summed over
+                // the approach rather than asserted on the first tick, when they are 12 m apart.
+                let rep = crowd.avoid(&avoidance);
+                pairs += rep.pairs;
+            }
+            let desired_left = crowd.desired(0).unwrap_or([0.0; 3]);
+            let desired_right = crowd.desired(1).unwrap_or([0.0; 3]);
+            left_velocity = desired_left;
+            right_velocity = desired_right;
+            left[0] += desired_left[0] * step;
+            right[0] += desired_right[0] * step;
+            let dx = left[0] - right[0];
+            let dy = left[1] - right[1];
+            let dz = left[2] - right[2];
+            closest = closest.min(libm::sqrtf(dx * dx + dy * dy + dz * dz));
+        }
+        (closest, left, right, pairs)
+    }
+
+    #[test]
+    fn avoidance_keeps_two_agents_from_sharing_space() {
+        let (without, _, _, _) = head_on_run(false);
+        let (with, left, right, pairs) = head_on_run(true);
+        assert!(
+            pairs > 0,
+            "the pass must have examined pairs during the approach"
+        );
+        assert!(
+            without < 0.7,
+            "the fixture must overlap without avoidance, else it proves nothing (got {without})"
+        );
+        assert!(
+            with >= 0.7,
+            "the separation floor must hold for the whole approach (closest {with})"
+        );
+        assert!(
+            left[0] < right[0],
+            "they must not have passed through each other"
+        );
+    }
+
+    #[test]
+    fn avoidance_is_bit_stable_across_runs() {
+        let (first, left_a, right_a, _) = head_on_run(true);
+        let (second, left_b, right_b, _) = head_on_run(true);
+        assert_eq!(first.to_bits(), second.to_bits());
+        assert_eq!(left_a.map(f32::to_bits), left_b.map(f32::to_bits));
+        assert_eq!(right_a.map(f32::to_bits), right_b.map(f32::to_bits));
+    }
+
+    #[test]
+    fn an_unusable_avoidance_config_does_nothing() {
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let mut crowd = packed(&grid, &[([0.0, 0.0, 0.0], [0.0; 3], None)]);
+        let report = crowd.avoid(&AvoidanceParams::new().with_separation(0.0));
+        assert_eq!(report, AvoidReport::default());
+    }
+
+    #[test]
+    fn ambient_agents_are_avoided_but_do_not_avoid() {
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let mut crowd = Crowd::default();
+        crowd.configure_from_grid(&grid);
+        crowd.begin();
+        // An ambient agent standing in the path, and one walker heading at it.
+        crowd.push([0.0, 0.0, 0.0], [0.0; 3], None, false);
+        crowd.push(
+            [-1.2, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            Some([9.0, 0.0, 0.0]),
+            true,
+        );
+        let _ = crowd.steer(&params());
+        let steered = crowd.desired(1).expect("the walker is steered");
+        let avoidance = AvoidanceParams::new();
+        let report = crowd.avoid(&avoidance);
+        assert_eq!(report.adjusted, 1, "only the walker is corrected");
+        let walker = crowd.desired(1).expect("steered");
+        assert!(
+            walker[0] < steered[0],
+            "the walker must be pushed away: steered {steered:?}, avoided {walker:?}"
+        );
+        assert_eq!(crowd.desired(0), None, "the ambient agent is not steered");
+    }
+
     #[test]
     fn a_lone_agent_is_isolated_and_does_not_drift() {
         let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
@@ -1171,6 +1554,34 @@ mod tests {
         let parallel_report = parallel.steer_parallel(&params);
         assert_eq!(scalar_report, parallel_report);
         assert_eq!(scalar.len(), parallel.len());
+        for index in 0..scalar.len() {
+            assert_eq!(
+                scalar.desired(index),
+                parallel.desired(index),
+                "agent {index} disagrees between the roads"
+            );
+        }
+    }
+
+    #[test]
+    fn a_parallel_avoidance_pass_matches_the_scalar_one() {
+        let (grid, points) = fixture(4_000);
+        let mut scalar = packed(&grid, &points);
+        let mut parallel = packed(&grid, &points);
+        scalar.set_sequential(true);
+        parallel.set_sequential(false);
+        let params = params();
+        let avoidance = AvoidanceParams::new();
+        scalar.steer(&params);
+        parallel.steer(&params);
+        let scalar_report = scalar.avoid_scalar(&avoidance);
+        let parallel_report = parallel.avoid_parallel(&avoidance);
+        assert_eq!(scalar_report, parallel_report);
+        assert!(
+            scalar_report.pairs > 1_000,
+            "the fixture must exercise the pass, got {}",
+            scalar_report.pairs
+        );
         for index in 0..scalar.len() {
             assert_eq!(
                 scalar.desired(index),

@@ -65,6 +65,58 @@ pub struct NpcVelocity(pub Vec3);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 pub struct NpcDesiredVelocity(pub Vec3);
 
+/// How much this NPC yields to others in the reciprocal avoidance pass (ADR 0045).
+///
+/// 1.0 is an ordinary person and the value every NPC gets for free: without the component, the
+/// crowd's configured default applies. Raise it for someone who should push through — a guard
+/// walking a beat, a cart — and lower it for someone who steps aside — a fleeing villager, a
+/// child. Zero would make an NPC ignore the pass entirely, which is why it is clamped to a
+/// positive floor rather than stored raw.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct NpcAvoidancePriority(pub f32);
+
+impl NpcAvoidancePriority {
+    /// The value an agent gets when nobody says otherwise.
+    pub const DEFAULT: f32 = 1.0;
+
+    /// A priority, clamped to a range where the solve still means something.
+    ///
+    /// A non-finite or non-positive value falls back to [`Self::DEFAULT`] rather than producing
+    /// an agent that can never be avoided: this is a per-NPC authoring knob, and a bad one should
+    /// cost the author their intent, not the crowd its separation.
+    #[must_use]
+    pub fn new(priority: f32) -> Self {
+        Self::try_new(priority).unwrap_or(Self(Self::DEFAULT))
+    }
+
+    /// A priority, or `None` when the value is not usable.
+    #[must_use]
+    pub fn try_new(priority: f32) -> Option<Self> {
+        if priority.is_finite() && (Self::FLOOR..=Self::CEILING).contains(&priority) {
+            Some(Self(priority))
+        } else {
+            None
+        }
+    }
+
+    /// The lowest priority accepted.
+    pub const FLOOR: f32 = 0.05;
+    /// The highest priority accepted.
+    pub const CEILING: f32 = 20.0;
+
+    /// The value, for the steering kernel.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+impl Default for NpcAvoidancePriority {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
+}
+
 /// Where this NPC is trying to get to.
 ///
 /// Optional: an NPC with no target flocks with its neighbours instead of heading

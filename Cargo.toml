@@ -36,6 +36,11 @@ memory = []
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
 serde = ["dep:serde", "dep:ron", "smallvec/serde"]
+# A polygon navmesh with derived adjacency, area costs and a string-pulled route: the shape a
+# level with doorways actually needs, where a cell grid has to over-block or let agents clip the
+# frame. Off by default because a game whose levels are open ground does not need it, and it is
+# the largest single module in the domain.
+navmesh = []
 # Steering on the ECS task pool (ADR 0044): the frame is cut into slices, one per worker.
 # On by default because it is the only lever that scales with cores rather than with lanes;
 # `default-features = false` gives a single-threaded, dependency-light build for a

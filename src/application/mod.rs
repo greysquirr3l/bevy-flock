@@ -10,6 +10,9 @@ pub use director::{
     AlarmField, AmbientDirector, Beat, Director, DirectorBoard, DirectorCommand, DirectorCommands,
     DirectorError, DirectorInputs, ScriptedDirector, TracedCommand,
 };
+pub mod avoidance;
+
+pub use avoidance::{AvoidReport, AvoidanceParams};
 pub mod crowd;
 pub mod director;
 pub mod packed;

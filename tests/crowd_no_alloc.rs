@@ -15,7 +15,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use bevy_flock::application::{Crowd, CrowdParams};
+use bevy_flock::application::{AvoidanceParams, Crowd, CrowdParams};
 use bevy_flock::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use bevy_flock::domain::steering::SteeringParams;
 
@@ -112,5 +112,45 @@ fn a_steady_frame_does_not_touch_the_allocator() {
     assert_eq!(
         allocations, 0,
         "a steady crowd frame allocated {allocations} times"
+    );
+}
+#[test]
+fn a_steady_avoidance_pass_does_not_touch_the_allocator() {
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let params = CrowdParams::from_steering(&SteeringParams::human_scale());
+    let avoidance = AvoidanceParams::new();
+    let mut crowd = Crowd::default();
+    crowd.configure_from_grid(&grid);
+    let frame = |crowd: &mut Crowd| {
+        crowd.begin();
+        for index in 0..1_000_u32 {
+            let ring = 1.6 * libm::sqrtf(index as f32);
+            let angle = index as f32 * 2.399_963_2;
+            crowd.push(
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(index as f32 * 0.7) * 3.0,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
+                Some([20.0, 2.0, 20.0]),
+                true,
+            );
+        }
+        let report = crowd.steer(&params);
+        let avoided = crowd.avoid(&avoidance);
+        (report, avoided)
+    };
+    frame(&mut crowd);
+    frame(&mut crowd);
+    let ((steered, avoided), allocations) = counting(|| frame(&mut crowd));
+    assert_eq!(steered.steered, 1_000);
+    assert!(
+        avoided.pairs > 0,
+        "the pass must actually have examined pairs"
+    );
+    assert_eq!(
+        allocations, 0,
+        "a steady avoidance pass allocated {allocations} times"
     );
 }

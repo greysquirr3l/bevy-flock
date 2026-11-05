@@ -20,6 +20,7 @@
 use std::hint::black_box;
 
 use bevy_app::App;
+use bevy_flock::application::avoidance::AvoidanceParams;
 use bevy_flock::application::crowd::{Crowd, CrowdParams, SteeringRoad};
 use bevy_flock::boids::BoidsConfig;
 use bevy_flock::domain::ids::{NpcId, SimSeed};
@@ -229,6 +230,62 @@ fn bench_kernel(c: &mut Criterion) {
     group.finish();
 }
 
+/// Reciprocal avoidance on and off, at the two populations the plan names (ADR 0045).
+///
+/// The number that matters is the delta between the two rows: the pass reuses the cell order
+/// steering already built, so it is one neighbour sweep and a double-buffered write, not a
+/// second spatial query. Ten samples at both sizes, because criterion refuses fewer.
+fn bench_avoidance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("crowd_avoidance");
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let params = CrowdParams::from_steering(&SteeringParams::human_scale());
+    let avoidance = AvoidanceParams::new();
+    for size in [10_000_usize, 100_000] {
+        group.sample_size(10);
+        group.throughput(Throughput::Elements(size as u64));
+        let mut crowd = Crowd::default();
+        crowd.configure_from_grid(&grid);
+        crowd.begin();
+        for index in 0..u32::try_from(size).expect("bench sizes fit in u32") {
+            let step = index as f32;
+            let ring = 1.6 * libm::sqrtf(step);
+            let angle = step * 2.399_963_2;
+            crowd.push(
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(step * 0.7) * 4.0,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
+                if index % 3 == 0 {
+                    Some([30.0, 2.0, -30.0])
+                } else {
+                    None
+                },
+                true,
+            );
+        }
+        group.bench_with_input(BenchmarkId::new("steer_only", size), &crowd, |b, crowd| {
+            b.iter(|| {
+                let mut frame = crowd.clone();
+                black_box(frame.steer(&params));
+            });
+        });
+        group.bench_with_input(
+            BenchmarkId::new("steer_and_avoid", size),
+            &crowd,
+            |b, crowd| {
+                b.iter(|| {
+                    let mut frame = crowd.clone();
+                    black_box(frame.steer(&params));
+                    black_box(frame.avoid(&avoidance));
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 /// The ECS query path against cell size (ADR 0031's open question).
 ///
 /// The steering kernel wants 6-10 agents a bucket, which in a one-kilometre volume means 7-9 m
@@ -293,6 +350,7 @@ criterion_group!(
     bench_cell_size,
     bench_spatial_queries,
     bench_steering,
-    bench_kernel
+    bench_kernel,
+    bench_avoidance
 );
 criterion_main!(benches);

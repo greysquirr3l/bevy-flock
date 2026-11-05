@@ -67,6 +67,45 @@ An authored tree that names a leaf the registry does not know is an error at loa
 name and the position. That is the difference between "the guard does nothing" and "the guard
 does nothing and the log says why".
 
+## Senses: losing sight of someone
+
+Encounter perception records who met whom, which is what social memory needs. A guard that
+searches needs something else: a memory of *seeing*, with an age (ADR 0047).
+
+```rust,ignore
+use bevy_flock::prelude::*;
+
+// A player-shaped emitter, refreshed every tick it is visible.
+commands.spawn((StimulusSource::sight(30.0, 1.0), Transform::from_translation(player)));
+
+// Every NPC that should notice it is an observer.
+commands.spawn((NpcBundle::default_for(id), Perception, PerceivedStimuli::default()));
+```
+
+`PerceivedStimuli` is rewritten on the perception interval (six ticks by default) and is a
+snapshot, so a tree can read it repeatedly during one think without the world changing under it.
+The guard's search falls out of the data:
+
+```rust,ignore
+// "Chase while I can see them; search where I last saw them when I cannot."
+selector((
+    sequence((
+        condition(|ctx| ctx.sees::<Player>()),
+        action(StandardLeaves::Pursue),
+    )),
+    sequence((
+        condition(|ctx| ctx.remembers::<Player>()),   // the sighting is still live
+        action(StandardLeaves::SearchLastKnown),
+    )),
+    action(StandardLeaves::Patrol),
+))
+```
+
+Hearing works the same way with `StimulusSource::sound`, which is not narrowed by the sight cone
+and ignores occlusion: a shout through a wall is still a shout. Anything the tree needs beyond
+that — "is it my team", "is it the alarm bell" — is a filter at the leaf, which keeps the hot loop
+free of per-game predicates.
+
 ## Utility scoring
 
 When the choice is "what should I want", trees get awkward: priorities interleave, and adding

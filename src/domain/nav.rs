@@ -168,6 +168,16 @@ pub enum NavError {
         /// Supplied maximum corner.
         max: NavCell,
     },
+    /// A navigation link that cannot exist.
+    #[error("navigation link {from:?} to {to:?} is invalid: {reason}")]
+    BadLink {
+        /// The cell the link leaves from.
+        from: NavCell,
+        /// The cell the link arrives at.
+        to: NavCell,
+        /// Why it was refused.
+        reason: &'static str,
+    },
 }
 
 /// A source of navigation data.
@@ -187,6 +197,41 @@ pub trait NavSource {
     /// The caller supplies the buffer so a solve allocates none.
     fn neighbours(&self, cell: NavCell, out: &mut SmallVec<[(NavCell, u32); 8]>);
 
+    /// Append the links leaving a cell: connections that are not ordinary steps.
+    ///
+    /// The default is empty, so a source with no ladders or doors does not implement this.
+    /// A source that answers here has its links followed by the flow solver, and the tags
+    /// appear in the finished field for a behaviour tree to read.
+    fn links_leaving(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        let _ = cell;
+        out.clear();
+    }
+
+    /// Append the links arriving at a cell, which is what a backward search follows.
+    ///
+    /// A flow field is solved from its target outward, so an expansion asks what can step
+    /// *into* the cell it is standing on. A source that implemented only the forward
+    /// direction would have every ladder walked in the wrong direction.
+    fn links_into(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        let _ = cell;
+        out.clear();
+    }
+
+    /// Whether this source can ever return a link.
+    ///
+    /// Lets the solver skip allocating the per-cell tag array for the common case.
+    fn has_links(&self) -> bool {
+        false
+    }
+
     /// The cell containing a world position, or `None` outside the bounds.
     fn cell_of(&self, position: Vec3) -> Option<NavCell>;
 
@@ -203,6 +248,7 @@ pub struct GridNavSource {
     bounds: NavBounds,
     walkable: Vec<bool>,
     version: NavVersion,
+    links: crate::domain::links::LinkTable,
 }
 
 impl GridNavSource {
@@ -217,6 +263,7 @@ impl GridNavSource {
             walkable: vec![true; bounds.cell_count()],
             bounds,
             version: NavVersion::FIRST,
+            links: crate::domain::links::LinkTable::new(),
         })
     }
 
@@ -236,6 +283,7 @@ impl GridNavSource {
             bounds,
             walkable,
             version: NavVersion::FIRST,
+            links: crate::domain::links::LinkTable::new(),
         })
     }
 
@@ -321,6 +369,7 @@ impl GridNavSource {
             bounds: self.bounds,
             walkable,
             version: self.version.next(),
+            links: self.links.clone(),
         }
     }
 
@@ -334,6 +383,36 @@ impl GridNavSource {
             .get(y as usize * self.bounds.width as usize + x as usize)
             .copied()
             .unwrap_or(false)
+    }
+
+    /// The links this source carries.
+    #[must_use]
+    pub const fn link_table(&self) -> &crate::domain::links::LinkTable {
+        &self.links
+    }
+
+    /// Add a link: a ladder, a ledge, a door that only staff may use.
+    ///
+    /// Bumps the version, because a field solved before the ladder existed does not know
+    /// about it and would route a crowd the long way round for ever.
+    ///
+    /// # Errors
+    ///
+    /// [`NavError::BadLink`] as [`crate::domain::links::LinkTable::add`].
+    pub fn add_link(&mut self, link: crate::domain::links::NavLink) -> Result<(), NavError> {
+        self.links.add(link)?;
+        self.version = self.version.next();
+        Ok(())
+    }
+
+    /// A copy of this source carrying a whole table of links.
+    #[must_use]
+    pub fn with_links(mut self, links: crate::domain::links::LinkTable) -> Self {
+        if !links.is_empty() {
+            self.version = self.version.next();
+        }
+        self.links = links;
+        self
     }
 
     /// Bytes the bitmap occupies.
@@ -386,6 +465,26 @@ impl NavSource for GridNavSource {
             }
             out.push((next, cost));
         }
+    }
+
+    fn links_leaving(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        self.links.leaving_into(cell, out);
+    }
+
+    fn links_into(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        self.links.arriving_into(cell, out);
+    }
+
+    fn has_links(&self) -> bool {
+        !self.links.is_empty()
     }
 
     fn cell_of(&self, position: Vec3) -> Option<NavCell> {
