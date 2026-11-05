@@ -77,3 +77,18 @@ cargo bench --bench crowd
 
 and paste the relevant table into the pull request. A change that makes
 `flock_frame/10000` slower needs a very good argument.
+
+## Running plan tasks concurrently
+
+wiggum schedules some tasks in the same execution group. Before taking one, read ADR 0032 — it is
+short and it is measured:
+
+- **Independent file ownership only.** Two tasks may not write the same file.
+- **One committer per group.** The others leave the tree dirty. Concurrent `git add` fails with
+  `index.lock` about two times in three, silently, if the script does not check exit codes.
+- **Mixed feature sets are fine.** Cargo rebuilds this crate's units, not the dependency tree: 3 s of
+  churn, not 3 minutes.
+- **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
+  compilations measures the machine.
+
+`CELL_SIZE_GATE` and the other CI jobs are unaffected: each job has its own runner and cache.

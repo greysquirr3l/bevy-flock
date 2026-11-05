@@ -58,3 +58,4 @@ replay.
 | [0029](0029-simd-in-three-dimensions.md) | SIMD in the 3D crowd kernel was measured, and rejected | Rejected |
 | [0030](0030-transposed-simd.md) | Transposed SIMD (lanes are agents) wins 21-29%; adopted behind `simd` | Accepted |
 | [0031](0031-cell-sizing-for-lanes.md) | Cell sizing wants 6-10 agents per bucket; transposed road is the default | Accepted |
+| [0032](0032-concurrent-plan-tasks.md) | Concurrent plan tasks: build cache safe, git index not | Accepted |

@@ -1054,6 +1054,7 @@ hints = [
     "When the gate fires: raise SpatialGridConfig's default max_cells, re-run examples/grid_sweep.rs and flock_frame_cell, record the numbers in ADR 0031 as an amendment, and only then close this task.",
     "Deliberately not automated: choosing a new default. The gate reports; the decision stays a recorded judgement with measured support.",
     "This task is a standing watch, not a one-shot: it stays open until the gate fires and the amendment is written, and it closes only when the numbers say the question is settled.",
+    "Verified concurrent with examples-showcase in group 3 (ADR 0032): 36.3 s wall, the gate PASSing at 0.1% while an --all-features example build ran in the same worktree. Mixed feature sets cost 3 s of recompilation, not a rebuild.",
 ]
 test_hints = [
     "python3 scripts/cell_size_gate.py exits 0 on the committed measurements (0.3% saving) and 2 when handed a synthetic 15% saving.",
@@ -1141,6 +1142,7 @@ hints = [
     "`custom_behavior`: a game-defined leaf behaviour, a game-defined director, and a full-takeover brain, side by side.",
     "`ambient_metropolis`: 1,000,000 ambient inhabitants, a camera you can move to watch materialisation happen, with a HUD showing ambient mass vs materialised entities.",
     "Each example gets a README section with a screenshot or GIF and the exact command to run it; each is built in CI so it cannot rot.",
+    "Runs concurrently with cell-size-reopen-gate in group 3, verified end to end in 36 s with both green (ADR 0032): this task owns examples/ and README, the gate owns scripts/, docs/adr/0031 and CI, so neither writes the other's files. This task does not commit while a sibling is running.",
 ]
 test_hints = [
     "All six examples build in CI with their required features.",
