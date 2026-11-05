@@ -37,6 +37,8 @@
 )]
 
 use bevy_math::Vec3;
+#[cfg(feature = "simd")]
+use wide::f32x4;
 
 use crate::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{SteeringParams, accumulate};
@@ -132,6 +134,22 @@ pub struct Crowd {
     dims: [u32; 3],
     min: [f32; 3],
     cell_size: f32,
+    /// Cell-major component arrays, built by the same sort that produces `order` (ADR 0030).
+    #[cfg(feature = "simd")]
+    soa: Soa,
+}
+
+/// One array per component, in cell order, so four agents of a cell load without a gather.
+#[cfg(feature = "simd")]
+#[derive(Debug, Clone, Default)]
+struct Soa {
+    x: Vec<f32>,
+    y: Vec<f32>,
+    z: Vec<f32>,
+    vx: Vec<f32>,
+    vy: Vec<f32>,
+    vz: Vec<f32>,
+    agent: Vec<f32>,
 }
 
 const HAS_TARGET: u8 = 1;
@@ -250,6 +268,15 @@ impl Crowd {
     ///
     /// Returns the report; occupancy is available from [`Crowd::occupied_cells`] afterwards.
     pub fn steer(&mut self, params: &CrowdParams) -> CrowdReport {
+        #[cfg(feature = "simd")]
+        let report = self.steer_blocks(params);
+        #[cfg(not(feature = "simd"))]
+        let report = self.steer_scalar(params);
+        report
+    }
+
+    /// The scalar road: one agent at a time, the reference implementation (ADR 0026).
+    pub fn steer_scalar(&mut self, params: &CrowdParams) -> CrowdReport {
         let mut report = CrowdReport::default();
         if !params.is_usable() || self.is_empty() {
             return report;
@@ -260,7 +287,7 @@ impl Crowd {
             if self.flags.get(index).copied().unwrap_or(0) & STEERS == 0 {
                 continue;
             }
-            let (count, sum_p, sum_v, sep, pairs) = self.scan(index, params);
+            let (count, sum_p, sum_v, sep, pairs) = self.scan_reference(index, params);
             report.pairs += pairs;
             if count == 0 {
                 report.isolated += 1;
@@ -326,10 +353,272 @@ impl Crowd {
                 *target = u32::try_from(agent).unwrap_or(u32::MAX);
             }
         }
+        // Only now is `order` meaningful, so only now can the component arrays be filled.
+        #[cfg(feature = "simd")]
+        self.pack_soa();
     }
 
-    /// Accumulate every neighbour of one agent in a single pass.
-    fn scan(&self, index: usize, params: &CrowdParams) -> (u32, [f32; 3], [f32; 3], [f32; 3], u64) {
+    /// Copy the crowd into cell-major component arrays.
+    #[cfg(feature = "simd")]
+    fn pack_soa(&mut self) {
+        let len = self.positions.len();
+        for buffer in [
+            &mut self.soa.x,
+            &mut self.soa.y,
+            &mut self.soa.z,
+            &mut self.soa.vx,
+            &mut self.soa.vy,
+            &mut self.soa.vz,
+            &mut self.soa.agent,
+        ] {
+            buffer.clear();
+            buffer.resize(len, 0.0);
+        }
+        for slot in 0..len {
+            let agent = self.order.get(slot).copied().unwrap_or(0) as usize;
+            let position = self.positions.get(agent).copied().unwrap_or([0.0; 3]);
+            let velocity = self.velocities.get(agent).copied().unwrap_or([0.0; 3]);
+            if let Some(cell) = self.soa.x.get_mut(slot) {
+                *cell = position[0];
+            }
+            if let Some(cell) = self.soa.y.get_mut(slot) {
+                *cell = position[1];
+            }
+            if let Some(cell) = self.soa.z.get_mut(slot) {
+                *cell = position[2];
+            }
+            if let Some(cell) = self.soa.vx.get_mut(slot) {
+                *cell = velocity[0];
+            }
+            if let Some(cell) = self.soa.vy.get_mut(slot) {
+                *cell = velocity[1];
+            }
+            if let Some(cell) = self.soa.vz.get_mut(slot) {
+                *cell = velocity[2];
+            }
+            if let Some(cell) = self.soa.agent.get_mut(slot) {
+                #[allow(clippy::cast_precision_loss)]
+                let id = agent as f32;
+                *cell = id;
+            }
+        }
+    }
+
+    /// The transposed road: lanes are agents, one neighbour is broadcast (ADR 0030).
+    ///
+    /// Four agents that share a cell fill four lanes; every neighbour in that cell's 3×3×3
+    /// neighbourhood is broadcast into all four, so one load feeds four agents that are all doing
+    /// real work. Buckets that cannot fill a block fall back to the scalar scan, because a masked
+    /// partial block costs more than it saves at that size.
+    #[cfg(feature = "simd")]
+    fn steer_blocks(&mut self, params: &CrowdParams) -> CrowdReport {
+        let mut report = CrowdReport::default();
+        if !params.is_usable() || self.is_empty() {
+            return report;
+        }
+        self.order_by_cell();
+        let radius_squared = params.radius * params.radius;
+        let separation_squared = params.separation * params.separation;
+        let dims = [
+            i64::from(self.dims[0]),
+            i64::from(self.dims[1]),
+            i64::from(self.dims[2]),
+        ];
+        for bucket in 0..self.touched.len() {
+            let cell = self.touched[bucket] as usize;
+            let start = self.start.get(cell).copied().unwrap_or(0) as usize;
+            let count = self.counts.get(cell).copied().unwrap_or(0) as usize;
+            let mut slot = start;
+            while slot + 4 <= start + count {
+                // Four agents of this cell fill four lanes. If any of them is ambient-tier the
+                // block is masked anyway, so the four go down the scalar road instead.
+                let all_steer = (0..4).all(|lane| {
+                    let agent = self.order.get(slot + lane).copied().unwrap_or(0) as usize;
+                    self.flags.get(agent).copied().unwrap_or(0) & STEERS != 0
+                });
+                if all_steer {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let home = cell as u32;
+                    self.steer_block(
+                        slot,
+                        home,
+                        params,
+                        (radius_squared, separation_squared),
+                        dims,
+                        &mut report,
+                    );
+                } else {
+                    for lane in 0..4 {
+                        let agent = self.order.get(slot + lane).copied().unwrap_or(0) as usize;
+                        self.scalar_agent(agent, params, &mut report);
+                    }
+                }
+                slot += 4;
+            }
+            while slot < start + count {
+                let agent = self.order.get(slot).copied().unwrap_or(0) as usize;
+                slot += 1;
+                self.scalar_agent(agent, params, &mut report);
+            }
+        }
+        report.cells = u32::try_from(self.touched.len()).unwrap_or(u32::MAX);
+        report
+    }
+
+    /// One agent, the scalar way: the tail of a bucket, and any block that cannot fill lanes.
+    #[cfg(feature = "simd")]
+    fn scalar_agent(&mut self, agent: usize, params: &CrowdParams, report: &mut CrowdReport) {
+        if self.flags.get(agent).copied().unwrap_or(0) & STEERS == 0 {
+            return;
+        }
+        let (count, sum_p, sum_v, sep, pairs) = self.scan_reference(agent, params);
+        report.pairs += pairs;
+        if count == 0 {
+            report.isolated += 1;
+        }
+        let target = self.target(agent);
+        self.desired[agent] = desired_for(
+            self.positions[agent],
+            self.velocities[agent],
+            target,
+            count,
+            sum_p,
+            sum_v,
+            sep,
+            params,
+        );
+        report.steered += 1;
+    }
+
+    /// One block of four agents that share a cell.
+    #[cfg(feature = "simd")]
+    fn steer_block(
+        &mut self,
+        slot: usize,
+        home: u32,
+        params: &CrowdParams,
+        squares: (f32, f32),
+        dims: [i64; 3],
+        report: &mut CrowdReport,
+    ) {
+        let (radius_squared, separation_squared) = squares;
+        let lane = |buffer: &[f32], base: usize| {
+            f32x4::from([
+                buffer.get(base).copied().unwrap_or(0.0),
+                buffer.get(base + 1).copied().unwrap_or(0.0),
+                buffer.get(base + 2).copied().unwrap_or(0.0),
+                buffer.get(base + 3).copied().unwrap_or(0.0),
+            ])
+        };
+        let px = lane(&self.soa.x, slot);
+        let py = lane(&self.soa.y, slot);
+        let pz = lane(&self.soa.z, slot);
+        let identities = lane(&self.soa.agent, slot);
+        let radius = f32x4::splat(radius_squared);
+        let separation = f32x4::splat(separation_squared);
+        let epsilon = f32x4::splat(1e-6);
+        let one = f32x4::splat(1.0);
+        let zero = f32x4::splat(0.0);
+        let mut counts = zero;
+        let mut sum_p = (zero, zero, zero);
+        let mut sum_v = (zero, zero, zero);
+        let mut sep = (zero, zero, zero);
+
+        // Every lane is in this cell, so anything within the radius is in the cell or one of its
+        // 26 neighbours — the box the band kernel walks.
+        let home = home as usize;
+        let origin = (
+            (home % self.dims[0] as usize) as i64,
+            (home / self.dims[0] as usize % self.dims[1] as usize) as i64,
+            (home / (self.dims[0] * self.dims[1]) as usize) as i64,
+        );
+        for z in (origin.2 - 1).max(0)..=(origin.2 + 1).min(dims[2] - 1) {
+            for y in (origin.1 - 1).max(0)..=(origin.1 + 1).min(dims[1] - 1) {
+                for x in (origin.0 - 1).max(0)..=(origin.0 + 1).min(dims[0] - 1) {
+                    let at = ((z * dims[1] + y) * dims[0] + x) as usize;
+                    let begin = self.start.get(at).copied().unwrap_or(0) as usize;
+                    let end = begin + self.counts.get(at).copied().unwrap_or(0) as usize;
+                    for other in begin..end {
+                        let ox = f32x4::splat(self.soa.x[other]);
+                        let oy = f32x4::splat(self.soa.y[other]);
+                        let oz = f32x4::splat(self.soa.z[other]);
+                        let dx = px - ox;
+                        let dy = py - oy;
+                        let dz = pz - oz;
+                        let distance_squared = dx * dx + dy * dy + dz * dz;
+                        let keep = distance_squared.simd_le(radius)
+                            & f32x4::splat(self.soa.agent[other]).simd_ne(identities);
+                        if !keep.any() {
+                            continue;
+                        }
+                        let weight = keep.select(one, zero);
+                        counts += weight;
+                        sum_p.0 += ox * weight;
+                        sum_p.1 += oy * weight;
+                        sum_p.2 += oz * weight;
+                        sum_v.0 += f32x4::splat(self.soa.vx[other]) * weight;
+                        sum_v.1 += f32x4::splat(self.soa.vy[other]) * weight;
+                        sum_v.2 += f32x4::splat(self.soa.vz[other]) * weight;
+                        let close = keep & distance_squared.simd_lt(separation);
+                        if close.any() {
+                            let push = close.select(one, zero) / (distance_squared + epsilon);
+                            sep.0 += dx * push;
+                            sep.1 += dy * push;
+                            sep.2 += dz * push;
+                        }
+                    }
+                }
+            }
+        }
+
+        let counts = counts.to_array();
+        let sum_x = sum_p.0.to_array();
+        let sum_y = sum_p.1.to_array();
+        let sum_z = sum_p.2.to_array();
+        let head_x = sum_v.0.to_array();
+        let head_y = sum_v.1.to_array();
+        let head_z = sum_v.2.to_array();
+        let away_x = sep.0.to_array();
+        let away_y = sep.1.to_array();
+        let away_z = sep.2.to_array();
+        for lane_index in 0..4 {
+            let agent = self.order.get(slot + lane_index).copied().unwrap_or(0) as usize;
+            let count = counts[lane_index];
+            report.pairs += u64::from(count as u32);
+            if count == 0.0 {
+                report.isolated += 1;
+            }
+            let target = self.target(agent);
+            self.desired[agent] = desired_for(
+                self.positions[agent],
+                self.velocities[agent],
+                target,
+                count as u32,
+                [sum_x[lane_index], sum_y[lane_index], sum_z[lane_index]],
+                [head_x[lane_index], head_y[lane_index], head_z[lane_index]],
+                [away_x[lane_index], away_y[lane_index], away_z[lane_index]],
+                params,
+            );
+            report.steered += 1;
+        }
+    }
+
+    /// The agent's target, if it has one.
+    #[cfg(feature = "simd")]
+    fn target(&self, agent: usize) -> Option<[f32; 3]> {
+        if self.flags.get(agent).copied().unwrap_or(0) & HAS_TARGET == 0 {
+            None
+        } else {
+            self.targets.get(agent).copied()
+        }
+    }
+
+    /// The scalar scan: the reference implementation, and the only road without `simd`.
+    fn scan_reference(
+        &self,
+        index: usize,
+        params: &CrowdParams,
+    ) -> (u32, [f32; 3], [f32; 3], [f32; 3], u64) {
         let position = self.positions[index];
         let radius_squared = params.radius * params.radius;
         let separation_squared = params.separation * params.separation;
@@ -751,6 +1040,31 @@ mod tests {
             (vec3(steered) - without_self).length() < 1e-4,
             "kernel {steered:?} should match the self-excluded model {without_self:?}"
         );
+    }
+
+    #[cfg(feature = "simd")]
+    #[test]
+    fn the_transposed_road_agrees_with_the_scalar_road() {
+        // Lanes are agents here, so a masking bug shows up as four agents steered by somebody
+        // else's neighbours. Compare every agent, and compare the counters too.
+        let (grid, points) = fixture(500);
+        let mut blocked = packed(&grid, &points);
+        let mut scalar = packed(&grid, &points);
+        let fast = blocked.steer(&params());
+        let slow = scalar.steer_scalar(&params());
+        assert_eq!(fast.steered, slow.steered);
+        assert_eq!(fast.isolated, slow.isolated);
+        assert_eq!(
+            fast.pairs, slow.pairs,
+            "the two roads saw different neighbours"
+        );
+        let mut worst = 0.0_f32;
+        for index in 0..points.len() {
+            let a = blocked.desired(index).expect("steered");
+            let b = scalar.desired(index).expect("steered");
+            worst = worst.max((vec3(a) - vec3(b)).length());
+        }
+        assert!(worst < 1e-4, "transposed road drifted by {worst}");
     }
 
     #[test]

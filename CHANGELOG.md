@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **The crowd kernel can now use SIMD — the transposed shape (ADR 0030).** ADR 0029 rejected
+  lane-per-neighbour vectorisation for good reasons: the lanes shared nothing and the masked
+  arithmetic threw away every rejected neighbour. The shape that works is the band kernel's
+  transpose — block four agents that share a cell and broadcast each neighbour into all four lanes.
+  Behind `--features simd`, with a scalar road for buckets that cannot fill a block and for
+  ambient-tier agents, it is 22% faster planar, 21% volumetric and 29% faster on a dense crowd
+  (10,000 agents, kernel only), and `the_transposed_road_agrees_with_the_scalar_road` holds it to
+  identical counters and desired velocities against `Crowd::steer_scalar`. Off by default: it costs
+  a per-frame structure-of-arrays copy that a sparse crowd does not earn back.
+
+
 - **SIMD was measured against the 3D crowd kernel and rejected (ADR 0029).** A structure-of-arrays,
   four-neighbours-at-a-time scan with a scalar tail was built behind the `simd` feature, held to
   parity with the scalar road in the same process, and benchmarked on planar, volumetric and dense

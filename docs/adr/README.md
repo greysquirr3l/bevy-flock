@@ -56,3 +56,4 @@ replay.
 | [0027](0027-spawn-placement.md) | Spawn placement is a validated type: spiral, random, or authored points | Accepted |
 | [0028](0028-three-dimensional-crowds.md) | The crowd kernel and spawn placement are three-dimensional | Accepted |
 | [0029](0029-simd-in-three-dimensions.md) | SIMD in the 3D crowd kernel was measured, and rejected | Rejected |
+| [0030](0030-transposed-simd.md) | Transposed SIMD (lanes are agents) wins 21-29%; adopted behind `simd` | Accepted |

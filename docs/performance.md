@@ -496,3 +496,18 @@ Two facts worth carrying away:
   brains runs at **198 ms per frame**: steering and spatial partitioning cost fourteen
   times what thinking does. ADR 0018's ambient continuum exists for that number, not for
   the scheduler's.
+
+### The transposed SIMD kernel (ADR 0030)
+
+Behind `--features simd`, the crowd kernel blocks four agents of a cell and broadcasts each
+neighbour into all four lanes. 10,000 agents, kernel only, medians:
+
+| Crowd | Scalar | Transposed | Delta |
+| --- | --- | --- | --- |
+| planar | 7.36 ms | 5.78 ms | −22% |
+| volumetric | 6.12 ms | 4.85 ms | −29%…−21% |
+| dense (30 m disc) | 114.9 ms | 81.8 ms | −29% |
+
+Off by default: it adds a per-frame SoA copy that a sparse crowd does not need, and the gain is
+largest where the kernel is most expensive. Reproduce with
+`cargo bench --bench crowd --features simd -- crowd_kernel`.
