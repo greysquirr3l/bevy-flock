@@ -86,10 +86,73 @@ The rule, then: **if your crowd is dense, size the cell so a bucket holds 6–10
 budget that allows it; if your crowd is sparse or your ECS queries dominate, the default is
 already close.** The sweep is the tool for deciding, and it takes a minute.
 
-## What would settle it
+## Settling it: the ECS-path sweep (done, same day)
 
-A sweep of the *ECS* path over the same cell sizes — `flock_frame` at 9 m versus 13.5 m — so the
-grid budget can be raised on evidence from both sides. That is a plan task, not a paragraph here.
+The question above is whether a finer grid is affordable on the path that runs every tick, because
+the budget in ADR 0003 exists to bound *query* cost. Measured, `flock_frame` group, whole
+`App::update()` at steady state, budget raised per case so the cell size survives:
+
+| population | 13.5 m / 2^20 (405k cells) | 9 m / 2^21 (1.4M) | 7 m / 2^22 (2.9M) |
+| --- | --- | --- | --- |
+| 10,000 | 7.29 ms | 7.29 ms | 7.26 ms |
+| 100,000 | 77.0 ms | 77.8 ms | 80.4 ms |
+
+**The frame is insensitive to cell size.** 1.4M cells costs nothing measurable at either
+population; 2.9M costs about 1% at 100,000 and nothing at 10,000. On the kernel side the same
+change was worth 8-20% of a steering pass — so where did it go?
+
+Two things absorb it, and both are already in the design:
+
+- **Tiering caps how many agents steer** (ADR 0017). At 100,000 agents roughly 5,000 are manifested
+  and steered; the rest are ambient and cost a continuum update, not a neighbour scan. A 20% kernel
+  win on 5% of the agents is 1% of the frame, which is inside this measurement's noise.
+- **The grid rebuild is cheap.** 405k cells to clear and rebuild was already a small share of the
+  frame (ADR 0003 sized it that way); tripling it triples a small share.
+
+That is the honest answer to the question ADR 0031 opened, and it changes the recommendation: the
+grid budget is **not** the thing standing between the kernel and its optimum. Moving to 1.4M cells
+is affordable but buys nothing at these populations, because the population that steers is small.
+
+Occupancy, from the same spiral at 100,000 agents ([figure](../images/occupancy-7m-9m.png)):
+
+| cell | buckets | agents/bucket | in blocks | peak |
+| --- | --- | --- | --- | --- |
+| 7 m | 16,521 | 6.1 | 69% | 13 |
+| 9 m | 10,063 | 9.9 | 81% | 17 |
+
+The spiral makes occupancy almost perfectly uniform, so there are no hotspots for a coarse grid to
+smear and no cold cells for a fine one to waste: the choice is purely about agents per bucket.
+
+## The decision after the sweep
+
+- **`MAX_CELLS` stays at 2^20.** Not because 1.4M is expensive — it is free — but because it buys
+  nothing measurable in a frame, and a default that allocates 16 MB where 4.9 MB did the same job is
+  a default that costs every user something for no one's benefit.
+- **The budget is now a per-config knob**: `SpatialGridConfig::max_cells`, set with
+  `with_cell_budget`. A game that steers a much larger share of its crowd — tiering tuned up, or a
+  game with no ambient tier — is exactly the case where the kernel's 9 m optimum is worth claiming,
+  and it can now be claimed without a fork.
+- **`BoidsConfig::with_grid`** exposes the whole grid config through the plugin, so this is reachable
+  from `FlockConfig` rather than only from the domain types.
+
+## Metrics and follow-up
+
+The sweep used one metric, because one metric decides it: whole-frame time at steady state for a
+fixed population, comparing cell sizes at the budget each needs. Everything else was a diagnostic
+(buckets, agents per bucket, block share) used to explain a number rather than to justify one.
+
+Re-open this decision if any of these become true, each with its own measurement:
+
+1. **Tiering raises the steered share** (the scheduler's calibration gate moves): re-run
+   `flock_frame_cell`; if 9 m is worth more than 3% of a frame, raise the default budget.
+2. **A game's volume is smaller than 1 km** — size the volume first (ADR 0003's advice), which makes
+   fine cells affordable inside the existing budget without any change here.
+3. **The rebuild stops being cheap**: if a future grid rebuild grows superlinearly in cells, the
+   2.9M case's 1% becomes the leading edge of something worse.
+
+Timeline: none of these are scheduled. The knob exists, the benchmark is permanent
+(`cargo bench --bench crowd -- flock_frame_cell`), and the next decision waits for a profile that
+shows the frame, not the kernel, wanting finer cells.
 
 ## Reproducing
 

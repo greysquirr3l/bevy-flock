@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **The cell budget is configurable, and the ECS sweep says leave the default alone (ADR 0031).**
+  `SpatialGridConfig::max_cells` and `with_cell_budget` let a game raise the grid past 2^20 cells;
+  `BoidsConfig::with_grid` exposes it through the plugin. Measured whole-frame time at 10,000 and
+  100,000 agents: 1.4M cells (9 m) is free, 2.9M (7 m) costs ~1% at 100,000, and neither moves the
+  frame the way it moves the kernel — tiering caps the steered population at a few thousand, so the
+  8-20% kernel preference for 9 m never reaches the frame. `MAX_CELLS` stays at 2^20; the knob is
+  there for games that steer more of their crowd.
+
+
 - **The transposed crowd kernel is on by default, and cell sizing is documented (ADR 0031).** A
   sweep of five cell sizes at 10,000 and 100,000 agents found the road winning at every density —
   including the 3-agents-per-bucket case ADR 0030 was cautious about — by 27-37% at 10k and 19-31%

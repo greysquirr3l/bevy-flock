@@ -533,3 +533,19 @@ The default grid sizes cells for queries (ADR 0003), which lands on 13.5 m: 19% 
 8-20% short of the 9 m optimum. Sweep your own density with `cargo run --release --example grid_sweep`.
 End to end at 100,000 agents with the default grid the frame is 79.07 ms with the transposed road,
 against 90.0 ms measured for the scalar road.
+
+### The ECS path against cell size (ADR 0031, closed)
+
+Whole-frame time at steady state, budget raised per case so the cell size survives:
+
+| population | 13.5 m / 405k cells | 9 m / 1.4M cells | 7 m / 2.9M cells |
+| --- | --- | --- | --- |
+| 10,000 | 7.29 ms | 7.29 ms | 7.26 ms |
+| 100,000 | 77.0 ms | 77.8 ms | 80.4 ms |
+
+1.4M cells is free; 2.9M costs about 1% at 100,000. The kernel's 8-20% preference for 9 m does not
+reach the frame because tiering caps how many agents steer (about 5,000 of 100,000, ADR 0017) and
+the grid rebuild is a small share. `MAX_CELLS` therefore stays; `SpatialGridConfig::with_cell_budget`
+is the knob for a game that steers more of its crowd.
+
+![Occupancy of the 7 m and 9 m grids at 100,000 agents](images/occupancy-7m-9m.png)

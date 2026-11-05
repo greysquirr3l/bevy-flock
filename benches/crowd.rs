@@ -21,6 +21,7 @@ use std::hint::black_box;
 
 use bevy_app::App;
 use bevy_flock::application::crowd::{Crowd, CrowdParams};
+use bevy_flock::boids::BoidsConfig;
 use bevy_flock::domain::ids::{NpcId, SimSeed};
 use bevy_flock::domain::rng::RngStream;
 use bevy_flock::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
@@ -191,9 +192,67 @@ fn bench_kernel(c: &mut Criterion) {
     group.finish();
 }
 
+/// The ECS query path against cell size (ADR 0031's open question).
+///
+/// The steering kernel wants 6-10 agents a bucket, which in a one-kilometre volume means 7-9 m
+/// cells — 1.4M to 2.9M cells, against the 405k the default budget allows. The kernel has been
+/// measured on its own; this measures the thing that pays for the finer grid, the per-tick rebuild
+/// and the neighbour queries that walk it.
+fn bench_cell_size(c: &mut Criterion) {
+    let mut group = c.benchmark_group("flock_frame_cell");
+    group.sample_size(10);
+    for population in [10_000_usize, 100_000] {
+        for (label, cell, budget) in [
+            ("13.5m_2^20", 13.5_f32, 1_u32 << 20),
+            ("9m_2^21", 9.0, 1 << 21),
+            ("7m_2^22", 7.0, 1 << 22),
+        ] {
+            group.throughput(Throughput::Elements(population as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format!("{population}"), label),
+                &(population, cell, budget),
+                |b, &(population, cell, budget)| {
+                    let mut app = crowd_with_cell(population, cell, budget);
+                    b.iter(|| {
+                        app.update();
+                        black_box(app.world().resource::<FlockStats>().population());
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+/// A crowd whose grid uses a particular cell size and budget.
+fn crowd_with_cell(size: usize, cell: f32, budget: u32) -> App {
+    let mut app = App::new();
+    let preset = FlockConfig::preset(CrowdPreset::CityAmbient);
+    let grid = SpatialGridConfig::try_new(
+        bevy_math::Vec3::splat(-500.0),
+        bevy_math::Vec3::splat(500.0),
+        cell,
+    )
+    .expect("the benchmark's volume is valid");
+    let config = FlockConfig {
+        population: PopulationSize::clamped(size),
+        spawn_budget: 1_000_000,
+        mode: PopulationMode::Unique,
+        seed: SimSeed::new(0xC0FF_EE00),
+        boids: BoidsConfig::default()
+            .with_max_acceleration(5.0)
+            .with_grid(grid.with_cell_budget(budget)),
+        ..preset
+    };
+    app.add_plugins(FlockPlugin::new(config));
+    app.update();
+    app
+}
+
 criterion_group!(
     benches,
     bench_frames,
+    bench_cell_size,
     bench_spatial_queries,
     bench_steering,
     bench_kernel

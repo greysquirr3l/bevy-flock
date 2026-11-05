@@ -48,7 +48,7 @@ use crate::error::ConfigError;
 /// 2^18 is three times better for a crowd of one and 27% worse at the population
 /// this crate actually targets. 2^20 is the choice, and the guidance that follows
 /// from it is in the docs: size the volume to the playable area, not to the map.
-pub const MAX_CELLS: u64 = 1 << 20;
+pub const DEFAULT_MAX_CELLS: u64 = 1 << 20;
 
 /// Construction parameters for a [`SpatialGrid`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,9 +59,16 @@ pub struct SpatialGridConfig {
     pub max: Vec3,
     /// Requested edge length of one cubic cell.
     ///
-    /// A *minimum*: if the volume would need more than [`MAX_CELLS`] cells at this
-    /// size, the grid coarsens until it fits.
+    /// A *minimum*: if the volume would need more than [`SpatialGridConfig::max_cells`] cells at
+    /// this size, the grid coarsens until it fits.
     pub cell_size: f32,
+    /// The most cells the grid may allocate.
+    ///
+    /// Defaults to [`DEFAULT_MAX_CELLS`], which was measured against the rebuild cost (ADR 0003).
+    /// This is the lever for ADR 0031: a finer grid gives the steering kernel more agents per
+    /// bucket, at the price of more cells to clear and rebuild every tick. Raising it is a trade a
+    /// game can make per volume — size the volume to the playable area before raising this.
+    pub max_cells: u32,
 }
 
 impl SpatialGridConfig {
@@ -89,7 +96,20 @@ impl SpatialGridConfig {
             min,
             max,
             cell_size,
+            #[allow(clippy::cast_possible_truncation)]
+            max_cells: DEFAULT_MAX_CELLS as u32,
         })
+    }
+
+    /// Raise or lower the cell budget.
+    ///
+    /// The grid coarsens to fit this many cells, so a larger budget is what lets a finer
+    /// [`SpatialGridConfig::cell_size`] survive. ADR 0031 measured 2^21 as the point where a
+    /// one-kilometre volume keeps 9 m cells.
+    #[must_use]
+    pub const fn with_cell_budget(mut self, max_cells: u32) -> Self {
+        self.max_cells = max_cells;
+        self
     }
 
     /// Dimensions this configuration needs at a given cell size.
@@ -111,6 +131,8 @@ impl Default for SpatialGridConfig {
             min: Vec3::splat(-500.0),
             max: Vec3::splat(500.0),
             cell_size: 4.0,
+            #[allow(clippy::cast_possible_truncation)]
+            max_cells: DEFAULT_MAX_CELLS as u32,
         }
     }
 }
@@ -171,9 +193,10 @@ impl SpatialGrid {
     pub fn new(config: SpatialGridConfig) -> Result<Self, ConfigError> {
         let mut cell_size = config.cell_size;
         let mut dims = config.dims_for(cell_size);
+        let budget = u64::from(config.max_cells.max(1));
         // Coarsen until the grid fits the budget. Each step multiplies the cell
         // size, so the loop terminates at a single cell in a handful of rounds.
-        while cell_count(dims) > MAX_CELLS {
+        while cell_count(dims) > budget {
             cell_size *= 1.5;
             if !cell_size.is_finite() {
                 return Err(ConfigError::InvalidDistance {
@@ -214,6 +237,7 @@ impl SpatialGrid {
                 min: Vec3::splat(-1.0),
                 max: Vec3::splat(1.0),
                 cell_size: 2.0,
+                max_cells: 1,
             },
             cell_size: 2.0,
             dims: [1, 1, 1],
@@ -522,6 +546,37 @@ fn clamp_axis(value: f32, cells: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_larger_budget_keeps_a_finer_cell() {
+        // ADR 0031: the default budget coarsens a 1 km volume to 13.5 m because 9 m needs 1.4M
+        // cells. Raising the budget is what lets the finer cell survive.
+        let coarse = SpatialGridConfig::try_new(Vec3::splat(-500.0), Vec3::splat(500.0), 9.0)
+            .expect("valid volume");
+        let grid = SpatialGrid::new(coarse).expect("grid");
+        assert!(
+            (grid.effective_cell_size() - 13.5).abs() < 0.01,
+            "the default budget should coarsen 9 m to 13.5 m, got {}",
+            grid.effective_cell_size()
+        );
+
+        let fine = coarse.with_cell_budget(1 << 21);
+        let grid = SpatialGrid::new(fine).expect("grid");
+        assert!(
+            (grid.effective_cell_size() - 9.0).abs() < 0.01,
+            "2^21 cells should keep 9 m, got {}",
+            grid.effective_cell_size()
+        );
+    }
+
+    #[test]
+    fn a_small_budget_coarsens_instead_of_failing() {
+        let config = SpatialGridConfig::default().with_cell_budget(64);
+        let grid = SpatialGrid::new(config).expect("grid");
+        let dims = grid.dims();
+        assert!(u64::from(dims[0]) * u64::from(dims[1]) * u64::from(dims[2]) <= 64);
+    }
+
     use crate::domain::ids::SimSeed;
     use crate::domain::rng::RngStream;
 
@@ -709,7 +764,7 @@ mod tests {
         let config = SpatialGridConfig::try_new(Vec3::splat(-5_000.0), Vec3::splat(5_000.0), 2.0)
             .expect("valid");
         let grid = SpatialGrid::new(config).expect("coarsening produces a valid grid");
-        assert!(grid.cell_count() as u64 <= MAX_CELLS);
+        assert!(grid.cell_count() as u64 <= DEFAULT_MAX_CELLS);
         assert!(
             grid.effective_cell_size() > config.cell_size,
             "the cell size must have coarsened"
@@ -732,7 +787,7 @@ mod tests {
     #[test]
     fn the_default_volume_fits_the_cell_budget() {
         let grid = grid();
-        assert!(grid.cell_count() as u64 <= MAX_CELLS);
+        assert!(grid.cell_count() as u64 <= DEFAULT_MAX_CELLS);
     }
 
     #[test]

@@ -102,6 +102,16 @@ impl BoidsConfig {
         self.grid
     }
 
+    /// Replace the grid configuration.
+    ///
+    /// The grid is where cell size and the cell budget live, so this is how a game picks the
+    /// density its crowd is scanned at — see ADR 0031 for what the cell size costs and buys.
+    #[must_use]
+    pub fn with_grid(mut self, grid: SpatialGridConfig) -> Self {
+        self.grid = grid;
+        self
+    }
+
     /// The acceleration limit, in metres per second squared.
     #[must_use]
     pub const fn max_acceleration(&self) -> f32 {
