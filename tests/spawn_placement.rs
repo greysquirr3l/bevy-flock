@@ -182,3 +182,34 @@ fn a_random_placement_still_produces_the_same_people() {
     };
     assert_eq!(identities(&mut spiral), identities(&mut random));
 }
+
+#[test]
+fn a_volume_crowd_spawns_at_height_and_stays_there() {
+    // The end-to-end version of the kernel's vertical test: this crate was planar, and the way a
+    // planar assumption comes back is a crowd that spawns in a box and is then flattened by the
+    // first steering pass. Nine frames later the heights must still be spread.
+    let min = Vec3::new(-30.0, 0.0, -30.0);
+    let max = Vec3::new(30.0, 25.0, 30.0);
+    let mut app = app_with(300, Placement::uniform_volume(min, max));
+    for _ in 0..8 {
+        app.update();
+    }
+    let mut heights: Vec<f32> = app
+        .world_mut()
+        .query::<(&Npc, &Transform)>()
+        .iter(app.world())
+        .map(|(_, transform)| transform.translation.y)
+        .collect();
+    assert_eq!(heights.len(), 300);
+    heights.sort_by(f32::total_cmp);
+    let low = heights.first().copied().unwrap_or(0.0);
+    let high = heights.last().copied().unwrap_or(0.0);
+    assert!(
+        high - low > 5.0,
+        "heights collapsed to {low}..{high}: something is still flattening the crowd"
+    );
+    assert!(
+        low >= -0.5 && high <= 25.5,
+        "heights left the box: {low}..{high}"
+    );
+}

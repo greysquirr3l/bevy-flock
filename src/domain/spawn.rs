@@ -5,12 +5,18 @@
 //! rather than a line inside the spawn system: a game can say what it means, and the library can
 //! validate it against the grid volume it will be simulated in.
 //!
-//! Three placements, and the default is the third:
+//! Five placements, and the default is the first:
 //!
 //! - [`Placement::spiral`] — a golden-angle sunflower, spacing-controlled, deterministic by index.
 //! - [`Placement::uniform_rect`] — uniform random inside an axis-aligned rectangle.
 //! - [`Placement::uniform_disc`] — uniform random inside a disc, which is what "a crowd here"
 //!   usually means.
+//! - [`Placement::uniform_volume`] — uniform random inside a box: a stairwell, a hangar, a city
+//!   block with height.
+//! - [`Placement::uniform_sphere`] — uniform random inside a sphere, volume-uniform (`r = R·∛u`),
+//!   which is a swarm, a flock in the air, or debris.
+//!
+//! [`Placement::fixed`] covers the fifth: points you authored, at whatever height you like.
 //!
 //! Random placements draw from the NPC's own RNG stream (`RngStream::for_npc`), never from a
 //! shared one: two NPCs with the same id and seed land in the same place no matter what order the
@@ -63,6 +69,23 @@ pub enum Placement {
         /// Radius of the disc, in metres.
         radius: f32,
     },
+    /// Uniform random inside a box. The three-dimensional answer for a space with height.
+    UniformVolume {
+        /// Corner with the smallest coordinates.
+        min: Vec3,
+        /// Corner with the largest coordinates.
+        max: Vec3,
+    },
+    /// Uniform random inside a sphere.
+    ///
+    /// Volume-uniform, not radius-uniform: the distance is `R·∛u`, so half the crowd sits inside
+    /// 79% of the radius, which is what an even density looks like in three dimensions.
+    UniformSphere {
+        /// Middle of the sphere.
+        centre: Vec3,
+        /// Radius of the sphere, in metres.
+        radius: f32,
+    },
     /// Positions you chose yourself: doorways, patrol anchors, the stools in a tavern.
     ///
     /// Indexed, not shuffled: NPC `i` stands at `positions[i % len]`. When the population is
@@ -104,6 +127,18 @@ impl Placement {
         Self::UniformDisc { centre, radius }
     }
 
+    /// Uniform random inside a box.
+    #[must_use]
+    pub fn uniform_volume(min: Vec3, max: Vec3) -> Self {
+        Self::UniformVolume { min, max }
+    }
+
+    /// Uniform random inside a sphere.
+    #[must_use]
+    pub fn uniform_sphere(centre: Vec3, radius: f32) -> Self {
+        Self::UniformSphere { centre, radius }
+    }
+
     /// Use these positions, in this order.
     #[must_use]
     pub fn fixed(positions: Vec<Vec3>) -> Self {
@@ -117,7 +152,13 @@ impl Placement {
     /// changes its placement to a spiral.
     #[must_use]
     pub const fn is_random(&self) -> bool {
-        matches!(self, Self::UniformRect { .. } | Self::UniformDisc { .. })
+        matches!(
+            self,
+            Self::UniformRect { .. }
+                | Self::UniformDisc { .. }
+                | Self::UniformVolume { .. }
+                | Self::UniformSphere { .. }
+        )
     }
 
     /// Where NPC number `index` goes.
@@ -152,6 +193,24 @@ impl Placement {
                     centre.x + libm::cosf(angle) * distance,
                     centre.y,
                     centre.z + libm::sinf(angle) * distance,
+                )
+            }
+            Self::UniformVolume { min, max } => Vec3::new(
+                min.x + (max.x - min.x) * rng.next_unit_f32(),
+                min.y + (max.y - min.y) * rng.next_unit_f32(),
+                min.z + (max.z - min.z) * rng.next_unit_f32(),
+            ),
+            Self::UniformSphere { centre, radius } => {
+                // A uniform direction on the sphere, then a radius that makes the *volume*
+                // uniform: cube root, because volume grows as r³.
+                let z = rng.next_unit_f32().mul_add(2.0, -1.0);
+                let angle = rng.next_unit_f32() * core::f32::consts::TAU;
+                let planar = libm::sqrtf((1.0 - z * z).max(0.0));
+                let distance = *radius * libm::cbrtf(rng.next_unit_f32());
+                Vec3::new(
+                    centre.x + libm::cosf(angle) * planar * distance,
+                    centre.y + z * distance,
+                    centre.z + libm::sinf(angle) * planar * distance,
                 )
             }
             Self::Fixed { positions } => {
@@ -221,6 +280,35 @@ impl Placement {
                 for (offset, field) in [
                     (Vec3::new(*radius, 0.0, 0.0), "placement.radius (+x)"),
                     (Vec3::new(-*radius, 0.0, 0.0), "placement.radius (-x)"),
+                    (Vec3::new(0.0, 0.0, *radius), "placement.radius (+z)"),
+                    (Vec3::new(0.0, 0.0, -*radius), "placement.radius (-z)"),
+                ] {
+                    inside(*centre + offset, grid, field)?;
+                }
+                Ok(())
+            }
+            Self::UniformVolume { min, max } => {
+                if min.x > max.x || min.y > max.y || min.z > max.z {
+                    return Err(ConfigError::Empty {
+                        kind: "placement volume",
+                    });
+                }
+                inside(*min, grid, "placement.min")?;
+                inside(*max, grid, "placement.max")
+            }
+            Self::UniformSphere { centre, radius } => {
+                if !radius.is_finite() || *radius <= 0.0 {
+                    return Err(ConfigError::InvalidDistance {
+                        field: "placement.radius",
+                        value: *radius,
+                    });
+                }
+                inside(*centre, grid, "placement.centre")?;
+                for (offset, field) in [
+                    (Vec3::new(*radius, 0.0, 0.0), "placement.radius (+x)"),
+                    (Vec3::new(-*radius, 0.0, 0.0), "placement.radius (-x)"),
+                    (Vec3::new(0.0, *radius, 0.0), "placement.radius (+y)"),
+                    (Vec3::new(0.0, -*radius, 0.0), "placement.radius (-y)"),
                     (Vec3::new(0.0, 0.0, *radius), "placement.radius (+z)"),
                     (Vec3::new(0.0, 0.0, -*radius), "placement.radius (-z)"),
                 ] {
@@ -348,6 +436,73 @@ mod tests {
             (0.22..0.28).contains(&fraction),
             "inner half held {fraction:.3} of the crowd, expected about 0.25"
         );
+    }
+
+    #[test]
+    fn a_volume_stays_inside_its_box() {
+        let min = Vec3::new(-30.0, 1.0, -10.0);
+        let max = Vec3::new(20.0, 12.0, 40.0);
+        let placement = Placement::uniform_volume(min, max);
+        placement.validate(&grid()).expect("box fits the volume");
+        for index in 0..2_000 {
+            let point = placement.position_for(NpcId::unique(index), SimSeed::new(3));
+            assert!((min.x..=max.x).contains(&point.x), "x {} escaped", point.x);
+            assert!((min.y..=max.y).contains(&point.y), "y {} escaped", point.y);
+            assert!((min.z..=max.z).contains(&point.z), "z {} escaped", point.z);
+        }
+    }
+
+    #[test]
+    fn a_sphere_is_volume_uniform_rather_than_radius_uniform() {
+        // Half the radius is an eighth of the volume, so a volume-uniform sphere puts about 12.5%
+        // inside it. Sampling the radius linearly would put half the crowd there and make a
+        // swarm look like a shell around an empty middle.
+        let placement = Placement::uniform_sphere(Vec3::new(0.0, 5.0, 0.0), 60.0);
+        let mut inner = 0_u32;
+        let samples = 20_000_u32;
+        for index in 0..samples {
+            let point = placement.position_for(NpcId::unique(index), SimSeed::new(77));
+            let offset = point - Vec3::new(0.0, 5.0, 0.0);
+            assert!(offset.length() <= 60.0 + 1e-3, "escaped the sphere");
+            if offset.length() <= 30.0 {
+                inner += 1;
+            }
+        }
+        let fraction = f64::from(inner) / f64::from(samples);
+        assert!(
+            (0.10..0.15).contains(&fraction),
+            "inner eighth held {fraction:.3} of the crowd, expected about 0.125"
+        );
+    }
+
+    #[test]
+    fn a_sphere_and_a_volume_can_leave_the_grid() {
+        let grid = grid();
+        assert!(matches!(
+            Placement::uniform_volume(Vec3::ZERO, Vec3::new(10.0, 900.0, 10.0)).validate(&grid),
+            Err(ConfigError::PlacementOutsideGrid { axis: 'y', .. })
+        ));
+        assert!(matches!(
+            Placement::uniform_sphere(Vec3::new(0.0, 0.0, 450.0), 100.0).validate(&grid),
+            Err(ConfigError::PlacementOutsideGrid { .. })
+        ));
+        let inverted =
+            Placement::uniform_volume(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        assert!(matches!(
+            inverted.validate(&grid),
+            Err(ConfigError::Empty { .. })
+        ));
+    }
+
+    #[test]
+    fn authored_positions_keep_their_height() {
+        let points = vec![Vec3::new(1.0, 3.5, 2.0), Vec3::new(-2.0, 0.0, 4.0)];
+        let placement = Placement::fixed(points.clone());
+        placement.validate(&grid()).expect("points are inside");
+        for (index, want) in points.iter().enumerate() {
+            let got = placement.position_for(NpcId::unique(index as u32), SimSeed::new(1));
+            assert_eq!(got, *want, "authored height must survive");
+        }
     }
 
     #[test]

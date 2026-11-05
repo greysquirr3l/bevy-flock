@@ -286,9 +286,13 @@ pub fn steer_flock(
         let steers = !matches!(tier, Some(LodTier::Ambient));
         entities.push(entity);
         crowd.push(
-            [transform.translation.x, transform.translation.z],
-            [velocity.0.x, velocity.0.z],
-            target.map(|target| [target.0.x, target.0.z]),
+            [
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+            ],
+            [velocity.0.x, velocity.0.y, velocity.0.z],
+            target.map(|target| [target.0.x, target.0.y, target.0.z]),
             steers,
         );
     }

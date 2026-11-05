@@ -54,3 +54,4 @@ replay.
 | [0025](0025-manifest-fold-hysteresis.md) | The manifest window is a disc inside the fold radius | Accepted |
 | [0026](0026-cell-major-crowd-steering.md) | Crowd steering walks cells once, in arrays, instead of entities three times | Accepted |
 | [0027](0027-spawn-placement.md) | Spawn placement is a validated type: spiral, random, or authored points | Accepted |
+| [0028](0028-three-dimensional-crowds.md) | The crowd kernel and spawn placement are three-dimensional | Accepted |

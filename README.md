@@ -175,14 +175,15 @@ A headless frame — spawn drain, grid rebuild, steering, integration — on the
 
 | NPCs | Frame | Per agent |
 | --- | --- | --- |
-| 1 | 1.01 ms | — |
-| 1,000 | 1.63 ms | 1.6 µs |
-| 10,000 | 7.7 ms | 0.77 µs |
-| 100,000 | 73.5 ms | 0.74 µs |
+| 1 | 0.99 ms | — |
+| 1,000 | 1.73 ms | 1.7 µs |
+| 10,000 | 9.2 ms | 0.92 µs |
+| 100,000 | 90.0 ms | 0.90 µs |
 
 Per-agent cost is flat because neighbour queries are local: a radius-8 m query is
 138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz
-frame with 2.2× of margin — the ADR 0026 kernel cut that frame from 18.2 ms.
+frame with 1.8× of margin — the ADR 0026 kernel cut that frame from 18.2 ms, and the
+three-dimensional kernel in ADR 0028 costs 19% on top of it.
 
 The first version of the spatial index cost **37 ms for a crowd of one**, because
 it materialised 15.6 million cells every tick. The second fixed that and lost 4×
@@ -217,9 +218,17 @@ let config = FlockConfig::preset(CrowdPreset::BattleHorde)
 # Ok::<(), bevy_flock::error::ConfigError>(())
 ```
 
-`Placement::uniform_rect` covers axis-aligned areas. Random placements draw from each NPC's own
-stream, so a replay scatters the same people into the same spots, and a population larger than an
-authored list cycles through it (the extras stand on earlier points until separation moves them).
+`Placement::uniform_rect` covers axis-aligned areas, `uniform_volume` a box, and `uniform_sphere` a
+sphere with volume-uniform density (`r = R·∛u`) — the three-dimensional answers, for stairwells,
+hangars and swarms. Random placements draw from each NPC's own stream, so a replay scatters the same
+people into the same spots, and a population larger than an authored list cycles through it (the
+extras stand on earlier points until separation moves them).
+
+```rust
+// A swarm around a point in the air, and a crowd on a first floor.
+let swarm = Placement::uniform_sphere(Vec3::new(0.0, 30.0, 0.0), 25.0);
+let upper_floor = Placement::uniform_disc(Vec3::new(0.0, 4.2, 0.0), 18.0);
+```
 
 ### Cost per agent
 

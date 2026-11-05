@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Crowds are three-dimensional (ADR 0028).** The steering kernel and the spawn placement no
+  longer assume the plane `y = 0`: positions, velocities and desired velocities are `[f32; 3]`,
+  cells come from all three axes with the grid's own arithmetic, and the scan walks a box of cells
+  and tests true 3D distance. New placements `uniform_volume` (a box) and `uniform_sphere`
+  (volume-uniform, `r = R·∛u`) join `fixed`, which now honours the height it was given. Nothing else
+  had to change — the grid and the integration system were already volumetric. Cost: 19% on a
+  planar crowd (`flock_frame/10000` 7.71 ms → 9.18 ms, still 1.8× inside the frame budget), because
+  the price is per-neighbour arithmetic rather than empty-cell bookkeeping. Breaking for direct
+  `Crowd` users only: `push` and `desired` use `[f32; 3]`, and `configure` lost its `plane`
+  argument.
+
+
 ### Added
 
 - **Spawn placement is a validated type (ADR 0027).** `Placement` offers four answers —

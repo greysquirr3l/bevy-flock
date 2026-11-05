@@ -83,11 +83,17 @@ fn a_steady_frame_does_not_touch_the_allocator() {
         for index in 0..1_000_u32 {
             let ring = 1.6 * libm::sqrtf(index as f32);
             let angle = index as f32 * 2.399_963_2;
+            let step_angle = index as f32 * 0.7;
+            // A crowd that spans three dimensions, so the buffers are sized for the real case.
             crowd.push(
-                [libm::cosf(angle) * ring, libm::sinf(angle) * ring],
-                [0.1, 0.0],
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(step_angle) * 3.0,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
                 if index % 4 == 0 {
-                    Some([20.0, 20.0])
+                    Some([20.0, 2.0, 20.0])
                 } else {
                     None
                 },
