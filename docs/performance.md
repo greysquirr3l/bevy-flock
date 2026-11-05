@@ -511,3 +511,25 @@ neighbour into all four lanes. 10,000 agents, kernel only, medians:
 Off by default: it adds a per-frame SoA copy that a sparse crowd does not need, and the gain is
 largest where the kernel is most expensive. Reproduce with
 `cargo bench --bench crowd --features simd -- crowd_kernel`.
+
+### Cell sizing and lane occupancy (ADR 0031)
+
+The transposed kernel wants **6-10 agents per occupied cell**, which in a one-kilometre volume is a
+7-9 m cell. Four per bucket is the minimum for a block, not the optimum: at 3 agents a bucket, half
+the agents take the scalar tail and the road still wins 27%, but at 48 a bucket both roads lose to
+the work per agent.
+
+100,000 agents, kernel only, one pass:
+
+| cell (m) | agents/bucket | in blocks | scalar | transposed |
+| --- | --- | --- | --- | --- |
+| 5.0 | 3.2 | 50% | 84.35 ms | 60.49 ms |
+| 7.0 | 6.1 | 70% | 75.88 ms | 52.59 ms |
+| 9.0 | 10.0 | 82% | 74.97 ms | 52.63 ms |
+| 13.5 (default) | 22.2 | 93% | 79.38 ms | 64.21 ms |
+| 20.0 | 48.2 | 97% | 96.59 ms | 95.53 ms |
+
+The default grid sizes cells for queries (ADR 0003), which lands on 13.5 m: 19% better than scalar,
+8-20% short of the 9 m optimum. Sweep your own density with `cargo run --release --example grid_sweep`.
+End to end at 100,000 agents with the default grid the frame is 79.07 ms with the transposed road,
+against 90.0 ms measured for the scalar road.

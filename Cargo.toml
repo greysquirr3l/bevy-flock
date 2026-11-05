@@ -21,7 +21,11 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
+# The transposed crowd kernel (ADR 0030) is on by default: at 100,000 agents it is 19-31% off a
+# steering pass at every cell size measured (ADR 0031), and a stride scheduler only pays for the
+# frames it can afford, so a default build should not leave that on the table. Turn it off if the
+# per-frame structure-of-arrays copy does not suit your density: `default-features = false`.
+default = ["simd"]
 # Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
 memory = []
@@ -29,9 +33,9 @@ memory = []
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
 serde = ["dep:serde", "dep:ron", "smallvec/serde"]
-# Four agents at a time through `wide::f32x4`, behind a cell-major block order (ADR 0023).
-# Off by default so the default build has no dependencies; worth 20% of a 1,000,000-
-# inhabitant frame and 59% of the packed kernel at 50,000 agents.
+# Four agents at a time through `wide::f32x4`: the band kernel's blocks (ADR 0023) and the crowd
+# kernel's transposed blocks (ADR 0030). On by default since ADR 0031 measured it winning at every
+# density and population tested; the only cost is the `wide` dependency.
 simd = ["dep:wide"]
 
 [dependencies]

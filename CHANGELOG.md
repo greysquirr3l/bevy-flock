@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **The transposed crowd kernel is on by default, and cell sizing is documented (ADR 0031).** A
+  sweep of five cell sizes at 10,000 and 100,000 agents found the road winning at every density —
+  including the 3-agents-per-bucket case ADR 0030 was cautious about — by 27-37% at 10k and 19-31%
+  at 100k, so `simd` joined the default features (`default-features = false` restores a
+  dependency-free build). The kernel's preferred density is 6-10 agents per occupied cell: four per
+  bucket is the minimum for a block, and 48 per bucket is the slowest configuration on both roads.
+  The default grid lands on 13.5 m, which is 19% better than scalar and 8-20% short of the 9 m
+  optimum; the recommendation is documented rather than enforced, because raising the cell budget
+  would also raise the cost of the ECS query path that ADR 0003 sized it for. `examples/grid_sweep.rs`
+  re-runs the measurement; end to end at 100,000 agents the frame is 79.07 ms, down from 90.0 ms.
+
+
 - **The crowd kernel can now use SIMD — the transposed shape (ADR 0030).** ADR 0029 rejected
   lane-per-neighbour vectorisation for good reasons: the lanes shared nothing and the masked
   arithmetic threw away every rejected neighbour. The shape that works is the band kernel's
