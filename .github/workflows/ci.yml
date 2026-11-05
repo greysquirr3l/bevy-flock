@@ -29,9 +29,38 @@ jobs:
       # The cap advisor states measured numbers; its self-test checks the tables still carry them
       # and that the recommendation reproduces every shape ADR 0032 measured.
       - run: python3 scripts/group_cap.py --self-test
+      # The regression checker's thresholds, noise handling and fixture guards, without touching a compiler.
+      - run: python3 scripts/scaling_regression.py --self-test
       - run: python3 -m py_compile scripts/*.py
       # Informational: capacity is machine-dependent, so this reports and never fails a runner.
       - run: python3 scripts/group_cap.py --check-plan plan.toml || true
+  scaling-regression:
+    name: Scaling regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: scaling
+      # A reduced matrix: one thread per task, on the runner's own core count and on one core. The
+      # comparison is on speedup, so a four-core runner is not "slower" than the six-core baseline.
+      - name: Sweep (reduced matrix, two repeats per cell)
+        run: |
+          SHAPES="A" CORES="1 $(nproc)" CONC="1 2 4" REPEATS=2 FUNCS=1500 \
+            scripts/scaling_sweep.sh /tmp/candidate.json
+      - name: Compare with the recorded baseline
+        run: |
+          python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/candidate.json \
+            --fail-pct 25 --warn-pct 12 --json /tmp/scaling-verdict.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scaling-verdict
+          path: |
+            /tmp/candidate.json
+            /tmp/scaling-verdict.json
+          if-no-files-found: ignore
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

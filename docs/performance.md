@@ -365,50 +365,60 @@ The milestone sign-off, including the open churn finding, is in
 ## Group scaling: cores against threads per task (2026-11-05)
 
 ADR 0033 caps a group at `nproc / threads_per_task`. That rule was measured on one machine at one
-core count when it was written, so the sweep was repeated with the process pinned to 1, 2, 3 and 6
-cores, cold target directory per task, two shapes: a task that is one crate's codegen (one thread)
-and a task that is six crates built in parallel (six threads, the shape a workspace `cargo build`
-has).
+core count, so the sweep is repeated with the process pinned to 1, 2, 3, 4, 6 cores and every task
+given a cold target directory. Two shapes, because the difference is the point: a task that is one
+crate's codegen (one thread) and a task that is 6 crates built in parallel (6 threads, the shape a
+workspace `cargo build` has). Each cell is the median of 2 runs; the largest spread between repeats
+was 8.8%.
 
 ![Wall clock and speedup against core count, for one-thread and six-thread tasks](images/scaling-curves.png)
 
-Eight one-crate tasks on six cores:
+Shape A on 6 cores (8 one-crate tasks):
 
 | admitted at once | wall | speedup |
 | --- | --- | --- |
-| 1 | 30 s | 1.0x |
-| 2 | 15 s | 2.0x |
-| 3 | 11 s | 2.7x |
-| 6 | 8 s | 3.8x |
-| 8 | 5 s | 6.0x |
+| 1 | 15.8 s | 1.0x |
+| 2 | 8.5 s | 1.9x |
+| 3 | 6.2 s | 2.6x |
+| 4 | 4.1 s | 3.8x |
+| 6 | 4.1 s | 3.8x |
+| 8 | 3.0 s | 5.2x |
 
-Three six-crate tasks on six cores:
+Shape B on 6 cores (3 bundles of 6 crates):
 
 | admitted at once | wall | speedup |
 | --- | --- | --- |
-| 1 | 8 s | 1.0x |
-| 2 | 6 s | 1.3x |
-| 3 | 5 s | 1.6x |
+| 1 | 6.5 s | 1.0x |
+| 2 | 6.4 s | 1.0x |
+| 3 | 6.3 s | 1.0x |
 
 What the curves show, and what they cost ADR 0033:
 
-- **The cap formula picks the right order of magnitude and slightly under-admits bursty work.** For
-  one-thread tasks the formula says 6 on six cores; measured, 6 gives 8 s and admitting all 8 gives
-  5 s. These tasks have an I/O-heavy start (cargo resolving, reading, spawning rustc) that overlaps
-  productively, so a mild oversubscription beats exact-core packing. On two cores the ordering
-  reverses (2 gives 15 s, 3 gives 17 s), so the effect is not a free lunch — it is bursty work that
-  occasionally has a core idle. `cap = nproc / threads` is a floor with headroom, not an optimum, and
-  ADR 0033 now says so.
-- **Threads per task dominate.** A six-thread task alone on six cores reaches only 4.0x against one
-  core; three of them together reach 6.4x. Capping that shape at one task would leave a third of the
-  machine idle, which is why the policy measures threads instead of counting tasks.
-- **Concurrency beyond a task's own thread count buys nothing.** A six-thread task on three cores
-  takes 12 s whether one, two or three are admitted; it is already queueing for cores internally.
+- **The formula is a floor with headroom, not an optimum.** It says 6 for one-thread tasks on
+  6 cores; measured, that gives 4.1 s and admitting 8 gives
+  3.0 s (5.2x), because cargo's resolve/read/spawn phase
+  overlaps across tasks. On two cores the ordering is
+  reversed
+  (1.88x at two at once, 1.79x at three), so this is bursty work rather
+  than a licence to oversubscribe.
+- **Threads per task dominates the curve.** On 6 cores a six-thread bundle alone reaches
+  1.0x; 3 together reach 1.0x. Capping that shape at one task
+  would leave much of the machine idle, which is why the policy measures threads instead of counting
+  tasks.
+- **Concurrency past a task's own thread count buys nothing.** A six-thread bundle on three cores
+  takes 12.7 s admitted alone and 12.6 s with
+  3; it is already queueing for cores internally.
 
-Reproduce with `scripts/scaling_sweep.sh docs/data/scaling-sweep.json` (about nine minutes on six
-cores, every run pinned with `taskset`) then `python3 scripts/scaling_curves.py
-docs/data/scaling-sweep.json docs/images/scaling-curves.png`. The raw rows are checked in beside this
-document.
+The suite that guards these numbers is ADR 0034: `scripts/scaling_regression.py` compares a fresh
+sweep against `docs/data/scaling-sweep.json` on speedup ratios, so a slower CI runner is not a
+regression, and fails when a cell loses more than the measured noise. The generated review —
+matrices, efficiency, the measured optimum against the formula — is
+[`docs/reports/scaling-report.md`](reports/scaling-report.md).
+
+Reproduce with `scripts/scaling_sweep.sh docs/data/scaling-sweep.json` (eighteen minutes on six
+cores, measured; every run pinned with `taskset`, two repeats per cell) then `python3
+scripts/scaling_curves.py docs/data/scaling-sweep.json docs/images/scaling-curves.png`. CI runs the
+reduced matrix on every push; the full one is a local or nightly job.
 
 ## What the numbers do not cover
 

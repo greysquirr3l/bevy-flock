@@ -28,16 +28,24 @@ if you do not. Both numbers are measured in ADR 0032 and printed by `--evidence`
 ### Validation across core counts (2026-11-05)
 
 The rule was measured on six cores only when it was written, so it was re-measured with the process
-pinned to 1, 2, 3 and 6 cores (`scripts/scaling_sweep.sh`, figure in `docs/performance.md`).
+pinned to 1, 2, 3, 4 and 6 cores (`scripts/scaling_sweep.sh`; the numbers live in
+`docs/data/scaling-sweep.json`, the review in `docs/reports/scaling-report.md`).
 
 - **The formula is a floor with headroom, not an optimum.** On six cores, one-thread tasks: cap 6
-  gives 8 s, admitting all 8 gives 5 s. Bursty compile work overlaps its I/O start, so mild
-  oversubscription wins — but on two cores the ordering reverses (cap 2 gives 15 s, cap 3 gives 17 s).
-  The policy therefore states the cap as a *minimum* admission rate and permits admitting up to the
-  task count when tasks are bursty; it does not pretend to compute an optimum.
-- **Threads per task dominates the curve**, as the formula assumes: a six-thread task alone reaches
-  4.0x, three together 6.4x, and on three cores all three arrangements take 12 s because the task is
-  already queueing for cores internally.
+  gives 4.1 s and admitting all 8 gives 3.0 s (5.2x against 3.8x), because the resolve/read/spawn
+  phase of each cargo invocation overlaps across tasks. On two cores the ordering reverses (1.88x at
+  two at once, 1.79x at three), so this is bursty work, not a licence to oversubscribe.
+- **Threads per task dominates the curve.** A six-thread bundle alone on six cores reaches 5.6x
+  against one core; three together reach 5.8x. The threads inside the task already fill the machine,
+  which is exactly why the policy measures threads instead of counting tasks.
+- **Concurrency past a task's own thread count buys nothing.** A six-thread bundle on three cores
+  takes 12.7 s alone, 12.5 s with two and 12.6 s with three; it is queueing for cores internally.
+
+The first version of this measurement was wrong, and the correction is worth recording: shape B built
+three "six-crate" bundles from an eight-crate fixture, so four of the eighteen builds did not exist
+and the numbers credited parallelism the work never had (a bundle appeared to reach only 4.0x). The
+sweep now builds a fixture sized to the bundles, refuses to compare sweeps whose fixtures differ, and
+records the fixture in the file itself.
 
 ## 2. Group sizes come from wiggum, not from the plan file
 

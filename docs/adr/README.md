@@ -60,3 +60,4 @@ replay.
 | [0031](0031-cell-sizing-for-lanes.md) | Cell sizing wants 6-10 agents per bucket; transposed road is the default | Accepted |
 | [0032](0032-concurrent-plan-tasks.md) | Concurrent plan tasks: build cache safe, git index not | Accepted |
 | [0033](0033-group-cap-policy.md) | Group capping: cap by threads, size groups from wiggum, enforce in CI | Accepted |
+| [0034](0034-scaling-regression-suite.md) | Scaling regression suite: gate on speedup ratios, refuse mismatched fixtures | Accepted |

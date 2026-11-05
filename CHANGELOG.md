@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Scaling regression suite and a generated report (ADR 0034).** `scripts/scaling_regression.py` gates
+  CI on speedup ratios rather than wall clock, so a four-core runner is not a regression: thresholds
+  widen with the measured spread (`fail = max(35%, 2 x noise)`, `warn = max(18%, noise)`), a different
+  fixture is refused instead of compared, and no shared core count is a failure rather than a pass.
+  `scripts/scaling_report.py` writes `docs/reports/scaling-report.md` — wall clock, speedup and
+  efficiency matrices, the measured optimum against the cap formula, an ASCII chart and the verdict —
+  from the same baseline the gate uses. The sweep moves to millisecond timing, two repeats per cell and
+  a `meta` record, and corrects an earlier defect: shape B built six-crate bundles from an eight-crate
+  fixture, so four of its eighteen builds never happened. The CI job runs a reduced matrix (shape A,
+  one core and the runner's own, concurrency 1/2/4) and uploads the raw sweep and verdict as artifacts.
+
+
 - **Group scaling measured at 1, 2, 3 and 6 cores, both task shapes.** `scripts/scaling_sweep.sh`
   pins every run with `taskset` and gives each task a cold target directory; `scripts/scaling_curves.py`
   plots wall clock and speedup with the raw rows checked in at `docs/data/scaling-sweep.json`. Findings:

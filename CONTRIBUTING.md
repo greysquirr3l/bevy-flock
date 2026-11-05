@@ -90,6 +90,11 @@ short and it is measured:
   churn, not 3 minutes.
 - **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
   compilations measures the machine.
+- **Re-baselining the scaling sweep is a reviewed commit.** `docs/data/scaling-sweep.json` is what the
+  `Scaling regression` job compares against (ADR 0034). If a change genuinely trades parallel
+  efficiency for something else, run `scripts/scaling_sweep.sh docs/data/scaling-sweep.json`, commit
+  the raw rows with the reasoning, and say what got slower. Never re-baseline to clear a red build
+  without explaining which trade-off was made.
 - **Cap by threads, not by task count** (ADR 0033). `cap = nproc / threads_per_task`: a workspace
   build that spawns `cargo -j6` wants to run alone, a single-crate codegen task wants every core
   filled. Measure the task with `python3 scripts/group_cap.py --measure "<command>"`, then size the

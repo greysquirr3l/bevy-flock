@@ -33,11 +33,17 @@ SHAPE_TITLES = {
 
 
 def load(path: str) -> list[dict]:
-    return [json.loads(line) for line in pathlib.Path(path).read_text().splitlines() if line.strip()]
+    """Measurement rows, skipping the `meta` record schema 2 writes first."""
+    records = [json.loads(line) for line in pathlib.Path(path).read_text().splitlines() if line.strip()]
+    return [r for r in records if r.get("kind", "measurement") == "measurement"]
 
 
-def series(rows: list[dict], shape: str, cores: int) -> list[tuple[int, int]]:
-    return sorted((r["concurrency"], r["wall"]) for r in rows if r["shape"] == shape and r["cores"] == cores)
+def series(rows: list[dict], shape: str, cores: int) -> list[tuple[int, float]]:
+    return sorted(
+        (r["concurrency"], r.get("wall_ms", r.get("wall", 0) * 1000) / 1000.0)
+        for r in rows
+        if r["shape"] == shape and r["cores"] == cores
+    )
 
 
 def efficiency(rows: list[dict], shape: str, cores: int, concurrency: int) -> float | None:
@@ -154,7 +160,7 @@ def main() -> int:
                 ideal = min(cores, concurrency)
                 eff = efficiency(rows, shape, cores, concurrency)
                 print(
-                    f"{shape:<6}{cores:>6}{concurrency:>6}{wall:>6}s{sequential / wall:>8.2f}x"
+                    f"{shape:<6}{cores:>6}{concurrency:>6}{wall:>6.1f}s{sequential / wall:>8.2f}x"
                     f"{ideal:>6}x{eff:>6.0f}%"
                 )
     return 0

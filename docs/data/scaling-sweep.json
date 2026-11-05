@@ -1,29 +1,46 @@
-{"shape": "A", "cores": 1, "concurrency": 1, "tasks": 8, "threads": 1, "wall": 33}
-{"shape": "A", "cores": 1, "concurrency": 2, "tasks": 8, "threads": 1, "wall": 32}
-{"shape": "A", "cores": 1, "concurrency": 3, "tasks": 8, "threads": 1, "wall": 31}
-{"shape": "A", "cores": 1, "concurrency": 6, "tasks": 8, "threads": 1, "wall": 30}
-{"shape": "A", "cores": 1, "concurrency": 8, "tasks": 8, "threads": 1, "wall": 32}
-{"shape": "A", "cores": 2, "concurrency": 1, "tasks": 8, "threads": 1, "wall": 30}
-{"shape": "A", "cores": 2, "concurrency": 2, "tasks": 8, "threads": 1, "wall": 15}
-{"shape": "A", "cores": 2, "concurrency": 3, "tasks": 8, "threads": 1, "wall": 17}
-{"shape": "A", "cores": 2, "concurrency": 6, "tasks": 8, "threads": 1, "wall": 16}
-{"shape": "A", "cores": 2, "concurrency": 8, "tasks": 8, "threads": 1, "wall": 16}
-{"shape": "A", "cores": 3, "concurrency": 1, "tasks": 8, "threads": 1, "wall": 31}
-{"shape": "A", "cores": 3, "concurrency": 2, "tasks": 8, "threads": 1, "wall": 15}
-{"shape": "A", "cores": 3, "concurrency": 3, "tasks": 8, "threads": 1, "wall": 11}
-{"shape": "A", "cores": 3, "concurrency": 6, "tasks": 8, "threads": 1, "wall": 12}
-{"shape": "A", "cores": 3, "concurrency": 8, "tasks": 8, "threads": 1, "wall": 11}
-{"shape": "A", "cores": 6, "concurrency": 1, "tasks": 8, "threads": 1, "wall": 30}
-{"shape": "A", "cores": 6, "concurrency": 2, "tasks": 8, "threads": 1, "wall": 15}
-{"shape": "A", "cores": 6, "concurrency": 3, "tasks": 8, "threads": 1, "wall": 11}
-{"shape": "A", "cores": 6, "concurrency": 6, "tasks": 8, "threads": 1, "wall": 8}
-{"shape": "A", "cores": 6, "concurrency": 8, "tasks": 8, "threads": 1, "wall": 5}
-{"shape": "B", "cores": 1, "concurrency": 1, "tasks": 3, "threads": 6, "wall": 32}
-{"shape": "B", "cores": 1, "concurrency": 2, "tasks": 3, "threads": 6, "wall": 30}
-{"shape": "B", "cores": 1, "concurrency": 3, "tasks": 3, "threads": 6, "wall": 32}
-{"shape": "B", "cores": 3, "concurrency": 1, "tasks": 3, "threads": 6, "wall": 12}
-{"shape": "B", "cores": 3, "concurrency": 2, "tasks": 3, "threads": 6, "wall": 11}
-{"shape": "B", "cores": 3, "concurrency": 3, "tasks": 3, "threads": 6, "wall": 10}
-{"shape": "B", "cores": 6, "concurrency": 1, "tasks": 3, "threads": 6, "wall": 8}
-{"shape": "B", "cores": 6, "concurrency": 2, "tasks": 3, "threads": 6, "wall": 6}
-{"shape": "B", "cores": 6, "concurrency": 3, "tasks": 3, "threads": 6, "wall": 5}
+{"kind": "meta", "schema": 2, "recorded": "2026-11-05T09:52:25+00:00", "nproc": 6, "cores_swept": "1 2 3 4 6", "concurrency_swept": "1 2 3 4 6 8", "shapes": "A B", "repeats": 2, "fixture": {"funcs_per_crate": 1500, "crates_one_per_task": 8, "bundles": 3, "crates_per_bundle": 6}, "machine": "Linux-6.18.38+-aarch64-with-glibc2.39", "processor": "aarch64"}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 1, "tasks": 8, "threads": 1, "wall_ms": 15882.0, "wall": 15.882, "repeats": 2, "spread_pct": 0.0}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 2, "tasks": 8, "threads": 1, "wall_ms": 16047.5, "wall": 16.047, "repeats": 2, "spread_pct": 1.5}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 3, "tasks": 8, "threads": 1, "wall_ms": 16146.5, "wall": 16.146, "repeats": 2, "spread_pct": 0.5}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 4, "tasks": 8, "threads": 1, "wall_ms": 16139.0, "wall": 16.139, "repeats": 2, "spread_pct": 0.7}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 6, "tasks": 8, "threads": 1, "wall_ms": 16058.0, "wall": 16.058, "repeats": 2, "spread_pct": 0.2}
+{"kind": "measurement", "shape": "A", "cores": 1, "concurrency": 8, "tasks": 8, "threads": 1, "wall_ms": 16009.0, "wall": 16.009, "repeats": 2, "spread_pct": 1.0}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 1, "tasks": 8, "threads": 1, "wall_ms": 15647.5, "wall": 15.648, "repeats": 2, "spread_pct": 1.3}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 2, "tasks": 8, "threads": 1, "wall_ms": 8331.0, "wall": 8.331, "repeats": 2, "spread_pct": 0.8}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 3, "tasks": 8, "threads": 1, "wall_ms": 8743.5, "wall": 8.743, "repeats": 2, "spread_pct": 5.9}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 4, "tasks": 8, "threads": 1, "wall_ms": 8262.5, "wall": 8.262, "repeats": 2, "spread_pct": 0.1}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 6, "tasks": 8, "threads": 1, "wall_ms": 8894.0, "wall": 8.894, "repeats": 2, "spread_pct": 8.8}
+{"kind": "measurement", "shape": "A", "cores": 2, "concurrency": 8, "tasks": 8, "threads": 1, "wall_ms": 8406.0, "wall": 8.406, "repeats": 2, "spread_pct": 2.4}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 1, "tasks": 8, "threads": 1, "wall_ms": 15495.0, "wall": 15.495, "repeats": 2, "spread_pct": 0.6}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 2, "tasks": 8, "threads": 1, "wall_ms": 8145.5, "wall": 8.146, "repeats": 2, "spread_pct": 1.3}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 3, "tasks": 8, "threads": 1, "wall_ms": 6300.5, "wall": 6.301, "repeats": 2, "spread_pct": 2.5}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 4, "tasks": 8, "threads": 1, "wall_ms": 5859.5, "wall": 5.859, "repeats": 2, "spread_pct": 1.0}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 6, "tasks": 8, "threads": 1, "wall_ms": 6562.0, "wall": 6.562, "repeats": 2, "spread_pct": 0.3}
+{"kind": "measurement", "shape": "A", "cores": 3, "concurrency": 8, "tasks": 8, "threads": 1, "wall_ms": 5761.0, "wall": 5.761, "repeats": 2, "spread_pct": 0.4}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 1, "tasks": 8, "threads": 1, "wall_ms": 15669.5, "wall": 15.669, "repeats": 2, "spread_pct": 0.5}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 2, "tasks": 8, "threads": 1, "wall_ms": 8417.0, "wall": 8.417, "repeats": 2, "spread_pct": 4.6}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 3, "tasks": 8, "threads": 1, "wall_ms": 6202.5, "wall": 6.202, "repeats": 2, "spread_pct": 3.0}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 4, "tasks": 8, "threads": 1, "wall_ms": 4196.0, "wall": 4.196, "repeats": 2, "spread_pct": 1.5}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 6, "tasks": 8, "threads": 1, "wall_ms": 5199.0, "wall": 5.199, "repeats": 2, "spread_pct": 7.8}
+{"kind": "measurement", "shape": "A", "cores": 4, "concurrency": 8, "tasks": 8, "threads": 1, "wall_ms": 4321.0, "wall": 4.321, "repeats": 2, "spread_pct": 4.8}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 1, "tasks": 8, "threads": 1, "wall_ms": 15784.5, "wall": 15.784, "repeats": 2, "spread_pct": 0.6}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 2, "tasks": 8, "threads": 1, "wall_ms": 8488.0, "wall": 8.488, "repeats": 2, "spread_pct": 2.0}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 3, "tasks": 8, "threads": 1, "wall_ms": 6164.5, "wall": 6.165, "repeats": 2, "spread_pct": 1.1}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 4, "tasks": 8, "threads": 1, "wall_ms": 4124.5, "wall": 4.125, "repeats": 2, "spread_pct": 5.1}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 6, "tasks": 8, "threads": 1, "wall_ms": 4144.0, "wall": 4.144, "repeats": 2, "spread_pct": 1.3}
+{"kind": "measurement", "shape": "A", "cores": 6, "concurrency": 8, "tasks": 8, "threads": 1, "wall_ms": 3047.5, "wall": 3.047, "repeats": 2, "spread_pct": 3.1}
+{"kind": "measurement", "shape": "B", "cores": 1, "concurrency": 1, "tasks": 3, "threads": 6, "wall_ms": 36467.0, "wall": 36.467, "repeats": 2, "spread_pct": 1.2}
+{"kind": "measurement", "shape": "B", "cores": 1, "concurrency": 2, "tasks": 3, "threads": 6, "wall_ms": 36594.5, "wall": 36.594, "repeats": 2, "spread_pct": 2.2}
+{"kind": "measurement", "shape": "B", "cores": 1, "concurrency": 3, "tasks": 3, "threads": 6, "wall_ms": 36465.0, "wall": 36.465, "repeats": 2, "spread_pct": 3.0}
+{"kind": "measurement", "shape": "B", "cores": 2, "concurrency": 1, "tasks": 3, "threads": 6, "wall_ms": 19129.5, "wall": 19.13, "repeats": 2, "spread_pct": 1.3}
+{"kind": "measurement", "shape": "B", "cores": 2, "concurrency": 2, "tasks": 3, "threads": 6, "wall_ms": 18728.0, "wall": 18.728, "repeats": 2, "spread_pct": 1.5}
+{"kind": "measurement", "shape": "B", "cores": 2, "concurrency": 3, "tasks": 3, "threads": 6, "wall_ms": 19027.5, "wall": 19.027, "repeats": 2, "spread_pct": 1.6}
+{"kind": "measurement", "shape": "B", "cores": 3, "concurrency": 1, "tasks": 3, "threads": 6, "wall_ms": 12664.5, "wall": 12.665, "repeats": 2, "spread_pct": 0.8}
+{"kind": "measurement", "shape": "B", "cores": 3, "concurrency": 2, "tasks": 3, "threads": 6, "wall_ms": 12464.0, "wall": 12.464, "repeats": 2, "spread_pct": 0.1}
+{"kind": "measurement", "shape": "B", "cores": 3, "concurrency": 3, "tasks": 3, "threads": 6, "wall_ms": 12577.0, "wall": 12.577, "repeats": 2, "spread_pct": 0.3}
+{"kind": "measurement", "shape": "B", "cores": 4, "concurrency": 1, "tasks": 3, "threads": 6, "wall_ms": 9796.0, "wall": 9.796, "repeats": 2, "spread_pct": 1.4}
+{"kind": "measurement", "shape": "B", "cores": 4, "concurrency": 2, "tasks": 3, "threads": 6, "wall_ms": 9533.0, "wall": 9.533, "repeats": 2, "spread_pct": 3.7}
+{"kind": "measurement", "shape": "B", "cores": 4, "concurrency": 3, "tasks": 3, "threads": 6, "wall_ms": 9591.5, "wall": 9.591, "repeats": 2, "spread_pct": 4.9}
+{"kind": "measurement", "shape": "B", "cores": 6, "concurrency": 1, "tasks": 3, "threads": 6, "wall_ms": 6506.5, "wall": 6.506, "repeats": 2, "spread_pct": 1.3}
+{"kind": "measurement", "shape": "B", "cores": 6, "concurrency": 2, "tasks": 3, "threads": 6, "wall_ms": 6423.5, "wall": 6.423, "repeats": 2, "spread_pct": 2.3}
+{"kind": "measurement", "shape": "B", "cores": 6, "concurrency": 3, "tasks": 3, "threads": 6, "wall_ms": 6316.0, "wall": 6.316, "repeats": 2, "spread_pct": 2.0}
