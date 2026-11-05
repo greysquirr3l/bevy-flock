@@ -8,8 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Scaling regression suite and a generated report (ADR 0034).** `scripts/scaling_regression.py` gates
   CI on speedup ratios rather than wall clock, so a four-core runner is not a regression: thresholds
-  widen with the measured spread (`fail = max(35%, 2 x noise)`, `warn = max(18%, noise)`), a different
-  fixture is refused instead of compared, and no shared core count is a failure rather than a pass.
+  widen with the measured spread (`fail = max(25%, 2.0 x widest)`, `warn = max(12%, 1.5 x widest)`), a
+  different fixture is refused instead of compared, and no shared core count is a failure rather than a
+  pass. The tolerances are exported as constants, printed by the report and stated in ADR 0034 with what
+  they mean in seconds; the job carries a 15-minute timeout so the CI budget is enforced too.
+  `scripts/scaling_report.py --check` fails when the committed report or ADR 0034 stops matching the
+  code and the baseline, which is how the "differences below 18%" contradiction got caught.
   `scripts/scaling_report.py` writes `docs/reports/scaling-report.md` — wall clock, speedup and
   efficiency matrices, the measured optimum against the cap formula, an ASCII chart and the verdict —
   from the same baseline the gate uses. The sweep moves to millisecond timing, two repeats per cell and

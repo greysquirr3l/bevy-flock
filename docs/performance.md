@@ -411,7 +411,8 @@ What the curves show, and what they cost ADR 0033:
 
 The suite that guards these numbers is ADR 0034: `scripts/scaling_regression.py` compares a fresh
 sweep against `docs/data/scaling-sweep.json` on speedup ratios, so a slower CI runner is not a
-regression, and fails when a cell loses more than the measured noise. The generated review —
+regression, and fails when a cell loses more than 25% of its speedup (widened to twice the measured
+spread; 12% to warn). The generated review —
 matrices, efficiency, the measured optimum against the formula — is
 [`docs/reports/scaling-report.md`](reports/scaling-report.md).
 

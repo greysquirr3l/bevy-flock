@@ -1,12 +1,20 @@
 # Scaling report: cores, threads per task, and what the crawl fills
 
-Generated 2026-11-05T09:53:31+00:00 from `docs/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
+Generated 2026-11-05T13:00:12+00:00 from `docs/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
 
 Every number here is measured: each run is pinned with `taskset`, each task gets a cold target directory, and each cell is the median of 2 runs. Nothing is modelled. The fixture is 8 crates of 1500 functions for shape A, and 3 bundles of 6 crates for shape B.
 
 ![Wall clock and speedup against core count](../images/scaling-curves.png)
 
 Two quantities are used throughout. **Speedup** is the same core count's sequential wall clock divided by the wall clock at that concurrency: dimensionless, so it compares across machines. **Efficiency** is that speedup divided by `min(cores, concurrency x threads per task)`: the fraction of the ideal the run actually delivered. Above 100% is possible and is explained where it happens.
+
+## Tolerances this report is judged by
+
+ADR 0034 commits to a **warning at 12%** and a **failure at 25%** of lost speedup, each widened by the measured spread (1.5x for a warning, 2.0x for a failure). The widest spread on this baseline is 8.8%, so the gate applies **13.2%** and **25.0%**.
+
+In wall clock, which is what a developer feels: the CI's 4-at-once cell on 6 cores runs in 4.1 s today, warns above 4.8 s and fails above 5.5 s. The second tolerance this suite owes is the CI budget itself: the job carries a 15-minute timeout against a measured three minutes on a six-core machine.
+
+Runtime frame budgets (16.6 ms at 10,000 agents, 8 ms at 100,000 with 5,000 manifested, 6 ms at 1,000,000) are enforced by the criterion benches and `docs/release-checklist.md`, not here: this suite grades parallelism, not absolute speed.
 
 ## Shape A: one crate per task (1 thread per task), 8 tasks
 
@@ -106,55 +114,11 @@ B 6c                        ######                            1.03x
 
 ## Findings
 
-- Repeats differed by at most 8.8% on any cell, so differences below 18% are not treated as regressions.
+- Repeats differed by at most 8.8% on any cell; the gate's tolerance is 25.0% to fail and 13.2% to warn, both computed above.
 - This suite gates the *shape* of the curve, not absolute speed: speedups are ratios against the same run's sequential baseline, so a change that slows every task equally cancels out. Per-task cost regressions belong to the criterion benches (`crowd`, `packed`, `brain`, `tiers`, `band`), which compare absolute times on one machine (ADR 0034).
 - Shape A on 6 cores: the formula admits 6 and the measured best is 8 (5.18x against 3.81x at the formula's choice, +36%). The formula under-admits this shape.
 - Shape B on 6 cores: the formula admits 1 (1.00x) and the measured best is 3 (1.03x, +3%), so the rule is close but not optimal for this shape.
 - On 3 cores, one six-thread bundle alone reaches 1.00x and three together reach 1.01x (+1%): the threads inside the task already fill the machine, which is why the policy counts threads rather than tasks.
-
-## Regression check against a newer run
-
-Candidate: `docs/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores. Comparison is on speedup, so a slower machine is not a regression.
-
-| shape | cores | conc | baseline | now   | delta | noise | verdict |
-| ----- | ----- | ---- | -------- | ----- | ----- | ----- | ------- |
-| A     | 1     | 2    | 0.99x    | 0.99x | +0.0% | 8%    | ok      |
-| A     | 1     | 3    | 0.98x    | 0.98x | +0.0% | 8%    | ok      |
-| A     | 1     | 4    | 0.98x    | 0.98x | +0.0% | 8%    | ok      |
-| A     | 1     | 6    | 0.99x    | 0.99x | +0.0% | 8%    | ok      |
-| A     | 1     | 8    | 0.99x    | 0.99x | +0.0% | 8%    | ok      |
-| A     | 2     | 2    | 1.88x    | 1.88x | +0.0% | 8%    | ok      |
-| A     | 2     | 3    | 1.79x    | 1.79x | +0.0% | 8%    | ok      |
-| A     | 2     | 4    | 1.89x    | 1.89x | +0.0% | 8%    | ok      |
-| A     | 2     | 6    | 1.76x    | 1.76x | +0.0% | 9%    | ok      |
-| A     | 2     | 8    | 1.86x    | 1.86x | +0.0% | 8%    | ok      |
-| A     | 3     | 2    | 1.90x    | 1.90x | +0.0% | 8%    | ok      |
-| A     | 3     | 3    | 2.46x    | 2.46x | +0.0% | 8%    | ok      |
-| A     | 3     | 4    | 2.64x    | 2.64x | +0.0% | 8%    | ok      |
-| A     | 3     | 6    | 2.36x    | 2.36x | +0.0% | 8%    | ok      |
-| A     | 3     | 8    | 2.69x    | 2.69x | +0.0% | 8%    | ok      |
-| A     | 4     | 2    | 1.86x    | 1.86x | +0.0% | 8%    | ok      |
-| A     | 4     | 3    | 2.53x    | 2.53x | +0.0% | 8%    | ok      |
-| A     | 4     | 4    | 3.73x    | 3.73x | +0.0% | 8%    | ok      |
-| A     | 4     | 6    | 3.01x    | 3.01x | +0.0% | 8%    | ok      |
-| A     | 4     | 8    | 3.63x    | 3.63x | +0.0% | 8%    | ok      |
-| A     | 6     | 2    | 1.86x    | 1.86x | +0.0% | 8%    | ok      |
-| A     | 6     | 3    | 2.56x    | 2.56x | +0.0% | 8%    | ok      |
-| A     | 6     | 4    | 3.83x    | 3.83x | +0.0% | 8%    | ok      |
-| A     | 6     | 6    | 3.81x    | 3.81x | +0.0% | 8%    | ok      |
-| A     | 6     | 8    | 5.18x    | 5.18x | +0.0% | 8%    | ok      |
-| B     | 1     | 2    | 1.00x    | 1.00x | +0.0% | 8%    | ok      |
-| B     | 1     | 3    | 1.00x    | 1.00x | +0.0% | 8%    | ok      |
-| B     | 2     | 2    | 1.02x    | 1.02x | +0.0% | 8%    | ok      |
-| B     | 2     | 3    | 1.00x    | 1.00x | +0.0% | 8%    | ok      |
-| B     | 3     | 2    | 1.02x    | 1.02x | +0.0% | 8%    | ok      |
-| B     | 3     | 3    | 1.01x    | 1.01x | +0.0% | 8%    | ok      |
-| B     | 4     | 2    | 1.03x    | 1.03x | +0.0% | 8%    | ok      |
-| B     | 4     | 3    | 1.02x    | 1.02x | +0.0% | 8%    | ok      |
-| B     | 6     | 2    | 1.01x    | 1.01x | +0.0% | 8%    | ok      |
-| B     | 6     | 3    | 1.03x    | 1.03x | +0.0% | 8%    | ok      |
-
-Verdict: **PASS** over 35 comparable cells (0 failed, 0 warned).
 
 ## Reproducing
 
@@ -163,6 +127,7 @@ scripts/scaling_sweep.sh /tmp/sweep.json            # ~20 minutes, pinned, two r
 python3 scripts/scaling_curves.py /tmp/sweep.json docs/images/scaling-curves.png
 python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/sweep.json
 python3 scripts/scaling_report.py docs/data/scaling-sweep.json --out docs/reports/scaling-report.md
+python3 scripts/scaling_report.py --check                       # fails if this report or ADR 0034 drifted
 ```
 
 CI runs a reduced matrix (`SHAPES="A" CORES="1 $(nproc)" CONC="1 2 4"`, two repeats) on every push and compares it with the same baseline; the full matrix above stays a local or nightly job because it costs twenty minutes.

@@ -31,12 +31,17 @@ jobs:
       - run: python3 scripts/group_cap.py --self-test
       # The regression checker's thresholds, noise handling and fixture guards, without touching a compiler.
       - run: python3 scripts/scaling_regression.py --self-test
+      # prose that restates a threshold drifts; the report and ADR must match the code and the baseline
+      - run: python3 scripts/scaling_report.py --check
       - run: python3 -m py_compile scripts/*.py
       # Informational: capacity is machine-dependent, so this reports and never fails a runner.
       - run: python3 scripts/group_cap.py --check-plan plan.toml || true
   scaling-regression:
     name: Scaling regression
     runs-on: ubuntu-latest
+    # Tolerance 2 in ADR 0034: three minutes measured, so a pathological sweep is cut rather than
+    # quietly taxing every push.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

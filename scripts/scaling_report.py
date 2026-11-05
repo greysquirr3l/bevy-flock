@@ -18,7 +18,17 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from scaling_regression import compare, coverage_notes, load, speedup  # noqa: E402
+from scaling_regression import (  # noqa: E402
+    DEFAULT_FAIL_PCT,
+    DEFAULT_WARN_PCT,
+    FAIL_NOISE_MULTIPLIER,
+    NOISE_FLOOR_PCT,
+    WARN_NOISE_MULTIPLIER,
+    compare,
+    coverage_notes,
+    load,
+    speedup,
+)
 
 SHAPE_TITLES = {
     "A": "one crate per task (1 thread per task)",
@@ -43,12 +53,75 @@ def bars(pairs: list[tuple[str, float]], width: int = 32) -> str:
     return "\n".join(lines)
 
 
+def check_docs(path: str) -> int:
+    """Regenerate in memory and compare. Prose that restates a threshold drifts; this catches it."""
+    import subprocess
+    import tempfile
+
+    failures = []
+    with tempfile.NamedTemporaryFile("r", suffix=".md", delete=False) as handle:
+        scratch = handle.name
+    subprocess.run(
+        [sys.executable, __file__, "docs/data/scaling-sweep.json", "--out", scratch],
+        check=True,
+        capture_output=True,
+    )
+    def without_timestamp(text: str) -> str:
+        """The header records when the report was generated, which is expected to differ every run."""
+        return "\n".join(line for line in text.splitlines() if not line.startswith("Generated "))
+
+    committed = without_timestamp(pathlib.Path(path).read_text())
+    fresh = without_timestamp(pathlib.Path(scratch).read_text())
+    pathlib.Path(scratch).unlink()
+    if committed != fresh:
+        failures.append(
+            f"{path} is stale: regenerate with `python3 scripts/scaling_report.py docs/data/scaling-sweep.json`"
+        )
+
+    adr = pathlib.Path("docs/adr/0034-scaling-regression-suite.md").read_text()
+    import json
+
+    records = [
+        json.loads(line)
+        for line in pathlib.Path("docs/data/scaling-sweep.json").read_text().splitlines()
+        if line.strip()
+    ]
+    spreads = [float(r.get("spread_pct") or 0.0) for r in records if r.get("kind") == "measurement"]
+    widest = max([NOISE_FLOOR_PCT, *spreads])
+    expected = {
+        f"max({DEFAULT_FAIL_PCT:.0f}%, {FAIL_NOISE_MULTIPLIER:.1f} x widest)": "the failure formula",
+        f"max({DEFAULT_WARN_PCT:.0f}%, {WARN_NOISE_MULTIPLIER:.1f} x widest)": "the warning formula",
+        f"{max(DEFAULT_FAIL_PCT, FAIL_NOISE_MULTIPLIER * widest):.1f}%": "the effective failure line",
+        f"{max(DEFAULT_WARN_PCT, WARN_NOISE_MULTIPLIER * widest):.1f}%": "the effective warning line",
+    }
+    for snippet, label in expected.items():
+        if snippet not in adr:
+            failures.append(f"ADR 0034 no longer states {label} ({snippet})")
+
+    for failure in failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print("docs ok: report matches the baseline, ADR 0034 matches the gate's constants")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("sweep")
+    parser.add_argument("sweep", nargs="?", help="sweep file to report on")
     parser.add_argument("--candidate", help="a newer sweep to compare against the baseline")
     parser.add_argument("--out", default="docs/reports/scaling-report.md")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify the committed report and ADR 0034 still match the baseline and the gate's constants",
+    )
     args = parser.parse_args()
+
+    if args.check:
+        return check_docs(args.out)
+    if not args.sweep:
+        parser.error("a sweep file is required unless --check is given")
 
     meta, cells = load(args.sweep)
     shapes = sorted({key[0] for key in cells})
@@ -82,6 +155,40 @@ def main() -> int:
         "**Efficiency** is that speedup divided by `min(cores, concurrency x threads per task)`: the "
         "fraction of the ideal the run actually delivered. Above 100% is possible and is explained where "
         "it happens.")
+    add("")
+
+    # The gate's own numbers, computed here rather than restated in prose: an earlier draft of this
+    # report said "below 18%" while the gate failed at 25%, and a document that disagrees with its gate
+    # teaches readers to distrust both.
+    widest = max(NOISE_FLOOR_PCT, max_spread)
+    warn_effective = max(DEFAULT_WARN_PCT, WARN_NOISE_MULTIPLIER * widest)
+    fail_effective = max(DEFAULT_FAIL_PCT, FAIL_NOISE_MULTIPLIER * widest)
+    add("## Tolerances this report is judged by")
+    add("")
+    add(f"ADR 0034 commits to a **warning at {DEFAULT_WARN_PCT:.0f}%** and a **failure at "
+        f"{DEFAULT_FAIL_PCT:.0f}%** of lost speedup, each widened by the measured spread "
+        f"({WARN_NOISE_MULTIPLIER:.1f}x for a warning, {FAIL_NOISE_MULTIPLIER:.1f}x for a failure). The "
+        f"widest spread on this baseline is {max_spread:.1f}%, so the gate applies "
+        f"**{warn_effective:.1f}%** and **{fail_effective:.1f}%**.")
+    add("")
+    ci_shape = "A" if "A" in shapes else shapes[0]
+    concs_for_shape = sorted({key[2] for key in cells if key[0] == ci_shape})
+    ci_conc = 4 if 4 in concs_for_shape else concs_for_shape[-1]
+    ci_key = (ci_shape, max(cores_list), ci_conc)
+    if ci_key in cells:
+        sequential = cells[(ci_shape, max(cores_list), 1)]["wall"]
+        base_speed = speedup(cells, ci_shape, max(cores_list), ci_conc)
+        warn_wall = sequential / (base_speed * (1 - warn_effective / 100))
+        fail_wall = sequential / (base_speed * (1 - fail_effective / 100))
+        add(f"In wall clock, which is what a developer feels: the CI's {ci_conc}-at-once cell on "
+            f"{max(cores_list)} cores runs in {cells[ci_key]['wall']:.1f} s today, warns above "
+            f"{warn_wall:.1f} s and fails above {fail_wall:.1f} s. The second tolerance this suite owes is "
+            "the CI budget itself: the job carries a 15-minute timeout against a measured three minutes on "
+            "a six-core machine.")
+        add("")
+    add("Runtime frame budgets (16.6 ms at 10,000 agents, 8 ms at 100,000 with 5,000 manifested, 6 ms at "
+        "1,000,000) are enforced by the criterion benches and `docs/release-checklist.md`, not here: this "
+        "suite grades parallelism, not absolute speed.")
     add("")
 
     for shape in shapes:
@@ -175,11 +282,10 @@ def main() -> int:
     add("## Findings")
     add("")
     findings: list[str] = []
-    spread_note = (
-        f"Repeats differed by at most {max_spread:.1f}% on any cell, so differences below "
-        f"{max(8.0, 2 * max_spread):.0f}% are not treated as regressions."
+    findings.append(
+        f"Repeats differed by at most {max_spread:.1f}% on any cell; the gate's tolerance is "
+        f"{fail_effective:.1f}% to fail and {warn_effective:.1f}% to warn, both computed above."
     )
-    findings.append(spread_note)
     findings.append(
         "This suite gates the *shape* of the curve, not absolute speed: speedups are ratios against the "
         "same run's sequential baseline, so a change that slows every task equally cancels out. Per-task "
@@ -280,6 +386,7 @@ def main() -> int:
     add("python3 scripts/scaling_curves.py /tmp/sweep.json docs/images/scaling-curves.png")
     add("python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/sweep.json")
     add("python3 scripts/scaling_report.py docs/data/scaling-sweep.json --out docs/reports/scaling-report.md")
+    add("python3 scripts/scaling_report.py --check                       # fails if this report or ADR 0034 drifted")
     add("```")
     add("")
     add("CI runs a reduced matrix (`SHAPES=\"A\" CORES=\"1 $(nproc)\" CONC=\"1 2 4\"`, two repeats) on every "

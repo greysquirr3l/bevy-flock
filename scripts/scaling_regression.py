@@ -35,6 +35,14 @@ import sys
 # A single run of a two-second compile carries a few percent of scheduler and filesystem noise. Below
 # this, a difference is not worth a human's attention on any machine.
 NOISE_FLOOR_PCT = 8.0
+# The tolerances ADR 0034 commits to. Kept here so the report quotes the gate's numbers instead of
+# restating them in prose, where they drifted once already.
+DEFAULT_FAIL_PCT = 25.0
+DEFAULT_WARN_PCT = 12.0
+# How far the measured spread is allowed to widen each threshold: a warning that fires inside the
+# noise is not a warning, and a failure needs twice the evidence a warning does.
+WARN_NOISE_MULTIPLIER = 1.5
+FAIL_NOISE_MULTIPLIER = 2.0
 
 
 def load(path: str) -> tuple[dict, dict[tuple[str, int, int], dict]]:
@@ -71,8 +79,8 @@ def speedup(cells: dict, shape: str, cores: int, concurrency: int) -> float | No
 def compare(
     base_cells: dict,
     cand_cells: dict,
-    fail_pct: float = 25.0,
-    warn_pct: float = 12.0,
+    fail_pct: float = DEFAULT_FAIL_PCT,
+    warn_pct: float = DEFAULT_WARN_PCT,
 ) -> tuple[list[dict], list[dict]]:
     """Per-cell verdicts and the list of cells that failed. Pure function so the self-test can drive it."""
     rows: list[dict] = []
@@ -87,8 +95,8 @@ def compare(
         noise = max(NOISE_FLOOR_PCT, base_cells[key]["spread"], cand_cells[key]["spread"])
         delta = (cand - base) / base * 100.0
         # A threshold tighter than the measurement's own spread is noise, not signal.
-        fail_at = max(fail_pct, 2.0 * noise)
-        warn_at = max(warn_pct, noise)
+        fail_at = max(fail_pct, FAIL_NOISE_MULTIPLIER * noise)
+        warn_at = max(warn_pct, WARN_NOISE_MULTIPLIER * noise)
         if delta <= -fail_at:
             status = "FAIL"
         elif delta <= -warn_at:
@@ -169,11 +177,12 @@ def self_test() -> int:
     if dropped or any(r["status"] != "ok" for r in rows):
         failures.append("a faster run was flagged")
 
-    # 5. Noise raises the bar: a 25% spread means a 30% drop is a warning, not a failure.
+    # 5. Noise raises the bar, both ways: with a 25% spread the fail line is 50% and the warn line
+    #    37.5%, so a 29% speedup drop is silence rather than a failure or a warning.
     noisy = suite({1: 30.0, 2: 15.0, 4: 8.0}, spread=25.0)
     rows, dropped = compare(noisy, suite({1: 30.0, 2: 15.0, 4: 11.2}))
-    if dropped:
-        failures.append("a drop inside the measured noise was treated as a regression")
+    if dropped or any(r["status"] != "ok" for r in rows):
+        failures.append("a drop inside the measured noise was reported")
 
     # 6. Missing core counts are skipped, not failed.
     sparse = {(("A", 2, 1)): cell(30.0), ("A", 2, 2): cell(15.0)}
@@ -205,8 +214,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("baseline", nargs="?", help="recorded sweep, usually docs/data/scaling-sweep.json")
     parser.add_argument("candidate", nargs="?", help="sweep from this run")
-    parser.add_argument("--fail-pct", type=float, default=25.0, help="speedup drop that fails the build")
-    parser.add_argument("--warn-pct", type=float, default=12.0, help="speedup drop worth a warning")
+    parser.add_argument("--fail-pct", type=float, default=DEFAULT_FAIL_PCT, help="speedup drop that fails the build")
+    parser.add_argument("--warn-pct", type=float, default=DEFAULT_WARN_PCT, help="speedup drop worth a warning")
     parser.add_argument("--json", metavar="PATH", help="write the verdicts as JSON for the CI artifact")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
