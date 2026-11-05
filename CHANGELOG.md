@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **ADR 0032, amendment 2: the group cap is a thread budget.** Eight one-core codegen tasks on six
+  cores: sequential 24 s, capped at half the cores 15 s, capped at six 10 s, uncapped 8 s. The
+  earlier "cap at half the cores" advice was measured on workspace builds that each spawn `cargo -j6`
+  and is wrong for any other shape. `cap = nproc / threads_per_task`, measured with
+  `scripts/group_cap.py --measure "<command>"`; the old rule is withdrawn rather than quietly dropped.
+
+
 - **ADR 0032 amended: the build lock is nearly free and `CARGO_TARGET_DIR` isolation does not pay.**
   Three cold compile tasks on six cores: one target sequential 45 s, one target concurrent 43 s
   (+4%), three targets concurrent 46 s, three targets sequential 82 s. The original advice to isolate

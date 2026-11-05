@@ -99,6 +99,42 @@ group whose tasks share a feature lineage is cheaper together than apart.
 - **Benchmark-bearing tasks still get their own group.** That part of the original decision stands
   and is strengthened: with three compilations running, the machine cannot measure 3% of a frame.
 
+## Amendment 2: the cap is a thread budget, not a task count (same day)
+
+The previous amendment said "cap a compile-heavy group at about half the cores". That advice came
+from three workspace builds that each spawn `cargo -j6`. Run eight tasks that each use *one* core and
+the same advice costs 87% of the wall clock:
+
+Eight independent codegen tasks, six cores, each task given its own target directory:
+
+| configuration | wall | vs sequential |
+| --- | --- | --- |
+| sequential | 24 s | 100% |
+| capped at 3 (half the cores) | 15 s | 62% |
+| capped at 6 | 10 s | 42% |
+| uncapped, 8 at once | 8 s | 33% |
+
+Twelve tasks — the size of the plan's group 1 — repeat it: sequential 24 s, capped at 3 15 s, capped
+at 6 9 s, uncapped 8 s. Capping at half the cores is the worst of the three concurrent options and
+still 1.9× better than sequential, which is why the wrong rule survived a casual read.
+
+So the variable is **threads per task**, not tasks per group:
+
+```
+cap = clamp(1, nproc, floor(nproc / threads_per_task))
+```
+
+- A task that is a full-workspace `cargo build` uses every core: cap 1, and the build lock will
+  serialise it anyway (45 s sequential, 43 s concurrent, measured).
+- A task that is one crate's codegen uses one core: cap = nproc, because an idle core is the only
+  waste that shows up in wall time.
+- `scripts/group_cap.py --measure "<command>"` measures the ratio for a real task and prints the cap,
+  and `--evidence` prints the tables above. It deliberately projects nothing: a contention model with
+  an invented penalty term would be a worse artefact than the measurement it summarises.
+
+**Withdrawn:** "cap at about half the cores". It was a rule about thread count wearing the costume of
+a rule about task count, and it was never measured.
+
 ## What this still does not answer
 
 Whether a group of *eleven* tasks — the size the plan actually schedules — is faster than eleven in

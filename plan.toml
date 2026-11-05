@@ -27,6 +27,10 @@
 # 268 library tests plus nine integration suites; clippy clean on the MSRV
 # (1.97.1); 25 ADRs; gates 1 to 9 closed by the boundary harness.
 #
+# Execution groups are derived from `depends_on` alone: they encode ordering, not capacity. Group 1
+# schedules eleven tasks, which is correct for dependencies and wrong for a six-core machine — run
+# scripts/group_cap.py to choose how many to take at once (ADR 0032, both amendments).
+#
 # Seven of the tasks below are partially delivered; each carries a hint naming what
 # is in place and what is missing, so nobody re-does the former or mistakes it for
 # the whole. The rest are untouched.

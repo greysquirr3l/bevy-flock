@@ -90,9 +90,10 @@ short and it is measured:
   churn, not 3 minutes.
 - **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
   compilations measures the machine.
-- **Cap compile-heavy groups at about half the cores.** Three tasks on six cores already run at 33%
-  efficiency, and `CARGO_TARGET_DIR` isolation does not recover it (46 s isolated against 43 s
-  shared, measured). The shared target directory is the right default; isolation is a debugging tool.
+- **Cap by threads, not by task count.** `cap = nproc / threads_per_task`: a workspace build that
+  spawns `cargo -j6` wants to run alone, a single-crate codegen task wants every core filled with
+  tasks. Measured: eight one-thread tasks take 8 s uncapped, 15 s capped at half the cores. Run
+  `python3 scripts/group_cap.py --measure "<command>"` and it will tell you which shape you have.
 - **The plan's groups are dependency-derived, not capacity-aware.** Group 1 schedules eleven tasks;
   taking them all at once on a small machine is slower than taking three.
 
