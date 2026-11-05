@@ -927,116 +927,28 @@ evidence     = "`src/application/crowd.rs` carries `SteeringRoad { Auto, Wide, T
 [[phases]]
 name  = "Reach"
 order = 10
+tasks = [] # every task in this phase is delivered; see the [[completed]] records below
 
-[[phases.tasks]]
-slug = "reciprocal-avoidance"
-title = "Reciprocal local avoidance: agents stop sharing space"
-goal = "Steering keeps a crowd from collapsing into a point; it does not keep two agents out of the same space, which is what a doorway shows. Add a local-avoidance solve over the neighbour set the kernel already gathers, so two agents approaching each other each take half the responsibility, and a game can rank who yields."
-kind = "feature"
-hints = [
-  "The half-responsibility linear program is the standard shape: each agent solves for a velocity inside the set of velocities that will not collide within a time horizon, and the reciprocal assumption is what keeps two agents from both swerving the same way.",
-  "The neighbour buffer and the transposed layout exist (ADR 0026, ADR 0030); this is a new pass over data already in cache, not a new index.",
-  "Anything sampled must draw from the per-NPC stream (ADR 0002) or the whole-world digest breaks. Prefer a deterministic solve to sampling, and if sampling is unavoidable, drive the sample from `RngStream::for_npc`.",
-  "Where the avoidance pass runs is a scheduler question: it is a cognition-tier cost, not a reflex one, or it will not fit a hundred thousand agents.",
-  "Priority matters for feel: a fleeing villager should yield to a charging guard. Expose it as a per-NPC weight with a documented default rather than as a global constant.",
-]
-test_hints = [
-  "Two agents walking at each other in a corridor pass without their minimum distance ever dropping below the requested separation.",
-  "The same seed and the same inputs produce the same positions to the bit, on every steering road.",
-  "An agent pinned against a wall does not oscillate: a head-on case and a corner case.",
-  "The pass allocates nothing in a steady frame.",
-]
-must_haves = [
-  "A local avoidance pass that consumes the kernel's neighbour set and produces a corrected desired velocity.",
-  "A per-NPC priority so a game can say who yields, with a documented default.",
-  "Determinism held by the existing tests, not waived.",
-  "A benchmark case in `benches/crowd.rs` at 10,000 and 100,000 agents, before and after.",
-]
-evaluation_criteria = [
-  "`cargo test --all-features` passes, including `tests/determinism.rs` and `tests/crowd_no_alloc.rs`.",
-  "A head-on test proves the separation floor holds for the whole approach, not just at the closest sample.",
-  "`docs/performance.md` records the measured cost of the pass at both sizes.",
-  "An ADR records the solve chosen, the determinism argument, and what was rejected.",
-]
+[[completed]]
+slug         = "reciprocal-avoidance"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0045 plus src/application/avoidance.rs and Crowd::avoid: a priority-weighted half-responsibility projection over the neighbour set the kernel already gathers, on the same SteeringRoad as steering (avoid_scalar / avoid_parallel, bit-equal by a_parallel_avoidance_pass_matches_the_scalar_one). NpcAvoidancePriority (default 1.0, clamped 0.05..=20) is the per-NPC weight; BoidsConfig::with_avoidance(None) is the kill switch, and the pass is on by default. Tests: head-on floor held for all 360 ticks with the soft separation weight off (crowd level and ECS level), bit-stable replay, ambient agents avoided but not steering, steady frame allocates zero (tests/crowd_no_alloc.rs). Measured with crowd_avoidance: 10,000 steer 2.25 ms -> 3.27 ms (+1.01 ms), 100,000 25.74 ms -> 38.08 ms (+12.34 ms); the first scalar pass cost 3.96 ms at 10,000, so the parallel road is 3.9x faster. docs/performance.md records both rows."
 
-[[phases.tasks]]
-slug = "navigation-links"
-title = "Navigation links: ladders, ledges and doors as costs"
-goal = "A flow field over a grid cannot express 'this ledge is a shortcut' or 'the ladder costs four seconds', so level designers flatten their levels or bury traversal in behaviour trees. Add a link table the solver understands as extra edges with a cost."
-kind = "feature"
-hints = [
-  "The navigation port already carries cells and costs (ADR 0040), so a link is a pair of cells, a direction, a traversal cost and an optional tag the game can read.",
-  "Inject the links as edges in the same search that builds the field, rather than post-processing a field: post-processing cannot make a link into a route that crosses it.",
-  "The cache keys on a source version; links are part of the source, so adding one must bump the version or a stale field will be served.",
-  "Behaviour trees need to know a link was taken: publish it as a blackboard fact at the leaf boundary rather than as a special node.",
-]
-test_hints = [
-  "A field with a cheap link across a wall routes through the link; the same field without it routes around.",
-  "A link with a high cost loses to the long way round, and wins when the cost is below the detour.",
-  "Editing the link table invalidates the cached field for the affected destination only.",
-]
-must_haves = [
-  "A link type with a cost and an optional tag, validated on insert.",
-  "Field construction that honours links, with the cache keyed on the source version including the link table.",
-  "The link traversal published where a behaviour tree can read it.",
-]
-evaluation_criteria = [
-  "The three routing tests above pass, and a property test holds that a link can never make a reachable cell unreachable.",
-  "`docs/book/src/crowds-at-scale.md` shows a level with a ladder in it.",
-  "An ADR records the field-level integration and why post-processing was rejected.",
-]
+[[completed]]
+slug         = "navigation-links"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0048 plus src/domain/links.rs and the flow-solver integration: NavLink { from, to, cost, tag } in a LinkTable indexed both ways, relaxed as edges inside the search (NavSource::links_leaving / links_into) rather than post-processed, with the version bumped through GridNavSource::add_link so a cached field is dropped. FlowField::link_tag_at carries the tag to the leaf boundary, which is what the book's ladder example reads. tests/nav_links.rs covers the cheap-link-wins, expensive-link-loses and only-route cases; iteration_order_does_not_depend_on_insertion_order holds the table to a canonical order (a defect found and fixed here: same-key edges were ordered by insertion). The optional navmesh (feature `navmesh`) ships alongside with area costs and a funnel whose pinch-restart advances the apex to the opposite corner."
 
-[[phases.tasks]]
-slug = "obstacle-driven-navigation"
-title = "Obstacle-driven navigation: the source rebuilds itself"
-goal = "Cached flow fields are versioned, so a door that opens invalidates them, but the game has to remember to re-stamp its source by hand and forgetting is a silent bug where the crowd walks through a wall. Add a navigation source that is derived from obstacle components and rebuilds within a documented budget."
-kind = "feature"
-hints = [
-  "The versioning and invalidation exist; this is a source, a rebuild trigger and a budget, not a new solver.",
-  "Rebuild on a change to the obstacle set, not every frame, and spend the rebuild across frames if the obstacle count is large: a coherent commit so no NPC sees half a wall.",
-  "A budget expressed in wall-clock time breaks replay; express it in virtual nanoseconds like the think scheduler (ADR 0009).",
-  "Keep the hand-written source working: this is a convenience, and a game with a baked level must not be forced through it.",
-]
-test_hints = [
-  "Spawning a blocker component makes the affected cells unwalkable within a bounded number of ticks, and removing it restores them.",
-  "The rebuild does not run when nothing changed.",
-  "A route exists around a blocker placed across a straight corridor.",
-]
-must_haves = [
-  "An obstacle-derived `NavSource` that bumps its version when the obstacle set changes.",
-  "A rebuild budget in virtual nanoseconds, with the commit point documented.",
-  "The existing manual source untouched and still tested.",
-]
-evaluation_criteria = [
-  "The three tests above pass, and a long-running test shows the field converging with no stale-route assertions failing.",
-  "`docs/performance.md` records the rebuild cost for a realistic obstacle count.",
-  "An ADR records the budget, the commit rule and what a game must still do by hand.",
-]
+[[completed]]
+slug         = "obstacle-driven-navigation"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0046 plus src/domain/obstacle_nav.rs and adapters::primary::obstacle_nav: ObstacleFootprint rasterised into a GridNavSource, staged under a cells-per-tick budget (4,096 default) a whole row at a time, published atomically with one version increment per commit. ObstacleNavPlugin + NavObstacle are opt-in, and the manual NavSource path is untouched. Tests: spawn blocks cells and publishes on the first frame, despawn restores them with version+1, an unchanged set does not rebuild, a 16-cell budget stages a 1,024-cell field across frames without exposing it, request order is not a change, a staged rebuild never exposes a half-built grid, erosion widens the gap, and a blocked corridor is routed around with a dearer detour. The budget is expressed in cells rather than nanoseconds because a cell is a fixed amount of work, which keeps the rebuild's duration identical in a replay."
 
-[[phases.tasks]]
-slug = "stimulus-perception"
-title = "Stimulus perception: sight, hearing and memory of a threat"
-goal = "Encounter perception records who noticed whom for social memory; it is not a senses model. Add stimuli with age and expiry so stealth, guard alertness and search behaviour are expressible as data instead of as a special case inside a tree."
-kind = "feature"
-hints = [
-  "A stimulus is a source, a position, an intensity and a tick; age decays it, and a per-NPC stimulus buffer replaces the single 'saw a player' fact.",
-  "Sight is a cone plus a distance plus an optional occlusion test against the spatial grid; hearing is a radius with a falloff. Do not build an occlusion system: offer the hook and a grid-based approximation.",
-  "Perception cannot run at reflex cadence for every NPC; it belongs in the tiered scheduler's mid band, and the tier decides how often a stimulus is refreshed.",
-  "Whatever a behaviour tree reads must be stable across a think: copy the buffer at the leaf boundary rather than reading live state.",
-]
-test_hints = [
-  "An agent behind another agent inside the cone with occlusion on does not see the target; with occlusion off it does.",
-  "A heard stimulus decays to nothing after its lifetime and stops being reported.",
-  "The same seed and inputs produce the same alertness trace to the bit.",
-  "Perception at 100,000 agents stays inside the mid-band budget.",
-]
-must_haves = [
-  "A stimulus type with age, intensity and expiry, and a per-NPC buffer.",
-  "Sight and hearing queries against the existing spatial grid, with occlusion as an optional hook.",
-  "The buffer published where a behaviour tree or blackboard can read it.",
-]
-evaluation_criteria = [
-  "The four tests above pass, and `tests/determinism.rs` still holds.",
-  "`docs/book/src/behaviour.md` shows a guard that searches after losing sight of a target.",
-  "An ADR records the stimulus model, the tier it runs in and the measured cost.",
-]
+[[completed]]
+slug         = "stimulus-perception"
+phase        = "Reach"
+delivered_in     = "74839a7"
+evidence     = "ADR 0047 plus src/domain/stimulus.rs and adapters::primary::stimulus: a bounded ring of Stimulus { kind, position, radius, intensity, emitted, ttl } with distance and age falloff, a sight cone, occlusion through the Occluder trait (OpenAir by default, so no physics dependency), and a deterministic sort by strength/distance/kind/position with total_cmp. StimulusPlugin publishes one pulse per StimulusSource per tick, sweeps expired records, and writes PerceivedStimuli per observer on a tick interval (six by default) as a snapshot a tree can read for the length of a think. Tests: behind-the-cone sight rejected, heard shout accepted, falloff with distance and age, expiry, wall stops sight but not sound, limited slots keep the strongest, ring overwrite, deterministic perception, and the ECS path including a despawned emitter expiring."
