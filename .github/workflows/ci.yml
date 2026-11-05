@@ -30,6 +30,8 @@ jobs:
       # and that the recommendation reproduces every shape ADR 0032 measured.
       - run: python3 scripts/group_cap.py --self-test
       - run: python3 -m py_compile scripts/*.py
+      # Informational: capacity is machine-dependent, so this reports and never fails a runner.
+      - run: python3 scripts/group_cap.py --check-plan plan.toml || true
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

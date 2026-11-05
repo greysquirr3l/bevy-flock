@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **ADR 0033 states the group capping policy once.** `cap = nproc / threads_per_task`, measured per
+  task rather than assumed, with group sizes taken from `wiggum validate` because wiggum injects audit
+  tasks the phases do not declare (23 authored, 24 scheduled, measured). `scripts/group_cap.py` gains
+  `--groups-from` for the exact answer, `--check-plan` for the authored one, and a self-test that CI
+  runs on every push: five recommendation cases, eleven evidence rows, wiggum's wave rule, cycle
+  detection, and a plan that still parses. Capacity stays out of CI on purpose — runners have two to
+  four cores, so a strict gate would be switched off within a week.
+
+
 - **ADR 0032, amendment 2: the group cap is a thread budget.** Eight one-core codegen tasks on six
   cores: sequential 24 s, capped at half the cores 15 s, capped at six 10 s, uncapped 8 s. The
   earlier "cap at half the cores" advice was measured on workspace builds that each spawn `cargo -j6`

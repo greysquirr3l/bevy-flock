@@ -1,6 +1,7 @@
 # ADR 0032 — Concurrent plan tasks: what the build pipeline tolerates
 
-**Status:** Accepted (2026-11-04)
+**Status:** Accepted (2026-11-04). **Policy superseded by:** ADR 0033 — this record keeps
+the measurements; the rule that follows from them lives in one place now.
 **Context:** wiggum schedules `cell-size-reopen-gate` and `examples-showcase` in the same execution
 group. Both were run concurrently, in one worktree, to find out what that actually costs.
 

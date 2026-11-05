@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import pathlib
 import resource
 import subprocess
 import sys
@@ -78,6 +79,73 @@ third shape because three cold dependency trees oversubscribe six cores.
 """
 
 
+def derive_groups(tasks: dict[str, list[str]]) -> list[list[str]]:
+    """The execution groups wiggum derives from `depends_on`: a task joins the first wave after its
+    slowest dependency. Unknown dependencies (already-completed tasks) are ignored. Raises ValueError
+    on a cycle, because a cycle has no schedule and silently dropping it would hide a broken plan."""
+    wave: dict[str, int] = {}
+
+    def place(task: str, chain: tuple[str, ...] = ()) -> int:
+        if task in wave:
+            return wave[task]
+        if task in chain:
+            cycle = " -> ".join((*chain, task))
+            raise ValueError(f"dependency cycle: {cycle}")
+        ready = [place(dep, (*chain, task)) for dep in tasks[task] if dep in tasks]
+        wave[task] = max(ready, default=0) + 1
+        return wave[task]
+
+    for task in tasks:
+        place(task)
+    groups: list[list[str]] = [[] for _ in range(max(wave.values(), default=0))]
+    for task, depth in wave.items():
+        groups[depth - 1].append(task)
+    return [sorted(group) for group in groups if group]
+
+
+def load_plan(path: str) -> tuple[dict[str, list[str]], list[str]]:
+    """Live tasks (queue) and completed task names from a wiggum plan.toml."""
+    import tomllib
+
+    doc = tomllib.loads(pathlib.Path(path).read_text())
+    done = {entry["slug"] for entry in doc.get("completed", [])}
+    tasks = {
+        task["slug"]: list(task.get("depends_on", []))
+        for phase in doc.get("phases", [])
+        for task in phase.get("tasks", [])
+        if task["slug"] not in done
+    }
+    return tasks, sorted(done)
+
+
+def parse_validate(text: str) -> list[list[str]]:
+    """Read `wiggum validate`'s group listing.
+
+    The authored plan cannot reproduce wiggum's groups exactly: wiggum appends up to two audit tasks
+    (`integration-wiring`, `stub-cleanup`) that no phase declares, and later tasks depend on them. So
+    when wiggum is installed, its own answer is the one to size.
+    """
+    groups = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("Group ") or ":" not in stripped:
+            continue
+        names = stripped.split(":", 1)[1].replace("(concurrent)", "")
+        members = [name.strip() for name in names.split(",") if name.strip()]
+        if members:
+            groups.append(members)
+    return groups
+
+
+def check_plan(path: str, threads: float, cores: int) -> tuple[list[list[str]], int, int]:
+    """Groups, the cap they should be admitted under, and how many groups exceed it."""
+    tasks, _done = load_plan(path)
+    groups = derive_groups(tasks)
+    cap = recommend(threads, cores)
+    over = sum(1 for group in groups if len(group) > cap)
+    return groups, cap, over
+
+
 def self_test() -> int:
     """The recommendation has to agree with every shape ADR 0032 measured."""
     failures = []
@@ -106,11 +174,44 @@ def self_test() -> int:
     for shape in ("eight single-threaded", "twelve single-threaded", "three workspace builds"):
         check(shape in EVIDENCE, f"evidence is missing the {shape!r} shape")
 
+    # Group derivation must reproduce wiggum's waves, not a plausible approximation of them.
+    fixture = {"a": [], "b": [], "c": ["a"], "d": ["a", "b"], "e": ["c", "d"]}
+    check(derive_groups(fixture) == [["a", "b"], ["c", "d"], ["e"]],
+          f"wave derivation gave {derive_groups(fixture)}")
+    # A dependency on an already-completed task cannot hold a group open.
+    check(derive_groups({"a": ["finished"], "b": []}) == [["a", "b"]],
+          "a completed dependency created a phantom wave")
+    try:
+        derive_groups({"a": ["b"], "b": ["a"]})
+        failures.append("a dependency cycle was scheduled instead of reported")
+    except ValueError:
+        pass
+    # `wiggum validate` output: sizes come from its groups, not from a plausible-looking regex.
+    validate_text = """  Plan: bevy-flock
+     Group 1: alpha, beta, gamma (concurrent)
+     Group 2: delta (concurrent)
+"""
+    check(parse_validate(validate_text) == [["alpha", "beta", "gamma"], ["delta"]],
+          f"validate parsing gave {parse_validate(validate_text)}")
+    check(parse_validate("") == [], "empty validate output produced groups")
+
+    # The real plan must parse and derive, whatever its groups turn out to be.
+    plan = pathlib.Path(__file__).resolve().parent.parent / "plan.toml"
+    if plan.exists():
+        groups, cap, _over = check_plan(str(plan), 1.0, 6)
+        check(len(groups) > 0, "the repository plan produced no groups")
+        check(all(groups), "a group came out empty")
+    else:
+        failures.append(f"plan not found at {plan}")
+
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"self-test: {len(rows)} evidence rows and 6 recommendation cases agree with ADR 0032")
+    print(
+        f"self-test: {len(rows)} evidence rows, every recommendation and derivation case "
+        f"agrees with ADR 0032 and ADR 0033"
+    )
     return 0
 
 
@@ -120,10 +221,38 @@ def main() -> int:
     parser.add_argument("--threads", type=float, help="threads one task uses, if already known")
     parser.add_argument("--evidence", action="store_true", help="print the measured tables")
     parser.add_argument("--self-test", action="store_true", help="check the recommendation and tables")
+    parser.add_argument("--check-plan", metavar="PATH", help="derive the plan's groups and size them")
+    parser.add_argument("--groups-from", metavar="PATH", help="use `wiggum validate` output, which is exact")
+    parser.add_argument("--strict", action="store_true", help="with --check-plan, exit 1 when a group exceeds the cap")
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
+
+    if args.check_plan or args.groups_from:
+        cores = os.cpu_count() or 1
+        threads = args.threads if args.threads is not None else float(cores)
+        if args.groups_from:
+            groups = parse_validate(pathlib.Path(args.groups_from).read_text())
+            cap = recommend(threads, cores)
+            over = sum(1 for group in groups if len(group) > cap)
+            source = f"{args.groups_from} (wiggum's groups, exact)"
+        else:
+            groups, cap, over = check_plan(args.check_plan, threads, cores)
+            source = f"{args.check_plan} (authored tasks only; wiggum adds up to two audit tasks)"
+        print(f"{source}: {sum(len(g) for g in groups)} tasks, {len(groups)} groups")
+        print(f"cores {cores}, threads per task {threads:.1f} -> admit {cap} at a time")
+        print()
+        for index, group in enumerate(groups, start=1):
+            mark = "OVER" if len(group) > cap else "ok"
+            print(f"  group {index}: {len(group):>2} tasks  {mark}")
+        print()
+        print("Groups encode ordering, not capacity. Taking the first `cap` tasks of a group and")
+        print("re-deriving is the supported way to run a group larger than the machine.")
+        if over and args.strict:
+            print(f"\nFAIL {over} group(s) exceed the cap of {cap}", file=sys.stderr)
+            return 1
+        return 0
 
     cores = os.cpu_count() or 1
     threads = args.threads

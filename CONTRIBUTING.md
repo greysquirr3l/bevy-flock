@@ -90,10 +90,10 @@ short and it is measured:
   churn, not 3 minutes.
 - **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
   compilations measures the machine.
-- **Cap by threads, not by task count.** `cap = nproc / threads_per_task`: a workspace build that
-  spawns `cargo -j6` wants to run alone, a single-crate codegen task wants every core filled with
-  tasks. Measured: eight one-thread tasks take 8 s uncapped, 15 s capped at half the cores. Run
-  `python3 scripts/group_cap.py --measure "<command>"` and it will tell you which shape you have.
+- **Cap by threads, not by task count** (ADR 0033). `cap = nproc / threads_per_task`: a workspace
+  build that spawns `cargo -j6` wants to run alone, a single-crate codegen task wants every core
+  filled. Measure the task with `python3 scripts/group_cap.py --measure "<command>"`, then size the
+  group with `--groups-from` (exact, needs wiggum) or `--check-plan` (authored tasks only).
 - **The plan's groups are dependency-derived, not capacity-aware.** Group 1 schedules eleven tasks;
   taking them all at once on a small machine is slower than taking three.
 
