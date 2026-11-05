@@ -381,6 +381,14 @@ impl Plugin for FlockPlugin {
             .insert_resource(SimClock::new(self.config.ticks_per_second))
             .init_resource::<SpawnQueue>()
             .init_resource::<FlockStats>()
+            .init_resource::<crate::adapters::primary::perception::PerceptionConfig>()
+            .init_resource::<crate::adapters::primary::grouping::Groups>()
+            .init_resource::<crate::adapters::primary::grouping::NpcIndex>()
+            .init_resource::<crate::adapters::primary::observability::CrowdPulse>()
+            .init_resource::<crate::adapters::primary::observability::Diagnostics>()
+            .init_resource::<crate::adapters::primary::world_director::AmbientMood>()
+            .init_resource::<crate::adapters::primary::world_director::CrowdAlarms>()
+            .init_resource::<crate::adapters::primary::world_director::CrowdDirector>()
             .configure_sets(
                 Update,
                 (
@@ -393,18 +401,46 @@ impl Plugin for FlockPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, drain_spawn_queue.in_set(FlockSet::Spawn))
+            .add_systems(
+                Update,
+                (
+                    drain_spawn_queue,
+                    crate::adapters::primary::grouping::index_new_npcs,
+                    crate::adapters::primary::grouping::reconcile_despawns,
+                )
+                    .chain()
+                    .in_set(FlockSet::Spawn),
+            )
             // Weights before planning (distance is a perception fact), planning before
             // ticking (the choice is the plan). Bevy is told the order rather than
             // trusted to infer it from the resource conflicts.
-            .add_systems(Update, assign_tiers.in_set(FlockSet::Perception))
+            .add_systems(
+                Update,
+                (
+                    assign_tiers,
+                    crate::adapters::primary::perception::observe_players,
+                    crate::adapters::primary::perception::forget_the_absent,
+                    crate::adapters::primary::observability::sample_crowd,
+                    crate::adapters::primary::observability::count_frames,
+                )
+                    .chain()
+                    .in_set(FlockSet::Perception),
+            )
             .add_systems(
                 Update,
                 (plan_thinks, tick_chosen)
                     .chain()
                     .in_set(FlockSet::Cognition),
             )
-            .add_systems(Update, advance_clock.in_set(FlockSet::AdvanceTick));
+            .add_systems(
+                Update,
+                (
+                    crate::adapters::primary::world_director::run_world_director,
+                    advance_clock,
+                )
+                    .chain()
+                    .in_set(FlockSet::AdvanceTick),
+            );
 
         // A game that added `BoidsPlugin` first (with its own steering config) is
         // respected: adding it twice would panic, and silently overriding the
