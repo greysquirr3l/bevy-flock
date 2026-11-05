@@ -3,67 +3,63 @@
 Repo: /home/ubuntu/bevy-flock. Branch main. Author: Nick Campbell <s0ma@protonmail.com>.
 Toolchain on PATH: export PATH="$HOME/.cargo/bin:$PATH". Rust 1.97.1 pinned.
 
-## Done in this session (committed or uncommitted)
-- Committed: domain generator, nav (NavSource + GridNavSource), flow fields (+cache,
-  resumable solver), groups/factions/formations, behavior utility scoring, dialog graph
-  engine, barks, dialog provider seam, application director (+AlarmField, DirectorBoard).
-  All 336 lib tests pass.
-- Uncommitted so far: adapters/primary/perception.rs, adapters/primary/grouping.rs
-  (neither wired into mod.rs yet, not compiled).
+Updated 2026-11-05. The plan (`plan.toml`) is the contract; this file is what the last
+session learned so the next one does not repeat it.
 
-## Remaining plan tasks
-1. encounter-perception  -> perception.rs written; wire module + systems into FlockPlugin
-   (FlockSet::Perception), add PerceptionConfig resource, tests pass.
-2. group-faction-model -> grouping.rs written; wire Groups/NpcIndex resources + systems.
-3. world-director -> adapters/primary/world_director.rs: CrowdDirector resource wrapping
-   application::DirectorBoard, systems build DirectorInputs from CrowdPulse + FlockStats +
-   SimClock, apply Mood into AmbientMood resource, publish alarm count into CrowdPulse.
-4. observability-and-debug -> adapters/primary/observability.rs: CrowdPulse resource,
-   Diagnostics resource, sample_crowd (interval 60 ticks, O(n) allowed), report() text,
-   Violation enum + check_world(&mut World) for duplicate NpcIds / tier sum, optional
-   `tracing` feature spans.
-5. render-adapter -> adapters/primary/render.rs: RenderPlan resource (reserved capacity,
-   no per-frame alloc), VisibleInstance {npc, position, yaw, tint, variant}, cull by tier +
-   distance, sort by variant, draw_call count; tests for culling parity + capacity stability.
-   Feature `render` optional Bevy sprite/mesh adapter if time permits (else document gap).
-6. nav-adapter -> adapters/secondary/nav_adapter.rs: NavGrid resource (GridNavSource +
-   FlowCache), version refresh system, NavVersion bump test.
-7. physics-adapter -> adapters/secondary/physics.rs: PhysicsPort trait (object safe),
-   KinematicBody marker, order test with a recording stub; document avian gap.
-8. networking-adapter -> adapters/secondary/network.rs: NpcNetState quantised,
-   InterestSet radius filter, encode/decode round trip, bounded replication test;
-   document replicon gap.
-9. memory-in-cognition -> perception writes KEY_PLAYER_SEEN/DISTANCE; add
-   behavior/social_leaves.rs (GreetKnown, AvoidKnown leaves w/ cost hints) gated or not on
-   memory feature; memory bridge system under `feature = "memory"` calling MemoryStore.
-10. dialog-dag / bark / provider already at library level; add ECS system in
-    adapters/primary/dialogue.rs: DialogueSessions component + talk system + bark emit
-    system writing BarkQueue; tests.
-11. examples-showcase -> examples/: horde_100k.rs (headless), tavern_dialog.rs,
-    custom_behavior.rs (custom LeafBehavior + GroupDirector), ambient_metropolis.rs,
-    plus README sections.
-12. benchmark-suite -> benches: generator.rs (100k blueprints + alloc count),
-    utility.rs (20 candidates x 10k NPCs), flow.rs (solve + cache), dialog.rs (graph walk),
-    director.rs; extend regression gate script to read criterion JSON vs committed baseline.
-13. property-and-fuzz-suite -> tests/properties.rs with proptest (dev-dep) for grid parity,
-    steering stability, tree cursor, dialog validator; fuzz/ targets (cargo-fuzz, no_std-free)
-    + mutation digest test.
-14. docs-site-and-readme -> book/ (mdbook: SUMMARY.md + ~10 chapters with tested snippets),
-    docs/comparison.md, README refresh, .github/workflows/pages.yml.
-15. prelude-rustdoc-book -> prelude re-exports for all new modules, lib.rs crate docs update,
-    docs/diagrams/*.d2 + rendered PNG in docs/images.
-16. release-and-community -> ROADMAP.md, .github/ISSUE_TEMPLATE/*, release workflow,
-    scripts/release_check.py, CHANGELOG entry.
-17. cross-platform-audit -> CI feature matrix, wasm32 check, docs/audits/platform-2026-11.md.
-18. ADRs 0035-0040: 0035 group relationship storage; 0036 dialog engine + provider seam;
-    0037 barks; 0038 world director + alarm field; 0039 render plan; 0040 ports
-    (nav/physics/network) + test strategy. Plus index update.
-19. plan.toml: mark every delivered task with delivered_in = "<commit sha>" once committed.
-20. Run full verification: cargo fmt, clippy -D warnings (all targets/features),
-    cargo test --release --all-features, then commit + push.
+## Where the crate stands
+
+`0.1.0` is no longer only a crowd simulator. It ships three paths:
+
+* **Crowd**: boids and steering, deterministic spatial grid, packed and transposed SIMD
+  kernels, bands, the nine-gate ambient continuum, budgeted spawning and placement.
+* **Cognition**: virtual-cost think scheduler, tiered cognition, behaviour trees with the
+  full node set, utility scoring, social memory (`memory` feature) and its save format.
+* **Society**: procedural generator, groups and factions, encounter perception, dialog
+  graphs, barks, the world director, and ports for physics, replication and rendering.
+
+Proof in place: 443 library tests, the full integration suite, six property tests over
+arbitrary inputs, four runnable examples, criterion benches for every hot path, clippy at
+`-D warnings` across all targets and features, and a CI matrix that runs all of it plus
+the scaling-regression gate and the cell-size gate.
+
+Delivered in `d50b203`: archetype-generator, flow-field-pathing, utility-scoring,
+group-faction-model, world-director, encounter-perception, dialog-graph-engine,
+bark-system, dialog-provider-seam, navigation-port, physics-adapter, render-adapter,
+networking-adapter, benchmark-suite, examples-showcase. ADRs 0035-0040 record why.
+
+## Remaining plan tasks and what each still needs
+
+| Task | What is left |
+| --- | --- |
+| `memory-in-cognition` | Blackboard keys (`memory_valence`, `memory_familiarity`, `memory_flags`) written once per think; the three memory leaves with declared costs; calibration re-pin; the eligibility rule for who is remembered when the player walks into a market |
+| `observability-and-debug` | Diagnostics, ghost-row/orphan-slot checks and the hysteresis rate exist. Missing: the per-NPC "why did it do that" dump (tree path, tier, weight, last barks, memory summary) and debug gizmos behind a feature |
+| `prelude-rustdoc-book` | Prelude and rustdoc are current; the mdbook is not written |
+| `docs-site-and-readme` | README has the honest status table; a docs build, the comparison page with measurements and the "what this is not" section are missing |
+| `property-and-fuzz-suite` | Six properties shipped; the fuzz target for the save decoder and the RON tree path is not |
+| `cell-size-reopen-gate` | Gate, script and CI job shipped; nothing pending unless a future benchmark trips it |
+| `release-and-community` | CI, licences, contributing, security and changelog in place; `0.1.0` publish and the adapter contribution path remain |
+| `cross-platform-audit` | CI covers Linux, macOS and Windows; wasm check, feature-powerset run and cross-target determinism remain |
+
+## Traps already paid for
+
+* Bevy system parameters are by value. `clippy::needless_pass_by_value` is allowed at the
+  crate level with the reason written next to it; do not "fix" a system signature.
+* Leaves are `&self` and shared. Per-NPC state belongs on the blackboard or the cursor
+  stack — a timer in a leaf field gives the whole crowd one timer.
+* `NpcBlueprint` owns its strings. A `&'static str` field makes the type impossible to
+  deserialise from a borrowed input, which is what broke the RON round trip.
+* `plan.toml` dependencies must name **open** tasks. Naming a completed task fails
+  validation with "unknown task dependency" — that is wiggum saying the edge is satisfied,
+  not pending.
+* A phase whose tasks all close needs an explicit `tasks = []`, or the file stops parsing
+  as the plan expects.
+* `cargo clippy --all-targets --all-features -- -D warnings` is the gate. Examples carry
+  their own allow block, because an example's job is to be read.
 
 ## Conventions
+
 - Lints: deny unsafe_code, missing_docs, clippy::unwrap_used/expect_used/panic/indexing_slicing
-  in library code (tests exempt). Every public item needs docs.
-- Tests live in `#[cfg(test)] mod tests` inside modules; integration tests in tests/.
-- Commits: conventional messages, author Nick Campbell.
+  in library code (tests and examples exempt with a stated reason).
+- Every public item has docs; hex literals are grouped (`0x00D1_A106`).
+- Tests live in `#[cfg(test)] mod tests` inside modules; integration tests in `tests/`.
+- Commits: conventional messages, author Nick Campbell <s0ma@protonmail.com>.

@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **The engine, not just the crowd.** The remaining open plan tasks land together
+  (ADRs 0035-0040). Behaviour trees gain the full node set — six composites, four
+  decorators, flat compiled nodes, a fixed-size cursor stack, stateless shared leaves —
+  and `tests/tree_no_alloc.rs` keeps a tick allocation-free. Beside them,
+  `behavior::utility` picks goals by weighted considerations with inhibition, count
+  compensation and an `explain` that prints the arithmetic. `domain::generator`
+  produces reproducible NPCs (names, temperament, needs, background) from a seed and an
+  index. `domain::groups` adds formations with stable slots and faction relations;
+  `application::director` decides by returning commands and keeps a bounded trace, which
+  is what makes a crowd's mood replayable. `behavior::dialog` validates graphs at load
+  (dangling choice, unreachable node, loop without exit), `behavior::bark` funnels every
+  line through one bounded, cooldown-gated channel with a per-frame cap, and
+  `behavior::provider` keeps a slow line source off the tick. `domain::nav`/`domain::flow`
+  give destination-driven movement a port, a grid and a hand-authored source, with a
+  version-keyed field cache.
+- **Integrations are ports (ADR 0040).** `PhysicsPort`, the `NpcNetState` wire format with
+  a bounded `InterestSet`, and a sorted `RenderPlan` are engine-free: a game writes a
+  dozen lines for its own Avian, replicon or renderer instead of inheriting a version
+  conflict. `NpcNetState::BYTES` is pinned by a test, and `benches/replication.rs`
+  measures the filter at 1k/10k/100k plus encode and decode.
+- **Proof for the new surface.** Six property tests over arbitrary inputs (blackboard
+  capacity and write survival, RNG determinism, grid/brute-force parity, wire round trip,
+  weight clamping, tick monotonicity), four runnable examples (`hello_flock`,
+  `custom_behavior`, `tavern_dialog`, `ambient_metropolis`) and benches for the scheduler
+  (`cognition`), groups, flow fields and replication. CI compiles every bench and runs the
+  examples. 443 library tests, the whole integration suite and clippy at `-D warnings`
+  across all targets and features.
 - **Scaling regression suite and a generated report (ADR 0034).** `scripts/scaling_regression.py` gates
   CI on speedup ratios rather than wall clock, so a four-core runner is not a regression: thresholds
   widen with the measured spread (`fail = max(25%, 2.0 x widest)`, `warn = max(12%, 1.5 x widest)`), a
