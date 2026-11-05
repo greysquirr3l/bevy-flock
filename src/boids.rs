@@ -44,7 +44,7 @@ use crate::adapters::primary::components::{
 };
 use crate::adapters::primary::plugin::FlockSet;
 use crate::application::SimClock;
-use crate::application::{Crowd, CrowdParams, CrowdReport};
+use crate::application::{Crowd, CrowdParams, CrowdReport, SteeringRoad};
 use crate::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{AgentState, SteeringParams, desired_velocity};
 use crate::domain::tick::TicksPerSecond;
@@ -59,6 +59,7 @@ pub struct BoidsConfig {
     params: SteeringParams,
     grid: SpatialGridConfig,
     max_acceleration: f32,
+    road: SteeringRoad,
 }
 
 impl BoidsConfig {
@@ -87,6 +88,7 @@ impl BoidsConfig {
             params,
             grid,
             max_acceleration,
+            road: SteeringRoad::Auto,
         })
     }
 
@@ -129,6 +131,22 @@ impl BoidsConfig {
         Ok(self)
     }
 
+    /// Choose where a frame is steered. `Auto` unless a game asks otherwise.
+    ///
+    /// `SteeringRoad::Threads` on a machine with cores to spare, `SteeringRoad::Scalar` for a
+    /// replay somebody wants to step through one agent at a time.
+    #[must_use]
+    pub fn with_road(mut self, road: SteeringRoad) -> Self {
+        self.road = road;
+        self
+    }
+
+    /// Where a frame is steered.
+    #[must_use]
+    pub fn road(&self) -> SteeringRoad {
+        self.road
+    }
+
     /// Change the acceleration limit.
     ///
     /// A non-finite or non-positive value is ignored and the previous limit is
@@ -151,6 +169,7 @@ impl Default for BoidsConfig {
             params: SteeringParams::human_scale(),
             grid: SpatialGridConfig::default(),
             max_acceleration: 4.0,
+            road: SteeringRoad::Auto,
         }
     }
 }
@@ -288,6 +307,7 @@ pub fn steer_flock(
     mut report: ResMut<FlockSteerReport>,
 ) {
     let params = CrowdParams::from_steering(&config.params);
+    crowd.set_road(config.road);
     crowd.configure_from_grid(&grid.0);
     crowd.begin();
     entities.clear();

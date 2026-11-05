@@ -34,6 +34,7 @@ pub use crate::adapters::primary::observability::{
 };
 #[cfg(feature = "memory")]
 pub use crate::adapters::primary::plugin::MemoryBridgePlugin;
+pub use crate::application::SteeringRoad;
 pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
 pub use crate::behavior::memory_leaves::{
     GRUDGE_VALENCE, GreetFriend, KEY_MEMORY_FAMILIARITY, KEY_MEMORY_FLAGS, KEY_MEMORY_VALENCE,

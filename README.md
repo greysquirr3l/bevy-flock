@@ -80,7 +80,7 @@ cargo bench --locked --bench tiers -- tier_frame      # the tier numbers in the 
 
 | Claim in this README | Where it is pinned |
 | --- | --- |
-| 10,000 agents in 9.18 ms | `benches/crowd.rs`, table in [`docs/performance.md`](docs/performance.md) |
+| 10,000 agents in 4.3 ms | `benches/crowd.rs`, table in [`docs/performance.md`](docs/performance.md) |
 | Per-agent cost is flat | same table, 1,000 / 10,000 / 100,000 rows |
 | Same seed, same world | `tests/determinism.rs`, whole-world digest |
 | No allocation in a tick | `tests/tree_no_alloc.rs`, `tests/crowd_no_alloc.rs` |
@@ -278,15 +278,16 @@ A headless frame — spawn drain, grid rebuild, steering, integration — on the
 
 | NPCs | Frame | Per agent |
 | --- | --- | --- |
-| 1 | 0.99 ms | — |
-| 1,000 | 1.73 ms | 1.7 µs |
-| 10,000 | 9.2 ms | 0.92 µs |
-| 100,000 | 90.0 ms | 0.90 µs |
+| 1 | 1.01 ms | — |
+| 1,000 | 1.74 ms | 1.7 µs |
+| 10,000 | 4.3 ms | 0.43 µs |
+| 100,000 | 29.2 ms | 0.29 µs |
 
 Per-agent cost is flat because neighbour queries are local: a radius-8 m query is
-138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz
-frame with 1.8× of margin — the ADR 0026 kernel cut that frame from 18.2 ms, and the
-three-dimensional kernel in ADR 0028 costs 19% on top of it.
+138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz frame
+3.9× over — the ADR 0026 kernel cut that frame from 18.2 ms, the three-dimensional kernel in
+ADR 0028 cost 19% on top of it, and ADR 0044 took another 48% off by steering on every core
+instead of one. The remaining fixed millisecond is the grid rebuild.
 
 The first version of the spatial index cost **37 ms for a crowd of one**, because
 it materialised 15.6 million cells every tick. The second fixed that and lost 4×

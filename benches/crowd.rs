@@ -20,7 +20,7 @@
 use std::hint::black_box;
 
 use bevy_app::App;
-use bevy_flock::application::crowd::{Crowd, CrowdParams};
+use bevy_flock::application::crowd::{Crowd, CrowdParams, SteeringRoad};
 use bevy_flock::boids::BoidsConfig;
 use bevy_flock::domain::ids::{NpcId, SimSeed};
 use bevy_flock::domain::rng::RngStream;
@@ -31,6 +31,11 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 
 /// A running crowd with every NPC already spawned.
 fn crowd(size: usize) -> App {
+    crowd_on(size, None)
+}
+
+/// The same crowd, steered on a chosen road (ADR 0044).
+fn crowd_on(size: usize, road: Option<SteeringRoad>) -> App {
     let mut app = App::new();
     let config = FlockConfig {
         population: PopulationSize::clamped(size),
@@ -40,6 +45,10 @@ fn crowd(size: usize) -> App {
         ..FlockConfig::preset(CrowdPreset::CityAmbient)
     };
     app.add_plugins(FlockPlugin::new(config));
+    if let Some(road) = road {
+        let boids = app.world().resource::<BoidsConfig>().with_road(road);
+        app.insert_resource(boids);
+    }
     // One update to drain the spawn queue so the measured frames are steady
     // state, not spawn work.
     app.update();
@@ -62,6 +71,34 @@ fn random_grid(size: usize) -> SpatialGrid {
     }
     grid.build();
     grid
+}
+
+/// The same frame on each road, so the choice in ADR 0044 rests on a measurement.
+fn bench_roads(c: &mut Criterion) {
+    let mut group = c.benchmark_group("flock_frame_road");
+    group.sample_size(10);
+    for size in [10_000_usize, 100_000] {
+        for (label, road) in [
+            ("auto", None),
+            ("wide", Some(SteeringRoad::Wide)),
+            ("threads", Some(SteeringRoad::Threads)),
+            ("scalar", Some(SteeringRoad::Scalar)),
+        ] {
+            group.throughput(Throughput::Elements(size as u64));
+            group.bench_with_input(
+                BenchmarkId::new(label, size),
+                &(size, road),
+                |b, &(size, road)| {
+                    let mut app = crowd_on(size, road);
+                    b.iter(|| {
+                        app.update();
+                        black_box(app.world().resource::<FlockStats>().population());
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
 }
 
 fn bench_frames(c: &mut Criterion) {
@@ -251,6 +288,7 @@ fn crowd_with_cell(size: usize, cell: f32, budget: u32) -> App {
 
 criterion_group!(
     benches,
+    bench_roads,
     bench_frames,
     bench_cell_size,
     bench_spatial_queries,

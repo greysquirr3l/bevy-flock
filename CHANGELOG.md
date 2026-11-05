@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **Steering uses every core (ADR 0044).** `Crowd::steer` cuts a frame into contiguous slices of
+  agents and hands them to the `ComputeTaskPool`, with `SteeringRoad { Auto, Wide, Threads, Scalar }`
+  to pin the choice and `BoidsConfig::with_road` to set it. All four roads assert bit equality with
+  the scalar reference, so determinism and the whole-world digest are untouched. Measured on six
+  vCPUs: 8.48 ms → 4.23 ms at 10,000 agents and 84.0 ms → 29.6 ms at 100,000, against the wide road
+  this supersedes. New `threads` feature (on by default) enables `bevy_tasks/multi_threaded`; without
+  it the pool has one thread and `Auto` stays on the wide road. `flock_frame_road` joins the
+  benchmark suite so the four roads are always measured on the same host in one run.
 - **The book, and a README you can check.** `docs/book/src` is an eight-chapter guide
   (getting started, the model, crowds at scale, behaviour, memory, extending, debugging,
   costs) that reads as Markdown on a forge and builds with `mdbook`. The README gains a

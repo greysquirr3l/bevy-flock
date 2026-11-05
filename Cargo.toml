@@ -28,7 +28,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # steering pass at every cell size measured (ADR 0031), and a stride scheduler only pays for the
 # frames it can afford, so a default build should not leave that on the table. Turn it off if the
 # per-frame structure-of-arrays copy does not suit your density: `default-features = false`.
-default = ["simd"]
+default = ["simd", "threads"]
 # Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
 memory = []
@@ -36,6 +36,11 @@ memory = []
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
 serde = ["dep:serde", "dep:ron", "smallvec/serde"]
+# Steering on the ECS task pool (ADR 0044): the frame is cut into slices, one per worker.
+# On by default because it is the only lever that scales with cores rather than with lanes;
+# `default-features = false` gives a single-threaded, dependency-light build for a
+# deterministic replay harness or a single-core runner.
+threads = ["bevy_tasks/multi_threaded"]
 # Four agents at a time through `wide::f32x4`: the band kernel's blocks (ADR 0023) and the crowd
 # kernel's transposed blocks (ADR 0030). On by default since ADR 0031 measured it winning at every
 # density and population tested; the only cost is the `wide` dependency.
@@ -43,12 +48,15 @@ simd = ["dep:wide"]
 
 [dependencies]
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
-# these four crates. `bevy_transform` is the ECS transform graph (also used by
+# these five crates. `bevy_transform` is the ECS transform graph (also used by
 # physics), not a rendering crate: no GPU, window or asset type reaches this
-# crate through it.
+# crate through it. `bevy_tasks` is the task pool the ECS scheduler already uses;
+# naming it directly is what lets one frame of steering claim the other cores
+# (ADR 0044), and it adds nothing to the dependency graph that was not there.
 bevy_app = "0.20.1"
 bevy_ecs = "0.20.1"
 bevy_math = "0.20.1"
+bevy_tasks = { version = "0.20.1", default-features = false }
 bevy_transform = "0.20.1"
 
 smallvec = "1.16"

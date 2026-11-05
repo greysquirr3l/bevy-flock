@@ -37,6 +37,7 @@
 )]
 
 use bevy_math::Vec3;
+use bevy_tasks::{ComputeTaskPool, TaskPool};
 #[cfg(feature = "simd")]
 use wide::f32x4;
 
@@ -96,6 +97,24 @@ impl CrowdParams {
     }
 }
 
+/// How a frame is cut up: one thread, four lanes, or the task pool.
+///
+/// All three compute the same numbers — the tests hold them to bit equality — so this chooses
+/// *where* the loop runs, never what it calculates. `Auto` is what ships: the pool when there
+/// are agents enough to fill it, the wide road otherwise (ADR 0044).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SteeringRoad {
+    /// Threads if the crowd and the pool are worth it, else the wide road, else the scalar one.
+    #[default]
+    Auto,
+    /// The transposed four-agents-per-block kernel (ADR 0030): one thread, four lanes.
+    Wide,
+    /// The scalar scan, sliced across the ECS compute pool.
+    Threads,
+    /// The reference loop on the calling thread, where a replay debugger can follow it.
+    Scalar,
+}
+
 /// What one steering pass cost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CrowdReport {
@@ -134,6 +153,11 @@ pub struct Crowd {
     dims: [u32; 3],
     min: [f32; 3],
     cell_size: f32,
+    /// Force every frame onto the calling thread. Off by default; on is what a replay
+    /// debugger and a single-core CI runner want.
+    sequential: bool,
+    /// Where the loop runs; `Auto` unless a game asks otherwise.
+    road: SteeringRoad,
     /// Cell-major component arrays, built by the same sort that produces `order` (ADR 0030).
     #[cfg(feature = "simd")]
     soa: Soa,
@@ -181,6 +205,34 @@ impl Crowd {
     pub fn configure_from_grid(&mut self, grid: &SpatialGrid) {
         let config = grid.config();
         self.configure(&config, grid.effective_cell_size(), grid.dims());
+    }
+
+    /// Choose where the loop runs. `Auto` unless a game asks otherwise.
+    ///
+    /// Useful for reproducing a reported frame time on a fixed road, and for a host that would
+    /// rather keep its cores for something else.
+    pub fn set_road(&mut self, road: SteeringRoad) {
+        self.road = road;
+    }
+
+    /// The road this crowd steers on.
+    #[must_use]
+    pub fn road(&self) -> SteeringRoad {
+        self.road
+    }
+
+    /// Force every frame onto one thread (`true`) or let it use the pool (`false`).
+    ///
+    /// The result is identical either way — `a_parallel_frame_matches_the_scalar_one` holds
+    /// that — so this is a diagnostic switch, not a performance one.
+    pub fn set_sequential(&mut self, sequential: bool) {
+        self.sequential = sequential;
+    }
+
+    /// Whether this crowd steers on one thread.
+    #[must_use]
+    pub fn is_sequential(&self) -> bool {
+        self.sequential
     }
 
     /// How many agents are held.
@@ -267,47 +319,101 @@ impl Crowd {
     /// Steer everyone, in one pass over the cells.
     ///
     /// Returns the report; occupancy is available from [`Crowd::occupied_cells`] afterwards.
+    /// Without `simd` this spreads the pass over the ECS task pool when there is one.
     pub fn steer(&mut self, params: &CrowdParams) -> CrowdReport {
+        match self.road {
+            SteeringRoad::Scalar => self.steer_scalar(params),
+            SteeringRoad::Threads => self.steer_parallel(params),
+            SteeringRoad::Wide => self.steer_wide(params),
+            SteeringRoad::Auto => {
+                if pool_for(self.positions.len(), self.sequential).is_some() {
+                    self.steer_parallel(params)
+                } else {
+                    self.steer_wide(params)
+                }
+            }
+        }
+    }
+
+    /// The wide road when `simd` is on, the scalar one otherwise: `Auto` never has to know
+    /// which features the crate was built with.
+    fn steer_wide(&mut self, params: &CrowdParams) -> CrowdReport {
         #[cfg(feature = "simd")]
-        let report = self.steer_blocks(params);
+        {
+            self.steer_blocks(params)
+        }
         #[cfg(not(feature = "simd"))]
-        let report = self.steer_scalar(params);
-        report
+        {
+            self.steer_scalar(params)
+        }
     }
 
     /// The scalar road: one agent at a time, the reference implementation (ADR 0026).
+    ///
+    /// This is the definition of the arithmetic. Everything else — the wide road, the threaded
+    /// road — is this loop rearranged, and the tests hold them to bit equality with it.
     pub fn steer_scalar(&mut self, params: &CrowdParams) -> CrowdReport {
-        let mut report = CrowdReport::default();
         if !params.is_usable() || self.is_empty() {
-            return report;
+            return CrowdReport::default();
         }
         self.order_by_cell();
+        let mut desired = std::mem::take(&mut self.desired);
+        let mut report = CrowdReport::default();
+        {
+            let view = self.view();
+            for (index, out) in desired.iter_mut().enumerate() {
+                steer_agent(&view, out, index, params, &mut report);
+            }
+        }
+        self.desired = desired;
+        report.cells = u32::try_from(self.touched.len()).unwrap_or(u32::MAX);
+        report
+    }
 
-        for index in 0..self.positions.len() {
-            if self.flags.get(index).copied().unwrap_or(0) & STEERS == 0 {
-                continue;
-            }
-            let (count, sum_p, sum_v, sep, pairs) = self.scan_reference(index, params);
-            report.pairs += pairs;
-            if count == 0 {
-                report.isolated += 1;
-            }
-            let target = if self.flags[index] & HAS_TARGET == 0 {
-                None
-            } else {
-                Some(self.targets[index])
-            };
-            self.desired[index] = desired_for(
-                self.positions[index],
-                self.velocities[index],
-                target,
-                count,
-                sum_p,
-                sum_v,
-                sep,
-                params,
-            );
-            report.steered += 1;
+    /// The same frame, cut into slices and shared across the ECS compute pool (ADR 0044).
+    ///
+    /// Every agent reads a snapshot and writes only its own `desired` slot, so splitting the
+    /// loop cannot change a float: `a_parallel_frame_matches_the_scalar_one` asserts the two
+    /// agree bit for bit at every population the benchmark uses. Falls back to
+    /// [`Crowd::steer_scalar`] when there is no pool, one thread, or a crowd too small to pay
+    /// for the split.
+    pub fn steer_parallel(&mut self, params: &CrowdParams) -> CrowdReport {
+        let Some(pool) = pool_for(self.positions.len(), self.sequential) else {
+            return self.steer_scalar(params);
+        };
+        if !params.is_usable() || self.is_empty() {
+            return CrowdReport::default();
+        }
+        self.order_by_cell();
+        let mut desired = std::mem::take(&mut self.desired);
+        // Eight slices per thread and never fewer than 512 agents each: enough slices that one
+        // bucket holding a whole village cannot become the critical path, and few enough that
+        // the pool's own bookkeeping stays noise.
+        let chunk = desired
+            .len()
+            .div_ceil(pool.thread_num() * 8)
+            .max(MIN_PARALLEL_CHUNK);
+        let parts = {
+            let view = self.view();
+            pool.scope(|scope| {
+                for (chunk_index, slice) in desired.chunks_mut(chunk).enumerate() {
+                    let first = chunk_index * chunk;
+                    scope.spawn(async move {
+                        let mut report = CrowdReport::default();
+                        for (offset, out) in slice.iter_mut().enumerate() {
+                            steer_agent(&view, out, first + offset, params, &mut report);
+                        }
+                        report
+                    });
+                }
+            })
+        };
+        self.desired = desired;
+        let mut report = CrowdReport::default();
+        for part in parts {
+            report.steered += part.steered;
+            report.isolated += part.isolated;
+            report.pairs += part.pairs;
         }
         report.cells = u32::try_from(self.touched.len()).unwrap_or(u32::MAX);
         report
@@ -613,26 +719,84 @@ impl Crowd {
         }
     }
 
-    /// The scalar scan: the reference implementation, and the only road without `simd`.
+    /// The scalar scan, for the wide road's tails: the only caller is `simd`'s `scalar_agent`.
+    #[cfg(feature = "simd")]
     fn scan_reference(
         &self,
         index: usize,
         params: &CrowdParams,
     ) -> (u32, [f32; 3], [f32; 3], [f32; 3], u64) {
-        let position = self.positions[index];
+        let scan = self.view().scan(index, params);
+        (scan.count, scan.sum_p, scan.sum_v, scan.sep, scan.pairs)
+    }
+
+    /// The read-only halves of a steer pass, borrowed together so a chunk of agents can be
+    /// handed to a thread without borrowing the buffer it writes into.
+    fn view(&self) -> ScanView<'_> {
+        ScanView {
+            positions: &self.positions,
+            velocities: &self.velocities,
+            targets: &self.targets,
+            flags: &self.flags,
+            order: &self.order,
+            start: &self.start,
+            counts: &self.counts,
+            dims: self.dims,
+            min: self.min,
+            cell_size: self.cell_size,
+        }
+    }
+}
+
+/// What one agent's scan collected, before the per-agent arithmetic.
+#[derive(Clone, Copy, Debug, Default)]
+struct Scan {
+    count: u32,
+    sum_p: [f32; 3],
+    sum_v: [f32; 3],
+    sep: [f32; 3],
+    pairs: u64,
+}
+
+/// Everything a scan reads, and nothing it writes.
+///
+/// Copy, because every thread needs its own handle to the same borrows.
+#[derive(Clone, Copy)]
+struct ScanView<'a> {
+    positions: &'a [[f32; 3]],
+    velocities: &'a [[f32; 3]],
+    targets: &'a [[f32; 3]],
+    flags: &'a [u8],
+    order: &'a [u32],
+    start: &'a [u32],
+    counts: &'a [u32],
+    dims: [u32; 3],
+    min: [f32; 3],
+    cell_size: f32,
+}
+
+impl ScanView<'_> {
+    /// Every neighbour of `index` inside the radius, summed in cell order.
+    ///
+    /// The arithmetic here is the domain model's, unchanged since ADR 0026: the same
+    /// `distance_squared > radius_squared` rejection, the same separation falloff, the same
+    /// accumulation order. Optimising this function means changing the definition of the
+    /// simulation, which is why the wins elsewhere are about *when* and *where* it runs.
+    fn scan(&self, index: usize, params: &CrowdParams) -> Scan {
+        let mut scan = Scan::default();
+        let Some(&position) = self.positions.get(index) else {
+            return scan;
+        };
         let radius_squared = params.radius * params.radius;
         let separation_squared = params.separation * params.separation;
-        let mut count = 0_u32;
-        let mut sum_p = [0.0_f32; 3];
-        let mut sum_v = [0.0_f32; 3];
-        let mut sep = [0.0_f32; 3];
-        let mut pairs = 0_u64;
-
         let window = self.window(position, params.radius);
+        let dim_x = i64::from(self.dims[0]);
+        let dim_y = i64::from(self.dims[1]);
+
         for z in window.z0..=window.z1 {
-            let plane = (z * i64::from(self.dims[1])) * i64::from(self.dims[0]);
+            let plane = (z * dim_y) * dim_x;
             for y in window.y0..=window.y1 {
-                let row = plane + y * i64::from(self.dims[0]);
+                let row = plane + y * dim_x;
                 for x in window.x0..=window.x1 {
                     let at = u32::try_from(row + x).unwrap_or(u32::MAX);
                     let Some(&start) = self.start.get(at as usize) else {
@@ -647,7 +811,9 @@ impl Crowd {
                         if other == index {
                             continue;
                         }
-                        let other_position = self.positions[other];
+                        let Some(&other_position) = self.positions.get(other) else {
+                            continue;
+                        };
                         let dx = position[0] - other_position[0];
                         let dy = position[1] - other_position[1];
                         let dz = position[2] - other_position[2];
@@ -655,81 +821,123 @@ impl Crowd {
                         if distance_squared > radius_squared {
                             continue;
                         }
-                        pairs += 1;
-                        count += 1;
-                        sum_p[0] += other_position[0];
-                        sum_p[1] += other_position[1];
-                        sum_p[2] += other_position[2];
-                        sum_v[0] += self.velocities[other][0];
-                        sum_v[1] += self.velocities[other][1];
-                        sum_v[2] += self.velocities[other][2];
+                        scan.pairs += 1;
+                        scan.count += 1;
+                        scan.sum_p[0] += other_position[0];
+                        scan.sum_p[1] += other_position[1];
+                        scan.sum_p[2] += other_position[2];
+                        if let Some(&other_velocity) = self.velocities.get(other) {
+                            scan.sum_v[0] += other_velocity[0];
+                            scan.sum_v[1] += other_velocity[1];
+                            scan.sum_v[2] += other_velocity[2];
+                        }
                         if distance_squared < separation_squared && distance_squared > f32::EPSILON
                         {
                             let scale = 1.0 / distance_squared.max(1e-6);
-                            sep[0] += dx * scale;
-                            sep[1] += dy * scale;
-                            sep[2] += dz * scale;
+                            scan.sep[0] += dx * scale;
+                            scan.sep[1] += dy * scale;
+                            scan.sep[2] += dz * scale;
                         }
                     }
                 }
             }
         }
-        (count, sum_p, sum_v, sep, pairs)
+        scan
     }
 
     /// The inclusive cell range that can hold anything within `radius` of `position`.
+    ///
+    /// One division per axis, not two: the previous version evaluated `axis_window` twice for
+    /// each axis to take `.0` and `.1` from separate calls.
     fn window(&self, position: [f32; 3], radius: f32) -> Window {
+        let (x0, x1) = axis_window(
+            position[0],
+            radius,
+            self.min[0],
+            self.cell_size,
+            self.dims[0],
+        );
+        let (y0, y1) = axis_window(
+            position[1],
+            radius,
+            self.min[1],
+            self.cell_size,
+            self.dims[1],
+        );
+        let (z0, z1) = axis_window(
+            position[2],
+            radius,
+            self.min[2],
+            self.cell_size,
+            self.dims[2],
+        );
         Window {
-            x0: axis_window(
-                position[0],
-                radius,
-                self.min[0],
-                self.cell_size,
-                self.dims[0],
-            )
-            .0,
-            x1: axis_window(
-                position[0],
-                radius,
-                self.min[0],
-                self.cell_size,
-                self.dims[0],
-            )
-            .1,
-            y0: axis_window(
-                position[1],
-                radius,
-                self.min[1],
-                self.cell_size,
-                self.dims[1],
-            )
-            .0,
-            y1: axis_window(
-                position[1],
-                radius,
-                self.min[1],
-                self.cell_size,
-                self.dims[1],
-            )
-            .1,
-            z0: axis_window(
-                position[2],
-                radius,
-                self.min[2],
-                self.cell_size,
-                self.dims[2],
-            )
-            .0,
-            z1: axis_window(
-                position[2],
-                radius,
-                self.min[2],
-                self.cell_size,
-                self.dims[2],
-            )
-            .1,
+            x0,
+            x1,
+            y0,
+            y1,
+            z0,
+            z1,
         }
     }
+}
+
+/// Steer one agent into `out`: the whole per-agent step, so both roads call the same code.
+fn steer_agent(
+    view: &ScanView<'_>,
+    out: &mut [f32; 3],
+    index: usize,
+    params: &CrowdParams,
+    report: &mut CrowdReport,
+) {
+    let flags = view.flags.get(index).copied().unwrap_or(0);
+    if flags & STEERS == 0 {
+        return;
+    }
+    let Some(&position) = view.positions.get(index) else {
+        return;
+    };
+    let Some(&velocity) = view.velocities.get(index) else {
+        return;
+    };
+    let scan = view.scan(index, params);
+    report.pairs += scan.pairs;
+    if scan.count == 0 {
+        report.isolated += 1;
+    }
+    let target = if flags & HAS_TARGET == 0 {
+        None
+    } else {
+        view.targets.get(index).copied()
+    };
+    *out = desired_for(
+        position, velocity, target, scan.count, scan.sum_p, scan.sum_v, scan.sep, params,
+    );
+    report.steered += 1;
+}
+
+/// Below this many agents a frame stays on one thread: the split costs more than it saves.
+const MIN_PARALLEL_AGENTS: usize = 1_024;
+
+/// Never hand out slices smaller than this, so the pool is not paid per handful.
+const MIN_PARALLEL_CHUNK: usize = 512;
+
+/// The pool to split a frame across, or `None` to keep it on the calling thread.
+///
+/// `try_get` rather than `get`: a bare `App` without `TaskPoolPlugin` (every unit test, and any
+/// server that builds the world by hand) must fall back to the scalar road instead of panicking.
+fn pool_for(agents: usize, sequential: bool) -> Option<&'static ComputeTaskPool> {
+    if sequential || agents < MIN_PARALLEL_AGENTS {
+        return None;
+    }
+    // A host that added `DefaultPlugins` already owns this pool and we simply borrow it. A
+    // headless host that added only `FlockPlugin` gets the same pool created here, with the
+    // same default shape, on the first frame big enough to be worth the threads. Creating it
+    // lazily rather than inserting `TaskPoolPlugin` means the plugin cannot collide with a
+    // host that adds `DefaultPlugins` afterwards.
+    let pool = ComputeTaskPool::try_get()
+        .unwrap_or_else(|| ComputeTaskPool::get_or_init(TaskPool::default));
+    (pool.thread_num() > 1).then_some(pool)
 }
 
 /// An inclusive cell range on each axis.
@@ -947,6 +1155,29 @@ mod tests {
             bottom[1] > 1e-3,
             "the bottom agent should be pushed up: {bottom:?}"
         );
+    }
+
+    #[test]
+    fn a_parallel_frame_matches_the_scalar_one() {
+        // Large enough to take the threaded road, and dense enough that every agent has
+        // neighbours: at this size the split is real, so a difference would be a difference.
+        let (grid, points) = fixture(4_000);
+        let mut scalar = packed(&grid, &points);
+        let mut parallel = packed(&grid, &points);
+        scalar.set_sequential(true);
+        parallel.set_sequential(false);
+        let params = params();
+        let scalar_report = scalar.steer_scalar(&params);
+        let parallel_report = parallel.steer_parallel(&params);
+        assert_eq!(scalar_report, parallel_report);
+        assert_eq!(scalar.len(), parallel.len());
+        for index in 0..scalar.len() {
+            assert_eq!(
+                scalar.desired(index),
+                parallel.desired(index),
+                "agent {index} disagrees between the roads"
+            );
+        }
     }
 
     #[test]

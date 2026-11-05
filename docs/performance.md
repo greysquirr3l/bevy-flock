@@ -75,10 +75,10 @@ quoted interval, which is the intended relationship between this section and the
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 0.99 ms | — |
-| `flock_frame/1000` | 1.73 ms | 1.7 µs |
-| `flock_frame/10000` | **9.18 ms** | 0.92 µs |
-| `flock_frame_large/100000` | 90.0 ms | 0.90 µs |
+| `flock_frame/1` | 1.01 ms | — |
+| `flock_frame/1000` | 1.74 ms | 1.7 µs |
+| `flock_frame/10000` | **4.27 ms** | 0.43 µs |
+| `flock_frame_large/100000` | **29.2 ms** | 0.29 µs |
 | `spatial_query/radius_8m/1000` | 138 ns | — |
 | `spatial_query/radius_8m/10000` | 185 ns | — |
 | `spatial_query/radius_8m/100000` | 552 ns | — |
@@ -86,17 +86,19 @@ quoted interval, which is the intended relationship between this section and the
 
 Four things to read from that table:
 
-- **Per-agent cost is flat, and it halved.** 1.6 µs at a thousand agents and 0.74 µs at a
-  hundred thousand, because the index makes each agent's work local and the kernel now walks
-  its neighbours once instead of three times (ADR 0026).
-- **10,000 agents fit a 60 Hz frame with room to spare.** 9.18 ms against the 16.6 ms budget is
-  109 fps, and 1.8× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
+- **Per-agent cost is flat, and it halved twice.** 1.7 µs at a thousand agents, 0.43 µs at ten
+  thousand and 0.29 µs at a hundred thousand: the index makes each agent's work local, the kernel
+  walks neighbours once instead of three times (ADR 0026), and the frame now uses every core
+  (ADR 0044).
+- **10,000 agents fit a 60 Hz frame three times over.** 4.27 ms against the 16.6 ms budget is
+  234 fps, and 3.9× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
   frame was 92% steering, at 1.79 µs per agent); the 3D kernel in ADR 0028 added 19% back on top of
   the 7.71 ms planar figure, which is the honest price of the third dimension and is visible here
   rather than buried.
 - **The fixed cost is the grid, not the crowd.** 1.01 ms of `flock_frame/1` is
-  `rebuild_spatial_grid` at the default 1 km volume; the other 6.7 ms of the 10,000 row is
-  everything that scales with agents. A playable area of 200 m across drops the fixed part to
+  `rebuild_spatial_grid` at the default 1 km volume; the other 3.3 ms of the 10,000 row is
+  everything that scales with agents. That fixed millisecond is now a quarter of the 10,000-agent
+  frame and is the next thing worth attacking, not the steering kernel. A playable area of 200 m across drops the fixed part to
   ~20 µs.
 - **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns at 100,000:
   the index walks the same 27 cells, and the cells are fuller. Those numbers are unchanged by
@@ -326,6 +328,37 @@ neighbours per agent at the band's density. The options, in order of expected va
    parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
    knob for exactly this reason.
 
+
+## Threads, not just lanes (2026-11-05)
+
+Every optimisation before this one traded lanes: four agents at a time through `wide::f32x4`. That
+road is finished and measured. What none of it used was the other five cores, and a profile of the
+100,000-agent frame put 84% of samples inside `Crowd::steer` — a pure map over agents — running on
+one thread.
+
+ADR 0044 cuts a frame into contiguous slices of agents and hands them to the ECS compute pool. All
+four roads produce bit-identical output; only where the loop runs changes. Same host, same
+`--locked` build, 20 samples:
+
+| Road | 10,000 agents | 100,000 agents |
+| --- | --- | --- |
+| `wide` (the previous default) | 8.48 ms | 84.0 ms |
+| `scalar` (one thread, reference) | 9.73 ms | 93.0 ms |
+| `threads` (six threads, reference) | 4.31 ms | 30.0 ms |
+| `auto` (what ships) | **4.23 ms** | **29.6 ms** |
+
+The frame-level result, measured on the standard benchmarks either side of the change: 9.18 ms to
+4.27 ms at 10,000 agents (−48%) and 90.0 ms to 29.2 ms at 100,000 (−62%).
+
+Two things the numbers say that are easy to get wrong. The gain is 2.0× on six threads, not 6×: the
+scan is memory-bound, and the neighbour arrays are read by every slice. And a crowd below 1,024
+agents stays on the wide road, which is why `flock_frame/1000` did not move at all.
+
+The wide road is still single-threaded, and the two wins are additive in principle — four lanes
+across six threads. They are not combined yet, because a block writes four non-contiguous agent
+slots and splitting those writes needs either a slot-indexed output buffer or cached per-thread
+scratch. ADR 0044 records the plan and the honest expectation: 2–3× on top, not 6×, for the same
+bandwidth reason.
 
 ## Four-agent SIMD steering (2026-11-04)
 

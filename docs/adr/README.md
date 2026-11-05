@@ -70,3 +70,4 @@ replay.
 | [0041](0041-memory-in-cognition.md) | Memory reaches a tree as three integers; enrolment by proximity and budget | Accepted |
 | [0042](0042-diagnostics-and-fuzzing.md) | Explain on demand, overlay as data, decoders fuzzed on two layers | Accepted |
 | [0043](0043-docs-and-release-shape.md) | Documentation and release shape: book, README verification, release gate | Accepted |
+| [0044](0044-threaded-steering.md) | One frame, cut into slices: threads beat lanes, 2.0x at 10k and 2.8x at 100k | Accepted |
