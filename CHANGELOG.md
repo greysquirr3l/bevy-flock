@@ -14,6 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   they mean in seconds; the job carries a 15-minute timeout so the CI budget is enforced too.
   `scripts/scaling_report.py --check` fails when the committed report or ADR 0034 stops matching the
   code and the baseline, which is how the "differences below 18%" contradiction got caught.
+- The gate refuses to be green over an empty test: a cell whose spread pushes the failure line past 25%
+  is `unverified`, the sequential cell's spread propagates to every row that divides by it, and a run
+  where fewer than half the cells could be verified exits 2. Found by the first full verification, where
+  one 17.7 s outlier on the one-core denominator turned five rows into fake 9-12% gains.
   `scripts/scaling_report.py` writes `docs/reports/scaling-report.md` — wall clock, speedup and
   efficiency matrices, the measured optimum against the cap formula, an ASCII chart and the verdict —
   from the same baseline the gate uses. The sweep moves to millisecond timing, two repeats per cell and

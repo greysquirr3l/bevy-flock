@@ -1,6 +1,6 @@
 # Scaling report: cores, threads per task, and what the crawl fills
 
-Generated 2026-11-05T13:00:12+00:00 from `docs/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
+Generated 2026-11-05T14:47:52+00:00 from `docs/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
 
 Every number here is measured: each run is pinned with `taskset`, each task gets a cold target directory, and each cell is the median of 2 runs. Nothing is modelled. The fixture is 8 crates of 1500 functions for shape A, and 3 bundles of 6 crates for shape B.
 

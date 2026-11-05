@@ -35,6 +35,14 @@ those lines is a warning that does not block the build: it is the band where a h
 curve but nobody has to re-run CI. A cell past the failure line names its shape, core count,
 concurrency and the percentage it lost, so the log says what broke rather than "regression".
 
+Two cells are named rather than painted green. First, a cell whose own spread pushes the failure line past
+25% has not been checked — reporting it `ok` would be a tick over an empty test — so it is reported
+`unverified`, counted separately, and the fix is more repeats. Second, the sequential cell is the
+denominator of every row on its core count, so its spread is folded into those rows: a ragged sequential
+run inflates speedups in the flattering direction, and the verification of 2026-11-05 caught exactly that
+(one 17.7 s outlier against a 15.8 s baseline turned five `A` rows into apparent gains of 9-12%). If fewer
+than half the comparable cells can be verified, the suite exits 2 rather than passing on a coin toss.
+
 The first draft used 35% and 18% with the spread widening only the warning. A dry run killed it: a
 deliberately injected 45% wall-clock slowdown on one cell only warned, because 45% more wall clock is a
 29.7% speedup loss, and a gate that watches a third of the machine disappear without failing is
@@ -50,8 +58,9 @@ skipped. No overlap at all exits 2 — "nothing comparable" is never a pass, bec
 compared nothing is worse than a red one.
 
 **5. CI runs a reduced matrix; the full sweep stays local.** The job sweeps shape A on one core and on
-the runner's own `nproc`, at concurrency 1, 2 and 4, two repeats per cell: three minutes measured on a
-six-core machine, and it covers the two ends of the curve — the sequential baseline the ratios divide
+the runner's own `nproc`, at concurrency 1, 2 and 4, two repeats per cell and four for the sequential
+cell (`REF_REPEATS`), because that one is every row's denominator: 3 m 40 s measured on a six-core
+machine, and it covers the two ends of the curve — the sequential baseline the ratios divide
 by, and the fill-the-machine case the policy is about. The full matrix (both shapes, five core counts,
 six concurrencies) costs eighteen minutes measured and stays a local or nightly job, because a gate
 nobody waits for gets skipped.
@@ -105,8 +114,10 @@ their own gates. Say it plainly in the report rather than implying the suite cov
 
 - A green `Scaling regression` job means "the crawl still fills the machine as well as it did", and
   nothing more. The report states that in the same words.
-- Flakiness has a defined response: if the job wobbles, raise `REPEATS` (noise is measured, so the
-  thresholds widen automatically) before touching the percentages.
+- Flakiness has a defined response: if the job wobbles, raise `REPEATS` (and `REF_REPEATS` for the
+  denominator) before touching the percentages. Widening the thresholds is the wrong lever — past 12.5%
+  of noise the failure line leaves the 25% the SLA promises, and the cell is reported unverifiable
+  instead of quietly passing.
 - `scripts/scaling_report.py --check` runs in CI: it regenerates the report in memory and fails if the
   committed copy differs, or if ADR 0034 stops stating the gate's formulas or the effective lines. Prose
   that restates a threshold is the one thing here that cannot be tested by running the code, so it is

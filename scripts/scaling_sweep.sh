@@ -19,6 +19,7 @@
 #   CONC="1 2 3 4 6 8"  concurrency levels to try
 #   SHAPES="A B"        task shapes to measure
 #   REPEATS=2           runs per cell; the spread is what the regression suite calls noise
+#   REF_REPEATS=4       runs for the sequential (concurrency 1) cell, which is every row's denominator
 #   FUNCS=1500          functions per fixture crate, i.e. how much codegen one crate costs
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -30,6 +31,7 @@ CRATES_BUNDLES=3
 PER_BUNDLE=6
 FUNCS=${FUNCS:-1500}
 REPEATS=${REPEATS:-2}
+REF_REPEATS=${REF_REPEATS:-4}
 CORES=${CORES:-"1 2 3 4 6"}
 CONC=${CONC:-"1 2 3 4 6 8"}
 SHAPES=${SHAPES:-"A B"}
@@ -104,7 +106,7 @@ run_b() {
 build_fixture
 : > "$TMP"
 echo "fixture: $CRATES_TOTAL crates x $FUNCS functions; A = 1 crate/task, B = $PER_BUNDLE crates/task" >&2
-echo "machine: $NPROC cores, $(date -Iseconds), repeats $REPEATS" >&2
+echo "machine: $NPROC cores, $(date -Iseconds), repeats $REPEATS, ref repeats $REF_REPEATS" >&2
 
 for shape in $SHAPES; do
   for cores in $CORES; do
@@ -112,7 +114,9 @@ for shape in $SHAPES; do
     for conc in $CONC; do
       if [ "$shape" = "A" ] && [ "$conc" -gt "$CRATES_A" ]; then continue; fi
       if [ "$shape" = "B" ] && [ "$conc" -gt "$CRATES_BUNDLES" ]; then continue; fi
-      for rep in $(seq 1 "$REPEATS"); do
+      reps=$REPEATS
+      [ "$conc" -eq 1 ] && reps=$REF_REPEATS
+      for rep in $(seq 1 "$reps"); do
         if [ "$shape" = "A" ]; then
           taskset -c "0-$((cores - 1))" bash -c "$(declare -f run_a now_ms); ROOT=$ROOT CRATES_A=$CRATES_A TMP=$TMP; run_a $cores $conc $ROOT/t_a_${cores}_${conc}_${rep}"
         else
@@ -124,10 +128,10 @@ for shape in $SHAPES; do
   done
 done
 
-python3 - "$TMP" "$OUT" "$NPROC" "$REPEATS" "$FUNCS" "$CRATES_A" "$CRATES_BUNDLES" "$PER_BUNDLE" "$CORES" "$CONC" "$SHAPES" <<'PY'
+python3 - "$TMP" "$OUT" "$NPROC" "$REPEATS" "$FUNCS" "$CRATES_A" "$CRATES_BUNDLES" "$PER_BUNDLE" "$CORES" "$CONC" "$SHAPES" "$REF_REPEATS" <<'PY'
 import json, platform, statistics, sys, collections
 
-tmp, out, nproc, repeats, funcs, crates_a, bundles, per_bundle, cores, conc, shapes = sys.argv[1:12]
+tmp, out, nproc, repeats, funcs, crates_a, bundles, per_bundle, cores, conc, shapes, ref_repeats = sys.argv[1:13]
 cells = collections.defaultdict(list)
 with open(tmp) as handle:
     for line in handle:
@@ -162,6 +166,7 @@ meta = {
     "concurrency_swept": conc,
     "shapes": shapes,
     "repeats": int(repeats),
+    "ref_repeats": int(ref_repeats),
     "fixture": {
         "funcs_per_crate": int(funcs),
         "crates_one_per_task": int(crates_a),

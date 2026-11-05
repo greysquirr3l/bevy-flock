@@ -20,8 +20,14 @@ refused rather than reported as a regression.
 Defaults are 25% to fail and 12% to warn. Both widen to twice the measured spread, so a noisy runner
 gets slack without anyone editing the numbers.
 
+A cell whose own spread is so wide that the failure threshold rises past the SLA it is supposed to
+enforce is reported as `unverified`, never `ok`: it has not been checked, and saying otherwise would be
+a green tick over an empty test. The sequential cell's spread is folded into every row that divides by
+it, because a noisy denominator moves five rows at once — in the direction of looking faster.
+
 Exit codes: 0 every comparable cell held, 1 a cell dropped beyond the failure threshold, 2 the two
-files cannot be compared at all (different fixture, or no overlapping core counts).
+files cannot be compared at all (different fixture, no overlapping core counts, or not one cell that
+could be verified).
 """
 
 from __future__ import annotations
@@ -43,6 +49,9 @@ DEFAULT_WARN_PCT = 12.0
 # noise is not a warning, and a failure needs twice the evidence a warning does.
 WARN_NOISE_MULTIPLIER = 1.5
 FAIL_NOISE_MULTIPLIER = 2.0
+# A suite where most cells could not be checked is not a passing suite. Half is a blunt line, but it is
+# a line: below it, the run says "cannot verify" instead of reporting a green tick on a coin toss.
+MIN_VERIFIED_FRACTION = 0.5
 
 
 def load(path: str) -> tuple[dict, dict[tuple[str, int, int], dict]]:
@@ -92,7 +101,16 @@ def compare(
         cand = speedup(cand_cells, shape, cores, concurrency)
         if base is None or cand is None or concurrency == 1:
             continue
-        noise = max(NOISE_FLOOR_PCT, base_cells[key]["spread"], cand_cells[key]["spread"])
+        # The reference cell is the denominator of this row's speedup, so its noise is this row's noise:
+        # a ragged sequential run inflates every speedup that divides by it, which reads as a gain.
+        reference = (shape, cores, 1)
+        noise = max(
+            NOISE_FLOOR_PCT,
+            base_cells[key]["spread"],
+            cand_cells[key]["spread"],
+            base_cells.get(reference, {}).get("spread", 0.0),
+            cand_cells.get(reference, {}).get("spread", 0.0),
+        )
         delta = (cand - base) / base * 100.0
         # A threshold tighter than the measurement's own spread is noise, not signal.
         fail_at = max(fail_pct, FAIL_NOISE_MULTIPLIER * noise)
@@ -101,6 +119,10 @@ def compare(
             status = "FAIL"
         elif delta <= -warn_at:
             status = "WARN"
+        elif fail_at > fail_pct:
+            # Noise has pushed the failure line past the tolerance this suite promises. The cell is not
+            # green, it is untested, and the fix is more repeats rather than a wider threshold.
+            status = "unverified"
         else:
             status = "ok"
         row = {
@@ -111,12 +133,24 @@ def compare(
             "candidate_speedup": round(cand, 3),
             "delta_pct": round(delta, 1),
             "noise_pct": round(noise, 1),
+            "fail_at_pct": round(fail_at, 1),
+            "warn_at_pct": round(warn_at, 1),
             "status": status,
         }
         rows.append(row)
         if status == "FAIL":
             failures.append(row)
     return rows, failures
+
+
+def verdict_exit(rows: list[dict], failures: list[dict]) -> int:
+    """0 pass, 1 a cell failed, 2 nothing (or too little) could be verified."""
+    if failures:
+        return 1
+    verified = [r for r in rows if r["status"] != "unverified"]
+    if not rows or len(verified) < MIN_VERIFIED_FRACTION * len(rows):
+        return 2
+    return 0
 
 
 def coverage_notes(base_cells: dict, cand_cells: dict) -> list[str]:
@@ -178,11 +212,37 @@ def self_test() -> int:
         failures.append("a faster run was flagged")
 
     # 5. Noise raises the bar, both ways: with a 25% spread the fail line is 50% and the warn line
-    #    37.5%, so a 29% speedup drop is silence rather than a failure or a warning.
+    #    37.5%, so a 29% speedup drop is neither. But a 50% failure line cannot enforce a 25% promise,
+    #    so the cell is unverified rather than green.
     noisy = suite({1: 30.0, 2: 15.0, 4: 8.0}, spread=25.0)
     rows, dropped = compare(noisy, suite({1: 30.0, 2: 15.0, 4: 11.2}))
-    if dropped or any(r["status"] != "ok" for r in rows):
-        failures.append("a drop inside the measured noise was reported")
+    if dropped or any(r["status"] == "FAIL" for r in rows):
+        failures.append("a drop inside the measured noise was reported as a failure")
+    if {r["status"] for r in rows} != {"unverified"}:
+        failures.append(f"cells blinded by noise were not marked unverified: {[r['status'] for r in rows]}")
+
+    # 9. A ragged sequential cell contaminates every row that divides by it, and does so in the
+    #    flattering direction: the denominator grows, so the speedup looks better. It must be caught.
+    ragged_base = suite({1: 30.0, 2: 15.0, 4: 8.0})
+    ragged_cand = suite({1: 30.0, 2: 15.0, 4: 8.0})
+    ragged_cand[("A", 4, 1)] = cell(36.0, spread=19.0)
+    rows, _ = compare(ragged_base, ragged_cand)
+    if any(r["status"] != "unverified" for r in rows):
+        failures.append("a 19% spread on the denominator did not blind the rows above it")
+
+    # 10. Half a suite is not a suite: 1 verified cell out of 4 exits 2, 3 of 4 exits 0.
+    if verdict_exit([{"status": "ok"}] + [{"status": "unverified"}] * 3, []) != 2:
+        failures.append("a mostly-unverifiable run was not rejected")
+    if verdict_exit([{"status": "ok"}] * 3 + [{"status": "unverified"}], []) != 0:
+        failures.append("a run with a noisy minority was rejected")
+    if verdict_exit([{"status": "ok"}], [{"status": "FAIL"}]) != 1:
+        failures.append("a failure did not take precedence over the verification share")
+
+    # 11. A cell can be wide without blinding: 10% spread leaves the fail line at 25%.
+    tight = suite({1: 30.0, 2: 15.0, 4: 8.0}, spread=10.0)
+    rows, _ = compare(tight, suite({1: 30.0, 2: 15.0, 4: 8.0}, spread=10.0))
+    if any(r["status"] != "ok" for r in rows):
+        failures.append("a 10% spread was treated as unverifiable")
 
     # 6. Missing core counts are skipped, not failed.
     sparse = {(("A", 2, 1)): cell(30.0), ("A", 2, 2): cell(15.0)}
@@ -255,10 +315,18 @@ def main() -> int:
         print()
 
     warnings = [r for r in rows if r["status"] == "WARN"]
+    unverified = [r for r in rows if r["status"] == "unverified"]
     print(
-        f"{len(rows)} comparable cells: {len(rows) - len(warnings) - len(failures)} held, "
-        f"{len(warnings)} warned, {len(failures)} failed"
+        f"{len(rows)} comparable cells: {len(rows) - len(warnings) - len(failures) - len(unverified)} held, "
+        f"{len(warnings)} warned, {len(failures)} failed, {len(unverified)} unverifiable"
     )
+    for row in unverified:
+        print(
+            f"note     : shape {row['shape']} {row['cores']} cores concurrency {row['concurrency']} is "
+            f"unverifiable at {row['noise_pct']:.1f}% noise (failure line {row['fail_at_pct']:.1f}%); "
+            "raise REPEATS for that cell",
+            file=sys.stderr,
+        )
     if failures:
         worst = min(failures, key=lambda r: r["delta_pct"])
         print(
@@ -280,7 +348,12 @@ def main() -> int:
                     "notes": notes,
                     "rows": rows,
                     "failures": failures,
-                    "verdict": "fail" if failures or not rows else ("warn" if warnings else "pass"),
+                    "unverified": unverified,
+                    "verdict": (
+                        "fail"
+                        if failures or not rows
+                        else ("unverified" if unverified else ("warn" if warnings else "pass"))
+                    ),
                 },
                 indent=2,
             )
@@ -288,11 +361,14 @@ def main() -> int:
         )
         print(f"wrote {args.json}")
 
-    if failures:
-        return 1
-    if not rows:
-        return 2
-    return 0
+    code = verdict_exit(rows, failures)
+    if code == 2:
+        print(
+            f"FAIL cannot verify: {len(unverified)} of {len(rows)} comparable cells were blinded by their own "
+            "noise; raise REF_REPEATS or REPEATS",
+            file=sys.stderr,
+        )
+    return code
 
 
 if __name__ == "__main__":

@@ -421,6 +421,26 @@ cores, measured; every run pinned with `taskset`, two repeats per cell) then `py
 scripts/scaling_curves.py docs/data/scaling-sweep.json docs/images/scaling-curves.png`. CI runs the
 reduced matrix on every push; the full one is a local or nightly job.
 
+### Verification run, 2026-11-05
+
+The regression gate was run end to end on this six-core machine: 45 cells, **18 m 21 s** of wall clock, two
+repeats per cell and four on each sequential denominator. Thirty-five cells are comparable (shape B has
+only three bundles, so concurrency above three is not swept), and all thirty-five held — median **−0.4%**
+on shape A and **−0.9%** on shape B, worst cell **−3.7%** (B, two cores, three bundles at once) against a
+13.2% warning line and a 25% failure line.
+
+Two cells were re-measured in isolation because their first readings were ragged:
+
+| cell | first reading | re-measured (4 repeats) | baseline |
+|---|---|---|---|
+| A, 1 core, sequential | 17.73 s, 18.1% spread | **15.78 s, 2.0%** | 15.88 s, 0.0% |
+| A, 4 cores, concurrency 4 | 5.22 s, 41.1% spread | **4.09 s, 1.1%** | 4.20 s, 1.5% |
+
+The one-core outlier mattered more than its own row: it is the denominator of every one-core speedup, so
+two ragged repeats turned five rows into apparent gains of 9–12%. That is the flattering direction — a
+genuine regression could hide behind an inflated denominator — which is why the gate now marks blinded
+cells `unverified` and folds the sequential cell's spread into the rows that divide by it (ADR 0034).
+
 ## What the numbers do not cover
 
 - **Rendering.** There is no renderer; the frame time above is simulation only.
