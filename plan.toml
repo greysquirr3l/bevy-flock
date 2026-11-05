@@ -915,3 +915,128 @@ slug         = "cell-size-reopen-gate"
 phase        = "Proof"
 delivered_in = "6fa4118"
 evidence     = "`scripts/cell_size_gate.py` reads the committed criterion estimates for the 7 m and 9 m cell budgets and fails when a finer grid would buy more than 10% of a frame, with a noise band so ordinary variance does not trip it; the `cell-size-gate` CI job runs it on every push, and the fail path was proven by perturbing an estimate. ADR 0031 and the task pointed at each other while both were open; both are now closed, with the sweep data and the occupancy figure committed under `docs/`."
+
+[[completed]]
+slug         = "threaded-steering"
+phase        = "Ship"
+delivered_in = "12c5b26"
+evidence     = "`src/application/crowd.rs` carries `SteeringRoad { Auto, Wide, Threads, Scalar }`, a `steer()` that dispatches on it, `steer_agent` shared by the scalar and threaded loops so the arithmetic cannot drift, and `steer_parallel`, which slices a frame into contiguous agent ranges of at least 512 agents with eight slices per thread and hands them to `ComputeTaskPool`. The pool is borrowed with `ComputeTaskPool::try_get()` and created lazily with `get_or_init(TaskPool::default)`, so a host that adds only `FlockPlugin` still gets workers. The `threads` cargo feature enables `bevy_tasks/multi_threaded` and is on by default; without it the pool reports one thread and `Auto` stays on the wide road. `a_parallel_frame_matches_the_scalar_one` and `tests/determinism.rs` hold every road to bit equality, `tests/crowd_no_alloc.rs` holds the threaded road to zero allocation, and `benches/crowd.rs` grows `flock_frame_road` so all four roads are measured on one host in one run. Measured on six vCPUs: 8.48 ms to 4.23 ms at 10,000 agents and 84.0 ms to 29.6 ms at 100,000; the standard benchmarks move 9.18 to 4.27 ms and 90.0 to 29.2 ms. ADR 0044 records the decision, the evidence, and the unclaimed follow-up (threading the wide road) with its expected 2-3x rather than 6x for bandwidth reasons."
+
+# Queued from `docs/research/competitive-analysis.md`, ranked by what a game hits first.
+# None of these depend on a completed task: a dependency on a delivered slug is a plan error.
+[[phases]]
+name  = "Reach"
+order = 10
+
+[[phases.tasks]]
+slug = "reciprocal-avoidance"
+title = "Reciprocal local avoidance: agents stop sharing space"
+goal = "Steering keeps a crowd from collapsing into a point; it does not keep two agents out of the same space, which is what a doorway shows. Add a local-avoidance solve over the neighbour set the kernel already gathers, so two agents approaching each other each take half the responsibility, and a game can rank who yields."
+kind = "feature"
+hints = [
+  "The half-responsibility linear program is the standard shape: each agent solves for a velocity inside the set of velocities that will not collide within a time horizon, and the reciprocal assumption is what keeps two agents from both swerving the same way.",
+  "The neighbour buffer and the transposed layout exist (ADR 0026, ADR 0030); this is a new pass over data already in cache, not a new index.",
+  "Anything sampled must draw from the per-NPC stream (ADR 0002) or the whole-world digest breaks. Prefer a deterministic solve to sampling, and if sampling is unavoidable, drive the sample from `RngStream::for_npc`.",
+  "Where the avoidance pass runs is a scheduler question: it is a cognition-tier cost, not a reflex one, or it will not fit a hundred thousand agents.",
+  "Priority matters for feel: a fleeing villager should yield to a charging guard. Expose it as a per-NPC weight with a documented default rather than as a global constant.",
+]
+test_hints = [
+  "Two agents walking at each other in a corridor pass without their minimum distance ever dropping below the requested separation.",
+  "The same seed and the same inputs produce the same positions to the bit, on every steering road.",
+  "An agent pinned against a wall does not oscillate: a head-on case and a corner case.",
+  "The pass allocates nothing in a steady frame.",
+]
+must_haves = [
+  "A local avoidance pass that consumes the kernel's neighbour set and produces a corrected desired velocity.",
+  "A per-NPC priority so a game can say who yields, with a documented default.",
+  "Determinism held by the existing tests, not waived.",
+  "A benchmark case in `benches/crowd.rs` at 10,000 and 100,000 agents, before and after.",
+]
+evaluation_criteria = [
+  "`cargo test --all-features` passes, including `tests/determinism.rs` and `tests/crowd_no_alloc.rs`.",
+  "A head-on test proves the separation floor holds for the whole approach, not just at the closest sample.",
+  "`docs/performance.md` records the measured cost of the pass at both sizes.",
+  "An ADR records the solve chosen, the determinism argument, and what was rejected.",
+]
+
+[[phases.tasks]]
+slug = "navigation-links"
+title = "Navigation links: ladders, ledges and doors as costs"
+goal = "A flow field over a grid cannot express 'this ledge is a shortcut' or 'the ladder costs four seconds', so level designers flatten their levels or bury traversal in behaviour trees. Add a link table the solver understands as extra edges with a cost."
+kind = "feature"
+hints = [
+  "The navigation port already carries cells and costs (ADR 0040), so a link is a pair of cells, a direction, a traversal cost and an optional tag the game can read.",
+  "Inject the links as edges in the same search that builds the field, rather than post-processing a field: post-processing cannot make a link into a route that crosses it.",
+  "The cache keys on a source version; links are part of the source, so adding one must bump the version or a stale field will be served.",
+  "Behaviour trees need to know a link was taken: publish it as a blackboard fact at the leaf boundary rather than as a special node.",
+]
+test_hints = [
+  "A field with a cheap link across a wall routes through the link; the same field without it routes around.",
+  "A link with a high cost loses to the long way round, and wins when the cost is below the detour.",
+  "Editing the link table invalidates the cached field for the affected destination only.",
+]
+must_haves = [
+  "A link type with a cost and an optional tag, validated on insert.",
+  "Field construction that honours links, with the cache keyed on the source version including the link table.",
+  "The link traversal published where a behaviour tree can read it.",
+]
+evaluation_criteria = [
+  "The three routing tests above pass, and a property test holds that a link can never make a reachable cell unreachable.",
+  "`docs/book/src/crowds-at-scale.md` shows a level with a ladder in it.",
+  "An ADR records the field-level integration and why post-processing was rejected.",
+]
+
+[[phases.tasks]]
+slug = "obstacle-driven-navigation"
+title = "Obstacle-driven navigation: the source rebuilds itself"
+goal = "Cached flow fields are versioned, so a door that opens invalidates them, but the game has to remember to re-stamp its source by hand and forgetting is a silent bug where the crowd walks through a wall. Add a navigation source that is derived from obstacle components and rebuilds within a documented budget."
+kind = "feature"
+hints = [
+  "The versioning and invalidation exist; this is a source, a rebuild trigger and a budget, not a new solver.",
+  "Rebuild on a change to the obstacle set, not every frame, and spend the rebuild across frames if the obstacle count is large: a coherent commit so no NPC sees half a wall.",
+  "A budget expressed in wall-clock time breaks replay; express it in virtual nanoseconds like the think scheduler (ADR 0009).",
+  "Keep the hand-written source working: this is a convenience, and a game with a baked level must not be forced through it.",
+]
+test_hints = [
+  "Spawning a blocker component makes the affected cells unwalkable within a bounded number of ticks, and removing it restores them.",
+  "The rebuild does not run when nothing changed.",
+  "A route exists around a blocker placed across a straight corridor.",
+]
+must_haves = [
+  "An obstacle-derived `NavSource` that bumps its version when the obstacle set changes.",
+  "A rebuild budget in virtual nanoseconds, with the commit point documented.",
+  "The existing manual source untouched and still tested.",
+]
+evaluation_criteria = [
+  "The three tests above pass, and a long-running test shows the field converging with no stale-route assertions failing.",
+  "`docs/performance.md` records the rebuild cost for a realistic obstacle count.",
+  "An ADR records the budget, the commit rule and what a game must still do by hand.",
+]
+
+[[phases.tasks]]
+slug = "stimulus-perception"
+title = "Stimulus perception: sight, hearing and memory of a threat"
+goal = "Encounter perception records who noticed whom for social memory; it is not a senses model. Add stimuli with age and expiry so stealth, guard alertness and search behaviour are expressible as data instead of as a special case inside a tree."
+kind = "feature"
+hints = [
+  "A stimulus is a source, a position, an intensity and a tick; age decays it, and a per-NPC stimulus buffer replaces the single 'saw a player' fact.",
+  "Sight is a cone plus a distance plus an optional occlusion test against the spatial grid; hearing is a radius with a falloff. Do not build an occlusion system: offer the hook and a grid-based approximation.",
+  "Perception cannot run at reflex cadence for every NPC; it belongs in the tiered scheduler's mid band, and the tier decides how often a stimulus is refreshed.",
+  "Whatever a behaviour tree reads must be stable across a think: copy the buffer at the leaf boundary rather than reading live state.",
+]
+test_hints = [
+  "An agent behind another agent inside the cone with occlusion on does not see the target; with occlusion off it does.",
+  "A heard stimulus decays to nothing after its lifetime and stops being reported.",
+  "The same seed and inputs produce the same alertness trace to the bit.",
+  "Perception at 100,000 agents stays inside the mid-band budget.",
+]
+must_haves = [
+  "A stimulus type with age, intensity and expiry, and a per-NPC buffer.",
+  "Sight and hearing queries against the existing spatial grid, with occlusion as an optional hook.",
+  "The buffer published where a behaviour tree or blackboard can read it.",
+]
+evaluation_criteria = [
+  "The four tests above pass, and `tests/determinism.rs` still holds.",
+  "`docs/book/src/behaviour.md` shows a guard that searches after losing sight of a target.",
+  "An ADR records the stimulus model, the tier it runs in and the measured cost.",
+]
