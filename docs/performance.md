@@ -1,38 +1,75 @@
 # Performance
 
-Measured, not estimated. Every number here comes from `cargo bench --bench crowd`
-on the machine and settings below, and the two designs that lost are documented
-alongside the one that won, because a table of "we are fast" is worth less than a
-record of what was tried and rejected.
+Measured, not estimated. Every number here comes from a criterion bench under
+`benches/`, on the machine and settings below, and the designs that lost are
+documented alongside the one that won, because a table of "we are fast" is worth
+less than a record of what was tried and rejected.
 
-## How to reproduce
+## Reproducing these numbers
+
+Every number in this document was produced on the machine below, from the commit named
+beside it, with the dependency graph the committed `Cargo.lock` pins. Three things are
+deliberately fixed, because each of them moves a timing by more than the differences this
+document argues about:
+
+| What | Where it is pinned | Why it matters |
+| --- | --- | --- |
+| Toolchain | `rust-toolchain.toml` (`1.97.1`, the Bevy 0.20 MSRV) | These numbers were produced with it; a different compiler is a different measurement, not a reproduction |
+| Dependencies | `Cargo.lock` and `compat/Cargo.lock`, both committed | Bevy, `wide` and `criterion` versions change the kernel and the harness |
+| Build profile | `[profile.bench]` (`debug = true`, otherwise release defaults) | Benchmarks need symbols for the profiler; optimisation stays release |
+
+Every CI job that builds or tests runs `--locked` (`clippy`, `test`, `features`, `msrv`,
+`docs`, `determinism`, `bench-smoke`, `compat`), and a `lockfile` job fails if either file has
+gone stale — so a dependency bump has to be a commit rather than a silent resolution.
+Reproduce a row exactly with:
 
 ```sh
-cargo bench --bench crowd
+cargo bench --locked --bench crowd -- flock_frame/10000 --warm-up-time 0.5 --measurement-time 3
+cargo bench --locked --bench band  --features simd -- band_frame/1000000_total_5000_manifested
+cargo bench --locked --bench tiers -- tier_frame/reflex/10000
+cargo bench --locked --bench packed --features simd -- packed_steer/steer_integrate_advance/50000
 ```
 
-Raw criterion output lives in `target/criterion`. The suite measures:
+Raw criterion output lands in `target/criterion`, with an HTML report under
+`target/criterion/report/index.html`. Drop the filter to run a whole suite and get the table
+rather than one row.
 
-- `flock_frame/N` — a whole `App::update()`: spawn drain, grid rebuild, steering
-  and integration, with N NPCs already alive. This is the number that decides
-  whether a game hits its frame budget.
-- `flock_frame_large/100000` — the same at 100,000 agents, with fewer samples.
-- `spatial_query/radius_8m/N` — one radius query against an index of N agents,
-  isolated from everything else.
-- `steering_step/32_neighbours` — one steering evaluation with 32 neighbours.
-
-## Test machine
+### The machine
 
 | | |
 | --- | --- |
-| CPU | ARM64, 8 vCPU (cloud sandbox) |
-| Toolchain | Rust 1.97.1, `--release` with debug symbols |
-| Build | default release (`codegen-units = 16`, no LTO), debug symbols on |
-| Criterion | 10 samples, 1 s warm-up, 2–3 s measurement |
+| CPU | ARM64, Neoverse-N1, 6 vCPU (shared cloud sandbox) |
+| Memory | 9 GB |
+| Kernel | Linux 6.8 (container) |
+| Toolchain | Rust 1.97.1, `--release` with debug symbols (`[profile.bench]`) |
+| Criterion | 10–20 samples, 0.5–1 s warm-up, 3 s measurement unless a bench overrides it |
 | Renderer | none — headless `App::new()`, simulation only |
 
-Absolute numbers on a desktop x86-64 will differ; the ratios between designs is
-what this document is for.
+Two things to know about that host. It is **shared**, so a neighbour's load shows up as a few
+percent of jitter; and its vCPU count has varied between sandboxes (6 here, 8 on the host the
+earlier tables were taken on), which barely matters because every path measured here is
+**single-threaded** — Bevy's schedule is one thread and the kernels are scalar loops or four
+lane `wide` vectors, not rayon. What does change with the host is the absolute number, not the
+shape of the curve or the ranking of designs.
+
+### What still varies, and by how much
+
+- **Run to run, same binary, same machine:** 1–4%. Criterion's confidence interval covers it;
+  treat the middle value as the number and the interval as the noise floor.
+- **A different machine:** not characterised here, and not worth characterising — an
+  absolute time is a property of a host, not of this library. This document therefore argues
+  in **ratios** (dense grid versus sorted array, scalar versus four-lane), and states the
+  number that shipped so you can re-measure it on yours rather than adopt it.
+- **First run after a rebuild:** slower and noisy while the page cache and CPU governor settle.
+  Discard it; criterion's warm-up exists for exactly this.
+
+### A cross-check, on the record
+
+Re-measured during the reproducibility pass (2026-11-04, `flock_frame/10000`, locked
+dependencies, 6 vCPU host): **18.75 ms**, against the 18.2 ms committed below — 3% inside the
+quoted interval, which is the intended relationship between this section and the tables. The
+1,000,000-inhabitant band frame re-measured at 3.80 ms against the 3.78 ms recorded for ADR
+0021, for the same reason.
 
 ## Final numbers
 
@@ -53,6 +90,13 @@ Two things to read from that table:
   because the index makes each agent's work local.
 - **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns
   at 100,000: the index walks the same 27 cells, and the cells are fuller.
+- **The 10,000 row misses 60 Hz.** 18.2 ms is 55 fps against a 16.6 ms budget: this
+  pipeline — boids steering for every agent, every frame — is the *steering* cost, and it
+  is the reason the band path exists. `band_frame/1000000_total_5000_manifested` carries
+  1,000,000 inhabitants with 5,000 manifested and steering at 3.80 ms, because the packed
+  kernel does the same neighbour work with the loop inverted and four lanes wide. If your
+  scene is 10,000 agents that all need to think and steer at 60 Hz, the crowd path does not
+  reach it on this host and the band path is the one to use.
 
 The 1.00 ms at N=1 is the grid rebuild's fixed cost at the default 1 km volume
 (405,000 cells after coarsening). It is the price of dense cells, which the query

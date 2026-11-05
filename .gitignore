@@ -1,6 +1,7 @@
 /target
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is committed deliberately. Published numbers depend on exact dependency
+# resolutions, and compat/ is a binary; `--locked` in CI is what keeps both current.
 .DS_Store
 /criterion
 *.profraw

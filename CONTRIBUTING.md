@@ -9,11 +9,18 @@ Every change must pass, in this order:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo test --no-default-features
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo test --locked --no-default-features
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 ```
+
+Dependencies are locked, and CI enforces it: `Cargo.lock` and `compat/Cargo.lock`
+are committed and every job runs `--locked`, with a `lockfile` job that fails if
+either has gone stale. If you change a dependency, commit the regenerated lockfile
+in the same commit as the manifest change. The reason is `docs/performance.md`:
+the timings published there are only reproducible against an exact dependency
+graph, so a silent resolution bump would quietly invalidate them.
 
 The lint profile (all + pedantic + nursery + cargo + perf) and its documented
 exceptions live in `Cargo.toml`. Do not add `#[allow]`; if a lint is genuinely

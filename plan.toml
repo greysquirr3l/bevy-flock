@@ -13,7 +13,7 @@
 # proves it. Wiggum generates task files from the phases only, so a finished task
 # left in the queue would ask an agent to rebuild something that exists.
 #
-# 29 of 50 tasks delivered, at v0.1.0-rc.1 plus the 1M milestone work after it:
+# 28 of 50 tasks delivered, at v0.1.0-rc.1 plus the 1M milestone work after it:
 # the deterministic core (identifiers, PCG32 streams, ticks, spatial index,
 # steering), the Bevy surface (plugin, components, budgeted spawning, budgeted
 # cognition), the behaviour trees with declared costs and the calibration gate, the
@@ -27,7 +27,7 @@
 # 268 library tests plus nine integration suites; clippy clean on the MSRV
 # (1.97.1); 25 ADRs; gates 1 to 9 closed by the boundary harness.
 #
-# Six of the tasks below are partially delivered; each carries a hint naming what
+# Seven of the tasks below are partially delivered; each carries a hint naming what
 # is in place and what is missing, so nobody re-does the former or mistakes it for
 # the whole. The rest are untouched.
 
@@ -1041,6 +1041,36 @@ name  = "Proof"
 order = 8
 
 [[phases.tasks]]
+slug      = "benchmark-suite"
+kind      = "feature"
+title     = "Criterion benchmarks at 1, 10k, 100k and 1M, with a regression gate"
+goal     = "Prove the performance envelope with benchmarks anyone can run, gated in CI so it cannot silently regress."
+depends_on = ["dialog-graph-engine"]
+implements = ["cognition-budget", "ambient-tier", "crowd-motion"]
+hints = [
+    "In place: nine criterion benches — crowd (1 to 100,000), brain, memory, saves (v1 against v2 at 50,000), think (100,000 budget), tiers, continuum, packed and band (100,000 to 1,000,000). Every number in README, docs/performance.md and docs/memory.md traces to one of them, and docs/performance.md now records the machine, the lockfile and the exact commands.",
+    "Remaining: the regression gate. There is no baseline artifact, no compare step, and no CI job that fails on a 10 percent regression — a bench that is not compared against anything is a report, not a gate.",
+    "Remaining: the 10,000 full-pipeline budget. `flock_frame/10000` is 18.2 ms against the 16.6 ms criterion, so that row is a documented miss rather than a claim; the 60 Hz route for a crowd that size is the band path (5,000 manifested at 3.80 ms), not this one.",
+    "Remaining: Divan allocation assertions on the hot paths. Steady-state zero allocation is a claim this crate makes in its tests (tests/tree_no_alloc.rs, tests/band_continuity.rs) but not a benchmark that would catch a regression.",
+    "Remaining: flow-field and dialog benchmarks, which wait on the navigation and dialogue tasks.",
+]
+test_hints = [
+    "All benchmarks run to completion in under 10 minutes on CI hardware.",
+    "Allocation assertions: steady-state steering and cognition steps allocate zero bytes after warm-up.",
+    "A deliberately slowed implementation trips the regression gate (verified on a scratch branch, then reverted).",
+    "Numbers for each size committed to `docs/performance.md` with the machine named.",
+]
+must_haves = [
+    "Benchmark at every documented size, including 10,000 and 100,000 and 1,000,000.",
+    "Baseline artifact and regression gate wired into CI.",
+    "Methodology documented.",
+]
+evaluation_criteria = [
+    "10,000-NPC full pipeline measured under 16.6 ms and the number is committed.",
+    "100,000-NPC cognition measured within the documented budget.",
+    "Every performance claim in README/book traces to a benchmark id.",
+]
+[[phases.tasks]]
 slug      = "property-and-fuzz-suite"
 kind      = "feature"
 title     = "Property tests, invariant harnesses and fuzzing"
@@ -1278,12 +1308,6 @@ slug         = "subject-clamp-diagnostic"
 phase        = "Society and Voice"
 delivered_in = "4afe434"
 evidence     = "domain::telemetry computes registry fragmentation and ghost-node accumulation from a store; examples/registry_telemetry.rs renders them as an SVG chart (the library has no rendering dependency by design, so the diagnostic writes SVG rather than drawing). ADR 0015 records the metrics, ADR 0016 the subject ceiling that motivated them, and docs/images holds a rendered sample from a simulated loop."
-
-[[completed]]
-slug         = "benchmark-suite"
-phase        = "Proof"
-delivered_in = "31f1663..df569c9"
-evidence     = "Nine criterion benches: crowd (1 to 100,000, including the 10,000 full pipeline at 5.01 ms against a 16.6 ms budget), brain, memory (subject sweeps and footprint at 16 and 64 subjects), saves (50,000-subject v1 versus v2 serialisation), think (100,000 cognition budget and the 84 us planner), tiers (per-tier frame cost), continuum (the nine gates), packed (1,000 to 50,000 steer) and band (100,000 through 1,000,000). Every number quoted in README, docs/performance.md and docs/memory.md traces to one of them."
 
 [[completed]]
 slug         = "perf-audit"

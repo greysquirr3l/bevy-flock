@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Reproducibility
+
+- `Cargo.lock` and `compat/Cargo.lock` are committed, and every CI job runs `--locked`, with a
+  `lockfile` job that fails if either is stale. A dependency bump is now a commit rather than a
+  silent resolution, which matters because `docs/performance.md` publishes timings that only
+  mean something against an exact dependency graph.
+- `docs/performance.md` grew a reproduction section: the toolchain and profile that are pinned,
+  the lockfiles, the exact `cargo bench` command for each row, the host the numbers were taken
+  on (6 vCPU Neoverse-N1, single-threaded paths), and what still varies between runs (1-4% run
+  to run; a different machine is a different measurement, which is why the document argues in
+  ratios). It also records a cross-check: `flock_frame/10000` re-measured at 18.75 ms against
+  the committed 18.2 ms.
+- Stated plainly rather than left to be inferred: the 10,000-agent crowd frame is 18.2 ms, i.e.
+  55 fps against a 16.6 ms budget. The 60 Hz route at that crowd size is the band path.
+
+
 ### Fixed
 
 - **The band no longer manifolds what it folds.** The manifest window was square, so its

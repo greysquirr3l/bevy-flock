@@ -31,7 +31,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (deny warnings, all targets)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -44,9 +44,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-features
-      - run: cargo test --no-default-features
-      - run: cargo test --doc
+      - run: cargo test --locked --all-features
+      - run: cargo test --locked --no-default-features
+      - run: cargo test --locked --doc
 
   features:
     name: Feature powerset
@@ -65,8 +65,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --no-default-features --features "${{ matrix.features }}"
-      - run: cargo test --lib --no-default-features --features "${{ matrix.features }}"
+      - run: cargo check --locked --no-default-features --features "${{ matrix.features }}"
+      - run: cargo test --locked --lib --no-default-features --features "${{ matrix.features }}"
+
+  lockfile:
+    name: Lockfiles current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # A stale lockfile would let CI and the published numbers drift apart silently.
+      - run: cargo metadata --locked --format-version 1 > /dev/null
+      - run: cargo metadata --locked --format-version 1 --manifest-path compat/Cargo.toml > /dev/null
 
   determinism:
     name: Determinism (/dev/urandom seeds)
@@ -78,7 +88,7 @@ jobs:
       - name: Randomised seed sweep
         run: |
           for i in 1 2 3; do
-            cargo test --test determinism -- --nocapture
+            cargo test --locked --test determinism -- --nocapture
           done
 
   msrv:
@@ -88,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97.1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-features
+      - run: cargo check --locked --all-features
 
   docs:
     name: Docs
@@ -99,7 +109,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps --all-features
+      - run: cargo doc --locked --no-deps --all-features
 
   deny:
     name: Supply chain
@@ -117,7 +127,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --bench crowd --no-run
+      - run: cargo bench --locked --bench crowd --no-run
 
   compat:
     name: Compat (v0.1.0-rc.1 reads current fixtures)
@@ -131,4 +141,4 @@ jobs:
       # The forward direction: a released build reading files this tree wrote. Pinned
       # by tag in compat/Cargo.toml, so this job goes red when a format change would
       # break players rather than when a test notices (ADR 0014).
-      - run: cargo run --manifest-path compat/Cargo.toml
+      - run: cargo run --locked --manifest-path compat/Cargo.toml
