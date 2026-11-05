@@ -64,22 +64,89 @@ The pass is O(live records × observers-due), not O(observers × entities). Meas
 
 | Case | Time | Per unit |
 | --- | ---: | ---: |
-| 10,000 observers, 128 live records | 27.6 ms | 2.8 µs observer |
-| 512 observers, 4,096 live records | 75.3 ms | 147 µs observer |
+| 10,000 observers, 128 live records | 21.7 ms | 2.2 µs observer |
+| 512 observers, 4,096 live records, 40 m square | 35.8 ms | 70 µs observer |
+| 512 observers, 4,096 live records, 400 m square | 9.3 ms | 18 µs observer |
 
-At the default six-tick interval the first row is ~4.6 ms a frame for a 10,000-NPC crowd that
+At the default six-tick interval the first row is ~3.6 ms a frame for a 10,000-NPC crowd that
 perceives on every tick of its band, which is inside a mid-band budget and well outside a reflex
 one — hence the interval, which is the scheduler's knob in miniature.
 
-Two optimisations are already in: the squared-distance reject avoids a square root for records
-that are out of range, and the cone test compares against `cos · |offset|` rather than normalising.
-Together they took the 4,096-record case from 87.1 ms to 75.3 ms.
+Three optimisations are already in, and they are worth separating because they say which costs are
+left:
 
-**Known limit:** there is no spatial index over the buffer, so a game with thousands of live
-stimuli pays linearly. Adding one (bucket the records, scan the buckets the hearing radius
-overlaps) is the obvious next step and is deliberately not pretended away here: the capacity and
-the interval are the two knobs that make the current cost acceptable, and a game that needs more
-should size its buffer to what its world actually does.
+1. The squared-distance reject skips the square root for out-of-range records.
+2. The cone test compares against `cos · |offset|` instead of normalising, saving a square root and
+   a divide per record.
+3. The result set is a **bounded insertion** rather than collect-sort-truncate. `max_results` is
+   six by default, and a dense buffer can put thousands of records inside the hearing radius;
+   keeping the best six as we go costs one comparison per slot and no growth of a vector the
+   caller never sees. This is the largest of the three: 75.7 ms → 35.8 ms on the dense case.
+
+Together they took the dense case from 87.1 ms to 35.8 ms.
+
+## The linear cost, and the three steps that remove it
+
+Per observer, the pass is O(R) in the number of *live records*, whether those records are on top
+of the observer or on the other side of the level. The table above is the proof: the same 4,096
+records cost 35.8 ms when they are crammed into a 40 m square and 9.3 ms when they are spread over
+400 m, because in the spread case almost every record fails the range test. That 9.3 ms — 4.4 ns
+per record per observer — is the **scan tax**: pure cost of looking at records that are nowhere
+near. An index removes the tax, not the work, and that is the whole of the future plan.
+
+The steps are ordered by benefit per unit of risk, and each is a separate decision:
+
+1. **Observer-side early-out, no new data structure.** The buffer maintains the union sphere of its
+   live records on insert and sweep — one add, one full recompute per tick, O(R) and vectorised by
+   nothing in particular. An observer outside that sphere returns an empty list in O(1). In a
+   100,000-NPC level where forty things are happening in one corner, this is the difference
+   between 10,000 observers paying and the few hundred near the action paying, and it costs one
+   bounding-sphere test per observer. This is the step to take first.
+2. **A bucketed index over the records.** A uniform grid whose cell is
+   `max(sight_radius, hearing_radius) / 2`; each record is inserted into every cell its own radius
+   overlaps, so a 45 m shout at a 22.5 m cell spans at most 5×5 cells and a 3 m footstep spans one.
+   An observer scans the cells its limit overlaps plus one ring, then runs every exact predicate
+   unchanged — range, cone, occlusion and strength are still computed per candidate, so the answer
+   is identical, only the candidate set is smaller. Cost is O(cells) to clear and rebuild per
+   perception tick, amortised across every observer due that tick, which is why it is worth
+   building once per tick rather than per observer. Gains where the ratio of query radius to world
+   extent is small: 4,096 records spread over 400 m with a 45 m hearing radius drops from 4,096
+   candidates per observer to roughly 50.
+3. **Band-scoped observer sets.** Perception is mid-band work, so only observers in the bands that
+   consume it should pay, and each band gets its own interval. This is scheduler integration, not
+   index work, and it is where the 100,000 case is actually won: the crowd at reflex tier does not
+   need a stimulus list, it needs to not walk into a wall.
+
+### What every step must preserve
+
+- **Bit-identical output.** Any index must produce exactly what the linear scan produces, held by a
+  parity test over a randomised buffer (`index_matches_the_linear_scan`), in the same spirit as
+  `the_bounded_insert_keeps_exactly_the_best_slots`, which guards the top-k swap already made.
+- **A canonical candidate order.** The comparator is a total order (`strength`, `distance`, `kind`,
+  `position.x`, `position.z`, all `total_cmp`), so bucket traversal order cannot change the result
+  — but only as long as ties are broken by a field and not by arrival. A test that shuffles the
+  buffer and compares must pass.
+- **No steady-frame allocation.** The bucket array and the union sphere are sized from `capacity`
+  and reused; a `Vec` rebuilt per tick would be a regression the allocator test would catch.
+- **The exact predicates stay exact.** No approximation of the cone, no early acceptance. An index
+  is allowed to skip candidates, never to add or soften one.
+
+### What reopens this decision
+
+The plan carries a `stimulus-spatial-index` task, and the trigger is a measurement rather than a
+feeling: reopen when the dense case of `crowd_perception` exceeds 25% of a 16.6 ms frame at the
+reference population, or when a game reports more than 256 live records in a level. Until then the
+capacity and the interval are the two knobs, and a game should size its buffer to what its world
+actually does rather than to the worst case.
+
+### Rejected for the index
+
+- **A k-d tree or BVH.** Rebuild cost per tick, and worse constants than a uniform grid for
+  point-like records with a handful of radius classes.
+- **A hash map keyed by cell.** Allocation per rebuild, and iteration order that would have to be
+  sorted back into a canonical order to stay deterministic — paying for the sort twice.
+- **Skipping the exact predicates once a record is bucketed.** Cheaper, and it changes answers
+  near cell boundaries, which is the one thing a stealth game cannot tolerate.
 
 ## Consequences
 
@@ -91,6 +158,11 @@ should size its buffer to what its world actually does.
   think rather than live state that changes underneath it.
 - The buffer is shared. A stimulus is not addressed to an observer: filters (team, channel) are
   the game's job at the leaf, which keeps the hot loop free of per-game predicates.
+- `perceive` allocates nothing: the result is a `SmallVec<[Perceived; 8]>` filled by bounded
+  insertion, so six slots at the default `max_results` never leave the stack.
+- The cost is linear in live records per observer until the index in "The linear cost" lands; the
+  buffer's `capacity` and the perception `interval` are the two knobs that keep it affordable
+  meanwhile.
 
 ## Alternatives rejected
 

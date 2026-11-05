@@ -952,3 +952,36 @@ slug         = "stimulus-perception"
 phase        = "Reach"
 delivered_in     = "74839a7"
 evidence     = "ADR 0047 plus src/domain/stimulus.rs and adapters::primary::stimulus: a bounded ring of Stimulus { kind, position, radius, intensity, emitted, ttl } with distance and age falloff, a sight cone, occlusion through the Occluder trait (OpenAir by default, so no physics dependency), and a deterministic sort by strength/distance/kind/position with total_cmp. StimulusPlugin publishes one pulse per StimulusSource per tick, sweeps expired records, and writes PerceivedStimuli per observer on a tick interval (six by default) as a snapshot a tree can read for the length of a think. Tests: behind-the-cone sight rejected, heard shout accepted, falloff with distance and age, expiry, wall stops sight but not sound, limited slots keep the strongest, ring overwrite, deterministic perception, and the ECS path including a despawned emitter expiring."
+
+[[phases]]
+name  = "Scale"
+order = 11
+
+[[phases.tasks]]
+slug = "stimulus-spatial-index"
+title = "Perception stops scanning records that are nowhere near"
+goal = "ADR 0047 measured the limit: a linear scan pays the same price for a recorded shout on the far side of the level as for one on top of the observer, so 4,096 live records cost 35.8 ms crammed into 40 m and 9.3 ms spread over 400 m. Add the observer-side early-out and the bucketed index the ADR specifies, so perception costs the records near an observer rather than the records in the world."
+kind = "infrastructure"
+hints = [
+  "Step one is the cheap win and needs no new structure: keep the union sphere of live records on the buffer, updated on push and on the per-tick sweep, and return an empty list in O(1) for an observer outside it. In a 100,000-NPC level that turns ten thousand observers paying into the few hundred near the action.",
+  "Step two is a uniform bucket grid whose cell is half the larger query radius; insert each record into every cell its own radius overlaps, scan the cells the observer's limit overlapped plus one ring, then run every exact predicate unchanged. Clear and rebuild once per perception tick, not per observer.",
+  "Bit-identical output is the requirement: an index may skip candidates, never add one or soften one. The comparator is already a total order, so a canonical bucket traversal keeps ties deterministic.",
+  "No steady-frame allocation: size the buckets from the buffer capacity and reuse them, or the allocator test will catch it.",
+  "Band-scoped observer sets are a separate, scheduler-shaped change; do not fold tiering into this task.",
+]
+test_hints = [
+  "A randomised buffer gives the same list from the indexed and linear paths, including ties, and the test fails if the buffer is shuffled.",
+  "An observer outside the union sphere returns an empty list without touching a record.",
+  "A dense spread-out buffer costs materially fewer candidate examinations, asserted on a counter rather than on wall-clock time.",
+  "The steady-frame allocation count stays at zero.",
+]
+must_haves = [
+  "A union-sphere early-out on the buffer, maintained on push and sweep.",
+  "A reusable bucket index with radius-aware insertion and a parity test against the linear scan.",
+  "`docs/performance.md` updated with the measured before and after, and ADR 0047's plan marked delivered or revised.",
+]
+evaluation_criteria = [
+  "The dense 4,096-record case in `crowd_perception` improves by at least 3x, and the spread case is no slower than it is today.",
+  "`cargo test --all-features` passes, including `tests/determinism.rs` and `tests/crowd_no_alloc.rs`.",
+  "The parity test is written to fail if bucket traversal changes tie order.",
+]

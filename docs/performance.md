@@ -366,18 +366,21 @@ bandwidth reason.
 
 | Case | Time | Per unit |
 | --- | ---: | ---: |
-| 10,000 observers against 128 live records | 27.6 ms | 2.8 µs observer, 22 ns record |
-| 512 observers against 4,096 live records | 75.3 ms | 147 µs observer |
+| 10,000 observers against 128 live records | 21.7 ms | 2.2 µs observer |
+| 512 observers against 4,096 live records in a 40 m square | 35.8 ms | 70 µs observer |
+| 512 observers against 4,096 live records spread over 400 m | 9.3 ms | 18 µs observer |
 | 64×64 rebuild, 32 obstacles | 3.7 µs | one full publish |
 
-Reading these honestly: perception is linear in live records per observer, so the number that
-matters is the *second* row's density, and 4,096 live stimuli inside one 40 m square is a
-pathological case — a real crowd has tens of things happening at once, not thousands. At 128 live
-records and the default six-tick interval, a 10,000-NPC crowd that perceives on every tick of its
-band costs 4.6 ms a frame; the interval and the buffer capacity are the two knobs, and both exist
-so a game can size this to what its world actually does. There is no spatial index over the
-buffer yet: that is the next lever if a game needs thousands of live stimuli, and it is listed in
-the ADR as the known limit rather than pretended away.
+The two 4,096-record rows are the interesting pair: same record count, same code, 3.9× apart,
+because a linear scan pays the same price for a record on the far side of the level as for one on
+top of the observer. That 9.3 ms floor — 4.4 ns per record per observer — is the scan tax an index
+would remove; ADR 0047 plans the three steps that remove it and names the measurement that reopens
+the decision.
+
+Three optimisations are already banked, the largest being bounded insertion into the six result
+slots instead of collect-sort-truncate: 87.1 ms → 35.8 ms on the dense case. At 128 live records
+and the default six-tick interval, a 10,000-NPC crowd that perceives on every tick of its band
+costs 3.6 ms a frame, which is the number to judge a mid-band budget against.
 
 The obstacle rebuild is a non-issue at 64×64: one publish is 3.7 µs, so even a 1,024-cell budget
 spread over 16 frames is noise next to a steering pass. Its cost scales with the grid and the

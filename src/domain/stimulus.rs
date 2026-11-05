@@ -19,6 +19,7 @@
 //! The ECS half lives in `adapters::primary::stimulus`.
 
 use bevy_math::Vec3;
+use core::cmp::Ordering;
 use smallvec::SmallVec;
 
 use super::tick::Tick;
@@ -379,25 +380,46 @@ pub fn perceive(
         if strength <= 0.0 {
             continue;
         }
-        found.push(Perceived {
+        if query.max_results == 0 {
+            continue;
+        }
+        let candidate = Perceived {
             kind: stimulus.kind,
             position: stimulus.position,
             distance,
             strength,
-        });
+        };
+        // Bounded insertion rather than collect-then-sort: `max_results` is six by default, and a
+        // dense buffer can put thousands of records inside the hearing radius. Keeping the best
+        // few as we go costs one comparison per slot and no allocation, where sorting everything
+        // cost a sort per observer and a growth of the result vector the caller never sees.
+        let slot = found.partition_point(|existing| ranks(existing, &candidate) == Ordering::Less);
+        if slot >= query.max_results {
+            continue;
+        }
+        if found.len() == query.max_results {
+            found.pop();
+        }
+        found.insert(slot, candidate);
     }
-    // Sorted by what an observer would notice first. `total_cmp` so two equal strengths order by
-    // kind and position rather than by whichever arrived first in the ring.
-    found.sort_unstable_by(|a, b| {
-        b.strength
-            .total_cmp(&a.strength)
-            .then_with(|| a.distance.total_cmp(&b.distance))
-            .then_with(|| a.kind.cmp(&b.kind))
-            .then_with(|| a.position.x.total_cmp(&b.position.x))
-            .then_with(|| a.position.z.total_cmp(&b.position.z))
-    });
-    found.truncate(query.max_results);
+    debug_assert!(found.len() <= query.max_results);
     found
+}
+
+/// The order an observer notices things in: strongest first, then nearest, then by kind and
+/// position.
+///
+/// Every component uses `total_cmp`, so this is a total order and two runs of the same world
+/// cannot disagree about a tie. The bounded insertion above depends on it: `partition_point`
+/// needs a predicate that is monotone over the slice, which an order with an arbitrary tie-break
+/// would not give.
+fn ranks(a: &Perceived, b: &Perceived) -> Ordering {
+    b.strength
+        .total_cmp(&a.strength)
+        .then_with(|| a.distance.total_cmp(&b.distance))
+        .then_with(|| a.kind.cmp(&b.kind))
+        .then_with(|| a.position.x.total_cmp(&b.position.x))
+        .then_with(|| a.position.z.total_cmp(&b.position.z))
 }
 
 #[cfg(test)]
@@ -557,6 +579,53 @@ mod tests {
         assert_eq!(seen.len(), 2);
         assert_eq!(seen[0].distance, 5.0);
         assert_eq!(seen[1].distance, 15.0);
+    }
+
+    #[test]
+    fn the_bounded_insert_keeps_exactly_the_best_slots() {
+        // The bounded insertion replaced a collect-then-sort-then-truncate. This is the parity
+        // test for that swap: with distinct strengths, the kept set must be the k strongest in
+        // range, in order, and nothing else.
+        let mut buffer = buffer(64);
+        for index in 0..40_u8 {
+            let x = f32::from(index) * 0.5;
+            buffer.push(Stimulus::new(
+                StimulusKind::Sound,
+                at(x, 0.0),
+                100.0,
+                0.1 + f32::from(index) * 0.02,
+                Tick::ZERO,
+            ));
+        }
+        let query = PerceptionQuery::new()
+            .with_ranges(100.0, 100.0)
+            .with_max_results(4);
+        let seen = perceive(&buffer, at(0.0, 0.0), Vec3::X, Tick::ZERO, &query, &OpenAir);
+        assert_eq!(seen.len(), 4);
+        let mut all: std::vec::Vec<(f32, f32)> = buffer
+            .iter()
+            .filter_map(|stimulus| {
+                let distance = stimulus.position.distance(at(0.0, 0.0));
+                let strength = stimulus.strength_at_distance(distance, Tick::ZERO);
+                (strength > 0.0).then_some((strength, distance))
+            })
+            .collect();
+        all.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.total_cmp(&b.1)));
+        for (index, perceived) in seen.iter().enumerate() {
+            let (strength, _) = all.get(index).copied().expect("enough records");
+            assert!(
+                (perceived.strength - strength).abs() < 1e-6,
+                "slot {index}: kept {} but the reference has {strength}",
+                perceived.strength
+            );
+        }
+        assert!(
+            seen.windows(2).all(|pair| {
+                let [a, b] = pair else { return true };
+                ranks(a, b) != Ordering::Greater
+            }),
+            "the kept slots are not in perception order"
+        );
     }
 
     #[test]

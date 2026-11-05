@@ -335,6 +335,28 @@ fn bench_perception(c: &mut Criterion) {
             black_box(seen);
         });
     });
+    // The same 512 observers and 4,096 records, spread over 400 m instead of 40. Almost nothing is
+    // within the 45 m hearing radius, and a linear scan cannot tell: this is the measurement that
+    // says the cost is spatial-blind, and the number an index would recover.
+    let mut spread = StimulusBuffer::new(4_096).expect("buffer");
+    for record in buffer.iter() {
+        spread.push(Stimulus {
+            position: record.position * 10.0,
+            ..*record
+        });
+    }
+    group.bench_function("512_observers_4096_records_spread_400m", |b| {
+        b.iter(|| {
+            let mut seen = 0_usize;
+            for index in 0..512_u32 {
+                #[allow(clippy::cast_precision_loss)]
+                let angle = index as f32 * 0.11;
+                let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
+                seen += perceive(&spread, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
+            }
+            black_box(seen);
+        });
+    });
     group.bench_function("512_observers_4096_records", |b| {
         b.iter(|| {
             let mut seen = 0_usize;

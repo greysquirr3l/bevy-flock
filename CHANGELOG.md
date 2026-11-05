@@ -25,6 +25,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only route to a floor, and `FlowField::link_tag_at` tells a leaf what it is about to walk onto.
   The `navmesh` feature adds a polygon source with area costs and a funnel, with the funnel's
   pinch-restart branches fixed to advance the apex to the opposite corner.
+- **Perception keeps six slots, not thousands.** `perceive` collected every hit and sorted them
+  before truncating to `max_results`; it now inserts in order into a bounded result set, which
+  costs one comparison per slot and no allocation. 75.7 ms → 35.8 ms on the dense benchmark, and
+  `the_bounded_insert_keeps_exactly_the_best_slots` is the parity test against the old behaviour.
 - **Three fixes found by the above.** `steer_flock` wrote the kernel's desired velocity as
   `(x, 0, y)`, dropping vertical and lateral motion; it now writes all three axes. Sorting a
   `LinkTable` placed same-key edges after every equal key, leaving insertion order to decide ties.
