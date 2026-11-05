@@ -522,6 +522,7 @@ tasks = [] # every task in this phase is finished
 [[phases]]
 name  = "Society and Voice"
 order = 5
+tasks = [] # every task in this phase is finished
 
 [[phases]]
 name  = "Adapters"
@@ -531,10 +532,12 @@ tasks = [] # every task in this phase is finished
 [[phases]]
 name  = "Developer Experience"
 order = 7
+tasks = [] # every task in this phase is finished
 
 [[phases]]
 name  = "Proof"
 order = 8
+tasks = [] # every task in this phase is finished
 
 [[phases]]
 name  = "Ship"
