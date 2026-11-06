@@ -1185,7 +1185,7 @@ schedule fails a test rather than a paragraph.
 slug = "local-ci-runner"
 title = "Reproduce the CI gate locally, from the workflow rather than a copy of it"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "65f7922"
 evidence = """CI is the gate that says `main` is healthy, and a gate behind a billing failure is no gate at all.
 `scripts/ci_local.py` reads `.github/workflows/ci.yml`, expands each job's matrix, substitutes
 `${{ matrix.* }}` into the `run:` steps and executes them with bash, so the commands exist once.
