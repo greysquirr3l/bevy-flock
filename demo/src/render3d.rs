@@ -981,6 +981,251 @@ mod tests {
         assert_eq!(first_stats.bodies, second_stats.bodies);
     }
 
+    /// A camera at eye height on the axis of a settlement, with `count` bodies ahead of it.
+    ///
+    /// The shot has no ruins, no props and a two-tile patch of ground, so `stats.triangles` counts
+    /// bodies and nothing else, and a body's distance from the eye is `sqrt(z^2 + 1.7^2)`.
+    fn avenue(count: usize, first: f32, step: f32) -> (CityLayout, Scene, Meshes, Shot) {
+        let city = CityLayout::generate(SimSeed::new(7), 900.0);
+        let centre = city
+            .districts
+            .iter()
+            .map(|district| district.centre)
+            .next()
+            .unwrap_or(Vec3::ZERO);
+        let bodies: Vec<crate::scene::Body> = (0..count as u64)
+            .map(|index| crate::scene::Body {
+                archetype: bevy_flock::domain::temperament::Archetype::Urchin,
+                position: centre + Vec3::new(0.0, 0.0, -(first + index as f32 * step)),
+                yaw: 0.0,
+                appearance_seed: index,
+            })
+            .collect();
+        let mut shot = shots(&city, &bodies).into_iter().next().or_die();
+        shot.camera = Camera {
+            eye: centre + Vec3::new(0.0, 1.7, 0.0),
+            target: centre + Vec3::new(0.0, 1.7, -80.0),
+            fov_y: 0.9,
+            ..shot.camera
+        };
+        shot.max_bodies = 64;
+        shot.draw_distance = 400.0;
+        shot.block_distance = 0.0;
+        shot.body_margin = 0.0;
+        shot.min_area = 0.0;
+        shot.impostor_distance = f32::INFINITY;
+        let scene = Scene::build(&city, &bodies);
+        let meshes = Meshes::load().or_die();
+        (city, scene, meshes, shot)
+    }
+
+    #[test]
+    fn the_impostor_threshold_decides_between_mesh_and_billboard() {
+        let (_, scene, meshes, shot) = avenue(8, 6.0, 6.0);
+        let trace = |threshold: f32| {
+            let mut shot = shot.clone();
+            shot.impostor_distance = threshold;
+            let (_, stats) = render(&scene, &meshes, &shot, 200, 140);
+            (stats.bodies, stats.triangles)
+        };
+
+        // Every body at full detail: the eight meshes, none of them culled.
+        let (bodies, detailed) = trace(f32::INFINITY);
+        assert_eq!(bodies, 8, "the avenue lost a body");
+        // Every body a billboard: exactly two triangles each, whatever the mesh costs.
+        let (_, billboards) = trace(0.0);
+        assert_eq!(
+            billboards,
+            2 * bodies,
+            "a billboard is not two triangles: {billboards} for {bodies} bodies"
+        );
+        assert!(
+            detailed > billboards + 1000,
+            "the meshes cost only {} triangles more than the quads",
+            detailed - billboards
+        );
+
+        // The switch moves with the threshold rather than sitting at a fixed distance: bodies sit at
+        // 6.24, 12.1, 18.1, 24.1 ... metres from an eye 1.7 m up, so a threshold inside the gap draws
+        // one more mesh than one inside the gap below it.
+        // Every body is the same archetype, so one mesh's cost is the average, and the integer
+        // division below counts bodies rather than fractions of one.
+        let per_mesh = (detailed - billboards) / bodies;
+        assert!(per_mesh > 100, "a mesh costs {per_mesh} triangles");
+        let count_meshes = |threshold: f32| {
+            let (_, triangles) = trace(threshold);
+            (triangles - billboards) / per_mesh
+        };
+        assert_eq!(count_meshes(5.0), 0, "a 5 m threshold drew a mesh");
+        assert_eq!(
+            count_meshes(7.0),
+            1,
+            "a 7 m threshold missed the 6.24 m body"
+        );
+        assert_eq!(
+            count_meshes(13.0),
+            2,
+            "a 13 m threshold missed the 12.1 m body"
+        );
+        assert_eq!(
+            count_meshes(19.0),
+            3,
+            "a 19 m threshold missed the 18.1 m body"
+        );
+        // Monotone: a threshold can only ever draw fewer meshes.
+        let mut previous = 0;
+        for step in 1..=50 {
+            let drawn = count_meshes(step as f32);
+            assert!(drawn >= previous, "the switch went backwards at {step} m");
+            previous = drawn;
+        }
+        assert_eq!(previous, 8, "the furthest body is 48 m away");
+    }
+
+    /// Where a world point lands in pixels, straight through the camera's own matrix.
+    fn project(camera: &Camera, width: u32, height: u32, world: Vec3) -> (f32, f32) {
+        let aspect = width as f32 / height as f32;
+        let clip = camera.view_projection(aspect) * world.extend(1.0);
+        let ndc_x = clip.x / clip.w;
+        let ndc_y = clip.y / clip.w;
+        (
+            (ndc_x * 0.5 + 0.5) * width as f32,
+            (0.5 - ndc_y * 0.5) * height as f32,
+        )
+    }
+
+    #[test]
+    fn a_billboard_stands_on_the_body_and_faces_the_camera() {
+        // One body twenty metres dead ahead, and a reference frame with no bodies at all: the pixels
+        // that differ are the billboard, with the ground and the sky cancelled out.
+        let (_, scene, meshes, shot) = avenue(1, 20.0, 1.0);
+        let width = 160;
+        let height = 160;
+        let mut empty = shot.clone();
+        empty.max_bodies = 0;
+        let (reference, _) = render(&scene, &meshes, &empty, width, height);
+        let mut single = shot.clone();
+        single.impostor_distance = 0.0;
+        let (image, stats) = render(&scene, &meshes, &single, width, height);
+        assert_eq!(stats.triangles, 2, "the body was not drawn as a quad");
+        assert_eq!(stats.bodies, 1);
+
+        let mut bounds = (u32::MAX, u32::MAX, 0_u32, 0_u32);
+        let mut drawn = 0_usize;
+        let mut mean = [0.0_f32; 3];
+        for y in 0..height {
+            for x in 0..width {
+                let here = image.pixel(x, y);
+                let there = reference.pixel(x, y);
+                let differs = here
+                    .iter()
+                    .zip(there.iter())
+                    .any(|(left, right)| left.abs_diff(*right) > 2);
+                if differs {
+                    drawn += 1;
+                    bounds = (
+                        bounds.0.min(x),
+                        bounds.1.min(y),
+                        bounds.2.max(x),
+                        bounds.3.max(y),
+                    );
+                    for (channel, value) in mean.iter_mut().zip(here.iter()) {
+                        *channel += f32::from(*value) / 255.0;
+                    }
+                }
+            }
+        }
+        assert!(drawn > 8, "the billboard covered {drawn} pixels");
+
+        // The billboard is 1.75 m tall with its feet on the ground, so its top and bottom are the
+        // projections of those two points, and its width is 0.26 of its height. Predicting them from
+        // the camera's own matrix is the check that the quad is a body and not a smear.
+        let instance = scene.bodies.first().or_die();
+        let foot = project(&shot.camera, width, height, instance.position);
+        let head = project(
+            &shot.camera,
+            width,
+            height,
+            instance.position + Vec3::Y * 1.75 * instance.scale,
+        );
+        let left = bounds.0 as f32;
+        let top = bounds.1 as f32;
+        let right = bounds.2 as f32;
+        let bottom = bounds.3 as f32;
+        let measured_height = bottom - top + 1.0;
+        let measured_width = right - left + 1.0;
+        let expected_height = (foot.1 - head.1).abs() + 1.0;
+        assert!(
+            (measured_height - expected_height).abs() < 2.5,
+            "the billboard is {measured_height} px tall, the body projects to {expected_height}"
+        );
+        assert!(
+            (measured_width / measured_height - 0.26).abs() < 0.12,
+            "the billboard is {} wide for its height, not a quarter of a body",
+            measured_width / measured_height
+        );
+        assert!(
+            (foot.1 - bottom).abs() < 2.5,
+            "the billboard's feet are at {bottom}, the body stands at {}",
+            foot.1
+        );
+        assert!(
+            (head.1 - top).abs() < 2.5,
+            "the billboard's head is at {top}, the body reaches {}",
+            head.1
+        );
+        assert!(
+            (foot.0 - f32::midpoint(left, right)).abs() < 2.5,
+            "the billboard is off the body's axis"
+        );
+
+        // The colour is the asset's material times the instance tint, so a billboard beside a mesh
+        // of the same body is the same colour: the shade differs, the hue does not.
+        let model = assets::model(instance.model).or_die();
+        let expected = [
+            model.material[0] * instance.tint[0],
+            model.material[1] * instance.tint[1],
+            model.material[2] * instance.tint[2],
+        ];
+        // Only the pixels the quad actually covered, so sky inside the bounding box does not dilute
+        // the average.
+        for channel in &mut mean {
+            *channel /= drawn as f32;
+        }
+        let peak = mean.iter().copied().fold(0.0_f32, f32::max).max(1.0e-6);
+        let wanted_peak = expected.iter().copied().fold(0.0_f32, f32::max).max(1.0e-6);
+        for (channel, reference) in mean.iter().zip(expected.iter()) {
+            let ratio = channel / peak;
+            let wanted = reference / wanted_peak;
+            assert!(
+                (ratio - wanted).abs() < 0.15,
+                "the billboard's hue is {ratio:.2} where the material wants {wanted:.2}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_shipped_views_draw_bodies_at_full_detail() {
+        let (city, _scene, bodies) = sample();
+        let shipped = shots(&city, &bodies);
+        assert_eq!(shipped.len(), 5, "a view went missing");
+        for shot in &shipped {
+            assert!(
+                shot.impostor_distance.is_infinite(),
+                "{} draws impostors by default, which would change the PNG it writes",
+                shot.name
+            );
+            let budgeted = crate::session::Budget::default().apply(shot);
+            assert_eq!(budgeted.impostor_distance, 24.0);
+            // The budget is five drawing knobs: framing, lighting and the note travel with the view,
+            // because a flight out of the street fog must not take the fog with it.
+            assert_eq!(budgeted.camera.eye.to_array(), shot.camera.eye.to_array());
+            assert_eq!(budgeted.camera.fov_y.to_bits(), shot.camera.fov_y.to_bits());
+            assert_eq!(budgeted.name, shot.name);
+            assert_eq!(budgeted.note, shot.note);
+        }
+    }
+
     #[test]
     fn the_street_view_sees_bodies_rather_than_only_buildings() {
         let city = CityLayout::generate(SimSeed::new(7), 900.0);

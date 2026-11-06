@@ -112,11 +112,14 @@ square pixels. It is not a screenshot: it is the same rasteriser, called every f
 *The street view, 120 × 88 pixels, captured from a real pty and enlarged four times without smoothing.
 The figures near the camera are meshes; the ones further off are the two-triangle impostors.*
 
-Two things make it fast enough to steer. The *budget* in `session::Budget` changes the shot rather than
-the world — 420 bodies, 240 m of crowd, a 0.75-pixel triangle cull — and everything past 24 m is drawn
-as a two-triangle billboard instead of an 11,000-triangle mesh. Measured on the district view: 850 ms a
-frame at full detail, 19.0 ms under the budget, 38 ms in a real 112 × 88-pixel terminal (26 fps). The budget
-is a `Copy` struct, so a bigger terminal or a faster machine is four numbers, not a code change.
+Two things make it fast enough to steer. The *budget* in `session::Budget` changes the shot rather
+than the world — 420 bodies, 240 m of crowd, a 0.75-pixel triangle cull — and everything past 24 m is
+drawn as two triangles instead of an 11,000-triangle mesh. The switch is hard, measured from the
+camera to the body's feet, and it lives on the shot (`Shot::impostor_distance`) rather than in the
+renderer or the session. Measured on the district view:
+850 ms a frame at full detail, 19.0 ms under the budget, 38 ms in a real 112 × 88-pixel terminal
+(26 fps). The budget is a `Copy` struct, so a bigger terminal or a faster machine is four numbers, not
+a code change.
 
 `--play N` runs the same flight the `p` key runs, `N` frames per view, and writes a PNG per frame plus
 `playback.json`. It needs no tty, so it works in CI and in a pipe:

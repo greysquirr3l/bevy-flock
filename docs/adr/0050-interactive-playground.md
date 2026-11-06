@@ -96,6 +96,16 @@ which is why the benchmark keeps both cases.
   with no GPU, and on the sandbox that produced every artefact in `docs/demo/`.
 - **The budget is data.** `session::Budget` is a plain `Copy` struct, so a caller that wants a richer
   picture (a bigger terminal, a faster machine) changes four numbers rather than the renderer.
+- **The switch is hard, and the distance is eye to feet.** A body crossing the threshold in motion
+  pops between an 11,000-triangle mesh and two triangles: there is no cross-fade band. At the sizes
+  this front end targets a body is three or four pixels tall and both are a smudge, so a fade would
+  buy nothing; on a 300-cell terminal it would be visible, and the answer there is a fade band rather
+  than a lower threshold. The distance is measured from the camera to the body's feet, not to its
+  silhouette, so a tall body crosses a fraction late — under a pixel at 24 m. Three tests pin the
+  behaviour instead of leaving it to inspection: the switch is monotone in the threshold and exact at
+  2 triangles per billboard, the quad's projection matches the camera's own matrix to within 2.5 px
+  with a 0.26 width-to-height ratio, and every shipped view still carries an infinite threshold so the
+  committed PNGs stay full detail.
 - **`impostor_distance` defaults to infinity.** The shipped PNGs are made at full detail and stay
   byte-identical; the LOD exists for the steered view. A renderer that turned it on by default would
   have silently changed five committed images.
