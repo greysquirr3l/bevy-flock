@@ -13,6 +13,7 @@ use crate::assets::{self, ModelKind};
 use crate::city::CityLayout;
 use crate::json;
 use bevy_flock::adapters::primary::render::tint_from_seed;
+use bevy_flock::domain::num;
 use bevy_math::Vec3;
 
 /// One thing to draw.
@@ -158,13 +159,13 @@ impl Scene {
 
     /// How many instances of everything.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.bodies.len() + self.pylons.len() + self.shelters.len() + self.stalls.len()
     }
 
     /// Whether the scene is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -250,10 +251,18 @@ pub fn crowd_fingerprint(bodies: &[Body]) -> u64 {
     for body in bodies {
         // Quantised, not raw bits: the same reason the library's digest is coarse, applied at the
         // resolution that still distinguishes two different crowds.
-        mix((body.position.x * 1_000.0).round() as i64 as u64);
-        mix((body.position.y * 1_000.0).round() as i64 as u64);
-        mix((body.position.z * 1_000.0).round() as i64 as u64);
-        mix((body.yaw * 1_000.0).round() as i64 as u64);
+        mix(num::i64_to_u64(num::f32_to_i64(
+            (body.position.x * 1_000.0).round(),
+        )));
+        mix(num::i64_to_u64(num::f32_to_i64(
+            (body.position.y * 1_000.0).round(),
+        )));
+        mix(num::i64_to_u64(num::f32_to_i64(
+            (body.position.z * 1_000.0).round(),
+        )));
+        mix(num::i64_to_u64(num::f32_to_i64(
+            (body.yaw * 1_000.0).round(),
+        )));
         mix(body.appearance_seed);
     }
     hash
@@ -275,7 +284,7 @@ pub struct Body {
 /// A unit float from a seed, without a generator: the scene needs one number, not a stream.
 fn unit(seed: u64) -> f32 {
     let mixed = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    ((mixed >> 40) & 0x00FF_FFFF) as f32 / 16_777_216.0
+    num::u64_to_f32((mixed >> 40) & 0x00FF_FFFF) / 16_777_216.0
 }
 
 #[cfg(test)]

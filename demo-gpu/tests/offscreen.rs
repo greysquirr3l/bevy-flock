@@ -1,9 +1,10 @@
 //! A frame is a frame: it encodes anywhere, and it draws where a device exists.
 
+use bevy_flock::testkit::OrDie;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::render3d::{self, Meshes};
 use bevy_flock_demo::scene::Scene;
-use bevy_flock_demo_gpu::{Backend, GpuError, GpuRenderer};
+use bevy_flock_demo_gpu::{Backend, FrameSize, GpuError, GpuRenderer, MAX_DIMENSION};
 
 /// A small district view, built the way the binary builds it.
 fn fixture() -> Option<(Scene, Meshes, render3d::Shot)> {
@@ -28,7 +29,12 @@ fn the_noop_backend_encodes_a_frame() {
         eprintln!("skipped: the scene could not be built");
         return;
     };
-    let renderer = GpuRenderer::open(&scene, &meshes, Backend::Noop, 160, 100);
+    let renderer = GpuRenderer::open(
+        &scene,
+        &meshes,
+        Backend::Noop,
+        FrameSize::try_new(160, 100).or_die(),
+    );
     let mut renderer = match renderer {
         Ok(renderer) => renderer,
         Err(error) => {
@@ -59,7 +65,12 @@ fn a_real_adapter_draws_the_same_frame_twice() {
         eprintln!("skipped: the scene could not be built");
         return;
     };
-    let mut renderer = match GpuRenderer::open(&scene, &meshes, Backend::Auto, 200, 125) {
+    let mut renderer = match GpuRenderer::open(
+        &scene,
+        &meshes,
+        Backend::Auto,
+        FrameSize::try_new(200, 125).or_die(),
+    ) {
         Ok(renderer) => renderer,
         Err(GpuError::NoAdapter(_)) => {
             eprintln!("skipped: no adapter on this machine");
@@ -109,4 +120,28 @@ fn a_real_adapter_draws_the_same_frame_twice() {
         drawn > first.len() / 4 / 20,
         "only {drawn} pixels were drawn, which is not a frame"
     );
+}
+
+/// A frame wider than the device's `max_texture_dimension_2d` is refused before a texture is
+/// created, because `create_texture` over that limit panics in wgpu's default error handler rather
+/// than returning.
+#[test]
+fn a_frame_beyond_the_device_limit_is_an_error() {
+    let Some((scene, meshes, _shot)) = fixture() else {
+        eprintln!("skipped: the scene could not be built");
+        return;
+    };
+    let frame = FrameSize::try_new(MAX_DIMENSION, 1).or_die();
+    match GpuRenderer::open(&scene, &meshes, Backend::Noop, frame) {
+        Err(GpuError::FrameTooLarge { limit, width, .. }) => {
+            assert!(
+                limit < MAX_DIMENSION,
+                "the device claims {limit} pixels a side"
+            );
+            assert_eq!(width, MAX_DIMENSION);
+        }
+        // A device that really does hold the largest frame this crate accepts is not a failure.
+        Ok(_) => eprintln!("this device accepts {MAX_DIMENSION} pixels a side"),
+        Err(error) => eprintln!("skipped: {error}"),
+    }
 }

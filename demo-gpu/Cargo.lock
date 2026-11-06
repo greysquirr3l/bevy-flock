@@ -163,6 +163,7 @@ dependencies = [
 name = "bevy-flock-demo-gpu"
 version = "0.1.0"
 dependencies = [
+ "bevy-flock",
  "bevy-flock-demo",
  "bevy_math",
  "bytemuck",

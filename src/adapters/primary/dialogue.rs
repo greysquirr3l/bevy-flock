@@ -133,6 +133,10 @@ impl Default for Barks {
 }
 
 /// Turn requests into events, respecting cooldowns and the per-tick cap.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn produce_barks(
     clock: Res<SimClock>,
     mut barks: ResMut<Barks>,
@@ -324,6 +328,10 @@ impl Default for DialogHub {
 }
 
 /// Poll the provider and publish whatever came back.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn tick_dialog(
     clock: Res<SimClock>,
     mut hub: ResMut<DialogHub>,
@@ -476,7 +484,8 @@ mod tests {
     fn a_saturated_queue_refuses_new_prompts() {
         let mut app = app();
         let mut hub = app.world_mut().resource_mut::<DialogHub>();
-        for index in 0..(crate::behavior::provider::MAX_INFLIGHT as u32 + 4) {
+        let inflight = crate::domain::num::usize_to_u32(crate::behavior::provider::MAX_INFLIGHT);
+        for index in 0..(inflight + 4) {
             hub.ask(
                 DialogPrompt {
                     npc: NpcId::unique(index),

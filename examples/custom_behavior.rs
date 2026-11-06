@@ -27,6 +27,7 @@ use bevy_flock::behavior::registry::LeafBehavior;
 use bevy_flock::behavior::tree::{LeafContext, Status};
 use bevy_flock::domain::cost::VirtualCost;
 use bevy_flock::domain::ids::NpcId;
+use bevy_flock::domain::num;
 use bevy_flock::domain::tick::Tick;
 
 /// Set by the guard leaf while it is watching a door.
@@ -42,14 +43,14 @@ struct WatchDoor {
 
 impl LeafBehavior for WatchDoor {
     fn tick(&self, ctx: &mut LeafContext<'_>) -> Status {
-        let watched = ctx.number(WATCHING).map_or(0.0, |value| value.max(0.0)) as u64;
+        let watched = num::f32_to_u64(ctx.number(WATCHING).map_or(0.0, |value| value.max(0.0)));
         if watched >= self.ticks {
             let _ = ctx.blackboard.remove(WATCHING);
             return Status::Success;
         }
         let _ = ctx
             .blackboard
-            .set(WATCHING, Value::Float((watched + 1) as f32));
+            .set(WATCHING, Value::Float(num::u64_to_f32(watched + 1)));
         Status::Running
     }
 

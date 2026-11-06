@@ -12,6 +12,7 @@
 //! original; see `README.md`.
 
 use bevy_flock::domain::ids::{NpcId, SimSeed};
+use bevy_flock::domain::num;
 use bevy_flock::domain::rng::RngStream;
 use bevy_math::Vec3;
 
@@ -152,7 +153,7 @@ pub struct CityLayout {
 
 /// The unit float from a raw draw. One division, no libm, same answer on every platform.
 fn unit(raw: u32) -> f32 {
-    (raw >> 8) as f32 / 16_777_216.0
+    num::u32_to_f32(raw >> 8) / 16_777_216.0
 }
 
 /// A draw in `-1.0..=1.0`.
@@ -225,14 +226,15 @@ impl CityLayout {
         // says people live rather than spread evenly over the ruins.
         let total: u32 = districts.iter().map(|d| d.class.people()).sum();
         for district in &mut districts {
-            district.population_share = district.class.people() as f32 / total as f32;
+            district.population_share =
+                num::u32_to_f32(district.class.people()) / num::u32_to_f32(total);
         }
 
         // Ruined blocks on a jittered grid. A cell is skipped when it is inside a settlement (the
         // settlement builds its own frontage) or when the roads have taken it.
         let mut block_rng = RngStream::new(seed, 0x02);
         let mut blocks = Vec::new();
-        let cells = (extent * 2.0 / block_pitch).round() as i32;
+        let cells = num::f32_to_i32((extent * 2.0 / block_pitch).round());
         let half = f32::from(i16::try_from(cells).unwrap_or(i16::MAX)) * block_pitch * 0.5;
         for ix in 0..cells {
             for iz in 0..cells {
@@ -314,7 +316,7 @@ impl CityLayout {
             });
         }
         for step in 0..4 {
-            let angle = core::f32::consts::FRAC_PI_2 * step as f32 + 0.4;
+            let angle = core::f32::consts::FRAC_PI_2 * num::i32_to_f32(step) + 0.4;
             let distance = extent * 0.72;
             pylons.push(Pylon {
                 position: Vec3::new(distance * angle.cos(), 0.0, distance * angle.sin()),
@@ -329,7 +331,8 @@ impl CityLayout {
         let mut stalls = Vec::new();
         for district in &districts {
             for index in 0..district.class.stalls() {
-                let fraction = (index as f32 + 0.5) / district.class.stalls() as f32;
+                let fraction =
+                    (num::u32_to_f32(index) + 0.5) / num::u32_to_f32(district.class.stalls());
                 let angle = fraction * core::f32::consts::TAU + unit(stall_rng.next_u32()) * 0.3;
                 let radius = district.radius * (0.35 + unit(stall_rng.next_u32()) * 0.4);
                 stalls.push(Stall {

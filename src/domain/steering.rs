@@ -10,6 +10,7 @@
 
 use bevy_math::Vec3;
 
+use crate::domain::num;
 use crate::domain::spatial::Neighbour;
 use crate::error::ConfigError;
 
@@ -251,7 +252,7 @@ pub fn alignment(velocity: Vec3, neighbours: &[Neighbour]) -> Vec3 {
     for neighbour in neighbours {
         sum += neighbour.velocity;
     }
-    let count = neighbours.len() as f32;
+    let count = num::usize_to_f32(neighbours.len());
     let average = sum / count;
     average - velocity
 }
@@ -266,7 +267,7 @@ pub fn cohesion(position: Vec3, neighbours: &[Neighbour]) -> Vec3 {
     for neighbour in neighbours {
         sum += neighbour.position;
     }
-    let centre = sum / neighbours.len() as f32;
+    let centre = sum / num::usize_to_f32(neighbours.len());
     centre - position
 }
 
@@ -443,7 +444,7 @@ mod tests {
         // worst case for separation being overwhelmed by cohesion.
         let mut positions: Vec<Vec3> = (0..12)
             .map(|index| {
-                let angle = core::f32::consts::TAU * (index as f32) / 12.0;
+                let angle = core::f32::consts::TAU * num::i32_to_f32(index) / 12.0;
                 Vec3::new(libm::cosf(angle), 0.0, libm::sinf(angle)) * 1.6
             })
             .collect();
@@ -458,7 +459,7 @@ mod tests {
                     .enumerate()
                     .filter(|(other, _)| *other != index)
                     .map(|(other, position)| Neighbour {
-                        id: NpcId::unique(other as u32),
+                        id: NpcId::unique(num::usize_to_u32(other)),
                         position: *position,
                         velocity: velocities.at(other),
                         distance_squared: position.distance_squared(centre),

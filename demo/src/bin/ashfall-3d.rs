@@ -10,6 +10,7 @@
 //!
 //! The city, the crowd and the tick count are the same flags as the plan bin, so the two artefacts
 //! describe the same run: `--seed 7 --population 2000 --ticks 600` is the pair in `demo/README.md`.
+use bevy_flock::domain::num;
 use bevy_flock_demo::DemoError;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::assets;
@@ -188,7 +189,7 @@ fn report_json(
                 ("blocks", stats.blocks.to_string()),
                 ("triangles", stats.triangles.to_string()),
                 ("coverage", json::number(stats.coverage, 3)),
-                ("ms", json::number(stats.ms as f32, 1)),
+                ("ms", json::number(num::f64_to_f32(stats.ms), 1)),
                 ("supersample", options.supersample.to_string()),
                 ("pixels", format!("\"0x{fingerprint:016x}\"")),
             ])
@@ -250,7 +251,7 @@ fn report_json(
     )
 }
 
-fn gltf_triangles(mesh: &bevy_flock_demo::gltf::Mesh) -> usize {
+const fn gltf_triangles(mesh: &bevy_flock_demo::gltf::Mesh) -> usize {
     mesh.triangles()
 }
 

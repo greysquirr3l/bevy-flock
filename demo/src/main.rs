@@ -9,6 +9,7 @@
 //! testable without a window — and the tests drive the same `Playground`, so the thing that is
 //! tested is the thing that runs.
 
+use bevy_flock::domain::num;
 use bevy_flock_demo::DemoError;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::assets;
@@ -96,7 +97,7 @@ fn run(arguments: impl Iterator<Item = String>) -> Result<(), DemoError> {
     report.population = playground.live().max(report.population);
     report.spawn_ticks = spawn_ticks;
     report.wall_ms = wall_ms;
-    report.ms_per_tick = wall_ms / options.ticks.max(1) as f64;
+    report.ms_per_tick = wall_ms / num::u64_to_f64(options.ticks.max(1));
     report.crowd = scene::crowd_fingerprint(&bodies);
     report.counts = [
         city.districts.len(),

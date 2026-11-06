@@ -18,6 +18,7 @@ use crate::behavior::blackboard::Blackboard;
 use crate::behavior::tree::{BehaviorTree, LeafContext, LeafDispatch, LeafId, Status};
 use crate::domain::cost::VirtualCost;
 use crate::domain::ids::{GroupId, NpcId};
+use crate::domain::num;
 use crate::domain::tick::Tick;
 use crate::error::RegistrationError;
 
@@ -188,7 +189,7 @@ impl FlockRegistry {
                 kind: "leaf behaviour",
             });
         }
-        let id = self.leaves.len() as LeafId;
+        let id = num::usize_to_u32(self.leaves.len());
         self.names.insert(name.clone(), id);
         self.leaves.push(LeafEntry {
             name,
@@ -221,7 +222,7 @@ impl FlockRegistry {
 
     /// How many leaves are registered.
     #[must_use]
-    pub fn leaf_count(&self) -> usize {
+    pub const fn leaf_count(&self) -> usize {
         self.leaves.len()
     }
 
@@ -315,7 +316,7 @@ impl FlockRegistry {
     }
 
     /// A dispatcher that borrows this registry for one tree evaluation.
-    pub fn dispatcher(&mut self) -> RegistryDispatch<'_> {
+    pub const fn dispatcher(&mut self) -> RegistryDispatch<'_> {
         RegistryDispatch { registry: self }
     }
 }
@@ -535,7 +536,7 @@ mod tests {
         let mut registry = FlockRegistry::new();
         registry.register_leaf("greet", Greet).or_die();
         let shout = registry.register_leaf("shout", Shouty).or_die();
-        let tree = BehaviorTree::try_from_spec(sequence(vec![action(shout)])).or_die();
+        let tree = BehaviorTree::try_from_spec(&sequence(vec![action(shout)])).or_die();
         assert_eq!(registry.tree_cost(&tree), VirtualCost::new(42));
         assert!(registry.tree_cost(&tree) < registry.declared_cost());
     }

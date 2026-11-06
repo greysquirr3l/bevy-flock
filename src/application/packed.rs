@@ -15,6 +15,7 @@
 //! keeping the kernel pure is what makes it testable without a world and benchmarkable at
 //! a population no ECS would survive.
 
+use crate::domain::num;
 use core::f32::consts::TAU;
 #[cfg(feature = "simd")]
 use wide::f32x4;
@@ -61,7 +62,7 @@ impl BlockSums {
     ///
     /// Literal indices, not a lane loop: each of the four records is a register-sized value the
     /// compiler keeps in place either way, and the literal says so.
-    fn lanes(&self) -> [LaneSums; LANES] {
+    const fn lanes(&self) -> [LaneSums; LANES] {
         let count = self.counts.to_array();
         let centre_x = self.centre_x.to_array();
         let centre_y = self.centre_y.to_array();
@@ -195,7 +196,7 @@ impl Pack {
     #[must_use]
     pub fn with_capacity(capacity: usize, params: SteerParams) -> Self {
         let cell_size = params.radius.max(0.001);
-        let side = ((params.extent / cell_size).ceil() as usize).clamp(1, 4096);
+        let side = (num::f32_to_usize((params.extent / cell_size).ceil())).clamp(1, 4096);
         Self {
             positions: Vec::with_capacity(capacity),
             velocities: Vec::with_capacity(capacity),
@@ -210,13 +211,13 @@ impl Pack {
 
     /// How many agents the pack holds.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.positions.len()
     }
 
     /// Whether the pack holds nobody.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.positions.is_empty()
     }
 
@@ -260,7 +261,7 @@ impl Pack {
     pub fn integrate(&mut self, max_speed: f32) {
         let limit = max_speed * max_speed;
         for (velocity, desired) in self.velocities.iter_mut().zip(self.desired.iter()) {
-            let squared = desired[0] * desired[0] + desired[1] * desired[1];
+            let squared = desired[1] * desired[1] + desired[0] * desired[0];
             if squared > limit && squared > 0.0 {
                 let scale = max_speed / squared.sqrt();
                 *velocity = [desired[0] * scale, desired[1] * scale];
@@ -273,8 +274,8 @@ impl Pack {
     /// Move every agent by its velocity over `dt`.
     pub fn advance(&mut self, dt: f32, extent: f32) {
         for (position, velocity) in self.positions.iter_mut().zip(self.velocities.iter()) {
-            position[0] = wrap(position[0] + velocity[0] * dt, extent);
-            position[1] = wrap(position[1] + velocity[1] * dt, extent);
+            position[0] = wrap(velocity[0] * dt + position[0], extent);
+            position[1] = wrap(velocity[1] * dt + position[1], extent);
         }
     }
 
@@ -338,7 +339,7 @@ impl Pack {
                 other_position[0] - position[0],
                 other_position[1] - position[1],
             ];
-            let distance_squared = delta[0] * delta[0] + delta[1] * delta[1];
+            let distance_squared = delta[1] * delta[1] + delta[0] * delta[0];
             if distance_squared > radius_squared {
                 return;
             }
@@ -366,7 +367,7 @@ impl Pack {
             return;
         }
 
-        let count = neighbours as f32;
+        let count = num::u32_to_f32(neighbours);
         centre[0] = centre[0] / count - position[0];
         centre[1] = centre[1] / count - position[1];
         heading[0] /= count;
@@ -538,7 +539,7 @@ impl Pack {
             return;
         }
 
-        let identities = f32x4::from(indices.map(|index| index as f32));
+        let identities = f32x4::from(indices.map(num::usize_to_f32));
         let position = (
             f32x4::from(positions.map(|value| value.0)),
             f32x4::from(positions.map(|value| value.1)),
@@ -615,7 +616,7 @@ impl Pack {
                 let mut cursor = self.heads.get(y * self.side + x).copied().unwrap_or(-1);
                 let mut guard = 0_usize;
                 while cursor >= 0 && guard <= self.positions.len() {
-                    let other = cursor as usize;
+                    let other = num::i32_to_usize(cursor);
                     cursor = self.next.get(other).copied().unwrap_or(-1);
                     guard += 1;
 
@@ -632,7 +633,7 @@ impl Pack {
                     let distance_squared = dx * dx + dy * dy;
 
                     let mut keep = distance_squared.simd_le(radius_squared) & inside;
-                    keep &= f32x4::splat(other as f32).simd_ne(identities);
+                    keep &= f32x4::splat(num::usize_to_f32(other)).simd_ne(identities);
                     if !keep.any() {
                         continue;
                     }
@@ -660,7 +661,7 @@ impl Pack {
         let pairs = counts
             .to_array()
             .iter()
-            .map(|lane| *lane as u64)
+            .map(|lane| num::f32_to_u64(*lane))
             .sum::<u64>();
         (
             BlockSums {
@@ -691,7 +692,7 @@ impl Pack {
                 *slot = previous;
             }
             if let Some(head) = self.heads.get_mut(bucket) {
-                *head = index as i32;
+                *head = num::usize_to_i32(index);
             }
         }
 
@@ -701,8 +702,12 @@ impl Pack {
             let mut cursor = *head;
             let mut guard = 0_usize;
             while cursor >= 0 && guard <= self.positions.len() {
-                self.order.push(cursor as u32);
-                cursor = self.next.get(cursor as usize).copied().unwrap_or(-1);
+                self.order.push((cursor).cast_unsigned());
+                cursor = self
+                    .next
+                    .get(num::i32_to_usize(cursor))
+                    .copied()
+                    .unwrap_or(-1);
                 guard += 1;
             }
         }
@@ -715,7 +720,7 @@ impl Pack {
             if !value.is_finite() || value < 0.0 {
                 0
             } else {
-                (value as usize).min(self.side - 1)
+                (num::f32_to_usize(value)).min(self.side - 1)
             }
         };
         (clamp(x), clamp(y))
@@ -733,8 +738,12 @@ impl Pack {
                 // the frame; the guard is the pack's own length, not a hope.
                 let mut guard = 0_usize;
                 while cursor >= 0 && guard <= self.positions.len() {
-                    visit(cursor as usize);
-                    cursor = self.next.get(cursor as usize).copied().unwrap_or(-1);
+                    visit(num::i32_to_usize(cursor));
+                    cursor = self
+                        .next
+                        .get(num::i32_to_usize(cursor))
+                        .copied()
+                        .unwrap_or(-1);
                     guard += 1;
                 }
             }
@@ -752,7 +761,7 @@ fn wrap(value: f32, extent: f32) -> f32 {
         return value;
     }
     let turns = (value / extent).floor();
-    let wrapped = turns.mul_add(-extent, value);
+    let wrapped = value - turns * extent;
     if wrapped >= extent {
         wrapped - extent
     } else if wrapped < 0.0 {
@@ -769,7 +778,7 @@ fn sub(left: [f32; 2], right: [f32; 2]) -> [f32; 2] {
 fn clamp(vector: [f32; 2], max: f32) -> [f32; 2] {
     // Compare squared lengths so the square root is only paid when a vector is actually
     // over its limit, which is the minority: `hypotf` was 8.4% of the whole 1M frame.
-    let squared = vector[0] * vector[0] + vector[1] * vector[1];
+    let squared = vector[1] * vector[1] + vector[0] * vector[0];
     let limit = max * max;
     if squared <= limit || squared == 0.0 {
         vector
@@ -786,7 +795,7 @@ pub fn scatter(count: usize, extent: f32, params: &mut Pack) {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1);
-        ((state >> 33) as f32) / (u32::MAX >> 1) as f32
+        num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)
     };
     for _ in 0..count {
         let angle = next() * TAU;
@@ -835,7 +844,7 @@ mod tests {
     fn alignment_turns_a_straggler_toward_the_crowd() {
         let mut pack = Pack::with_capacity(4, params());
         for i in 0..3 {
-            pack.push([10.0 + i as f32, 10.0], [1.0, 0.0]);
+            pack.push([10.0 + num::i32_to_f32(i), 10.0], [1.0, 0.0]);
         }
         pack.push([10.0, 11.0], [0.0, 1.0]);
         pack.steer(&params());
@@ -940,11 +949,11 @@ mod tests {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
-            let x = ((state >> 33) as f32 / (u32::MAX >> 1) as f32) * params.extent;
+            let x = (num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)) * params.extent;
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
-            let y = ((state >> 33) as f32 / (u32::MAX >> 1) as f32) * params.extent;
+            let y = (num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)) * params.extent;
             packed.push([x, y], [0.5, 0.25]);
             scalar.push([x, y], [0.5, 0.25]);
         }

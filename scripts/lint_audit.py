@@ -49,6 +49,28 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "tests/tree_no_alloc.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to assert the tree allocates nothing",
+    (
+        "demo/src/city.rs",
+        "too_many_lines",
+    ): "the layout is one pass of the same generator over districts, blocks, shelters and pylons; \
+each section is the city's own narrative and splitting it would pass a dozen mutable accumulators \
+between helpers to keep a line count down",
+    (
+        "demo/src/plan.rs",
+        "too_many_lines",
+    ): "the plan is drawn in painting order -- roads, ruins, settlements, props, crowd, legend -- and \
+each layer is three to eight lines; the alternative is a dozen mutable buffers in a signature",
+    (
+        "demo/benches/render_pipeline.rs",
+        "too_many_lines",
+    ): "a Criterion body that opens a device, uploads the scene and times a pass: the setup is the \
+measurement's context and cannot be hoisted without hiding what is being timed",
+    (
+        "demo-gpu/src/lib.rs",
+        "too_many_lines",
+    ): "a wgpu pipeline is a description that only compiles in one order: bind groups, then the \
+layout, then the pipeline that consumes them, each borrowing the last, so splitting it moves the \
+borrow rather than the line count",
 }
 
 #: What `Cargo.toml` has to deny or warn, so the policy cannot drift while the exceptions stay clean.
@@ -62,11 +84,26 @@ REQUIRED = (
     ("lints.clippy", "panic", "deny"),
     ("lints.clippy", "indexing_slicing", "deny"),
     ("lints.clippy", "cast_ptr_alignment", "deny"),
+    # Restriction lints that no group turns on: `panic` covers `panic!` and leaves `todo!` and
+    # `unimplemented!` allowed, which is how a half-written function ships.
+    ("lints.clippy", "todo", "deny"),
+    ("lints.clippy", "unimplemented", "deny"),
     ("lints.clippy", "all", "warn"),
     ("lints.clippy", "pedantic", "warn"),
     ("lints.clippy", "nursery", "warn"),
     ("lints.clippy", "cargo", "warn"),
     ("lints.clippy", "perf", "warn"),
+    # The lints below were allowed with a paragraph of justification each. They are denied now, and
+    # the code satisfies them; `num` and the Bevy system signatures carry the only `#[expect]`s,
+    # under the three rules `expected_is_allowed` states.
+    ("lints.clippy", "needless_pass_by_value", "deny"),
+    ("lints.clippy", "cast_precision_loss", "deny"),
+    ("lints.clippy", "cast_possible_truncation", "deny"),
+    ("lints.clippy", "cast_sign_loss", "deny"),
+    ("lints.clippy", "cast_possible_wrap", "deny"),
+    ("lints.clippy", "float_cmp", "deny"),
+    ("lints.clippy", "missing_const_for_fn", "deny"),
+    ("lints.clippy", "significant_drop_tightening", "deny"),
 )
 
 #: Every lint the manifest may allow, and the reason the spine cannot be satisfied without it. The
@@ -79,16 +116,27 @@ TOLERATED: dict[str, str] = {
     "missing_panics_doc": "the crate denies `panic`, so the section would be empty in every signature",
     "struct_excessive_bools": "`BoidsConfig` and friends are flags by design; splitting them hides the defaults",
     "multiple_crate_versions": "Bevy's dependency graph is not ours to flatten",
-    "needless_pass_by_value": "Bevy hands systems their parameters by value; the signature is the framework's",
-    "cast_precision_loss": "an f32 simulation converts at audited boundaries; `cast_lossless` is still denied, so widening uses `From`",
-    "cast_possible_truncation": "counts narrow to lane values at audited boundaries, bounded by `MAX_AGENTS`",
-    "cast_sign_loss": "cell offsets and lane counts are non-negative by construction",
-    "cast_possible_wrap": "index arithmetic stays inside `i32` by the same bound as truncation",
-    "suboptimal_flops": "fusing into `mul_add` changes rounding, and the formulas are pinned bit-exactly",
-    "float_cmp": "exact comparison is the substance of the determinism tests",
-    "significant_drop_tightening": "Criterion's `BenchmarkGroup` is a guard by design",
-    "missing_const_for_fn": "`const` is added where it enables a static, not for its own sake",
+    "suboptimal_flops": "the kernels must not fuse: a fused op rounds once where the scalar road rounds twice",
 }
+
+#: The lints `src/domain/num.rs` is allowed to `#[expect]`: it exists so that a numeric cast happens
+#: once, with its rounding written down, instead of at three hundred call sites.
+CAST_LINTS = frozenset(
+    {
+        "cast_precision_loss",
+        "cast_possible_truncation",
+        "cast_sign_loss",
+        "cast_possible_wrap",
+    }
+)
+#: The conversion module: the one file permitted to carry a cast expectation.
+NUM_MODULE = "src/domain/num.rs"
+#: A Bevy system parameter, by value, as the framework's `SystemParam` contract requires.
+BEVY_PARAM = re.compile(
+    r"\b(?:Res|ResMut|Query|Commands|Local|EventReader|EventWriter|Single|ParamSet)<"
+)
+#: How far past an `#[expect]` to look for the signature it is attached to.
+SIGNATURE_WINDOW = 60
 
 #: Attributes worth finding. `cfg_attr` wraps `expect`/`allow`, so the inner lint name is what
 #: matters and the search is textual rather than syntactic.
@@ -97,9 +145,19 @@ ATTRIBUTE = re.compile(r"#!?\[(?:cfg_attr\([^]]*?\)?)?(allow|expect)\(([^]]*?)\)
 LEVEL = re.compile(r'level\s*=\s*"([a-z]+)"')
 #: `reason = "…"`, stripped before an attribute body is split on commas.
 NAME = re.compile(r"[a-z_][a-z0-9_]*")
-REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"')
+# `re.S` because a reason is often wrapped across lines with a trailing `\\`, and a pattern that
+# stops at the newline leaves the reason's own words looking like lint names.
+REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"', re.S)
 
-SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz")
+SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz", "demo", "demo-gpu")
+
+#: Every manifest that carries the policy, relative to the repository root. A crate that is not in
+#: this list has no table to weaken; one that is, cannot weaken it quietly.
+MANIFESTS = ("Cargo.toml", "demo/Cargo.toml", "demo-gpu/Cargo.toml")
+
+#: How strong a level is. A crate may be stricter than the policy — the GPU demo denies the groups
+#: instead of warning about them — but never weaker.
+STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
 
 
 def strip_comments(text: str) -> str:
@@ -190,26 +248,42 @@ def manifest_levels(text: str) -> dict[tuple[str, str], str]:
 
 
 def check_manifest(root: Path) -> int:
-    """Fail if the manifest no longer says what the policy says it says."""
-    path = root / "Cargo.toml"
-    if not path.is_file():
-        print(f"lint audit: no Cargo.toml at {path}")
-        return 1
-    levels = manifest_levels(path.read_text(encoding="utf-8"))
+    """Fail if any manifest no longer says what the policy says it says.
+
+    Every crate that carries the table is checked, because a weakened table in the demo crate is
+    exactly as invisible as one in the library. A crate may be *stricter* than the policy — the GPU
+    demo denies the groups rather than warning about them, since it has no `-D warnings` step of its
+    own — so the comparison is against a strength order rather than for equality.
+    """
     problems = []
-    for table, lint, expected in REQUIRED:
-        found = levels.get((table, lint))
-        if found != expected:
-            problems.append(f"  [{table}] {lint}: expected {expected}, found {found or 'nothing'}")
-    allowed = {
-        lint
-        for (table, lint), level in levels.items()
-        if table.startswith("lints.") and level == "allow"
-    }
-    for lint in sorted(allowed - set(TOLERATED)):
-        problems.append(f"  allowed but not in TOLERATED: {lint}")
-    for lint in sorted(set(TOLERATED) - allowed):
-        problems.append(f"  in TOLERATED but no longer allowed: {lint}")
+    covered: set[str] = set()
+    for relative in MANIFESTS:
+        path = root / relative
+        if not path.is_file():
+            # Silently skipping is how a rename or a delete removes a crate from the policy without
+            # anyone noticing: the audit would report success over two manifests instead of three.
+            problems.append(f"  {relative}: the manifest that carries the policy is missing")
+            continue
+        levels = manifest_levels(path.read_text(encoding="utf-8"))
+        for table, lint, expected in REQUIRED:
+            found = levels.get((table, lint))
+            if STRENGTH.get(found or "", -1) < STRENGTH[expected]:
+                problems.append(
+                    f"  {relative} [{table}] {lint}: expected at least {expected}, "
+                    f"found {found or 'nothing'}"
+                )
+        allowed = {
+            lint
+            for (table, lint), level in levels.items()
+            if table.startswith("lints.") and level == "allow"
+        }
+        for lint in sorted(allowed - set(TOLERATED)):
+            problems.append(f"  {relative}: allowed but not in TOLERATED: {lint}")
+        covered.update(allowed)
+    # A crate may deny what another crate tolerates, so the tolerated set is checked once against
+    # every manifest together: a lint that nothing allows any more is a stale entry.
+    for lint in sorted(set(TOLERATED) - covered):
+        problems.append(f"  no manifest allows the tolerated lint any more: {lint}")
     if problems:
         print("the lint policy in Cargo.toml is not the policy this audit enforces:")
         print("\n".join(problems))
@@ -227,8 +301,46 @@ def walk(root: Path) -> list[Path]:
     files: list[Path] = []
     for top in SEARCH:
         for path in sorted((root / top).rglob("*.rs")):
+            # `demo/`, `demo-gpu/` and `compat/` are packages, so each has its own `target/`: the
+            # build scripts of dependencies write `.rs` files there, and a generated file that
+            # happens to carry an `allow` is not a policy violation this repository can fix.
+            if "target" in path.relative_to(root).parts:
+                continue
             files.append(path)
     return files
+
+
+def expected_is_allowed(path: Path, relative: str, line: int, lint: str) -> bool:
+    """Whether an `#[expect]` at this site is one of the two the policy permits.
+
+    An `#[expect]` is not a suppression: it fails the build when the lint stops firing, so it cannot
+    rot into an `allow`. It is still only correct where the lint is *right about the code and wrong
+    about the rule*, which is true in exactly three places here:
+
+    * `num` owns every numeric cast, and each of its helpers says what it does with the bits.
+    * A Bevy system is handed its parameters by value; `&Res<T>` is not a `SystemParam`, so the
+      signature cannot be changed to satisfy the lint.
+    * Criterion writes its report when the benchmark group drops, so the group's scope *is* the
+      measurement; shortening its life would measure less, not more.
+
+    Everything else is code to fix, which is why the reason is required and the rules are narrow.
+    """
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not 0 < line <= len(lines):
+        return False
+    attribute = "\n".join(lines[line - 1 : line + 8])
+    if not REASON.search(attribute):
+        return False
+    if relative == NUM_MODULE:
+        return lint in CAST_LINTS
+    if lint == "needless_pass_by_value":
+        window = "\n".join(lines[line - 1 : line + SIGNATURE_WINDOW])
+        return bool(BEVY_PARAM.search(window))
+    if lint == "significant_drop_tightening":
+        # Criterion writes its report when the group drops, so the group's scope is the measurement.
+        return relative.startswith("benches/") and "Criterion" in attribute
+    return False
 
 
 def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tuple[str, str]]]:
@@ -240,6 +352,9 @@ def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tu
         for line, kind, lint in scan(path):
             key = (relative, lint)
             if key in SANCTIONED:
+                seen.add(key)
+                continue
+            if kind == "expect" and expected_is_allowed(path, relative, line, lint):
                 seen.add(key)
                 continue
             unsanctioned.append((relative, line, kind, lint))
@@ -282,7 +397,7 @@ def check(root: Path) -> int:
     print(
         f"lint audit: {len(walk(root))} file(s) scanned, {len(REQUIRED)} required and "
         f"{len(TOLERATED)} tolerated manifest entries verified, {len(seen_sanctioned)} sanctioned "
-        "override(s), none unsanctioned"
+        "override(s) and documented expectation(s), none unsanctioned"
     )
     return 0
 
@@ -311,7 +426,11 @@ def write_manifest(
             if extra_allow is not None:
                 lines.append(f'{extra_allow} = "allow"')
         lines.append("")
-    (root / "Cargo.toml").write_text("\n".join(lines), encoding="utf-8")
+    body = "\n".join(lines)
+    for relative in MANIFESTS:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
 
 
 def self_test() -> int:
@@ -345,10 +464,74 @@ def self_test() -> int:
             "a bare rustc lint in an allow",
         ),
         (
+            "src/domain/num.rs",
+            '#[expect(\n    clippy::cast_precision_loss,\n    reason = "a coordinate conversion"\n)]\n'
+            "fn f(v: u32) -> f32 { v as f32 }\n",
+            0,
+            "a documented cast expectation in the conversion module",
+        ),
+        (
+            "src/domain/num.rs",
+            "#[expect(clippy::cast_precision_loss)]\nfn f() {}\n",
+            1,
+            "a cast expectation with no reason",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::cast_precision_loss,\n    reason = "elsewhere"\n)]\n'
+            "fn f(v: u32) -> f32 { v as f32 }\n",
+            1,
+            "a cast expectation outside the conversion module",
+        ),
+        (
+            "src/sys.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n    reason = "a system"\n)]\n'
+            "pub fn s(config: Res<BoidsConfig>) { let _ = config; }\n",
+            0,
+            "a documented expectation on a Bevy system",
+        ),
+        (
+            "benches/x.rs",
+            '#[expect(\n    clippy::significant_drop_tightening,\n'
+            '    reason = "Criterion writes the report when the group drops"\n)]\n'
+            "fn b() {}\n",
+            0,
+            "a documented Criterion guard expectation in a bench",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::significant_drop_tightening,\n'
+            '    reason = "Criterion writes the report when the group drops"\n)]\n'
+            "fn b() {}\n",
+            1,
+            "a Criterion guard expectation outside the benches",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n    reason = "a helper"\n)]\n'
+            "pub fn h(value: String) { let _ = value; }\n",
+            1,
+            "a pass-by-value expectation on something that is not a system",
+        ),
+        (
             "src/other.rs",
             "#![cfg_attr(\n    feature = \"simd\",\n    expect(clippy::indexing_slicing, reason = \"x\")\n)]\nfn f() {}\n",
             1,
             "a cfg_attr wrapping an expect",
+        ),
+        (
+            "demo/target/debug/build/serde/out/private.rs",
+            "#![allow(clippy::unwrap_used)]\nfn f() {}\n",
+            0,
+            "a build artefact is not the repository's code",
+        ),
+        (
+            "src/sys.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n'
+            '    reason = "a system hands its \\\nparameters over by value"\n)]\n'
+            "pub fn s(config: Res<BoidsConfig>) { let _ = config; }\n",
+            0,
+            "a reason wrapped across lines does not become a lint name",
         ),
     ]
     failures = 0
@@ -396,6 +579,28 @@ def self_test() -> int:
             if code != expected:
                 print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
                 failures += 1
+    # A manifest that carries the policy and is not there is a failure. Without this, renaming or
+    # deleting a crate's manifest removes it from the audit and the run still reports success.
+    for label, removed, expected in [
+        ("every manifest present passes", None, 0),
+        ("a missing manifest fails", "demo/Cargo.toml", 1),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root)
+            if removed is not None:
+                (root / removed).unlink()
+            # The real tree's sanctions have no files here, and a stale one is its own failure.
+            saved = dict(SANCTIONED)
+            SANCTIONED.clear()
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.clear()
+                SANCTIONED.update(saved)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
             else:
                 print(f"self-test ok: {label}")
 
@@ -405,12 +610,40 @@ def self_test() -> int:
         ("a downgraded deny fails", 'panic = "warn"', None, None, 1),
         ("an allow in place of a deny fails", 'unwrap_used = "allow"', None, None, 1),
         ("an undocumented allow fails", None, "dead_code", None, 1),
-        ("a tolerated allow that vanished fails", None, None, "float_cmp", 1),
+        ("a tolerated allow that vanished fails", None, None, "must_use_candidate", 1),
         ("an intact manifest passes", 'panic = "deny"', None, None, 0),
     ]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_manifest(root, override, extra, dropped)
+            saved = dict(SANCTIONED)
+            SANCTIONED.clear()
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.update(saved)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
+            else:
+                print(f"self-test ok: {label}")
+
+    # A second manifest is judged on its own: a crate may be stricter than the library, but it may
+    # not allow something the library does not.
+    for label, extra, expected in [
+        ("a crate stricter than the policy passes", None, 0),
+        ("a second manifest with an undocumented allow fails", 'dead_code = "allow"', 1),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root)
+            text = (root / "Cargo.toml").read_text(encoding="utf-8")
+            text = text.replace('suboptimal_flops = "allow"', 'suboptimal_flops = "deny"')
+            if extra is not None:
+                text = text.replace("[lints.clippy]", f"[lints.clippy]\n{extra}", 1)
+            nested = root / "demo-gpu" / "Cargo.toml"
+            nested.parent.mkdir(parents=True, exist_ok=True)
+            nested.write_text(text, encoding="utf-8")
             saved = dict(SANCTIONED)
             SANCTIONED.clear()
             try:

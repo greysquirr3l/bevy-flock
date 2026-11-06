@@ -19,6 +19,7 @@
 use crate::adapters::primary::components::{LodTier, Npc, NpcMood};
 use crate::application::SimClock;
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 use bevy_ecs::prelude::*;
 use bevy_transform::prelude::Transform;
@@ -49,12 +50,12 @@ impl CrowdPulse {
     /// The share of the crowd in each tier, in `0..=1`. Zero when the crowd is empty.
     #[must_use]
     pub fn tier_share(&self) -> [f32; 4] {
-        let total = self.population.max(1) as f32;
+        let total = num::u32_to_f32(self.population.max(1));
         [
-            self.tiers[0] as f32 / total,
-            self.tiers[1] as f32 / total,
-            self.tiers[2] as f32 / total,
-            self.tiers[3] as f32 / total,
+            num::u32_to_f32(self.tiers[0]) / total,
+            num::u32_to_f32(self.tiers[1]) / total,
+            num::u32_to_f32(self.tiers[2]) / total,
+            num::u32_to_f32(self.tiers[3]) / total,
         ]
     }
 }
@@ -119,8 +120,12 @@ impl Diagnostics {
         for tier in self.pulse.tiers {
             mix(u64::from(tier));
         }
-        mix((f64::from(self.pulse.mean_mood) * 1_000.0) as i64 as u64);
-        mix((f64::from(self.pulse.tension) * 1_000.0) as i64 as u64);
+        mix(num::i64_to_u64(num::f64_to_i64(
+            f64::from(self.pulse.mean_mood) * 1_000.0,
+        )));
+        mix(num::i64_to_u64(num::f64_to_i64(
+            f64::from(self.pulse.tension) * 1_000.0,
+        )));
         mix(self.pulse.sampled.get());
         hash
     }
@@ -130,6 +135,10 @@ impl Diagnostics {
 ///
 /// O(n) and deliberately not per frame: the director decides once a second, and the
 /// diagnostics are for humans.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn sample_crowd(
     clock: Res<SimClock>,
     mut pulse: ResMut<CrowdPulse>,
@@ -163,7 +172,7 @@ pub fn sample_crowd(
     pulse.mean_mood = if counted == 0 {
         0.0
     } else {
-        (mood_sum / counted as f32).clamp(-1.0, 1.0)
+        (mood_sum / num::u32_to_f32(counted)).clamp(-1.0, 1.0)
     };
     pulse.sampled = clock.tick;
     diagnostics.pulse = *pulse;
@@ -238,10 +247,10 @@ pub fn check_world(world: &mut World) -> SmallVec<[Violation; 8]> {
     }
     let mut query = world.query::<(Entity, &LodTier)>();
     let tiered: Vec<Entity> = query.iter(world).map(|(entity, _)| entity).collect();
-    let population = identities.len() as u32;
-    if tiered.len() as u32 > population {
+    let population = num::usize_to_u32(identities.len());
+    if num::usize_to_u32(tiered.len()) > population {
         violations.push(Violation::TierSumOverPopulation {
-            sum: tiered.len() as u32,
+            sum: num::usize_to_u32(tiered.len()),
             population,
         });
     }
@@ -409,6 +418,10 @@ impl Default for DebugOverlayConfig {
 /// Sorted by distance so the nearest bots win the budget, which is what makes an overlay
 /// useful while walking through a crowd: the labels you can read are the ones you are
 /// standing next to.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn collect_debug_overlay(
     config: Res<DebugOverlayConfig>,
     mut overlay: ResMut<DebugOverlay>,
@@ -563,7 +576,7 @@ mod tests {
         let mut app = app();
         let tree = std::sync::Arc::new(
             crate::behavior::tree::BehaviorTree::try_from_spec(
-                crate::behavior::tree::NodeSpec::Action(0),
+                &crate::behavior::tree::NodeSpec::Action(0),
             )
             .or_die(),
         );
@@ -622,7 +635,7 @@ mod tests {
         for id in 0..4 {
             app.world_mut().spawn((
                 Npc(NpcId::unique(id)),
-                Transform::from_xyz(id as f32, 0.0, 0.0),
+                Transform::from_xyz(num::u32_to_f32(id), 0.0, 0.0),
             ));
         }
         app.update();
@@ -649,8 +662,16 @@ mod tests {
         app.update();
         let overlay = app.world().resource::<DebugOverlay>();
         assert_eq!(overlay.labels.len(), 2);
-        assert_eq!(overlay.labels.at_ref(0).position.x, 1.0);
-        assert_eq!(overlay.labels.at_ref(1).position.x, 5.0);
+        // The label carries the transform verbatim, so the comparison is exact by intent:
+        // the position is a copy of a literal, not a computed length.
+        assert_eq!(
+            overlay.labels.at_ref(0).position.x.to_bits(),
+            1.0_f32.to_bits()
+        );
+        assert_eq!(
+            overlay.labels.at_ref(1).position.x.to_bits(),
+            5.0_f32.to_bits()
+        );
     }
 
     #[test]

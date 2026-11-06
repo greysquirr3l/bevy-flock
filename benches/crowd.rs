@@ -20,6 +20,7 @@ use bevy_flock::application::avoidance::AvoidanceParams;
 use bevy_flock::application::crowd::{Crowd, CrowdParams, SteeringRoad};
 use bevy_flock::boids::BoidsConfig;
 use bevy_flock::domain::ids::{NpcId, SimSeed};
+use bevy_flock::domain::num;
 use bevy_flock::domain::rng::RngStream;
 use bevy_flock::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use bevy_flock::domain::steering::{AgentState, SteeringParams, desired_velocity};
@@ -57,7 +58,7 @@ fn random_grid(size: usize) -> SpatialGrid {
     let mut grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     for index in 0..size {
         grid.insert(GridEntry {
-            id: NpcId::unique(index as u32),
+            id: NpcId::unique(num::usize_to_u32(index)),
             position: bevy_math::Vec3::new(
                 rng.next_range_f32(-200.0, 200.0),
                 rng.next_range_f32(-200.0, 200.0),
@@ -98,6 +99,10 @@ fn bench_roads(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "Criterion writes the report when the group drops; the group is the measurement"
+)]
 fn bench_frames(c: &mut Criterion) {
     let mut group = c.benchmark_group("flock_frame");
     group.sample_size(20);
@@ -168,7 +173,6 @@ fn bench_steering(c: &mut Criterion) {
         velocity: bevy_math::Vec3::ZERO,
         target: Some(bevy_math::Vec3::new(40.0, 0.0, 4.0)),
     };
-
     let mut group = c.benchmark_group("steering_step");
     group.throughput(Throughput::Elements(1));
     group.bench_function("32_neighbours", |b| {
@@ -198,7 +202,7 @@ fn bench_kernel(c: &mut Criterion) {
         crowd.configure_from_grid(&grid);
         crowd.begin();
         for index in 0..10_000_u32 {
-            let step = index as f32;
+            let step = num::u32_to_f32(index);
             let ring = pack * libm::sqrtf(step);
             let angle = step * 2.399_963_2;
             crowd.push(
@@ -242,7 +246,7 @@ fn bench_temperament(c: &mut Criterion) {
         crowd.configure_from_grid(&grid);
         crowd.begin();
         for index in 0..10_000_u32 {
-            let step = index as f32;
+            let step = num::u32_to_f32(index);
             let ring = 1.6 * libm::sqrtf(step);
             let angle = step * 2.399_963_2;
             crowd.push(
@@ -261,7 +265,7 @@ fn bench_temperament(c: &mut Criterion) {
             );
             if biased {
                 // A spread wide enough to matter: the band a real temperament produces.
-                let swing = (index % 7) as f32 / 7.0;
+                let swing = num::u32_to_f32(index % 7) / 7.0;
                 crowd.set_bias(
                     index as usize,
                     [0.6 + swing, 0.7 + swing * 0.6, 1.4 - swing, 0.9, 1.1],
@@ -299,7 +303,7 @@ fn bench_avoidance(c: &mut Criterion) {
         crowd.configure_from_grid(&grid);
         crowd.begin();
         for index in 0..u32::try_from(size).or_die() {
-            let step = index as f32;
+            let step = num::u32_to_f32(index);
             let ring = 1.6 * libm::sqrtf(step);
             let angle = step * 2.399_963_2;
             crowd.push(
@@ -367,8 +371,8 @@ fn perception_fixtures() -> PerceptionFixtures {
 
     let mut buffer = StimulusBuffer::new(4_096).or_die();
     for index in 0..4_096_u32 {
-        let angle = index as f32 * 0.37;
-        let radius = 2.0 + (index % 40) as f32;
+        let angle = num::u32_to_f32(index) * 0.37;
+        let radius = 2.0 + num::u32_to_f32(index % 40);
         buffer.push(Stimulus::new(
             if index % 3 == 0 {
                 StimulusKind::Sound
@@ -424,7 +428,7 @@ fn bench_perception(c: &mut Criterion) {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                let angle = observer_index as f32 * 0.11;
+                let angle = num::u32_to_f32(observer_index) * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive(buffer, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
             }
@@ -439,7 +443,7 @@ fn bench_perception(c: &mut Criterion) {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                let angle = observer_index as f32 * 0.11;
+                let angle = num::u32_to_f32(observer_index) * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive_indexed(
                     &buffer,
@@ -459,7 +463,7 @@ fn bench_perception(c: &mut Criterion) {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                let angle = observer_index as f32 * 0.11;
+                let angle = num::u32_to_f32(observer_index) * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive_indexed(
                     &spread,
@@ -488,8 +492,8 @@ fn bench_perception(c: &mut Criterion) {
         .with_budget(1_000_000);
     let obstacles: Vec<ObstacleFootprint> = (0..32)
         .map(|index| {
-            let x = 2.0 + (index % 8) as f32 * 7.5;
-            let z = 2.0 + (index / 8) as f32 * 15.0;
+            let x = (num::i32_to_f32(index % 8)).mul_add(7.5, 2.0);
+            let z = (num::i32_to_f32(index / 8)).mul_add(15.0, 2.0);
             ObstacleFootprint::new(Vec3::new(x, 0.0, z), Vec3::new(x + 3.0, 2.0, z + 6.0)).or_die()
         })
         .collect();

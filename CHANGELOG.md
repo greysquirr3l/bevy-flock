@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The lint spine now actually holds.** Eight lints that had been allowed with a paragraph each —
+  `needless_pass_by_value`, `cast_precision_loss`, `cast_possible_truncation`, `cast_sign_loss`,
+  `cast_possible_wrap`, `float_cmp`, `missing_const_for_fn`, `significant_drop_tightening` — are
+  denied across the library, tests, benches and examples, which is what `Cargo.toml` claimed while
+  VS Code reported the opposite. Every cast goes through `src/domain/num.rs`, which says what each
+  conversion does with the bits; float equality is compared as `to_bits()`; Bevy systems carry the
+  only `#[expect(needless_pass_by_value)]`s, because `&Res<T>` is not a `SystemParam`.
+- **`suboptimal_flops` is allowed, and that is a numerical decision.** Fusing the kernels by hand
+  made `application::packed::tests::the_vectorised_kernel_agrees_with_the_scalar_one` fail on a
+  one-ulp difference: a fused multiply-add rounds once where the scalar reference rounds twice.
+  `scripts/lint_audit.py` now enforces three documented `#[expect]` rules instead of two, and the
+  Criterion guard in `benches/` is the third.
 - **CI is reproducible without Actions.** `scripts/ci_local.py` reads `.github/workflows/ci.yml` and
   runs the `run:` steps itself, expanding each matrix and substituting it into the commands, so the
   local gate cannot drift from the real one. It skips the steps that provision a runner, refuses any

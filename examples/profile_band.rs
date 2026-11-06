@@ -20,6 +20,7 @@ use bevy_flock::adapters::primary::band::{
     Band, BandAgent, BandConfig, BandPlugin, MidAgent, seed_field,
 };
 use bevy_flock::adapters::primary::cognition::PlayerFocus;
+use bevy_flock::domain::num;
 
 const NEAR: u32 = 5_000;
 const MID: u32 = 15_000;
@@ -53,7 +54,7 @@ fn main() {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1);
-        ((state >> 33) as f32) / (u32::MAX >> 1) as f32
+        num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)
     };
     for _ in 0..NEAR {
         let angle = next() * std::f32::consts::TAU;
@@ -61,22 +62,22 @@ fn main() {
         app.world_mut().spawn((
             BandAgent::still(),
             Transform::from_xyz(
-                512.0 + angle.cos() * distance,
-                512.0 + angle.sin() * distance,
+                angle.cos().mul_add(distance, 512.0),
+                angle.sin().mul_add(distance, 512.0),
                 0.0,
             ),
         ));
     }
     for index in 0..MID {
-        let angle = index as f32 * 0.000_419;
-        let distance = 400.0 + (index % 700) as f32;
+        let angle = num::u32_to_f32(index) * 0.000_419;
+        let distance = 400.0 + num::u32_to_f32(index % 700);
         app.world_mut().spawn((
             MidAgent {
                 velocity: [0.4, 0.1],
             },
             Transform::from_xyz(
-                512.0 + angle.cos() * distance,
-                512.0 + angle.sin() * distance,
+                angle.cos().mul_add(distance, 512.0),
+                angle.sin().mul_add(distance, 512.0),
                 0.0,
             ),
         ));

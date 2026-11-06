@@ -6,6 +6,7 @@
 
 use bevy_flock::domain::groups::{Formation, GroupStore};
 use bevy_flock::domain::ids::{GroupId, NpcId};
+use bevy_flock::domain::num;
 use bevy_flock::testkit::OrDie;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
@@ -48,10 +49,12 @@ fn bench_slots(c: &mut Criterion) {
                         let Some(group) = store.get(*id) else {
                             continue;
                         };
-                        let count = group.len() as u16;
+                        let count = num::usize_to_u16(group.len());
                         let formation = group.formation();
                         for (slot, _npc) in group.members().enumerate() {
-                            if let Some(offset) = formation.slot_offset(slot as u16, count, 1.5) {
+                            if let Some(offset) =
+                                formation.slot_offset(num::usize_to_u16(slot), count, 1.5)
+                            {
                                 sum += offset.length();
                             }
                         }
@@ -81,7 +84,7 @@ fn bench_membership(c: &mut Criterion) {
         let (mut store, ids) = build(50, 16);
         let mut index = 0_u32;
         bencher.iter(|| {
-            let slot = index.checked_rem(ids.len() as u32).unwrap_or(0) as usize;
+            let slot = index.checked_rem(num::usize_to_u32(ids.len())).unwrap_or(0) as usize;
             index = index.wrapping_add(1);
             if let Some(id) = ids.get(slot).copied() {
                 let member = store.get(id).and_then(|group| group.members().next());

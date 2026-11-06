@@ -23,17 +23,17 @@ reports **11 warnings** across 5 lints: `assert_is_empty` × 6, `chunks_exact_to
 
 | Lint | Site | What it wants |
 | --- | --- | --- |
-| `assert_is_empty` | `src/adapters/primary/dialogue.rs:472` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/adapters/primary/interaction.rs:865` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/adapters/primary/observability.rs:629` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `src/adapters/primary/dialogue.rs:480` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `src/adapters/primary/interaction.rs:870` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `src/adapters/primary/observability.rs:642` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
 | `assert_is_empty` | `src/application/tiered.rs:318` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/behavior/provider.rs:424` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `src/behavior/provider.rs:425` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
 | `assert_is_empty` | `src/domain/cognition.rs:474` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `chunks_exact_to_as_chunks` | `src/domain/navmesh.rs:348` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
-| `manual_slice_fill` | `src/application/packed.rs:682` | `slice.fill(value)`, which is one call and vectorises |
+| `chunks_exact_to_as_chunks` | `src/domain/navmesh.rs:349` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
+| `manual_slice_fill` | `src/application/packed.rs:683` | `slice.fill(value)`, which is one call and vectorises |
 | `needless_borrows_for_generic_args` | `src/domain/memory.rs:874` | pass the closure by value; the call already takes it by value |
-| `tuple_array_conversions` | `src/application/packed.rs:511` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
-| `tuple_array_conversions` | `src/application/packed.rs:514` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `src/application/packed.rs:512` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `src/application/packed.rs:515` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
 <!-- lint-drift:end -->
 
 ## What is deliberately not here

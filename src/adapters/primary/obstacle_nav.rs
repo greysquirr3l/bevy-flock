@@ -122,7 +122,7 @@ impl ObstacleNavState {
 
     /// The last complete source. `None` until the first rebuild publishes.
     #[must_use]
-    pub fn source(&self) -> Option<&GridNavSource> {
+    pub const fn source(&self) -> Option<&GridNavSource> {
         self.nav.source()
     }
 

@@ -56,6 +56,7 @@ use crate::domain::ids::NpcId;
 use crate::domain::memory::{
     MemoryArchive, MemoryIndex, MemorySlot, MemoryStore, NpcMemories, SubjectId,
 };
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// The four bytes every save starts with.
@@ -279,7 +280,7 @@ pub struct SubjectEntry {
 impl SubjectEntry {
     /// An entry with no label.
     #[must_use]
-    pub fn new(key: SubjectKey, kind: SubjectKind) -> Self {
+    pub const fn new(key: SubjectKey, kind: SubjectKind) -> Self {
         Self {
             key,
             kind,
@@ -319,18 +320,18 @@ impl SubjectRegistry {
     /// Register a subject, returning its dense identifier.
     pub fn register(&mut self, entry: SubjectEntry) -> SubjectId {
         self.entries.push(entry);
-        SubjectId::new((self.entries.len() - 1) as u16)
+        SubjectId::new(num::usize_to_u16(self.entries.len() - 1))
     }
 
     /// How many subjects are registered.
     #[must_use]
-    pub fn len(&self) -> u16 {
-        self.entries.len() as u16
+    pub const fn len(&self) -> u16 {
+        num::usize_to_u16(self.entries.len())
     }
 
     /// Whether no subject is registered.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -352,7 +353,7 @@ impl SubjectRegistry {
         self.entries
             .iter()
             .position(|entry| entry.key == key)
-            .map(|index| SubjectId::new(index as u16))
+            .map(|index| SubjectId::new(num::usize_to_u16(index)))
     }
 
     /// A checksum over every `(key, kind)` pair in identifier order.
@@ -457,22 +458,22 @@ impl SavedSlot {
 
     /// Convert a live slot into an age-based one.
     #[must_use]
-    pub fn from_slot(slot: MemorySlot, now: Tick) -> Self {
-        let now = now.get() as u32;
+    pub const fn from_slot(slot: MemorySlot, now: Tick) -> Self {
+        let now = num::u64_to_low_u32(now.get());
         Self {
             familiarity: slot.familiarity(),
             valence: slot.valence(),
             encounters: slot.encounters(),
             flags: slot.flags(),
-            first_age: now.wrapping_sub(slot.first_seen().get() as u32),
-            last_age: now.wrapping_sub(slot.last_seen().get() as u32),
+            first_age: now.wrapping_sub(num::u64_to_low_u32(slot.first_seen().get())),
+            last_age: now.wrapping_sub(num::u64_to_low_u32(slot.last_seen().get())),
         }
     }
 
     /// Convert an age-based slot back into a stamp-based one at `now`.
     #[must_use]
     pub fn to_slot(self, now: Tick) -> MemorySlot {
-        let now = now.get() as u32;
+        let now = num::u64_to_low_u32(now.get());
         MemorySlot::from_parts(
             self.familiarity,
             self.valence,
@@ -594,13 +595,13 @@ impl MemorySnapshot {
     pub fn slot_count(&self) -> u32 {
         self.records
             .iter()
-            .map(|record| record.slots.len() as u32)
+            .map(|record| num::usize_to_u32(record.slots.len()))
             .sum()
     }
 
     /// The registry written into the file, if any.
     #[must_use]
-    pub fn registry(&self) -> Option<&SubjectRegistry> {
+    pub const fn registry(&self) -> Option<&SubjectRegistry> {
         self.registry.as_ref()
     }
 
@@ -633,8 +634,8 @@ impl MemorySnapshot {
         out.extend_from_slice(&self.half_life_ticks.to_le_bytes());
         let subjects = self.registry.as_ref().map_or(0, SubjectRegistry::len);
         out.extend_from_slice(&subjects.to_le_bytes());
-        out.extend_from_slice(&(self.records.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(sections.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u32(self.records.len())).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u16(sections.len())).to_le_bytes());
         let crc = crc32(&out);
         out.extend_from_slice(&crc.to_le_bytes());
 
@@ -642,8 +643,8 @@ impl MemorySnapshot {
         for (id, payload) in &sections {
             out.extend_from_slice(&id.to_le_bytes());
             out.extend_from_slice(&0_u16.to_le_bytes());
-            out.extend_from_slice(&(offset as u32).to_le_bytes());
-            out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(num::usize_to_u32(offset)).to_le_bytes());
+            out.extend_from_slice(&(num::usize_to_u32(payload.len())).to_le_bytes());
             out.extend_from_slice(&crc32(payload).to_le_bytes());
             offset += payload.len();
         }
@@ -672,7 +673,7 @@ impl MemorySnapshot {
         for record in &self.records {
             out.extend_from_slice(&record.npc.to_bits().to_le_bytes());
             out.push(record.origin.code());
-            out.extend_from_slice(&(record.slots.len() as u16).to_le_bytes());
+            out.extend_from_slice(&(num::usize_to_u16(record.slots.len())).to_le_bytes());
             for (subject, slot) in &record.slots {
                 out.extend_from_slice(&subject.get().to_le_bytes());
                 out.extend_from_slice(&slot.familiarity.to_le_bytes());
@@ -887,7 +888,7 @@ impl MemorySnapshot {
                 }),
                 LegacySubjectPolicy::AssumeDense => Ok((
                     (0..subjects)
-                        .map(|raw| Some(SubjectId::new(raw as u16)))
+                        .map(|raw| Some(SubjectId::new(num::usize_to_u16(raw))))
                         .collect(),
                     true,
                 )),
@@ -898,7 +899,7 @@ impl MemorySnapshot {
             // Same registry, same positions: no translation, no drops, no doubt.
             return Ok((
                 (0..subjects)
-                    .map(|raw| Some(SubjectId::new(raw as u16)))
+                    .map(|raw| Some(SubjectId::new(num::usize_to_u16(raw))))
                     .collect(),
                 false,
             ));
@@ -990,7 +991,7 @@ impl MemorySnapshot {
                     report.archive_records += 1;
                 }
             }
-            report.slots += slots.len() as u32;
+            report.slots += num::usize_to_u32(slots.len());
         }
         Ok(report)
     }
@@ -1022,7 +1023,7 @@ impl MemorySnapshot {
 
     /// Whether the snapshot holds nothing.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
 }
@@ -1193,7 +1194,7 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, position: 0 }
     }
 
@@ -1201,7 +1202,7 @@ impl<'a> Reader<'a> {
         self.position
     }
 
-    fn remaining(&self) -> usize {
+    const fn remaining(&self) -> usize {
         self.bytes.len().saturating_sub(self.position)
     }
 
@@ -1238,7 +1239,7 @@ impl<'a> Reader<'a> {
     }
 
     fn read_i16(&mut self) -> Result<i16, SaveError> {
-        self.read_u16().map(|value| value as i16)
+        self.read_u16().map(u16::cast_signed)
     }
 
     fn read_u32(&mut self) -> Result<u32, SaveError> {
@@ -1290,7 +1291,8 @@ const fn crc_entry(index: u32) -> u32 {
 /// save, not per byte.
 fn crc32(bytes: &[u8]) -> u32 {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(index as u32)));
+    let table =
+        TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(num::usize_to_u32(index))));
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in bytes {
         let index = usize::from(u8::try_from((crc ^ u32::from(*byte)) & 0xFF).unwrap_or(0));
@@ -1910,7 +1912,7 @@ mod tests {
         out.extend_from_slice(&1_u16.to_le_bytes());
         out.extend_from_slice(&half_life.to_le_bytes());
         out.extend_from_slice(&registry().len().to_le_bytes());
-        out.extend_from_slice(&(snapshot.records.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u32(snapshot.records.len())).to_le_bytes());
         out.extend_from_slice(&0_u16.to_le_bytes());
         let crc = crc32(&out);
         out.extend_from_slice(&crc.to_le_bytes());
@@ -1949,8 +1951,8 @@ mod tests {
                 .map_or(0_u16, SubjectRegistry::len)
                 .to_le_bytes(),
         );
-        out.extend_from_slice(&(snapshot.records.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(sections.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u32(snapshot.records.len())).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u16(sections.len())).to_le_bytes());
         let header_crc = crc32(&out);
         out.extend_from_slice(&header_crc.to_le_bytes());
 
@@ -1958,8 +1960,8 @@ mod tests {
         for (section_id, body) in &sections {
             out.extend_from_slice(&section_id.to_le_bytes());
             out.extend_from_slice(&0_u16.to_le_bytes());
-            out.extend_from_slice(&(offset as u32).to_le_bytes());
-            out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(num::usize_to_u32(offset)).to_le_bytes());
+            out.extend_from_slice(&(num::usize_to_u32(body.len())).to_le_bytes());
             out.extend_from_slice(&crc32(body).to_le_bytes());
             offset += body.len();
         }

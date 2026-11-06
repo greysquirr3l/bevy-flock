@@ -206,6 +206,7 @@ impl Default for Blackboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::num;
 
     const A: BlackboardKey = BlackboardKey::new(1);
     const B: BlackboardKey = BlackboardKey::new(2);
@@ -231,7 +232,10 @@ mod tests {
     fn overflow_is_reported_not_silent() {
         let mut board = Blackboard::new();
         for index in 0..BLACKBOARD_CAPACITY {
-            assert!(board.set(BlackboardKey::new(index as u16), Value::Int(index as i64)));
+            assert!(board.set(
+                BlackboardKey::new(num::usize_to_u16(index)),
+                Value::Int(num::usize_to_i64(index))
+            ));
         }
         assert!(!board.set(BlackboardKey::new(999), Value::Int(0)));
         assert_eq!(board.len(), BLACKBOARD_CAPACITY);

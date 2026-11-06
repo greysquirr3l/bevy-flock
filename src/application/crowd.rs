@@ -36,6 +36,7 @@ use bevy_tasks::{ComputeTaskPool, TaskPool};
 use wide::f32x4;
 
 use crate::application::avoidance::{self, AvoidBody, AvoidReport, AvoidanceParams};
+use crate::domain::num;
 use crate::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{SteeringParams, accumulate};
 
@@ -61,7 +62,7 @@ pub struct CrowdParams {
 impl CrowdParams {
     /// Take the model from the ECS configuration, so both paths steer identically.
     #[must_use]
-    pub fn from_steering(params: &SteeringParams) -> Self {
+    pub const fn from_steering(params: &SteeringParams) -> Self {
         Self {
             radius: params.neighbour_radius,
             separation: params.separation_radius,
@@ -231,7 +232,7 @@ impl BlockAccumulators {
     /// Literal indices, not a lane loop: each record is a register-sized value the compiler keeps
     /// in place either way, and the literal says so.
     #[inline]
-    fn lanes(&self) -> [NeighbourSums; 4] {
+    const fn lanes(&self) -> [NeighbourSums; 4] {
         let count = self.counts.to_array();
         // Tuple fields, not a destructure: three sibling bindings one letter apart are what
         // `similar_names` exists to reject, and `.0` costs nothing.
@@ -246,25 +247,25 @@ impl BlockAccumulators {
         let away_z = self.sep.2.to_array();
         [
             NeighbourSums {
-                count: count[0] as u32,
+                count: num::f32_to_u32(count[0]),
                 sum_p: [sum_x[0], sum_y[0], sum_z[0]],
                 sum_v: [head_x[0], head_y[0], head_z[0]],
                 sep: [away_x[0], away_y[0], away_z[0]],
             },
             NeighbourSums {
-                count: count[1] as u32,
+                count: num::f32_to_u32(count[1]),
                 sum_p: [sum_x[1], sum_y[1], sum_z[1]],
                 sum_v: [head_x[1], head_y[1], head_z[1]],
                 sep: [away_x[1], away_y[1], away_z[1]],
             },
             NeighbourSums {
-                count: count[2] as u32,
+                count: num::f32_to_u32(count[2]),
                 sum_p: [sum_x[2], sum_y[2], sum_z[2]],
                 sum_v: [head_x[2], head_y[2], head_z[2]],
                 sep: [away_x[2], away_y[2], away_z[2]],
             },
             NeighbourSums {
-                count: count[3] as u32,
+                count: num::f32_to_u32(count[3]),
                 sum_p: [sum_x[3], sum_y[3], sum_z[3]],
                 sum_v: [head_x[3], head_y[3], head_z[3]],
                 sep: [away_x[3], away_y[3], away_z[3]],
@@ -308,13 +309,13 @@ impl Crowd {
     ///
     /// Useful for reproducing a reported frame time on a fixed road, and for a host that would
     /// rather keep its cores for something else.
-    pub fn set_road(&mut self, road: SteeringRoad) {
+    pub const fn set_road(&mut self, road: SteeringRoad) {
         self.road = road;
     }
 
     /// The road this crowd steers on.
     #[must_use]
-    pub fn road(&self) -> SteeringRoad {
+    pub const fn road(&self) -> SteeringRoad {
         self.road
     }
 
@@ -322,25 +323,25 @@ impl Crowd {
     ///
     /// The result is identical either way — `a_parallel_frame_matches_the_scalar_one` holds
     /// that — so this is a diagnostic switch, not a performance one.
-    pub fn set_sequential(&mut self, sequential: bool) {
+    pub const fn set_sequential(&mut self, sequential: bool) {
         self.sequential = sequential;
     }
 
     /// Whether this crowd steers on one thread.
     #[must_use]
-    pub fn is_sequential(&self) -> bool {
+    pub const fn is_sequential(&self) -> bool {
         self.sequential
     }
 
     /// How many agents are held.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.positions.len()
     }
 
     /// Whether the crowd is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.positions.is_empty()
     }
 
@@ -756,7 +757,7 @@ impl Crowd {
             *row = SoaRow {
                 position,
                 velocity,
-                agent: agent as f32,
+                agent: num::usize_to_f32(agent),
             };
         }
     }
@@ -794,7 +795,7 @@ impl Crowd {
                     self.flags.get(agent).copied().unwrap_or(0) & STEERS != 0
                 });
                 if all_steer {
-                    let home = cell as u32;
+                    let home = num::usize_to_u32(cell);
                     self.steer_block(
                         slot,
                         home,
@@ -891,14 +892,14 @@ impl Crowd {
         // 26 neighbours — the box the band kernel walks.
         let home = home as usize;
         let origin = (
-            (home % self.dims[0] as usize) as i64,
-            (home / self.dims[0] as usize % self.dims[1] as usize) as i64,
-            (home / (self.dims[0] * self.dims[1]) as usize) as i64,
+            num::usize_to_i64(home % self.dims[0] as usize),
+            num::usize_to_i64(home / self.dims[0] as usize % self.dims[1] as usize),
+            num::usize_to_i64(home / (self.dims[0] * self.dims[1]) as usize),
         );
         for z in (origin.2 - 1).max(0)..=(origin.2 + 1).min(dims[2] - 1) {
             for y in (origin.1 - 1).max(0)..=(origin.1 + 1).min(dims[1] - 1) {
                 for x in (origin.0 - 1).max(0)..=(origin.0 + 1).min(dims[0] - 1) {
-                    let at = ((z * dims[1] + y) * dims[0] + x) as usize;
+                    let at = num::i64_to_usize((z * dims[1] + y) * dims[0] + x);
                     let begin = self.start.get(at).copied().unwrap_or(0) as usize;
                     let end = begin + self.counts.get(at).copied().unwrap_or(0) as usize;
                     // One bound for the whole cell: the range comes from a bucket, and slicing
@@ -1116,7 +1117,7 @@ impl ScanView<'_> {
                         let dx = position[0] - other_position[0];
                         let dy = position[1] - other_position[1];
                         let dz = position[2] - other_position[2];
-                        let distance_squared = dx * dx + dy * dy + dz * dz;
+                        let distance_squared = dz * dz + (dy * dy + dx * dx);
                         if distance_squared > radius_squared {
                             continue;
                         }
@@ -1184,7 +1185,7 @@ impl ScanView<'_> {
                         let dx = position[0] - other_position[0];
                         let dy = position[1] - other_position[1];
                         let dz = position[2] - other_position[2];
-                        if dx * dx + dy * dy + dz * dz > radius_squared {
+                        if dz * dz + (dy * dy + dx * dx) > radius_squared {
                             continue;
                         }
                         visit(other);
@@ -1258,7 +1259,7 @@ fn avoid_agent(
     };
     let velocity = intended(view, desired, index);
     let priority = priorities.get(index).copied().unwrap_or(params.priority);
-    let reach = params.floor() + params.max_adjust * params.horizon;
+    let reach = params.max_adjust * params.horizon + params.floor();
     let mut correction = [0.0_f32; 3];
     let mut touched = false;
     view.for_each_neighbour(index, position, reach, |other| {
@@ -1435,7 +1436,7 @@ fn desired_for(
         max_speed,
     );
     if count > 0 {
-        let scaled = count as f32;
+        let scaled = num::u32_to_f32(count);
         let average = Vec3::new(sum_v[0], sum_v[1], sum_v[2]) / scaled;
         steering = accumulate(
             steering,
@@ -1474,7 +1475,7 @@ fn clamp_axis(value: f32, dim: u32) -> u32 {
     if index < 0.0 {
         return 0;
     }
-    let index = index as u32;
+    let index = num::f32_to_u32(index);
     index.min(last)
 }
 
@@ -1499,7 +1500,7 @@ mod tests {
         let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut points = Vec::new();
         for index in 0..count {
-            let step = index as f32;
+            let step = num::u32_to_f32(index);
             let ring = 1.6 * libm::sqrtf(step);
             let angle = step * 2.399_963_2;
             let position = [
@@ -1668,7 +1669,7 @@ mod tests {
                 state = state
                     .wrapping_mul(6_364_136_223_846_793_005)
                     .wrapping_add(1);
-                ((state >> 33) as f32 / 8_388_608.0) * 2_000.0 - 1_000.0
+                (num::u64_to_f32(state >> 33) / 8_388_608.0) * 2_000.0 + -1_000.0
             };
             let position = [next(), next() * 0.5, next()];
             let mine = crowd.cell_of(position);
@@ -1926,7 +1927,10 @@ mod tests {
             report.isolated,
             report.steered
         );
-        let mut heights: Vec<i64> = points.iter().map(|(p, _, _)| p[1] as i64).collect();
+        let mut heights: Vec<i64> = points
+            .iter()
+            .map(|(p, _, _)| num::f32_to_i64(p[1]))
+            .collect();
         heights.sort_unstable();
         heights.dedup();
         assert!(heights.len() > 4, "the fixture really does span the axis");
@@ -1937,8 +1941,8 @@ mod tests {
         let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let points = (0..count)
             .map(|index| {
-                let step = index as f32;
-                ([step * 2.0 - 2.0, 0.0, 0.0], [0.0; 3], None)
+                let step = num::u32_to_f32(index);
+                ([step * 2.0 + -2.0, 0.0, 0.0], [0.0; 3], None)
             })
             .collect();
         (grid, points)
@@ -1949,16 +1953,22 @@ mod tests {
         let mut crowd = packed(&grid, &points);
         let params = params();
         assert_eq!(crowd.bias(0), None);
-        assert_eq!(crowd.weights_for(0, &params), params.weights);
+        assert_eq!(
+            crowd.weights_for(0, &params).map(f32::to_bits),
+            params.weights.map(f32::to_bits)
+        );
         crowd.set_bias(0, [2.0, 0.5, 1.0, 1.0, 1.0]);
         let weights = crowd.weights_for(0, &params);
-        assert_eq!(weights[0], params.weights[0] * 2.0);
-        assert_eq!(weights[1], params.weights[1] * 0.5);
-        assert_eq!(weights[2], params.weights[2]);
+        assert_eq!(weights[0].to_bits(), (params.weights[0] * 2.0).to_bits());
+        assert_eq!(weights[1].to_bits(), (params.weights[1] * 0.5).to_bits());
+        assert_eq!(weights[2].to_bits(), params.weights[2].to_bits());
         // A NaN or wild multiplier clamps to the documented band instead of poisoning a frame.
         crowd.set_bias(2, [f32::NAN, 99.0, 0.0, 1.0, 1.0]);
         let clamped = crowd.bias(2).or_die();
-        assert_eq!([clamped[0], clamped[1], clamped[2]], [1.0, 4.0, 0.25]);
+        assert_eq!(
+            [clamped[0], clamped[1], clamped[2]].map(f32::to_bits),
+            [1.0_f32, 4.0, 0.25].map(f32::to_bits)
+        );
     }
     #[test]
     fn a_cohesive_bias_pulls_an_agent_toward_the_crowd() {

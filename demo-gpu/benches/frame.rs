@@ -26,7 +26,7 @@
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::render3d::{self, Meshes};
 use bevy_flock_demo::scene::Scene;
-use bevy_flock_demo_gpu::{Backend, GpuRenderer};
+use bevy_flock_demo_gpu::{Backend, FrameSize, GpuRenderer};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 /// The population and tick count the other Ashfall artefacts use.
@@ -37,10 +37,8 @@ const TICKS: u64 = 600;
 const SEED: u64 = 7;
 /// Layout half-extent, metres.
 const EXTENT: f32 = 900.0;
-/// Frame width: the software comparison's district width, halved.
-const WIDTH: u32 = 600;
-/// Frame height.
-const HEIGHT: u32 = 375;
+/// The frame: the software comparison's district size, halved.
+const FRAME: FrameSize = FrameSize::DEFAULT;
 
 fn bench_frames(criterion: &mut Criterion) {
     let backend = std::env::var("ASHFALL_BACKEND").map_or(Backend::Auto, |name| {
@@ -53,16 +51,15 @@ fn bench_frames(criterion: &mut Criterion) {
         eprintln!("benchmark skipped: the scene could not be built");
         return;
     };
-    let mut renderer =
-        match GpuRenderer::open(&fixture.scene, &fixture.meshes, backend, WIDTH, HEIGHT) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                // A machine with no driver is a machine that cannot run this benchmark; say so rather
-                // than reporting zero, which would read as "free".
-                eprintln!("benchmark skipped: {error}");
-                return;
-            }
-        };
+    let mut renderer = match GpuRenderer::open(&fixture.scene, &fixture.meshes, backend, FRAME) {
+        Ok(renderer) => renderer,
+        Err(error) => {
+            // A machine with no driver is a machine that cannot run this benchmark; say so rather
+            // than reporting zero, which would read as "free".
+            eprintln!("benchmark skipped: {error}");
+            return;
+        }
+    };
     let adapter = renderer.adapter().clone();
     println!(
         "adapter {} {}",
@@ -81,8 +78,8 @@ fn bench_frames(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(format!(
         "gpu/{}/{}x{}",
         adapter.backend.to_lowercase(),
-        WIDTH,
-        HEIGHT
+        FRAME.width(),
+        FRAME.height()
     ));
     group.sample_size(20);
     group.bench_function("frame", |bencher| {

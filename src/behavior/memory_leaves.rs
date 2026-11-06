@@ -16,6 +16,7 @@ use crate::behavior::registry::LeafBehavior;
 use crate::behavior::social::KEY_TALK_TO;
 use crate::behavior::tree::{LeafContext, Status};
 use crate::domain::cost::VirtualCost;
+use crate::domain::num;
 
 /// How the strongest remembered subject feels about the NPC, signed. Negative is
 /// hostile.
@@ -82,20 +83,20 @@ impl Remembered {
 
     /// Whether this subject did something hostile, by flag rather than by intensity.
     #[must_use]
-    pub fn is_grudge(self) -> bool {
+    pub const fn is_grudge(self) -> bool {
         let hostile = FLAG_ATTACKED | FLAG_ROBBED;
         self.flags & hostile != 0 || self.valence <= GRUDGE_VALENCE
     }
 
     /// Whether this subject is both known and welcome.
     #[must_use]
-    pub fn is_friend(self) -> bool {
+    pub const fn is_friend(self) -> bool {
         self.familiarity >= RECOGNITION_THRESHOLD && self.valence >= WARM_VALENCE
     }
 
     /// Whether the NPC would recognise this subject at all.
     #[must_use]
-    pub fn is_known(self) -> bool {
+    pub const fn is_known(self) -> bool {
         self.familiarity >= RECOGNITION_THRESHOLD
     }
 }
@@ -108,7 +109,7 @@ impl Remembered {
 fn whole(value: Option<Value>) -> Option<i64> {
     match value? {
         Value::Int(raw) => Some(raw),
-        Value::Float(raw) if raw.is_finite() => Some(raw as i64),
+        Value::Float(raw) if raw.is_finite() => Some(num::f32_to_i64(raw)),
         Value::Bool(_) | Value::Npc(_) | Value::Position(_) | Value::Float(_) => None,
     }
 }

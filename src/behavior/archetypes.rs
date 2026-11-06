@@ -89,7 +89,7 @@ impl Archetype {
         leaves: &StandardLeaves,
         cost_of: impl Fn(LeafId) -> VirtualCost,
     ) -> Result<ArchetypeLogic, TreeError> {
-        let tree = BehaviorTree::try_from_spec(self.spec(leaves))?.named(self.as_str());
+        let tree = BehaviorTree::try_from_spec(&self.spec(leaves))?.named(self.as_str());
         let cost = tree.declared_cost(&cost_of);
         Ok(ArchetypeLogic {
             archetype: self,

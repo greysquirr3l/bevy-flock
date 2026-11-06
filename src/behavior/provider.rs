@@ -112,7 +112,7 @@ pub struct TemplateProvider {
 impl TemplateProvider {
     /// A provider that answers immediately from a table.
     #[must_use]
-    pub fn new(table: BarkTable, seed: u64) -> Self {
+    pub const fn new(table: BarkTable, seed: u64) -> Self {
         Self {
             table,
             rng: RngStream::new(crate::domain::ids::SimSeed::new(seed), 0xBA2C),
@@ -330,6 +330,7 @@ impl ProviderQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::num;
     use crate::testkit::{GetOrDieRef, OrDie};
 
     /// A provider that answers after a fixed number of polls.
@@ -445,7 +446,7 @@ mod tests {
     fn the_queue_refuses_more_than_it_can_track() {
         let mut queue = ProviderQueue::new();
         for index in 0..MAX_INFLIGHT {
-            assert!(queue.submit(prompt(index as u32, 0, 100), Tick::ZERO));
+            assert!(queue.submit(prompt(num::usize_to_u32(index), 0, 100), Tick::ZERO));
         }
         assert!(!queue.submit(prompt(999, 0, 100), Tick::ZERO));
         assert_eq!(queue.refused(), 1);

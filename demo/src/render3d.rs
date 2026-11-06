@@ -22,6 +22,7 @@ use crate::city::CityLayout;
 use crate::gltf::{self, Mesh};
 use crate::raster::{Atmosphere, Camera, Face, Image, Renderer, Style, Vertex};
 use crate::scene::{Body, Instance, Scene};
+use bevy_flock::domain::num;
 use bevy_math::{Mat4, Quat, Vec3};
 use std::collections::BTreeMap;
 
@@ -359,7 +360,7 @@ fn street_vantage(centre: Vec3, bodies: &[Body]) -> Vec3 {
     let mut best = base;
     let mut best_gap = f32::NEG_INFINITY;
     for step in -6..=6 {
-        let candidate = base + Vec3::new(step as f32 * 2.5, 0.0, 0.0);
+        let candidate = base + Vec3::new(num::i32_to_f32(step) * 2.5, 0.0, 0.0);
         let gap = bodies
             .iter()
             .map(|body| body.position.distance(candidate))
@@ -637,7 +638,7 @@ pub fn render_with(
     height: u32,
 ) -> (Image, Stats) {
     let started = std::time::Instant::now();
-    let aspect = width as f32 / height.max(1) as f32;
+    let aspect = num::u32_to_f32(width) / num::u32_to_f32(height.max(1));
     let renderer =
         Renderer::new(&shot.camera, aspect, shot.atmosphere).with_min_area(shot.min_area);
     let mut image = Image::new(width, height);
@@ -646,10 +647,12 @@ pub fn render_with(
     let forward = (shot.camera.target - shot.camera.eye).normalize_or_zero();
     let pitch = forward.y.clamp(-1.0, 1.0).asin();
     let horizon_ndc = -pitch.tan() / (shot.camera.fov_y * 0.5).tan().max(1.0e-4);
-    let horizon_row = ((1.0 - (horizon_ndc * 0.5 + 0.5))
-        * f32::from(u16::try_from(height).unwrap_or(1)))
-    .clamp(0.0, f32::from(u16::try_from(height).unwrap_or(1)))
-    .round() as u32;
+    let rows = f32::from(u16::try_from(height).unwrap_or(1));
+    let horizon_row = num::f32_to_u32(
+        ((1.0 - (horizon_ndc * 0.5 + 0.5)) * rows)
+            .clamp(0.0, rows)
+            .round(),
+    );
     image.sky_to(
         [
             shot.atmosphere.sky[0] * 0.55 + 0.05,
@@ -744,12 +747,12 @@ fn push_ground(renderer: &Renderer, image: &mut Image, eye: Vec3, reach: f32, ti
         0.0,
         (eye.z / tile).round() * tile,
     );
-    let tiles = ((reach * 2.0) / tile).ceil() as i32 + 2;
+    let tiles = num::f32_to_i32(((reach * 2.0) / tile).ceil()) + 2;
     let half = tiles / 2;
     for row in -half..half {
         for column in -half..half {
-            let x = anchor.x + column as f32 * tile;
-            let z = anchor.z + row as f32 * tile;
+            let x = anchor.x + num::i32_to_f32(column) * tile;
+            let z = anchor.z + num::i32_to_f32(row) * tile;
             let corners = [
                 Vec3::new(x, 0.0, z),
                 Vec3::new(x + tile, 0.0, z),
@@ -945,7 +948,7 @@ mod tests {
         let bodies: Vec<Body> = (0..24_u64)
             .map(|index| Body {
                 archetype: bevy_flock::domain::temperament::Archetype::Urchin,
-                position: centre + Vec3::new((index % 6) as f32 * 3.0 - 9.0, 0.0, -8.0),
+                position: centre + Vec3::new(num::u64_to_f32(index % 6) * 3.0 - 9.0, 0.0, -8.0),
                 yaw: 0.0,
                 appearance_seed: index,
             })
@@ -1047,7 +1050,7 @@ mod tests {
         let bodies: Vec<crate::scene::Body> = (0..count as u64)
             .map(|index| crate::scene::Body {
                 archetype: bevy_flock::domain::temperament::Archetype::Urchin,
-                position: centre + Vec3::new(0.0, 0.0, -(first + index as f32 * step)),
+                position: centre + Vec3::new(0.0, 0.0, -(first + num::u64_to_f32(index) * step)),
                 yaw: 0.0,
                 appearance_seed: index,
             })
@@ -1126,7 +1129,7 @@ mod tests {
         // Monotone: a threshold can only ever draw fewer meshes.
         let mut previous = 0;
         for step in 1..=50 {
-            let drawn = count_meshes(step as f32);
+            let drawn = count_meshes(num::i32_to_f32(step));
             assert!(drawn >= previous, "the switch went backwards at {step} m");
             previous = drawn;
         }
@@ -1135,13 +1138,13 @@ mod tests {
 
     /// Where a world point lands in pixels, straight through the camera's own matrix.
     fn project(camera: &Camera, width: u32, height: u32, world: Vec3) -> (f32, f32) {
-        let aspect = width as f32 / height as f32;
+        let aspect = num::u32_to_f32(width) / num::u32_to_f32(height);
         let clip = camera.view_projection(aspect) * world.extend(1.0);
         let ndc_x = clip.x / clip.w;
         let ndc_y = clip.y / clip.w;
         (
-            (ndc_x * 0.5 + 0.5) * width as f32,
-            (0.5 - ndc_y * 0.5) * height as f32,
+            (ndc_x * 0.5 + 0.5) * num::u32_to_f32(width),
+            (0.5 - ndc_y * 0.5) * num::u32_to_f32(height),
         )
     }
 
@@ -1199,10 +1202,10 @@ mod tests {
             height,
             instance.position + Vec3::Y * 1.75 * instance.scale,
         );
-        let left = bounds.0 as f32;
-        let top = bounds.1 as f32;
-        let right = bounds.2 as f32;
-        let bottom = bounds.3 as f32;
+        let left = num::u32_to_f32(bounds.0);
+        let top = num::u32_to_f32(bounds.1);
+        let right = num::u32_to_f32(bounds.2);
+        let bottom = num::u32_to_f32(bounds.3);
         let measured_height = bottom - top + 1.0;
         let measured_width = right - left + 1.0;
         let expected_height = (foot.1 - head.1).abs() + 1.0;
@@ -1241,7 +1244,7 @@ mod tests {
         // Only the pixels the quad actually covered, so sky inside the bounding box does not dilute
         // the average.
         for channel in &mut mean {
-            *channel /= drawn as f32;
+            *channel /= num::usize_to_f32(drawn);
         }
         let peak = mean.iter().copied().fold(0.0_f32, f32::max).max(1.0e-6);
         let wanted_peak = expected.iter().copied().fold(0.0_f32, f32::max).max(1.0e-6);
@@ -1420,7 +1423,7 @@ mod tests {
             if distance >= 20.0 {
                 // Fractions, not counts: the quad shrinks as the body recedes, so the number of
                 // pixels it covers falls even as its share of them rises.
-                let fraction = switched as f32 / footprint as f32;
+                let fraction = num::usize_to_f32(switched) / num::usize_to_f32(footprint);
                 assert!(
                     fraction >= previous_fraction - 0.01,
                     "the ramp went backwards at {distance} m: {fraction:.3} after {previous_fraction:.3}"
@@ -1449,13 +1452,21 @@ mod tests {
                 "{} draws impostors by default, which would change the PNG it writes",
                 shot.name
             );
-            assert_eq!(shot.impostor_band, 0.0, "{} fades by default", shot.name);
+            assert_eq!(
+                shot.impostor_band.to_bits(),
+                0.0_f32.to_bits(),
+                "{} fades by default",
+                shot.name
+            );
             let budgeted = crate::session::Budget::default().apply(shot);
-            assert_eq!(budgeted.impostor_distance, 24.0);
-            assert_eq!(budgeted.impostor_band, 8.0);
+            assert_eq!(budgeted.impostor_distance.to_bits(), 24.0_f32.to_bits());
+            assert_eq!(budgeted.impostor_band.to_bits(), 8.0_f32.to_bits());
             // The budget is five drawing knobs: framing, lighting and the note travel with the view,
             // because a flight out of the street fog must not take the fog with it.
-            assert_eq!(budgeted.camera.eye.to_array(), shot.camera.eye.to_array());
+            assert_eq!(
+                budgeted.camera.eye.to_array().map(f32::to_bits),
+                shot.camera.eye.to_array().map(f32::to_bits)
+            );
             assert_eq!(budgeted.camera.fov_y.to_bits(), shot.camera.fov_y.to_bits());
             assert_eq!(budgeted.name, shot.name);
             assert_eq!(budgeted.note, shot.note);
@@ -1473,7 +1484,7 @@ mod tests {
         let bodies: Vec<crate::scene::Body> = (0..40_u64)
             .map(|index| crate::scene::Body {
                 archetype: bevy_flock::domain::temperament::Archetype::Urchin,
-                position: centre + Vec3::new((index % 8) as f32 * 2.0 - 8.0, 0.0, -6.0),
+                position: centre + Vec3::new(num::u64_to_f32(index % 8) * 2.0 - 8.0, 0.0, -6.0),
                 yaw: 0.0,
                 appearance_seed: index,
             })

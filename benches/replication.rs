@@ -7,14 +7,15 @@
 
 use bevy_flock::adapters::secondary::network::{InterestSet, NpcNetState};
 use bevy_flock::domain::ids::NpcId;
+use bevy_flock::domain::num;
 use bevy_math::Vec3;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn positions(count: usize) -> Vec<Vec3> {
     (0..count)
         .map(|index| {
-            let x = (index % 512) as f32 * 0.5;
-            let z = (index / 512) as f32 * 0.5;
+            let x = num::usize_to_f32(index % 512) * 0.5;
+            let z = num::usize_to_f32(index / 512) * 0.5;
             Vec3::new(x, 0.0, z)
         })
         .collect()
@@ -55,8 +56,12 @@ fn bench_encoding(c: &mut Criterion) {
         .map(|index| {
             NpcNetState::capture(
                 NpcId::unique(index),
-                Vec3::new(index as f32 * 0.1, 0.0, index as f32 * 0.2),
-                index as f32 * 0.01,
+                Vec3::new(
+                    num::u32_to_f32(index) * 0.1,
+                    0.0,
+                    num::u32_to_f32(index) * 0.2,
+                ),
+                num::u32_to_f32(index) * 0.01,
                 bevy_flock::adapters::primary::components::LodTier::Near,
                 0.25,
             )

@@ -127,6 +127,11 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 struct_excessive_bools = "allow"
 multiple_crate_versions = "allow"
+# The steering kernels must not fuse. `a.mul_add(b, c)` rounds once where `a * b + c` rounds twice,
+# and the SIMD road, the threaded road and the scalar reference are compared bit for bit; fusing one
+# of them and not the others is a one-ulp divergence that the parity tests catch. Fusion is a
+# measurement, not a default, so the lint that asks for it is off crate-wide.
+suboptimal_flops = "allow"
 # Denied: every one of these is a production incident waiting to happen, tests included. The code
 # satisfies them by construction rather than by `#[allow]`: fallible constructors are `Result`,
 # test fixtures use `testkit::OrDie` (which reports the failure with `unreachable!`, not `panic!`),
@@ -136,6 +141,13 @@ expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
+# `panic` covers `panic!` and nothing else. `todo!()` and `unimplemented!()` are restriction lints
+# that no group turns on, so without these two a function nobody finished would pass every gate
+# above. `unreachable!()` is deliberately not denied: it is the failure primitive in
+# `testkit::OrDie` and the way a `match` says "the other arm cannot happen", which is a claim about
+# the code rather than a promise to come back to it.
+todo = "deny"
+unimplemented = "deny"
 # --- Documented deviations -------------------------------------------------------------------
 # Each of these is a deliberate departure from the spine, kept in this one table rather than
 # scattered through the tree as `#[allow]` attributes, and each with the reason it cannot be
@@ -143,27 +155,18 @@ cast_ptr_alignment = "deny"
 #
 # Bevy hands systems their parameters by value (`Res<T>`, `Query<..>`): the signature is the
 # framework's, not an inefficiency to fix, and taking them by reference does not compile.
-needless_pass_by_value = "allow"
-# Numeric simulation code converts between integer counts and f32 lane values in audited places.
-# Precision loss there is inherent to an f32 simulation and bounded by the documented epsilon;
-# `cast_lossless` is exact and is *not* allowed, so every widening cast still has to use `From`.
-cast_precision_loss = "allow"
-cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
-cast_possible_wrap = "allow"
-# Fusing a multiply-add changes rounding. The simulation's formulas are pinned by tests that compare
-# exact bits, so each site opts in deliberately rather than by suggestion.
-suboptimal_flops = "allow"
-# Exact float comparison is the *point* of the determinism tests: they assert bit-identical output
-# across runs and across the scalar/wide/threaded roads.
-float_cmp = "allow"
-# Criterion's `BenchmarkGroup` is a guard by design: it owns the benchmark it measures and must
-# outlive it, which is exactly what this lint objects to.
-significant_drop_tightening = "allow"
-# `const` is added where it enables a static or a `const` caller, not for its own sake; the scheduler
-# and config types already are.
-missing_const_for_fn = "allow"
-
+# The eight lints below were once allowed here with a paragraph of justification each. They are now
+# denied, and the code satisfies them: the justifications were real, but "the simulation is numeric"
+# is an argument for a documented `#[expect]` at the few sites where it is genuinely unavoidable,
+# not for switching the lint off across 40 files.
+needless_pass_by_value = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+missing_const_for_fn = "deny"
+significant_drop_tightening = "deny"
 # Benchmarks run on the settings a game actually ships with: default release,
 # no LTO. Flattering the numbers with `lto = "fat"` would measure a build nobody
 # uses. Debug symbols stay on so a profile can be read against the source.

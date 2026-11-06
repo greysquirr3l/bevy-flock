@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MemoryArchive, MemoryStore, SubjectId};
+use bevy_flock::domain::num;
 use bevy_flock::domain::saves::{
     LEGACY_VERSION, LegacySubjectPolicy, MAGIC, MemorySnapshot, Origin, SubjectEntry, SubjectKey,
     SubjectKind, SubjectRegistry,
@@ -124,7 +125,7 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
     out.extend_from_slice(&1_u16.to_le_bytes());
     out.extend_from_slice(&snapshot.half_life_ticks.to_le_bytes());
     out.extend_from_slice(&2_u16.to_le_bytes());
-    out.extend_from_slice(&(snapshot.records.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(num::usize_to_u32(snapshot.records.len())).to_le_bytes());
     out.extend_from_slice(&0_u16.to_le_bytes());
     let crc = crc32(&out);
     out.extend_from_slice(&crc.to_le_bytes());
@@ -134,7 +135,7 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
             Origin::Store => 0,
             Origin::Archive => 1,
         });
-        out.extend_from_slice(&(record.slots.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u16(record.slots.len())).to_le_bytes());
         for (subject, slot) in &record.slots {
             out.extend_from_slice(&subject.get().to_le_bytes());
             out.extend_from_slice(&slot.familiarity.to_le_bytes());
@@ -155,7 +156,8 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
 /// reused the library's implementation could agree with a bug in it.
 fn crc32(bytes: &[u8]) -> u32 {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(index as u32)));
+    let table =
+        TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(num::usize_to_u32(index))));
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in bytes {
         let index = usize::from(u8::try_from((crc ^ u32::from(*byte)) & 0xFF).unwrap_or(0));

@@ -44,6 +44,7 @@ use crate::domain::ids::NpcId;
 use crate::domain::memory::{
     DecayPolicy, Encounter, EncounterKind, MemoryIndex, MemoryStore, SubjectId,
 };
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// How the last interaction went, as a score a tree can compare.
@@ -293,13 +294,13 @@ impl InteractionQueue {
 
     /// How many are waiting.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.pending.len()
     }
 
     /// Whether anything is waiting.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
@@ -356,11 +357,11 @@ impl InteractionLog {
         self.deferred
     }
 
-    fn note_refusal(&mut self) {
+    const fn note_refusal(&mut self) {
         self.refused = self.refused.saturating_add(1);
     }
 
-    fn note_repeat(&mut self) {
+    const fn note_repeat(&mut self) {
         self.repeated = self.repeated.saturating_add(1);
     }
 
@@ -391,6 +392,10 @@ impl InteractionLog {
 /// The reaction is written to the actor's blackboard under
 /// [`KEY_INTERACTION_REACTION`] and [`KEY_INTERACTION_KIND`] before cognition runs, so a
 /// behaviour tree can branch on "they liked that" in the same frame the smile happened.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn resolve_interactions(
     clock: Res<SimClock>,
     config: Res<InteractionConfig>,
@@ -460,7 +465,7 @@ pub fn resolve_interactions(
 impl InteractionConfig {
     /// The decay the store is read through. The memory bridge owns the authoritative policy;
     /// this is the default a standalone interaction layer uses.
-    fn decay() -> DecayPolicy {
+    const fn decay() -> DecayPolicy {
         DecayPolicy::MINUTE
     }
 }
@@ -568,7 +573,7 @@ fn score_of(
     const DELTA_PER_POINT: i32 = 8;
     const FATIGUE_POINTS: i32 = 12;
 
-    let mood_points = (mood.clamp(-1.0, 1.0) * MOOD_POINTS) as i32;
+    let mood_points = num::f32_to_i32(mood.clamp(-1.0, 1.0) * MOOD_POINTS);
     let act = i32::from(kind.delta()) / DELTA_PER_POINT;
     let fatigue = if repeated { -FATIGUE_POINTS } else { 0 };
     let Some((valence, familiarity)) = remembered else {

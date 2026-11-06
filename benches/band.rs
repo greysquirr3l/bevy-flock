@@ -10,6 +10,7 @@ use bevy_flock::adapters::primary::band::{
     Band, BandAgent, BandConfig, BandPlugin, MidAgent, seed_field,
 };
 use bevy_flock::adapters::primary::cognition::PlayerFocus;
+use bevy_flock::domain::num;
 
 fn world(total: u32, manifested: u32) -> App {
     let config = BandConfig::default();
@@ -32,7 +33,7 @@ fn world(total: u32, manifested: u32) -> App {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1);
-        ((state >> 33) as f32) / (u32::MAX >> 1) as f32
+        num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)
     };
     for _ in 0..manifested {
         let angle = next() * std::f32::consts::TAU;
@@ -40,8 +41,8 @@ fn world(total: u32, manifested: u32) -> App {
         app.world_mut().spawn((
             BandAgent::still(),
             Transform::from_xyz(
-                256.0 + angle.cos() * distance,
-                256.0 + angle.sin() * distance,
+                angle.cos().mul_add(distance, 256.0),
+                angle.sin().mul_add(distance, 256.0),
                 0.0,
             ),
         ));
@@ -62,15 +63,15 @@ fn bench_band(c: &mut Criterion) {
         // the mid band is specified at. The previous ring was 300-800 m and the pack's grid
         // only covered 512 m, so every mid agent fell outside it.
         for index in 0..15_000_u32 {
-            let angle = index as f32 * 0.000_419;
-            let distance = 400.0 + (index % 700) as f32;
+            let angle = num::u32_to_f32(index) * 0.000_419;
+            let distance = 400.0 + num::u32_to_f32(index % 700);
             app.world_mut().spawn((
                 MidAgent {
                     velocity: [0.4, 0.1],
                 },
                 Transform::from_xyz(
-                    256.0 + angle.cos() * distance,
-                    256.0 + angle.sin() * distance,
+                    angle.cos().mul_add(distance, 256.0),
+                    angle.sin().mul_add(distance, 256.0),
                     0.0,
                 ),
             ));

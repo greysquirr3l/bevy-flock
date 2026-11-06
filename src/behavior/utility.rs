@@ -37,6 +37,7 @@
 //! output alone, which is a requirement rather than a nicety.
 
 use crate::behavior::blackboard::{Blackboard, BlackboardKey, Value};
+use crate::domain::num;
 use smallvec::SmallVec;
 use std::fmt::Write as _;
 
@@ -82,7 +83,7 @@ impl Input {
             Self::Constant(value) => value,
             Self::Key(key) => match blackboard.get(key) {
                 Some(Value::Float(value)) => value,
-                Some(Value::Int(value)) => value as f32,
+                Some(Value::Int(value)) => num::i64_to_f32(value),
                 Some(Value::Bool(value)) => f32::from(u8::from(value)),
                 _ => 0.0,
             },
@@ -159,9 +160,9 @@ impl Curve {
     #[must_use]
     pub fn evaluate(&self, input: f32) -> f32 {
         let raw = match self {
-            Self::Linear { slope, intercept } => *slope * input + *intercept,
+            Self::Linear { slope, intercept } => (*slope).mul_add(input, *intercept),
             Self::Quadratic { exponent } => input.max(0.0).powf(*exponent),
-            Self::Inverse { falloff } => 1.0 / (1.0 + *falloff * input.max(0.0)),
+            Self::Inverse { falloff } => 1.0 / (*falloff).mul_add(input.max(0.0), 1.0),
             Self::Logistic {
                 steepness,
                 midpoint,
@@ -199,7 +200,7 @@ impl Curve {
                     return y1;
                 }
                 let t = (input - x0) / span;
-                return y0 + (y1 - y0) * t;
+                return (y1 - y0).mul_add(t, y0);
             }
         }
         points.last().map_or(0.0, |(_, y)| *y)
@@ -323,7 +324,7 @@ impl UtilitySet {
         if !self.compensation {
             return (raw, raw);
         }
-        let count = self.considerations.len() as f32;
+        let count = num::usize_to_f32(self.considerations.len());
         // With one consideration the exponent is zero, and `x^0` is 1.0 — which would
         // turn every single-consideration behaviour into an unconditional winner. The
         // compensation is the identity below two considerations, so it is applied only
@@ -370,7 +371,7 @@ pub struct UtilityEntry {
 impl UtilityEntry {
     /// An entry.
     #[must_use]
-    pub fn new(id: BehaviorId, label: &'static str, set: UtilitySet) -> Self {
+    pub const fn new(id: BehaviorId, label: &'static str, set: UtilitySet) -> Self {
         Self { id, label, set }
     }
 }
@@ -662,7 +663,12 @@ mod tests {
         set.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         set.push(Consideration::keyed(KEY_FEAR).with_weight(0.0))
             .or_die();
-        assert_eq!(set.score(&board(0.0, 1.0, 0.0)), 0.0);
+        // A zero weight gates the behaviour off, so the score must be exactly zero, not
+        // merely small: the comparison is on the bits, which is what "gated off" means.
+        assert_eq!(
+            set.score(&board(0.0, 1.0, 0.0)).to_bits(),
+            0.0_f32.to_bits()
+        );
     }
 
     #[test]
@@ -778,6 +784,10 @@ mod tests {
     #[test]
     fn an_empty_set_always_wants_to_run() {
         let set = UtilitySet::new();
-        assert_eq!(set.score(&board(0.0, 0.0, 0.0)), 1.0);
+        // An empty set scores exactly one by construction, so the comparison is exact.
+        assert_eq!(
+            set.score(&board(0.0, 0.0, 0.0)).to_bits(),
+            1.0_f32.to_bits()
+        );
     }
 }

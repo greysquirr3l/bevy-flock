@@ -24,6 +24,7 @@ use crate::adapters::primary::cognition::PlayerFocus;
 use crate::application::packed::{Pack, SteerParams};
 use crate::domain::continuum::{AmbientField, CellId, FieldError, Occupation};
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// Marks an entity the band owns: it is steered by the packed kernel, not by the ECS crowd
@@ -112,7 +113,7 @@ impl BandConfig {
         if self.density <= 0.0 || !self.density.is_finite() {
             return 0.0;
         }
-        (self.target as f32 / (self.density * core::f32::consts::PI))
+        (num::u32_to_f32(self.target) / (self.density * core::f32::consts::PI))
             .sqrt()
             .max(1.0)
     }
@@ -160,7 +161,7 @@ impl Band {
     pub fn new(config: BandConfig) -> Result<Self, FieldError> {
         let radius = config.radius();
         // 2048² is exactly AmbientField::MAX_CELLS: the largest grid a band may ask for.
-        let side = ((config.extent / config.spacing).ceil() as u32).clamp(1, 2048);
+        let side = num::f32_to_u32((config.extent / config.spacing).ceil()).clamp(1, 2048);
         let field = AmbientField::new(side, side, config.spacing, 0x5EED_BA9D)?;
         Ok(Self {
             field,
@@ -263,10 +264,14 @@ fn focus_at(focus: &Query<&Transform, With<PlayerFocus>>) -> [f32; 2] {
 }
 
 fn distance_squared(a: [f32; 2], b: [f32; 2]) -> f32 {
-    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
+    (a[1] - b[1]).mul_add(a[1] - b[1], (a[0] - b[0]).powi(2))
 }
 
 /// Fold agents beyond the fold radius into density. Anchors are skipped.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn band_fold(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -297,6 +302,10 @@ pub fn band_fold(
 }
 
 /// Manifest density inside the manifest radius, rationed, taking before spawning.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn band_manifest(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -306,7 +315,7 @@ pub fn band_manifest(
     clock: Option<Res<crate::application::SimClock>>,
 ) {
     let centre = focus_at(&focus);
-    let live = agents.iter().count() as u32;
+    let live = num::usize_to_u32(agents.iter().count());
     let capacity = config.target.saturating_sub(live);
     if capacity == 0 {
         return;
@@ -329,11 +338,11 @@ pub fn band_manifest(
     // 256 people.
     let radius_squared = band.radius * band.radius;
     let fold_squared = band.fold_radius * band.fold_radius;
-    let reach = (band.radius / config.spacing).ceil() as i32;
+    let reach = num::f32_to_i32((band.radius / config.spacing).ceil());
     'cells: for ring in 0..=reach {
         // Rings are Chebyshev shells; once even the nearest point of a shell is beyond the
         // radius, every outer shell is too.
-        if (ring as f32 - 1.0) * config.spacing > band.radius {
+        if (num::i32_to_f32(ring) - 1.0) * config.spacing > band.radius {
             break 'cells;
         }
         for dy in -ring..=ring {
@@ -341,12 +350,12 @@ pub fn band_manifest(
                 if ring > 0 && dx.abs() != ring && dy.abs() != ring {
                     continue;
                 }
-                let x = centre_cell.x as i32 + dx;
-                let y = centre_cell.y as i32 + dy;
+                let x = centre_cell.x.cast_signed() + dx;
+                let y = centre_cell.y.cast_signed() + dy;
                 if x < 0 || y < 0 {
                     continue;
                 }
-                let cell = CellId::new(x as u32, y as u32);
+                let cell = CellId::new(x.cast_unsigned(), y.cast_unsigned());
                 // Eligibility is a property of where the person would *appear*, not of where
                 // they are stored: the spawn point is the cell centre, so that is what the
                 // radius has to bound.
@@ -391,6 +400,10 @@ pub fn band_manifest(
 }
 
 /// Copy the band into the pack, steer it, and copy the result back.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn band_steer(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
@@ -424,6 +437,10 @@ pub fn band_steer(
 }
 
 /// Steer the mid band every `mid_cadence` frames. Same kernel, a third of the rate.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn band_steer_mid(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
@@ -445,7 +462,7 @@ pub fn band_steer_mid(
         ..config.steer_params()
     };
     let _ = band.mid_pack.steer(&params);
-    let dt = 1.0 / 60.0 * band.mid_cadence as f32;
+    let dt = 1.0 / 60.0 * num::u32_to_f32(band.mid_cadence);
     band.mid_pack.integrate(params.max_speed);
     band.mid_pack.advance(dt, params.extent);
     for (index, (mut transform, mut mid)) in mids.iter_mut().enumerate() {

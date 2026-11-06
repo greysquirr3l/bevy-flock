@@ -9,6 +9,7 @@
 use crate::behaviour::{self, ArchetypeBehaviour};
 use crate::json;
 use bevy_flock::adapters::primary::observability::Diagnostics;
+use bevy_flock::domain::num;
 
 /// One finished run.
 #[derive(Debug, Clone)]
@@ -74,7 +75,7 @@ impl RunReport {
         let mut shares = [0.0_f32; 4];
         for (index, count) in self.tiers.iter().enumerate() {
             if let Some(slot) = shares.get_mut(index) {
-                *slot = *count as f32 / total as f32;
+                *slot = num::u32_to_f32(*count) / num::u32_to_f32(total);
             }
         }
         shares
@@ -129,8 +130,11 @@ impl RunReport {
                 ("population", self.population.to_string()),
                 ("ticks", self.ticks.to_string()),
                 ("spawn_ticks", self.spawn_ticks.to_string()),
-                ("wall_ms", json::number(self.wall_ms as f32, 3)),
-                ("ms_per_tick", json::number(self.ms_per_tick as f32, 4)),
+                ("wall_ms", json::number(num::f64_to_f32(self.wall_ms), 3)),
+                (
+                    "ms_per_tick",
+                    json::number(num::f64_to_f32(self.ms_per_tick), 4),
+                ),
                 ("digest", format!("\"0x{:016x}\"", self.digest)),
                 ("crowd_fingerprint", format!("\"0x{:016x}\"", self.crowd)),
                 ("tiers", json::array_block(&tiers, 2)),
@@ -186,7 +190,10 @@ mod tests {
     fn an_empty_crowd_does_not_divide_by_zero() {
         let mut report = sample();
         report.tiers = [0; 4];
-        assert_eq!(report.tier_shares(), [0.0; 4]);
+        assert_eq!(
+            report.tier_shares().map(f32::to_bits),
+            [0.0; 4].map(f32::to_bits)
+        );
         assert!(report.headline().contains("0% reflex"));
     }
 

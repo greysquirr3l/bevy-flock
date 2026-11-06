@@ -25,6 +25,7 @@
 use bevy_math::Vec3;
 
 use crate::domain::ids::{NpcId, SimSeed};
+use crate::domain::num;
 use crate::domain::rng::RngStream;
 use crate::domain::spatial::SpatialGridConfig;
 use crate::error::ConfigError;
@@ -102,7 +103,7 @@ pub enum Placement {
 impl Placement {
     /// The default spiral: 1.6 m spacing, centred on the origin.
     #[must_use]
-    pub fn spiral(spacing: f32) -> Self {
+    pub const fn spiral(spacing: f32) -> Self {
         Self::Spiral {
             centre: Vec3::ZERO,
             spacing,
@@ -111,37 +112,37 @@ impl Placement {
 
     /// A spiral around an arbitrary centre.
     #[must_use]
-    pub fn spiral_at(centre: Vec3, spacing: f32) -> Self {
+    pub const fn spiral_at(centre: Vec3, spacing: f32) -> Self {
         Self::Spiral { centre, spacing }
     }
 
     /// Uniform random inside a rectangle on the plane.
     #[must_use]
-    pub fn uniform_rect(min: Vec3, max: Vec3) -> Self {
+    pub const fn uniform_rect(min: Vec3, max: Vec3) -> Self {
         Self::UniformRect { min, max }
     }
 
     /// Uniform random inside a disc on the plane.
     #[must_use]
-    pub fn uniform_disc(centre: Vec3, radius: f32) -> Self {
+    pub const fn uniform_disc(centre: Vec3, radius: f32) -> Self {
         Self::UniformDisc { centre, radius }
     }
 
     /// Uniform random inside a box.
     #[must_use]
-    pub fn uniform_volume(min: Vec3, max: Vec3) -> Self {
+    pub const fn uniform_volume(min: Vec3, max: Vec3) -> Self {
         Self::UniformVolume { min, max }
     }
 
     /// Uniform random inside a sphere.
     #[must_use]
-    pub fn uniform_sphere(centre: Vec3, radius: f32) -> Self {
+    pub const fn uniform_sphere(centre: Vec3, radius: f32) -> Self {
         Self::UniformSphere { centre, radius }
     }
 
     /// Use these positions, in this order.
     #[must_use]
-    pub fn fixed(positions: Vec<Vec3>) -> Self {
+    pub const fn fixed(positions: Vec<Vec3>) -> Self {
         Self::Fixed { positions }
     }
 
@@ -175,36 +176,36 @@ impl Placement {
     pub fn position(&self, index: u32, rng: &mut RngStream) -> Vec3 {
         match self {
             Self::Spiral { centre, spacing } => {
-                let step = index as f32;
+                let step = num::u32_to_f32(index);
                 let angle = step * GOLDEN_ANGLE;
                 // `sqrt` of the index is what makes the density uniform rather than the ring
                 // spacing uniform: equal-area rings need radii in sqrt(k).
                 let radius = *spacing * libm::sqrtf(step);
                 Vec3::new(
-                    centre.x + libm::cosf(angle) * radius,
+                    libm::cosf(angle).mul_add(radius, centre.x),
                     centre.y,
-                    centre.z + libm::sinf(angle) * radius,
+                    libm::sinf(angle).mul_add(radius, centre.z),
                 )
             }
             Self::UniformRect { min, max } => Vec3::new(
-                min.x + (max.x - min.x) * rng.next_unit_f32(),
+                (max.x - min.x).mul_add(rng.next_unit_f32(), min.x),
                 min.y,
-                min.z + (max.z - min.z) * rng.next_unit_f32(),
+                (max.z - min.z).mul_add(rng.next_unit_f32(), min.z),
             ),
             Self::UniformDisc { centre, radius } => {
                 let angle = rng.next_unit_f32() * core::f32::consts::TAU;
                 // sqrt keeps the points area-uniform; a uniform radius would crowd the middle.
                 let distance = *radius * libm::sqrtf(rng.next_unit_f32());
                 Vec3::new(
-                    centre.x + libm::cosf(angle) * distance,
+                    libm::cosf(angle).mul_add(distance, centre.x),
                     centre.y,
-                    centre.z + libm::sinf(angle) * distance,
+                    libm::sinf(angle).mul_add(distance, centre.z),
                 )
             }
             Self::UniformVolume { min, max } => Vec3::new(
-                min.x + (max.x - min.x) * rng.next_unit_f32(),
-                min.y + (max.y - min.y) * rng.next_unit_f32(),
-                min.z + (max.z - min.z) * rng.next_unit_f32(),
+                (max.x - min.x).mul_add(rng.next_unit_f32(), min.x),
+                (max.y - min.y).mul_add(rng.next_unit_f32(), min.y),
+                (max.z - min.z).mul_add(rng.next_unit_f32(), min.z),
             ),
             Self::UniformSphere { centre, radius } => {
                 // A uniform direction on the sphere, then a radius that makes the *volume*
@@ -214,9 +215,9 @@ impl Placement {
                 let planar = libm::sqrtf((1.0 - z * z).max(0.0));
                 let distance = *radius * libm::cbrtf(rng.next_unit_f32());
                 Vec3::new(
-                    centre.x + libm::cosf(angle) * planar * distance,
+                    (libm::cosf(angle) * planar).mul_add(distance, centre.x),
                     centre.y + z * distance,
-                    centre.z + libm::sinf(angle) * planar * distance,
+                    (libm::sinf(angle) * planar).mul_add(distance, centre.z),
                 )
             }
             Self::Fixed { positions } => {
@@ -386,7 +387,7 @@ mod tests {
         // Radius grows as spacing * sqrt(index), which is what makes it area-uniform.
         for index in [1_u32, 10, 100, 1_000] {
             let point = placement.position_for(NpcId::unique(index), SimSeed::new(7));
-            let expected = DEFAULT_SPACING * libm::sqrtf(index as f32);
+            let expected = DEFAULT_SPACING * libm::sqrtf(num::u32_to_f32(index));
             assert!(
                 (point.length() - expected).abs() < 1e-3,
                 "index {index} should be {expected} m out, was {}",
@@ -519,7 +520,8 @@ mod tests {
         let placement = Placement::fixed(points.clone());
         placement.validate(&grid()).or_die();
         for (index, want) in points.iter().enumerate() {
-            let got = placement.position_for(NpcId::unique(index as u32), SimSeed::new(1));
+            let got =
+                placement.position_for(NpcId::unique(num::usize_to_u32(index)), SimSeed::new(1));
             assert_eq!(got, *want, "authored height must survive");
         }
     }

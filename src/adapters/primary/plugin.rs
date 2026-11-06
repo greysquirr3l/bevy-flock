@@ -20,6 +20,7 @@ use crate::adapters::primary::components::{
 use crate::application::{SimClock, advance_clock};
 use crate::boids::{BoidsConfig, BoidsPlugin};
 use crate::domain::ids::{NpcId, SimSeed};
+use crate::domain::num;
 use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 use crate::domain::rng::RngStream;
 use crate::domain::spawn::Placement;
@@ -385,7 +386,7 @@ impl Plugin for MemoryBridgePlugin {
         // Rows are 16 bytes per subject; a tenth of the crowd is a defensible default
         // for a game that never thinks about it, and the enrolment budget spreads the
         // rest over the ticks that follow.
-        let capacity = (population / 10).clamp(64, 16_384) as u32;
+        let capacity = num::usize_to_u32((population / 10).clamp(64, 16_384));
         crate::adapters::primary::memory_bridge::register(
             app,
             crate::adapters::primary::memory_bridge::MemoryConfig::default(),
@@ -509,6 +510,10 @@ impl Plugin for FlockPlugin {
 ///
 /// Budgeted rather than all at once: a game asking for 100,000 NPCs gets them
 /// over 25 frames at the default budget instead of one 400 ms hitch.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn drain_spawn_queue(
     config: Res<FlockConfig>,
     mut queue: ResMut<SpawnQueue>,
@@ -525,7 +530,7 @@ pub fn drain_spawn_queue(
         // The individual is drawn in full before the archetype, so a seed that produced a given
         // personality before still draws the same numbers; only the blend below is new.
         let individual = Temperament::sample(&mut rng);
-        let archetype_index = rng.next_bounded(Archetype::ALL.len() as u32) as usize;
+        let archetype_index = rng.next_bounded(num::usize_to_u32(Archetype::ALL.len())) as usize;
         let archetype = Archetype::ALL
             .get(archetype_index)
             .copied()

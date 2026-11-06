@@ -23,6 +23,7 @@
 //! adapter it came from, through [`Adapter::label`], because a figure without its adapter is a figure
 //! without meaning.
 
+use bevy_flock::domain::num;
 use bevy_flock_demo::gltf::Mesh;
 use bevy_flock_demo::render3d::{Meshes, Shot};
 use bevy_flock_demo::scene::{Instance, Scene};
@@ -119,6 +120,15 @@ pub enum GpuError {
     MissingModel(&'static str),
     /// The shot selected nothing at all, so there is nothing to draw.
     EmptyView,
+    /// The frame is larger than the device will allocate.
+    FrameTooLarge {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+        /// The device's limit per side.
+        limit: u32,
+    },
 }
 
 impl std::fmt::Display for GpuError {
@@ -129,6 +139,14 @@ impl std::fmt::Display for GpuError {
             Self::Readback(why) => write!(formatter, "the readback failed: {why}"),
             Self::MissingModel(slug) => write!(formatter, "no loaded mesh for model `{slug}`"),
             Self::EmptyView => write!(formatter, "the shot selected no geometry"),
+            Self::FrameTooLarge {
+                width,
+                height,
+                limit,
+            } => write!(
+                formatter,
+                "this device draws at most {limit} pixels a side, not {width}x{height}"
+            ),
         }
     }
 }
@@ -249,6 +267,135 @@ impl Adapter {
     }
 }
 
+/// The largest frame this crate accepts from a caller, in pixels a side.
+///
+/// This is the bound that keeps the arithmetic below safe, not the bound the device enforces: the
+/// device's own `max_texture_dimension_2d` is smaller (`8_192` in `Limits::default()`) and is
+/// checked when the device is opened, because asking for a bigger texture does not return an
+/// error -- wgpu's default error handler panics, which is not how this crate fails.
+pub const MAX_DIMENSION: u32 = 16_384;
+
+/// Why a frame size was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameError {
+    /// One of the dimensions was zero.
+    Empty {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+    },
+    /// One of the dimensions was above [`MAX_DIMENSION`].
+    TooLarge {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+    },
+}
+
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty { width, height } => write!(
+                formatter,
+                "a frame must be at least 1x1 pixel, not {width}x{height}"
+            ),
+            Self::TooLarge { width, height } => write!(
+                formatter,
+                "a frame may be at most {MAX_DIMENSION} pixels a side, not {width}x{height}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FrameError {}
+
+/// A frame size that is safe to allocate, and the arithmetic that follows from it.
+///
+/// The width arrives from a command line, and three things downstream assume it is sane: the row
+/// pitch is `width * 4`, which overflows `u32` above a billion; the readback buffer is
+/// `padded_row * height` bytes, which a 65535x65535 frame puts past the address space of a 32-bit
+/// target; and the aspect ratio divides one dimension by the other, which a zero height turns into
+/// infinity and a NaN matrix. None of that can happen once the size is a value that had to be
+/// constructed, so the checks live here and every multiplication below is ordinary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameSize {
+    width: u32,
+    height: u32,
+}
+
+impl FrameSize {
+    /// The size the demo draws at when no flag says otherwise.
+    ///
+    /// Written as a literal rather than through [`Self::try_new`] so it can be a `const`: a unit
+    /// test asserts it is inside the limit, which is the check the compiler cannot do here.
+    pub const DEFAULT: Self = Self {
+        width: 600,
+        height: 375,
+    };
+
+    /// Check a width and a height.
+    ///
+    /// # Errors
+    ///
+    /// [`FrameError::Empty`] when either dimension is zero, [`FrameError::TooLarge`] when either is
+    /// above [`MAX_DIMENSION`].
+    pub const fn try_new(width: u32, height: u32) -> Result<Self, FrameError> {
+        if width == 0 || height == 0 {
+            return Err(FrameError::Empty { width, height });
+        }
+        if width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return Err(FrameError::TooLarge { width, height });
+        }
+        Ok(Self { width, height })
+    }
+
+    /// The width in pixels.
+    #[must_use]
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// The height in pixels.
+    #[must_use]
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Both dimensions, for a caller that wants the pair.
+    #[must_use]
+    pub const fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Bytes in one row of RGBA pixels, before the copy alignment pads it.
+    ///
+    /// Cannot overflow: [`MAX_DIMENSION`] times four is 65,536.
+    #[must_use]
+    pub const fn row_bytes(self) -> u32 {
+        self.width * 4
+    }
+
+    /// Bytes in one row as the readback buffer holds it, padded to the copy alignment.
+    #[must_use]
+    pub const fn padded_row_bytes(self) -> u32 {
+        self.row_bytes().div_ceil(COPY_ALIGN) * COPY_ALIGN
+    }
+
+    /// Bytes the readback buffer holds, padding included.
+    #[must_use]
+    pub const fn padded_len(self) -> u64 {
+        self.padded_row_bytes() as u64 * self.height as u64
+    }
+
+    /// The frame's aspect ratio, exactly representable: 16,384 is inside an `f32`'s mantissa.
+    #[must_use]
+    pub fn aspect(self) -> f32 {
+        num::u32_to_f32(self.width) / num::u32_to_f32(self.height)
+    }
+}
+
 /// An offscreen GPU renderer for one scene.
 pub struct GpuRenderer {
     device: wgpu::Device,
@@ -267,8 +414,7 @@ pub struct GpuRenderer {
     batches: Vec<Batch>,
     adapter: Adapter,
     clear: [f32; 3],
-    width: u32,
-    height: u32,
+    frame: FrameSize,
 }
 
 impl GpuRenderer {
@@ -288,8 +434,7 @@ impl GpuRenderer {
         scene: &Scene,
         meshes: &Meshes,
         backend: Backend,
-        width: u32,
-        height: u32,
+        frame: FrameSize,
     ) -> Result<Self, GpuError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: backend.mask(),
@@ -303,7 +448,17 @@ impl GpuRenderer {
         )
         .map_err(|_| GpuError::NoAdapter(backend.name()))?;
         let info = wgpu_adapter.get_info();
-        let (device, queue) = request_device(&wgpu_adapter)?;
+        let (device, queue, limits) = request_device(&wgpu_adapter)?;
+        // Before anything is created from the size: `create_texture` with a dimension over the limit
+        // does not fail, it panics in wgpu's default error handler.
+        let widest = limits.max_texture_dimension_2d;
+        if frame.width() > widest || frame.height() > widest {
+            return Err(GpuError::FrameTooLarge {
+                width: frame.width(),
+                height: frame.height(),
+                limit: widest,
+            });
+        }
         let adapter = Adapter {
             backend: format!("{:?}", info.backend),
             name: info.name,
@@ -447,6 +602,7 @@ impl GpuRenderer {
             cache: None,
         });
 
+        let (width, height) = frame.size();
         let extent = wgpu::Extent3d {
             width,
             height,
@@ -494,8 +650,7 @@ impl GpuRenderer {
             batches: Vec::new(),
             adapter,
             clear: [0.0; 3],
-            width,
-            height,
+            frame,
         })
     }
 
@@ -508,7 +663,12 @@ impl GpuRenderer {
     /// The texture's size in pixels.
     #[must_use]
     pub const fn size(&self) -> (u32, u32) {
-        (self.width, self.height)
+        self.frame.size()
+    }
+    /// The frame size this renderer was built for.
+    #[must_use]
+    pub const fn frame(&self) -> FrameSize {
+        self.frame
     }
 
     /// Candidates the scene offered, before any shot selected from them.
@@ -532,7 +692,7 @@ impl GpuRenderer {
     /// Selection is a sort by model and then by distance, so the instance buffer stays contiguous per
     /// batch and the copy is one `write_buffer` per shot rather than one per body.
     pub fn set_shot(&mut self, shot: &Shot) {
-        let aspect = pixels(self.width) / pixels(self.height);
+        let aspect = self.frame.aspect();
         let uniform = CameraUniform {
             view_projection: shot.camera.view_projection(aspect).to_cols_array_2d(),
             eye: shot.camera.eye.extend(0.0).to_array(),
@@ -731,11 +891,10 @@ impl GpuRenderer {
     ///
     /// [`GpuError::Readback`] when the map fails or a row falls outside the mapped range.
     pub fn read_rgba(&self) -> Result<Vec<u8>, GpuError> {
-        let unpadded = self.width * 4;
-        let row_bytes = unpadded.div_ceil(COPY_ALIGN) * COPY_ALIGN;
+        let row_bytes = self.frame.padded_row_bytes();
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
-            size: u64::from(row_bytes) * u64::from(self.height),
+            size: self.frame.padded_len(),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -756,12 +915,12 @@ impl GpuRenderer {
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(row_bytes),
-                    rows_per_image: Some(self.height),
+                    rows_per_image: Some(self.frame.height()),
                 },
             },
             wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
+                width: self.frame.width(),
+                height: self.frame.height(),
                 depth_or_array_layers: 1,
             },
         );
@@ -783,15 +942,7 @@ impl GpuRenderer {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| GpuError::Readback(format!("{error}")))?;
-        let mut out = Vec::with_capacity((unpadded * self.height) as usize);
-        for row in 0..self.height {
-            let start = (row * row_bytes) as usize;
-            let end = start + unpadded as usize;
-            match mapped.get(start..end) {
-                Some(slice) => out.extend_from_slice(slice),
-                None => return Err(GpuError::Readback(format!("row {row} is out of range"))),
-            }
-        }
+        let out = pack_rows(&mapped, self.frame)?;
         drop(mapped);
         buffer.unmap();
         Ok(out)
@@ -808,6 +959,33 @@ impl GpuRenderer {
             255,
         ]
     }
+}
+
+/// Copy a mapped texture readback into tightly packed rows.
+///
+/// `wgpu` pads every copied row to [`COPY_ALIGN`], so the mapped buffer is wider than the frame: a
+/// 3-pixel-wide frame occupies 12 bytes of a 256-byte row. Dropping the padding is arithmetic that
+/// is easy to get subtly wrong and impossible to see in a screenshot, so it is a function of its own
+/// with tests rather than four lines inside a method that needs a device to run.
+///
+/// # Errors
+///
+/// [`GpuError::Readback`] when a row falls outside the mapped buffer, which means the copy and the
+/// request disagreed about the size.
+fn pack_rows(mapped: &[u8], frame: FrameSize) -> Result<Vec<u8>, GpuError> {
+    let unpadded = frame.row_bytes();
+    let row_bytes = frame.padded_row_bytes();
+    let capacity = usize::try_from(u64::from(unpadded) * u64::from(frame.height())).unwrap_or(0);
+    let mut out = Vec::with_capacity(capacity);
+    for row in 0..frame.height() {
+        let start = usize::try_from(row * row_bytes).unwrap_or(usize::MAX);
+        let end = start.saturating_add(usize::try_from(unpadded).unwrap_or(usize::MAX));
+        match mapped.get(start..end) {
+            Some(slice) => out.extend_from_slice(slice),
+            None => return Err(GpuError::Readback(format!("row {row} is out of range"))),
+        }
+    }
+    Ok(out)
 }
 
 /// Every model slug a scene can name.
@@ -927,14 +1105,6 @@ const fn rgba_vec(direction: Vec3) -> [f32; 4] {
     [direction.x, direction.y, direction.z, 0.0]
 }
 
-/// A pixel dimension as a float.
-///
-/// `u16` first, because a texture wider than 65,535 pixels cannot be created anyway and the
-/// conversion is then exact: `f32::from` has no lossy cast to argue with.
-fn pixels(value: u32) -> f32 {
-    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
-}
-
 /// A linear channel as sRGB, which is what the target texture holds after the hardware encodes it.
 fn linear_to_srgb(value: f32) -> u8 {
     let clamped = value.clamp(0.0, 1.0);
@@ -948,22 +1118,26 @@ fn linear_to_srgb(value: f32) -> u8 {
 
 /// A rounded, clamped 0-255 value as a byte.
 ///
-/// The cast is the point: the value is clamped into `0..=255` first, so it cannot truncate anything
-/// but the fraction `round` has already removed. Every alternative that avoids the cast either
-/// reinterprets the float's bits (wrong) or is unsafe.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the value is rounded and clamped into 0..=255 first, so neither can apply"
-)]
+/// The rounding happens here; the conversion belongs to `bevy_flock::domain::num`, which is where
+/// every cast in this repository lives. It truncates toward zero and saturates, so a negative or
+/// enormous input lands on `0` or `255` instead of wrapping, and `NaN` becomes `0`. Rounding first is
+/// what makes this a rounding rather than a truncation.
 const fn to_byte(value: f32) -> u8 {
-    value.round().clamp(0.0, 255.0) as u8
+    num::f32_to_u8(value.round())
 }
 
 /// Ask the adapter for a device with default limits, which is all this pipeline needs.
-fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), GpuError> {
-    futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-        .map_err(|error| GpuError::NoDevice(format!("{error}")))
+fn request_device(
+    adapter: &wgpu::Adapter,
+) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Limits), GpuError> {
+    let limits = wgpu::Limits::default();
+    let descriptor = wgpu::DeviceDescriptor {
+        required_limits: limits.clone(),
+        ..wgpu::DeviceDescriptor::default()
+    };
+    let (device, queue) = futures_lite::future::block_on(adapter.request_device(&descriptor))
+        .map_err(|error| GpuError::NoDevice(format!("{error}")))?;
+    Ok((device, queue, limits))
 }
 
 /// Upload one mesh's vertices and indices.
@@ -1157,3 +1331,345 @@ fn fs(input: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(mix(lit, camera.fog_colour.rgb, fog), 1.0);
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_flock::testkit::{OrDie, OrDieErr};
+
+    /// An instance at the origin facing north, for tests that only vary one field.
+    const fn instance(yaw: f32, scale: f32, position: Vec3) -> Instance {
+        Instance {
+            model: "block",
+            position,
+            yaw,
+            scale,
+            tint: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    /// Every backend's printed name parses back to itself, because the name is also the flag value.
+    #[test]
+    fn backend_names_round_trip_through_parse() {
+        for backend in [Backend::Auto, Backend::Vulkan, Backend::Gl, Backend::Noop] {
+            assert_eq!(Backend::parse(backend.name()), Some(backend));
+        }
+    }
+
+    /// `gles` is what `wgpu` calls the backend and `gl` is what a person types; both mean OpenGL.
+    #[test]
+    fn backend_parse_accepts_both_spellings_of_opengl_and_rejects_nonsense() {
+        assert_eq!(Backend::parse("gl"), Some(Backend::Gl));
+        assert_eq!(Backend::parse("gles"), Some(Backend::Gl));
+        assert_eq!(Backend::parse("metal"), None);
+        assert_eq!(Backend::parse(""), None);
+    }
+
+    /// The default is the one that opens whatever the machine has, not a backend it may not.
+    #[test]
+    fn the_default_backend_is_auto() {
+        assert_eq!(Backend::default(), Backend::Auto);
+    }
+
+    /// Rounding is half away from zero and the conversion saturates, so nothing wraps.
+    #[test]
+    fn to_byte_rounds_and_saturates() {
+        assert_eq!(to_byte(0.0), 0);
+        assert_eq!(to_byte(0.4), 0);
+        assert_eq!(to_byte(0.5), 1);
+        assert_eq!(to_byte(1.5), 2);
+        assert_eq!(to_byte(254.4), 254);
+        assert_eq!(to_byte(254.6), 255);
+        assert_eq!(to_byte(-3.0), 0);
+        assert_eq!(to_byte(1.0e9), 255);
+        assert_eq!(to_byte(f32::NAN), 0);
+    }
+
+    /// The transfer function hits both ends exactly and matches the published value at mid grey.
+    ///
+    /// `linear_to_srgb` is what `clear_colour` compares a frame against, so an error here makes every
+    /// "was anything drawn" check wrong in the same direction.
+    #[test]
+    fn linear_to_srgb_hits_the_endpoints_and_the_midpoint() {
+        assert_eq!(linear_to_srgb(0.0), 0);
+        assert_eq!(linear_to_srgb(1.0), 255);
+        // 0.5^(1/2.4) = 0.7492, and 1.055 * 0.7492 - 0.055 = 0.7354, which is 188/255.
+        assert_eq!(linear_to_srgb(0.5), 188);
+        // Out of range clamps rather than wrapping.
+        assert_eq!(linear_to_srgb(-1.0), 0);
+        assert_eq!(linear_to_srgb(4.0), 255);
+    }
+
+    /// The transfer function is monotone, which is what makes a dithered frame readable at all.
+    #[test]
+    fn linear_to_srgb_is_monotone() {
+        let mut previous = 0;
+        for step in 0..=64 {
+            let value = f32::from(u8::try_from(step).or_die()) / 64.0;
+            let encoded = linear_to_srgb(value);
+            assert!(
+                encoded >= previous,
+                "encoding fell from {previous} to {encoded} at {value}"
+            );
+            previous = encoded;
+        }
+    }
+
+    /// A yaw of a quarter turn swaps the two horizontal axes and the scale reaches both.
+    #[test]
+    fn instance_raw_rotates_scales_and_translates() {
+        let raw = instance_raw(&instance(
+            std::f32::consts::FRAC_PI_2,
+            2.0,
+            Vec3::new(1.0, 2.0, 3.0),
+        ));
+        // Column 0 is the rotated x axis: (cos, 0, -sin) * scale = (0, 0, -2) at a quarter turn.
+        assert!((raw.model[0][0]).abs() < 1.0e-6);
+        assert!((raw.model[0][2] + 2.0).abs() < 1.0e-6);
+        // Column 2 is the rotated z axis: (sin, 0, cos) * scale = (2, 0, 0).
+        assert!((raw.model[2][0] - 2.0).abs() < 1.0e-6);
+        // Column 3 is the translation, with the homogeneous 1 in `w`.
+        assert!((raw.model[3][0] - 1.0).abs() < 1.0e-6);
+        assert!((raw.model[3][1] - 2.0).abs() < 1.0e-6);
+        assert!((raw.model[3][2] - 3.0).abs() < 1.0e-6);
+        assert!((raw.model[3][3] - 1.0).abs() < 1.0e-6);
+    }
+
+    /// A zero yaw and unit scale is the identity, so an instance with no rotation draws where it says.
+    #[test]
+    fn instance_raw_at_rest_is_a_translation() {
+        let raw = instance_raw(&instance(0.0, 1.0, Vec3::new(-4.0, 0.5, 7.0)));
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-4.0, 0.5, 7.0, 1.0],
+        ];
+        for (column, expected) in raw.model.iter().zip(identity) {
+            for (value, want) in column.iter().zip(expected) {
+                assert!((value - want).abs() < 1.0e-6, "expected {expected:?}");
+            }
+        }
+    }
+
+    /// A scaled cube carries its half extent in the diagonal, which is what `scaled_cube` is for.
+    #[test]
+    fn scaled_cube_is_half_extent_and_centre() {
+        let raw = scaled_cube(
+            Vec3::new(3.0, 4.0, 5.0),
+            Vec3::new(2.0, 6.0, 8.0),
+            [0.1, 0.2, 0.3, 1.0],
+        );
+        assert!((raw.model[0][0] - 2.0).abs() < 1.0e-6);
+        assert!((raw.model[1][1] - 6.0).abs() < 1.0e-6);
+        assert!((raw.model[2][2] - 8.0).abs() < 1.0e-6);
+        assert!((raw.model[3][0] - 3.0).abs() < 1.0e-6);
+        assert!((raw.model[3][1] - 4.0).abs() < 1.0e-6);
+        assert!((raw.model[3][2] - 5.0).abs() < 1.0e-6);
+    }
+
+    /// The vertex layout in the pipeline is written as a stride and two offsets, so the struct the
+    /// bytes come from has to keep the size the layout promises. A field added here without a change
+    /// there silently reads the next vertex's position as this one's normal.
+    #[test]
+    fn the_packed_structs_keep_the_strides_the_pipeline_declares() {
+        assert_eq!(size_of::<VertexRaw>(), 24);
+        assert_eq!(size_of::<InstanceRaw>(), 80);
+        assert_eq!(size_of::<CameraUniform>(), 192);
+    }
+
+    /// A row of 3 pixels is 12 bytes in a 256-byte stride, and the copy has to drop the other 244.
+    #[test]
+    fn pack_rows_strips_the_row_padding() {
+        let (width, height) = (3_u32, 2_u32);
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let mut mapped = vec![0xEE_u8; row_bytes * 2];
+        // First row: 12 bytes of 0x01, second: 12 bytes of 0x02.
+        for (index, byte) in mapped.iter_mut().take(12).enumerate() {
+            *byte = u8::try_from(index).or_die();
+        }
+        for (index, byte) in mapped.iter_mut().skip(row_bytes).take(12).enumerate() {
+            *byte = u8::try_from(index).or_die() + 100;
+        }
+        let packed = pack_rows(&mapped, FrameSize::try_new(width, height).or_die()).or_die();
+        assert_eq!(packed.len(), 24);
+        let expected: Vec<u8> = (0..12_u8).chain(100..112_u8).collect();
+        assert_eq!(packed, expected);
+    }
+
+    /// A buffer that is short by a row is an error rather than a frame with a hole in it.
+    #[test]
+    fn pack_rows_reports_a_row_outside_the_buffer() {
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let short = vec![0_u8; row_bytes];
+        let error = pack_rows(&short, FrameSize::try_new(1, 2).or_die()).or_die_err();
+        assert!(matches!(error, GpuError::Readback(_)), "got {error:?}");
+    }
+
+    /// A frame narrower than the copy alignment still packs one row, which is the off-by-one that
+    /// `div_ceil` exists to avoid.
+    #[test]
+    fn pack_rows_handles_a_frame_narrower_than_the_alignment() {
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let mut mapped = vec![0_u8; row_bytes];
+        for (index, byte) in mapped.iter_mut().take(4).enumerate() {
+            *byte = u8::try_from(index).or_die();
+        }
+        let packed = pack_rows(&mapped, FrameSize::try_new(1, 1).or_die()).or_die();
+        assert_eq!(packed, vec![0, 1, 2, 3]);
+    }
+
+    /// The cube is twelve triangles, six faces, and each face's four corners share its normal.
+    #[test]
+    fn the_cube_is_six_flat_faces() {
+        let mesh = cube();
+        assert_eq!(mesh.positions.len(), 24);
+        assert_eq!(mesh.normals.len(), 24);
+        assert_eq!(mesh.indices.len(), 36);
+        for face in 0..6 {
+            let base = face * 4;
+            let normal = mesh.normals.get(base).copied().or_die();
+            for corner in 0..4 {
+                let other = mesh.normals.get(base + corner).copied().or_die();
+                assert_eq!(
+                    normal.map(f32::to_bits),
+                    other.map(f32::to_bits),
+                    "face {face} corner {corner} is not flat"
+                );
+            }
+            // A unit cube's corners are all at distance sqrt(3) from its centre.
+            for corner in 0..4 {
+                let position = mesh.positions.get(base + corner).copied().or_die();
+                let length = Vec3::from_array(position).length();
+                assert!((length - 3.0_f32.sqrt()).abs() < 1.0e-6);
+            }
+        }
+    }
+
+    /// Every triangle's winding agrees with the normal it carries, which is what back-face culling
+    /// depends on: a flipped pair of indices draws nothing and looks like a modelling bug.
+    #[test]
+    fn every_triangle_winds_with_its_normal() {
+        for mesh in [cube(), plane()] {
+            for triangle in mesh.indices.chunks_exact(3) {
+                let [a, b, c] = <[u32; 3]>::try_from(triangle).or_die();
+                let position = |index: u32| {
+                    Vec3::from_array(
+                        mesh.positions
+                            .get(usize::try_from(index).or_die())
+                            .copied()
+                            .or_die(),
+                    )
+                };
+                let normal = Vec3::from_array(
+                    mesh.normals
+                        .get(usize::try_from(a).or_die())
+                        .copied()
+                        .or_die(),
+                );
+                let geometric = (position(b) - position(a)).cross(position(c) - position(a));
+                let agreement = geometric.normalize().dot(normal);
+                assert!(
+                    agreement > 0.9,
+                    "{}: a triangle's winding disagrees with its normal ({agreement})",
+                    mesh.name
+                );
+            }
+        }
+    }
+
+    /// The ground is four corners and two triangles, all facing up.
+    #[test]
+    fn the_plane_is_two_triangles_facing_up() {
+        let mesh = plane();
+        assert_eq!(mesh.positions.len(), 4);
+        assert_eq!(mesh.indices.len(), 6);
+        for normal in &mesh.normals {
+            assert_eq!(
+                normal.map(f32::to_bits),
+                [0.0_f32.to_bits(), 1.0_f32.to_bits(), 0.0_f32.to_bits()],
+                "the ground is not facing up"
+            );
+        }
+    }
+
+    /// A view that selects nothing is an error, not a black frame that looks like a driver problem.
+    #[test]
+    fn the_empty_view_error_says_what_happened() {
+        let message = GpuError::EmptyView.to_string();
+        assert!(message.contains("no geometry"), "got {message}");
+    }
+
+    /// A frame with no pixels in it divides the aspect ratio by zero and asks for a texture wgpu
+    /// will refuse, so it is refused here, before anything is created.
+    #[test]
+    fn a_zero_frame_is_refused() {
+        for (width, height) in [(0, 1), (1, 0), (0, 0)] {
+            assert!(
+                matches!(
+                    FrameSize::try_new(width, height),
+                    Err(FrameError::Empty { .. })
+                ),
+                "{width}x{height} was accepted"
+            );
+        }
+    }
+    /// The limit is a limit, not a suggestion: one pixel over it is refused, and the message says
+    /// which number was wrong.
+    #[test]
+    fn a_frame_above_the_limit_is_refused() {
+        for (width, height) in [
+            (MAX_DIMENSION + 1, 1),
+            (1, MAX_DIMENSION + 1),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert!(
+                matches!(
+                    FrameSize::try_new(width, height),
+                    Err(FrameError::TooLarge { .. })
+                ),
+                "{width}x{height} was accepted"
+            );
+        }
+        let message = FrameError::TooLarge {
+            width: 20_000,
+            height: 1,
+        }
+        .to_string();
+        assert!(message.contains("at most"), "got {message}");
+        assert!(message.contains("20000x1"), "got {message}");
+    }
+    /// The boundaries themselves are legal, which is the half of a range check that is easy to get
+    /// wrong: an off-by-one here rejects a frame the backend would have drawn.
+    #[test]
+    fn the_limits_themselves_are_accepted() {
+        assert_eq!(FrameSize::try_new(1, 1).or_die().size(), (1, 1));
+        let widest = FrameSize::try_new(MAX_DIMENSION, MAX_DIMENSION).or_die();
+        assert_eq!(widest.size(), (MAX_DIMENSION, MAX_DIMENSION));
+    }
+    /// The arithmetic the checks exist to make safe: at the limit the row pitch is 65,536 bytes and
+    /// the readback buffer is one gibibyte, both computed without wrapping.
+    #[test]
+    fn the_pitch_at_the_limit_does_not_overflow() {
+        let widest = FrameSize::try_new(MAX_DIMENSION, MAX_DIMENSION).or_die();
+        assert_eq!(widest.row_bytes(), 65_536);
+        assert_eq!(widest.padded_row_bytes(), 65_536);
+        assert_eq!(widest.padded_len(), 1_073_741_824);
+        // A width whose pitch is not already a multiple of the copy alignment pads up, and one
+        // narrower than the alignment still occupies a whole padded row.
+        let narrow = FrameSize::try_new(1, 1).or_die();
+        assert_eq!(narrow.row_bytes(), 4);
+        assert_eq!(narrow.padded_row_bytes(), COPY_ALIGN);
+    }
+    /// The default frame is inside the limit, which is the check the compiler cannot do for a
+    /// `const` that is written as a literal.
+    #[test]
+    fn the_default_frame_is_inside_the_limit() {
+        let default = FrameSize::DEFAULT;
+        assert_eq!(
+            FrameSize::try_new(default.width(), default.height()).or_die(),
+            default
+        );
+        assert!((default.aspect() - 1.6).abs() < 1e-6, "600x375 is 16:10");
+    }
+}

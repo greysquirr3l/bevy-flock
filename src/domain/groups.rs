@@ -144,7 +144,7 @@ impl FactionMatrix {
         Ok(Self { size, cells })
     }
 
-    fn offset(a: u8, b: u8) -> usize {
+    const fn offset(a: u8, b: u8) -> usize {
         a as usize * MAX_FACTIONS as usize + b as usize
     }
 
@@ -330,7 +330,7 @@ impl Group {
 
     /// Replace the formation. Slots keep their indices, so the group reshapes
     /// without reshuffling who is where in the queue.
-    pub fn set_formation(&mut self, formation: Formation) {
+    pub const fn set_formation(&mut self, formation: Formation) {
         self.formation = formation;
     }
 
@@ -688,9 +688,9 @@ impl GroupStore {
         // Rotate the local offset by the leader's yaw. `+z` behind the leader means
         // the offset is subtracted along the facing direction.
         let rotated = Vec3::new(
-            offset.x * cos - offset.z * sin,
+            offset.z.mul_add(-sin, offset.x * cos),
             0.0,
-            offset.x * sin + offset.z * cos,
+            offset.z.mul_add(cos, offset.x * sin),
         );
         Ok(Some(leader_position + rotated))
     }

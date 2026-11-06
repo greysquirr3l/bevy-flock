@@ -16,6 +16,7 @@
 //! content pipeline the library's problem.
 
 use crate::domain::ids::SimSeed;
+use crate::domain::num;
 use crate::domain::rng::RngStream;
 use crate::domain::temperament::{Archetype, Temperament, Weight};
 use smallvec::SmallVec;
@@ -176,16 +177,21 @@ impl NameStyle {
         // non-empty constants, so the fallback arm is unreachable in practice; it still
         // returns without indexing so the crate can keep `indexing_slicing` denied.
         for syllable in 0..2 {
-            if let Some(onset) = onsets.get(rng.next_bounded(onsets.len() as u32) as usize) {
+            if let Some(onset) =
+                onsets.get(rng.next_bounded(num::usize_to_u32(onsets.len())) as usize)
+            {
                 name.push_str(onset);
             }
-            if let Some(vowel) = vowels.get(rng.next_bounded(vowels.len() as u32) as usize) {
+            if let Some(vowel) =
+                vowels.get(rng.next_bounded(num::usize_to_u32(vowels.len())) as usize)
+            {
                 name.push_str(vowel);
             }
             // A final syllable always closes; the first one closes half the time, which is
             // what stops every name having the same rhythm.
             if (syllable == 1 || rng.next_bool(0.5))
-                && let Some(coda) = codas.get(rng.next_bounded(codas.len() as u32) as usize)
+                && let Some(coda) =
+                    codas.get(rng.next_bounded(num::usize_to_u32(codas.len())) as usize)
             {
                 name.push_str(coda);
             }
@@ -199,7 +205,7 @@ impl NameStyle {
         let given = self.given_name(rng);
         let surnames = self.surnames();
         let family = surnames
-            .get(rng.next_bounded(surnames.len() as u32) as usize)
+            .get(rng.next_bounded(num::usize_to_u32(surnames.len())) as usize)
             .copied()
             .unwrap_or("Nameless")
             .to_owned();
@@ -239,7 +245,7 @@ impl Name {
     /// the same person to a reader who is not paying attention, and the suffix
     /// rule exists precisely because that happens.
     #[must_use]
-    pub fn bare(&self) -> (&str, &str) {
+    pub const fn bare(&self) -> (&str, &str) {
         (self.given.as_str(), self.family.as_str())
     }
 }
@@ -361,14 +367,14 @@ impl ArchetypeTable {
 
     /// How many rows the table holds.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether the table is empty. Always false for a constructed table; present
     /// so the type is usable where an emptiness check is idiomatic.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -457,7 +463,7 @@ pub struct Generator {
 impl Generator {
     /// Build a generator.
     #[must_use]
-    pub fn new(seed: SimSeed, style: NameStyle, table: ArchetypeTable) -> Self {
+    pub const fn new(seed: SimSeed, style: NameStyle, table: ArchetypeTable) -> Self {
         Self { seed, style, table }
     }
 
@@ -470,7 +476,7 @@ impl Generator {
         let mut chooser = RngStream::new(seed, u64::MAX);
         let styles = NameStyle::ALL;
         let style = styles
-            .get(chooser.next_bounded(styles.len() as u32) as usize)
+            .get(chooser.next_bounded(num::usize_to_u32(styles.len())) as usize)
             .copied()
             .unwrap_or(NameStyle::Nordic);
         Self { seed, style, table }
@@ -519,7 +525,7 @@ impl Generator {
         let appearance_seed = rng.next_u64();
         let backgrounds = BACKGROUNDS;
         let background = backgrounds
-            .get(rng.next_bounded(backgrounds.len() as u32) as usize)
+            .get(rng.next_bounded(num::usize_to_u32(backgrounds.len())) as usize)
             .copied()
             .map_or_else(
                 || "keeps their history to themselves".to_owned(),
@@ -583,7 +589,7 @@ impl Generator {
 /// two guards are not the same person, enough signal that a guard still reads as
 /// a guard.
 fn blend(base: Weight, noise: Weight) -> Weight {
-    Weight::clamped(base.get() * 0.66 + noise.get() * 0.34)
+    Weight::clamped(noise.get().mul_add(0.34, base.get() * 0.66))
 }
 
 /// Prose hooks a game may use as background, or ignore.
@@ -654,7 +660,7 @@ mod tests {
         keys.sort();
         keys.dedup();
         let total = 25_000_u32;
-        let collisions = total - keys.len() as u32;
+        let collisions = total - num::usize_to_u32(keys.len());
         // The pools give roughly 500 onsets x vowels x codas per syllable pair, times
         // 16-18 surnames: a collision rate under 1% is generous, and the point of the
         // test is that the number is measured rather than assumed.

@@ -19,6 +19,7 @@
 //!
 //! The interactive path needs a terminal for raw mode; when stdin is a pipe the binary says so and
 //! points at `--play` rather than failing obscurely.
+use bevy_flock::domain::num;
 use bevy_flock_demo::DemoError;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::assets;
@@ -257,7 +258,7 @@ fn interactive(
         let spent = last_ms / 1000.0;
         if spent < f64::from(FRAME_BUDGET) {
             std::thread::sleep(Duration::from_secs_f32(
-                (FRAME_BUDGET - spent as f32).max(0.0),
+                (FRAME_BUDGET - num::f64_to_f32(spent)).max(0.0),
             ));
         }
     }

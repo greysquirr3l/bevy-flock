@@ -35,6 +35,7 @@ use std::collections::BinaryHeap;
 use thiserror::Error;
 
 use crate::domain::cost::VirtualCost;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// Sentinel for a participant that has never run.
@@ -150,8 +151,8 @@ impl ThinkScheduler {
 
     /// The capacity this scheduler was built for.
     #[must_use]
-    pub fn capacity(&self) -> u32 {
-        self.weights.len() as u32
+    pub const fn capacity(&self) -> u32 {
+        num::usize_to_u32(self.weights.len())
     }
 
     /// The weight a participant is enrolled with, or `None` if it is not enrolled.
@@ -266,7 +267,7 @@ impl ThinkScheduler {
     /// Called once per simulation tick, before planning. The tick is only ever used for
     /// bookkeeping — the run order depends on virtual finish times, which are advanced
     /// by cost, never by elapsed time.
-    pub fn advance(&mut self, tick: Tick) {
+    pub const fn advance(&mut self, tick: Tick) {
         self.tick = tick;
     }
 
@@ -325,7 +326,7 @@ impl ThinkScheduler {
 
             let last = self.last_run_at(id);
             if last != NEVER {
-                let waited = tick.saturating_sub(last).min(u64::from(u32::MAX)) as u32;
+                let waited = num::u64_to_u32(tick.saturating_sub(last).min(u64::from(u32::MAX)));
                 self.worst_wait = self.worst_wait.max(waited);
             }
             self.mark_ran(id, tick);
@@ -337,9 +338,9 @@ impl ThinkScheduler {
         }
 
         Plan {
-            chosen: out.len() as u32,
+            chosen: num::usize_to_u32(out.len()),
             spent: VirtualCost::new(spent),
-            deferred: self.enrolled.saturating_sub(out.len() as u32),
+            deferred: self.enrolled.saturating_sub(num::usize_to_u32(out.len())),
         }
     }
 }
@@ -614,7 +615,7 @@ mod tests {
                 scheduler.advance(Tick::new(tick));
                 chosen += u64::from(scheduler.plan(budget, cost, &mut out).chosen);
             }
-            let per_tick = chosen as f64 / ticks as f64;
+            let per_tick = num::u64_to_f64(chosen) / num::u64_to_f64(ticks);
             let share = per_tick / f64::from(count) * 100.0;
             eprintln!(
                 "{count:>7} participants: {per_tick:>8.1} think per tick, {share:>5.2}% served per tick, worst wait {} ticks",

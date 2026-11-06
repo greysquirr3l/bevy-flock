@@ -11,6 +11,7 @@ use bevy_math::Vec3;
 use crate::city::CityLayout;
 use crate::render3d::{self, Shot};
 use crate::scene::{Body, Scene};
+use bevy_flock::domain::num;
 
 /// A small settlement and the bodies standing in it.
 ///
@@ -28,7 +29,7 @@ pub fn sample_scene() -> (CityLayout, Vec<Body>) {
     let bodies: Vec<Body> = (0..24_u64)
         .map(|index| Body {
             archetype: Archetype::Urchin,
-            position: centre + Vec3::new((index % 6) as f32 * 3.0 - 9.0, 0.0, -8.0),
+            position: centre + Vec3::new(num::u64_to_f32(index % 6) * 3.0 - 9.0, 0.0, -8.0),
             yaw: 0.0,
             appearance_seed: index,
         })

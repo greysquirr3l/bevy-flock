@@ -34,7 +34,7 @@ pub struct Mesh {
 impl Mesh {
     /// Triangles in the mesh.
     #[must_use]
-    pub fn triangles(&self) -> usize {
+    pub const fn triangles(&self) -> usize {
         self.indices.len() / 3
     }
 
@@ -344,8 +344,11 @@ pub(crate) fn read_indices(
 
 /// Accumulate face normals where the file had none, then normalise every normal.
 fn fill_missing_normals(mesh: &mut Mesh) {
-    let needs_normals =
-        mesh.normals.len() != mesh.positions.len() || mesh.normals.iter().all(|n| n == &[0.0; 3]);
+    let needs_normals = mesh.normals.len() != mesh.positions.len()
+        || mesh
+            .normals
+            .iter()
+            .all(|n| n.iter().all(|v| v.to_bits().trailing_zeros() >= 31));
     if needs_normals {
         mesh.normals = vec![[0.0; 3]; mesh.positions.len()];
         for triangle in mesh.indices.chunks_exact(3) {

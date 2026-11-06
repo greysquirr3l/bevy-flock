@@ -17,6 +17,8 @@
 use bevy_math::Vec3;
 use smallvec::SmallVec;
 
+use crate::domain::num;
+
 /// The integer cost of stepping to an orthogonally adjacent cell.
 pub const COST_ORTHOGONAL: u32 = 10;
 
@@ -56,7 +58,7 @@ impl NavCell {
     /// order picks a different (equally short) path, and the whole point of the
     /// fixed-point costs is that everyone picks the same one.
     #[must_use]
-    pub fn neighbour_offsets() -> [(i16, i16, u32); 8] {
+    pub const fn neighbour_offsets() -> [(i16, i16, u32); 8] {
         [
             (0, -1, COST_ORTHOGONAL),
             (1, -1, COST_DIAGONAL),
@@ -359,7 +361,9 @@ impl GridNavSource {
                     }
                 }
                 if blocked
-                    && let Some(cell) = walkable.get_mut(y as usize * width as usize + x as usize)
+                    && let Some(cell) = walkable.get_mut(
+                        num::i32_to_usize(y) * num::i32_to_usize(width) + num::i32_to_usize(x),
+                    )
                 {
                     *cell = false;
                 }
@@ -380,7 +384,7 @@ impl GridNavSource {
             return false;
         }
         self.walkable
-            .get(y as usize * self.bounds.width as usize + x as usize)
+            .get(num::i32_to_usize(y) * self.bounds.width as usize + num::i32_to_usize(x))
             .copied()
             .unwrap_or(false)
     }
@@ -417,7 +421,7 @@ impl GridNavSource {
 
     /// Bytes the bitmap occupies.
     #[must_use]
-    pub fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> usize {
         self.walkable.len()
     }
 }
@@ -449,7 +453,7 @@ impl NavSource for GridNavSource {
             if nx < 0 || ny < 0 || nx >= width || ny >= height {
                 continue;
             }
-            let next = NavCell::new(nx as u16, ny as u16);
+            let next = NavCell::new(num::i32_to_u16(nx), num::i32_to_u16(ny));
             if !self.is_walkable(next) {
                 continue;
             }
@@ -458,8 +462,8 @@ impl NavSource for GridNavSource {
             // walls and the navmesh stops describing the level.
             if dx != 0
                 && dy != 0
-                && (!self.is_walkable(NavCell::new(nx as u16, cell.y))
-                    || !self.is_walkable(NavCell::new(cell.x, ny as u16)))
+                && (!self.is_walkable(NavCell::new(num::i32_to_u16(nx), cell.y))
+                    || !self.is_walkable(NavCell::new(cell.x, num::i32_to_u16(ny))))
             {
                 continue;
             }
@@ -498,15 +502,15 @@ impl NavSource for GridNavSource {
         if x >= f32::from(self.bounds.width) || y >= f32::from(self.bounds.height) {
             return None;
         }
-        Some(NavCell::new(x as u16, y as u16))
+        Some(NavCell::new(num::f32_to_u16(x), num::f32_to_u16(y)))
     }
 
     fn center_of(&self, cell: NavCell) -> Vec3 {
         let half = self.bounds.cell_size * 0.5;
         Vec3::new(
-            self.bounds.origin.x + (f32::from(cell.x) + 0.5) * self.bounds.cell_size,
+            (f32::from(cell.x) + 0.5).mul_add(self.bounds.cell_size, self.bounds.origin.x),
             self.bounds.origin.y,
-            self.bounds.origin.z + (f32::from(cell.y) + 0.5) * self.bounds.cell_size,
+            (f32::from(cell.y) + 0.5).mul_add(self.bounds.cell_size, self.bounds.origin.z),
         ) + Vec3::new(0.0, 0.0, 0.0) * half
     }
 
@@ -669,7 +673,7 @@ mod tests {
             {
                 return None;
             }
-            Some(NavCell::new(x as u16, y as u16))
+            Some(NavCell::new(num::f32_to_u16(x), num::f32_to_u16(y)))
         }
 
         fn center_of(&self, cell: NavCell) -> Vec3 {

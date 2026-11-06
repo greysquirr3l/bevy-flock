@@ -8,6 +8,7 @@
 
 use core::fmt;
 
+use crate::domain::num;
 use crate::domain::rng::RngStream;
 use crate::domain::tick::Tick;
 use crate::error::ConfigError;
@@ -46,7 +47,7 @@ impl Weight {
     /// silently turn an NPC into a personality-less shell, and NaN has no
     /// meaningful ordering to clamp toward.
     #[must_use]
-    pub fn clamped(value: f32) -> Self {
+    pub const fn clamped(value: f32) -> Self {
         if value.is_nan() {
             Self::MID
         } else {
@@ -232,7 +233,7 @@ impl Temperament {
     #[must_use]
     pub fn steering_bias(&self, gain: Weight) -> WeightBias {
         let g = gain.get();
-        let axis = |shape: f32| 1.0 + g * (2.0 * shape - 1.0);
+        let axis = |shape: f32| g.mul_add(2.0f32.mul_add(shape, -1.0), 1.0);
         let room = self
             .neuroticism
             .0
@@ -290,7 +291,7 @@ impl Temperament {
 }
 
 /// One multiplier, clamped into the permitted range, with NaN read as neutral.
-fn clean_multiplier(value: f32) -> f32 {
+const fn clean_multiplier(value: f32) -> f32 {
     if value.is_nan() {
         1.0
     } else {
@@ -352,7 +353,7 @@ impl WeightBias {
     /// NaN is neutral rather than extreme: a broken sample should leave the agent steering
     /// normally instead of freezing it in place.
     #[must_use]
-    pub fn clamped(self) -> Self {
+    pub const fn clamped(self) -> Self {
         Self {
             separation: clean_multiplier(self.separation),
             alignment: clean_multiplier(self.alignment),
@@ -603,12 +604,12 @@ impl Needs {
     /// per-second, so decay is identical at any frame rate.
     #[must_use]
     pub fn decayed(self, temperament: &Temperament, ticks: u64) -> Self {
-        let ticks = ticks as f32;
+        let ticks = num::u64_to_f32(ticks);
         let company_rate = 0.0004 * temperament.company_appetite().0.mul_add(1.0, 0.5);
         let safety_rate = 0.0002 * temperament.neuroticism.0.mul_add(1.0, 0.5);
         Self {
-            energy: (self.energy - 0.0003 * ticks).max(0.0),
-            satiety: (self.satiety - 0.0005 * ticks).max(0.0),
+            energy: 0.0003f32.mul_add(-ticks, self.energy).max(0.0),
+            satiety: 0.0005f32.mul_add(-ticks, self.satiety).max(0.0),
             company: (self.company - company_rate * ticks).max(0.0),
             safety: (self.safety - safety_rate * ticks).max(0.0),
         }
@@ -693,19 +694,21 @@ impl Needs {
         let lonely = 1.0 - self.company.clamp(0.0, 1.0);
         let frightened = 1.0 - self.safety.clamp(0.0, 1.0);
         WeightBias {
-            separation: (1.0 + i * frightened).min(WeightBias::MAX),
+            separation: i.mul_add(frightened, 1.0).min(WeightBias::MAX),
             alignment: 1.0,
-            cohesion: (1.0 + i * lonely).min(WeightBias::MAX),
-            seek: (1.0 + i * (hunger - fatigue)).clamp(WeightBias::MIN, WeightBias::MAX),
-            arrive: (1.0 + i * frightened).min(WeightBias::MAX),
+            cohesion: i.mul_add(lonely, 1.0).min(WeightBias::MAX),
+            seek: i
+                .mul_add(hunger - fatigue, 1.0)
+                .clamp(WeightBias::MIN, WeightBias::MAX),
+            arrive: i.mul_add(frightened, 1.0).min(WeightBias::MAX),
         }
         .clamped()
     }
 
     /// Clamp every channel into `0.0..=1.0`, dropping NaN to zero.
     #[must_use]
-    pub fn sanitised(self) -> Self {
-        fn clean(value: f32) -> f32 {
+    pub const fn sanitised(self) -> Self {
+        const fn clean(value: f32) -> f32 {
             if value.is_nan() {
                 0.0
             } else {
@@ -790,13 +793,19 @@ impl Mood {
     /// window instead of snapping back.
     #[must_use]
     pub fn step(self, at: Tick, impulse: (f32, f32), temperament: &Temperament) -> Self {
-        let ticks = at.since(self.updated).max(1) as f32;
+        let ticks = num::u64_to_f32(at.since(self.updated).max(1));
         let stability = 1.0 - temperament.neuroticism.0.mul_add(0.5, 0.0);
-        let valence_decay = (1.0 - 0.002 * stability * ticks).clamp(0.0, 1.0);
-        let arousal_decay = (1.0 - 0.004 * stability * ticks).clamp(0.0, 1.0);
+        let valence_decay = (0.002 * stability).mul_add(-ticks, 1.0).clamp(0.0, 1.0);
+        let arousal_decay = (0.004 * stability).mul_add(-ticks, 1.0).clamp(0.0, 1.0);
         Self {
-            valence: ((self.valence * valence_decay) + impulse.0).clamp(-1.0, 1.0),
-            arousal: ((self.arousal * arousal_decay) + impulse.1).clamp(0.0, 1.0),
+            valence: self
+                .valence
+                .mul_add(valence_decay, impulse.0)
+                .clamp(-1.0, 1.0),
+            arousal: self
+                .arousal
+                .mul_add(arousal_decay, impulse.1)
+                .clamp(0.0, 1.0),
             updated: at,
         }
     }
@@ -1098,8 +1107,8 @@ mod tests {
                 .combined(drive.needs_bias(&needs))
         );
         assert_eq!(
-            drive.bias(&who, &needs).alignment,
-            drive.temperament_bias(&who).alignment
+            drive.bias(&who, &needs).alignment.to_bits(),
+            drive.temperament_bias(&who).alignment.to_bits()
         );
         // An inert drive is indistinguishable from no personality at all.
         assert!(TemperamentDrive::inert().bias(&who, &needs).is_neutral());
@@ -1115,12 +1124,15 @@ mod tests {
             arrive: 1.0,
         };
         assert_eq!(
-            bias.apply([0.9, 0.4, 0.3, 0.7, 0.6]),
-            [1.8, 0.2, 0.3, 1.05, 0.6]
+            bias.apply([0.9, 0.4, 0.3, 0.7, 0.6]).map(f32::to_bits),
+            [1.8_f32, 0.2, 0.3, 1.05, 0.6].map(f32::to_bits)
         );
         assert_eq!(WeightBias::from_array(bias.to_array()), bias);
         // Composing twice is a product, not a sum.
-        assert_eq!(bias.combined(bias).separation, WeightBias::MAX);
+        assert_eq!(
+            bias.combined(bias).separation.to_bits(),
+            WeightBias::MAX.to_bits()
+        );
     }
 
     #[test]

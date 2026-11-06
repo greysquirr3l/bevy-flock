@@ -57,7 +57,7 @@ impl Default for MemoryConfig {
 impl MemoryConfig {
     /// Set the enrolment radius.
     #[must_use]
-    pub fn with_publish_radius(mut self, metres: f32) -> Self {
+    pub const fn with_publish_radius(mut self, metres: f32) -> Self {
         self.publish_radius = metres;
         self
     }
@@ -135,6 +135,10 @@ impl MemoryBridgeStats {
 /// Ordering comes from [`crate::domain::memory::enrolment_order`] — the same rule the
 /// domain test pins — so the ECS path and the pure one cannot disagree about who gets
 /// remembered.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn enrol_the_present(
     mut commands: Commands,
     config: Res<MemoryConfig>,
@@ -177,6 +181,10 @@ pub fn enrol_the_present(
 ///
 /// One store read per NPC per tick, not per leaf evaluation: a tree may ask four
 /// questions of the same memory, and they should all cost a slot lookup.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn publish_memory(
     store: Res<MemoryStore>,
     config: Res<MemoryConfig>,

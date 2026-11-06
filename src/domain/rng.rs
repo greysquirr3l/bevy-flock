@@ -16,6 +16,7 @@
 use core::fmt;
 
 use crate::domain::ids::{NpcId, SimSeed};
+use crate::domain::num;
 
 /// PCG32 multiplier, from the reference implementation.
 const MULTIPLIER: u64 = 6_364_136_223_846_793_005;
@@ -100,12 +101,12 @@ impl RngStream {
     }
 
     /// Draw the next 32 bits.
-    pub fn next_u32(&mut self) -> u32 {
+    pub const fn next_u32(&mut self) -> u32 {
         let old = self.state;
         self.state = old.wrapping_mul(MULTIPLIER).wrapping_add(self.increment);
         self.draws = self.draws.wrapping_add(1);
-        let xorshifted = (((old >> 18) ^ old) >> 27) as u32;
-        let rotation = (old >> 59) as u32;
+        let xorshifted = num::u64_to_low_u32(((old >> 18) ^ old) >> 27);
+        let rotation = num::u64_to_low_u32(old >> 59);
         xorshifted.rotate_right(rotation)
     }
 
@@ -125,12 +126,12 @@ impl RngStream {
             return 0;
         }
         let mut product = u64::from(self.next_u32()) * u64::from(bound);
-        let mut low = product as u32;
+        let mut low = num::u64_to_low_u32(product);
         if low < bound {
             let threshold = bound.wrapping_neg() % bound;
             while low < threshold {
                 product = u64::from(self.next_u32()) * u64::from(bound);
-                low = product as u32;
+                low = num::u64_to_low_u32(product);
             }
         }
         (product >> 32) as u32
@@ -169,7 +170,7 @@ impl RngStream {
             return;
         }
         for index in (1..items.len()).rev() {
-            let bound = (index + 1) as u32;
+            let bound = num::usize_to_u32(index + 1);
             let swap_with = self.next_bounded(bound) as usize;
             items.swap(index, swap_with);
         }
@@ -253,8 +254,8 @@ mod tests {
                 .wrapping_add(self.inc);
             // The reference applies `>> 27` after the xor, before the truncation.
             let xorshifted = ((oldstate >> 18) ^ oldstate) >> 27;
-            let xorshifted = xorshifted as u32;
-            let rot = (oldstate >> 59) as u32;
+            let xorshifted = num::u64_to_low_u32(xorshifted);
+            let rot = num::u64_to_low_u32(oldstate >> 59);
             (xorshifted >> rot) | (xorshifted << ((!rot).wrapping_add(1) & 31))
         }
     }

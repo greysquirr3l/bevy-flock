@@ -23,6 +23,7 @@ use core::cmp::Ordering;
 use smallvec::SmallVec;
 
 use super::tick::Tick;
+use crate::domain::num;
 
 /// What kind of thing was perceived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -134,7 +135,7 @@ impl Stimulus {
             return 0.0;
         }
         let distance_falloff = 1.0 - (distance / self.radius);
-        let age_falloff = 1.0 - (self.age(now) as f32 / self.ttl.max(1) as f32);
+        let age_falloff = 1.0 - (num::u32_to_f32(self.age(now)) / num::u32_to_f32(self.ttl.max(1)));
         (self.intensity * distance_falloff * age_falloff).clamp(0.0, 1.0)
     }
 }
@@ -215,13 +216,13 @@ impl StimulusBuffer {
     }
     /// How many records are held.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.items.len()
     }
 
     /// Whether the buffer is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
@@ -354,7 +355,7 @@ impl PerceptionQuery {
     /// A record's own radius can only shorten its reach, never lengthen it, so this is the window
     /// an index must cover to miss nothing.
     #[must_use]
-    pub fn max_limit(&self) -> f32 {
+    pub const fn max_limit(&self) -> f32 {
         if self.sight_radius.is_finite() && self.hearing_radius.is_finite() {
             self.sight_radius.max(self.hearing_radius).max(0.0)
         } else {
@@ -626,7 +627,7 @@ impl StimulusIndex {
 
     /// Whether the index holds nothing and a caller can skip perception entirely.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.live == 0
     }
 
@@ -658,8 +659,8 @@ impl StimulusIndex {
         let mut cols = 0_u32;
         let mut rows = 0_u32;
         for _ in 0..32 {
-            cols = usize_to_u32((max.x - min.x) / cell).saturating_add(1);
-            rows = usize_to_u32((max.z - min.z) / cell).saturating_add(1);
+            cols = num::f32_to_u32((max.x - min.x) / cell).saturating_add(1);
+            rows = num::f32_to_u32((max.z - min.z) / cell).saturating_add(1);
             if (cols as usize) * (rows as usize) <= MAX_CELLS {
                 break;
             }
@@ -805,13 +806,13 @@ impl StimulusIndex {
         }
         let limit = limit.max(0.0);
         let inv = 1.0 / self.cell;
-        let max_x = (self.cols - 1) as f32;
-        let max_z = (self.rows - 1) as f32;
+        let max_x = num::u32_to_f32(self.cols - 1);
+        let max_z = num::u32_to_f32(self.rows - 1);
         let clamp = |value: f32, high: f32| -> u32 {
             if value.is_nan() {
                 0
             } else {
-                usize_to_u32(value.max(0.0).min(high))
+                num::f32_to_u32(value.max(0.0).min(high))
             }
         };
         let x0 = clamp(((observer.x - limit - self.origin.x) * inv).floor(), max_x);
@@ -832,21 +833,10 @@ impl StimulusIndex {
         if x.is_nan() || z.is_nan() {
             return None;
         }
-        let x = usize_to_u32(x.max(0.0).min((self.cols - 1) as f32));
-        let z = usize_to_u32(z.max(0.0).min((self.rows - 1) as f32));
+        let x = num::f32_to_u32(x.max(0.0).min(num::u32_to_f32(self.cols - 1)));
+        let z = num::f32_to_u32(z.max(0.0).min(num::u32_to_f32(self.rows - 1)));
         Some((z as usize) * (self.cols as usize) + (x as usize))
     }
-}
-
-/// A non-negative, finite float to `u32`, saturating rather than wrapping.
-fn usize_to_u32(value: f32) -> u32 {
-    if value.is_nan() || value <= 0.0 {
-        return 0;
-    }
-    if value >= u32::MAX as f32 {
-        return u32::MAX;
-    }
-    value as u32
 }
 
 /// Whether any record could possibly reach an observer, using the buffer's bounding box.
@@ -1035,8 +1025,8 @@ mod tests {
         let query = PerceptionQuery::new().with_max_results(2);
         let seen = perceive(&buffer, Vec3::ZERO, Vec3::Z, Tick::ZERO, &query, &OpenAir);
         assert_eq!(seen.len(), 2);
-        assert_eq!(seen.at(0).distance, 5.0);
-        assert_eq!(seen.at(1).distance, 15.0);
+        assert_eq!(seen.at(0).distance.to_bits(), 5.0_f32.to_bits());
+        assert_eq!(seen.at(1).distance.to_bits(), 15.0_f32.to_bits());
     }
 
     #[test]
@@ -1051,7 +1041,7 @@ mod tests {
                 StimulusKind::Sound,
                 at(x, 0.0),
                 100.0,
-                0.1 + f32::from(index) * 0.02,
+                f32::from(index).mul_add(0.02, 0.1),
                 Tick::ZERO,
             ));
         }
@@ -1119,7 +1109,7 @@ mod tests {
     fn perception_is_deterministic() {
         let mut buffer = buffer(16);
         for index in 0..16 {
-            let x = index as f32 * 0.5;
+            let x = num::i32_to_f32(index) * 0.5;
             buffer.push(Stimulus::new(
                 StimulusKind::Sight,
                 at(x, 4.0),
@@ -1148,7 +1138,7 @@ mod tests {
     /// fixed sequence is what makes a failure reproducible.
     fn lcg(seed: &mut u32) -> f32 {
         *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        ((*seed >> 8) & 0xffff) as f32 / 65_535.0
+        num::u32_to_f32((*seed >> 8) & 0xffff) / 65_535.0
     }
 
     fn scattered(count: usize, extent: f32, seed: u32) -> StimulusBuffer {
@@ -1162,9 +1152,9 @@ mod tests {
             } else {
                 StimulusKind::Sight
             };
-            let radius = 2.0 + lcg(&mut state) * 40.0;
-            let intensity = 0.2 + lcg(&mut state) * 0.8;
-            let emitted = Tick::new((lcg(&mut state) * 5.0) as u64);
+            let radius = lcg(&mut state).mul_add(40.0, 2.0);
+            let intensity = lcg(&mut state).mul_add(0.8, 0.2);
+            let emitted = Tick::new(num::f32_to_u64(lcg(&mut state) * 5.0));
             buffer.push(Stimulus::new(kind, at(x, z), radius, intensity, emitted));
         }
         buffer
@@ -1227,7 +1217,7 @@ mod tests {
         let mut backwards = StimulusBuffer::new(64).or_die();
         let records: std::vec::Vec<Stimulus> = (0..40_u8)
             .map(|index| {
-                let x = f32::from(index) * 1.5 - 30.0;
+                let x = f32::from(index).mul_add(1.5, -30.0);
                 Stimulus::new(StimulusKind::Sound, at(x, x * 0.5), 25.0, 0.5, Tick::ZERO)
             })
             .collect();

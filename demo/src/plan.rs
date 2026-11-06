@@ -11,6 +11,7 @@
 
 use crate::city::CityLayout;
 use crate::scene::{Body, Scene};
+use bevy_flock::domain::num;
 use bevy_flock::domain::temperament::Archetype;
 use bevy_math::Vec3;
 use std::fmt::Write as _;
@@ -55,7 +56,7 @@ fn scale_of(extent: f32) -> f32 {
     (CANVAS - PAD * 2.0) / (extent * 2.0)
 }
 
-fn archetype_colour(archetype: Archetype) -> &'static str {
+const fn archetype_colour(archetype: Archetype) -> &'static str {
     match archetype {
         Archetype::Guard => "#7fb3ab",
         Archetype::Merchant | Archetype::Noble => "#c9a06a",
@@ -87,7 +88,7 @@ pub fn render(city: &CityLayout, bodies: &[Body], digest: u64, ticks: u64) -> St
         r#"<g stroke="{ROAD}" stroke-width="{}">"#,
         city.road_width * scale
     );
-    let cells = (city.extent * 2.0 / city.block_pitch).round().max(1.0) as i32;
+    let cells = num::f32_to_i32((city.extent * 2.0 / city.block_pitch).round().max(1.0));
     for index in 0..=cells {
         let metre =
             f32::from(i16::try_from(index).unwrap_or(i16::MAX)) * city.block_pitch - city.extent;
@@ -268,7 +269,7 @@ fn legend_and_footer(
             r#"<text x="{:.1}" y="{y}" fill="{MUTED}">{label}</text>"#,
             line_x + 17.0
         );
-        line_x += 17.0 + 8.0 * label.len() as f32 + 26.0;
+        line_x += 17.0 + 8.0 * num::usize_to_f32(label.len()) + 26.0;
     }
     y += 20.0;
     let guards = bodies
@@ -320,7 +321,7 @@ pub fn summary(city: &CityLayout) -> String {
 
 /// Whether a scene would draw anything, used by the smoke test.
 #[must_use]
-pub fn scene_has_content(scene: &Scene) -> bool {
+pub const fn scene_has_content(scene: &Scene) -> bool {
     !scene.is_empty()
 }
 

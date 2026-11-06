@@ -19,6 +19,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use bevy_flock::application::{AvoidanceParams, Crowd, CrowdParams};
+use bevy_flock::domain::num;
 use bevy_flock::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use bevy_flock::domain::steering::SteeringParams;
 
@@ -84,9 +85,9 @@ fn a_steady_frame_does_not_touch_the_allocator() {
     let frame = |crowd: &mut Crowd| {
         crowd.begin();
         for index in 0..1_000_u32 {
-            let ring = 1.6 * libm::sqrtf(index as f32);
-            let angle = index as f32 * 2.399_963_2;
-            let step_angle = index as f32 * 0.7;
+            let ring = 1.6 * libm::sqrtf(num::u32_to_f32(index));
+            let angle = num::u32_to_f32(index) * 2.399_963_2;
+            let step_angle = num::u32_to_f32(index) * 0.7;
             // A crowd that spans three dimensions, so the buffers are sized for the real case.
             crowd.push(
                 [
@@ -127,12 +128,12 @@ fn a_steady_avoidance_pass_does_not_touch_the_allocator() {
     let frame = |crowd: &mut Crowd| {
         crowd.begin();
         for index in 0..1_000_u32 {
-            let ring = 1.6 * libm::sqrtf(index as f32);
-            let angle = index as f32 * 2.399_963_2;
+            let ring = 1.6 * libm::sqrtf(num::u32_to_f32(index));
+            let angle = num::u32_to_f32(index) * 2.399_963_2;
             crowd.push(
                 [
                     libm::cosf(angle) * ring,
-                    libm::sinf(index as f32 * 0.7) * 3.0,
+                    libm::sinf(num::u32_to_f32(index) * 0.7) * 3.0,
                     libm::sinf(angle) * ring,
                 ],
                 [0.1, 0.0, -0.1],
@@ -169,12 +170,12 @@ fn a_steady_frame_with_personalities_does_not_touch_the_allocator() {
     let frame = |crowd: &mut Crowd| {
         crowd.begin();
         for index in 0..1_000_u32 {
-            let ring = 1.6 * libm::sqrtf(index as f32);
-            let angle = index as f32 * 2.399_963_2;
+            let ring = 1.6 * libm::sqrtf(num::u32_to_f32(index));
+            let angle = num::u32_to_f32(index) * 2.399_963_2;
             crowd.push(
                 [
                     libm::cosf(angle) * ring,
-                    libm::sinf(index as f32 * 0.7) * 3.0,
+                    libm::sinf(num::u32_to_f32(index) * 0.7) * 3.0,
                     libm::sinf(angle) * ring,
                 ],
                 [0.1, 0.0, -0.1],
@@ -183,7 +184,7 @@ fn a_steady_frame_with_personalities_does_not_touch_the_allocator() {
             );
             // Every agent biased, which is the expensive shape: a short buffer would pass by
             // accident if only a handful of agents carried one.
-            let scale = 1.0 + (index % 5) as f32 * 0.1;
+            let scale = (num::u32_to_f32(index % 5)).mul_add(0.1, 1.0);
             crowd.set_bias(index as usize, [scale, 1.0, 2.0 - scale, 1.0, 1.0]);
         }
         crowd.steer(&params)
