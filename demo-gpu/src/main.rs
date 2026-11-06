@@ -106,38 +106,65 @@ fn main() -> std::process::ExitCode {
     }
 }
 
+/// What the command line asked for.
+enum Request {
+    /// Render, with these settings.
+    Run(Options),
+    /// Print the usage and stop.
+    Help,
+}
+
+impl Options {
+    /// Read the flags.
+    ///
+    /// Separated from [`run`] so the command line can be tested without a device: everything that can
+    /// be wrong about a flag is decided here, and none of it needs a GPU.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Usage`] when a flag is unknown, is missing its value, or is given one that does not
+    /// parse.
+    fn parse(arguments: impl Iterator<Item = String>) -> Result<Request, Error> {
+        let mut options = Self::default();
+        let mut arguments = arguments;
+        while let Some(argument) = arguments.next() {
+            let mut value = || {
+                arguments
+                    .next()
+                    .ok_or_else(|| Error::Usage(format!("{argument} needs a value")))
+            };
+            match argument.as_str() {
+                "--population" => options.population = parse(&value()?)?,
+                "--ticks" => options.ticks = parse(&value()?)?,
+                "--seed" => options.seed = parse(&value()?)?,
+                "--extent" => options.extent = parse(&value()?)?,
+                "--width" => options.width = parse(&value()?)?,
+                "--height" => options.height = parse(&value()?)?,
+                "--frames" => options.frames = parse(&value()?)?,
+                "--view" => options.view = Some(value()?),
+                "--out" => options.out = PathBuf::from(value()?),
+                "--backend" => {
+                    let name = value()?;
+                    options.backend = Backend::parse(&name)
+                        .ok_or_else(|| Error::Usage(format!("unknown backend `{name}`")))?;
+                }
+                "--help" | "-h" => return Ok(Request::Help),
+                other => return Err(Error::Usage(format!("unknown flag `{other}`"))),
+            }
+        }
+        Ok(Request::Run(options))
+    }
+}
+
 /// Parse the flags, render, and print one JSON line per view.
 fn run(arguments: impl Iterator<Item = String>) -> Result<(), Error> {
-    let mut options = Options::default();
-    let mut arguments = arguments;
-    while let Some(argument) = arguments.next() {
-        let mut value = || {
-            arguments
-                .next()
-                .ok_or_else(|| Error::Usage(format!("{argument} needs a value")))
-        };
-        match argument.as_str() {
-            "--population" => options.population = parse(&value()?)?,
-            "--ticks" => options.ticks = parse(&value()?)?,
-            "--seed" => options.seed = parse(&value()?)?,
-            "--extent" => options.extent = parse(&value()?)?,
-            "--width" => options.width = parse(&value()?)?,
-            "--height" => options.height = parse(&value()?)?,
-            "--frames" => options.frames = parse(&value()?)?,
-            "--view" => options.view = Some(value()?),
-            "--out" => options.out = PathBuf::from(value()?),
-            "--backend" => {
-                let name = value()?;
-                options.backend = Backend::parse(&name)
-                    .ok_or_else(|| Error::Usage(format!("unknown backend `{name}`")))?;
-            }
-            "--help" | "-h" => {
-                println!("{USAGE}");
-                return Ok(());
-            }
-            other => return Err(Error::Usage(format!("unknown flag `{other}`"))),
+    let options = match Options::parse(arguments)? {
+        Request::Help => {
+            println!("{USAGE}");
+            return Ok(());
         }
-    }
+        Request::Run(options) => options,
+    };
     std::fs::create_dir_all(&options.out)
         .map_err(|error| Error::Io(format!("{}: {error}", options.out.display())))?;
 
@@ -331,3 +358,141 @@ Prints one JSON line per view with the median CPU submit time, the median
 submit-and-wait time, and the number of lit pixels. `--backend noop` encodes
 every frame and draws none, so it runs anywhere but produces a blank image.
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_flock::testkit::OrDie;
+
+    /// Parse a command line written as a shell would split it.
+    fn parse_line(line: &str) -> Result<Request, Error> {
+        Options::parse(line.split_whitespace().map(str::to_string))
+    }
+
+    /// The usage error a line has to produce, so a test that expects a refusal cannot pass silently.
+    fn usage_error(line: &str) -> Error {
+        match parse_line(line) {
+            Ok(_) => unreachable!("`{line}` was accepted"),
+            Err(error) => error,
+        }
+    }
+
+    /// Every flag reaches the field it names, and the defaults survive the ones left out.
+    #[test]
+    fn the_flags_reach_their_fields() {
+        let request = parse_line(
+            "--population 500 --ticks 12 --seed 9 --extent 450.5 --width 320 --height 200 \
+             --frames 4 --view street --out /tmp/frames --backend gl",
+        )
+        .or_die();
+        let Request::Run(options) = request else {
+            unreachable!("a full command line is not a request for help");
+        };
+        assert_eq!(options.population, 500);
+        assert_eq!(options.ticks, 12);
+        assert_eq!(options.seed, 9);
+        assert!((options.extent - 450.5).abs() < f32::EPSILON);
+        assert_eq!(options.width, 320);
+        assert_eq!(options.height, 200);
+        assert_eq!(options.frames, 4);
+        assert_eq!(options.view.as_deref(), Some("street"));
+        assert_eq!(options.out, PathBuf::from("/tmp/frames"));
+        assert_eq!(options.backend, Backend::Gl);
+    }
+
+    /// An empty command line is the documented default, which is what a bare run has to do.
+    #[test]
+    fn no_flags_means_the_documented_defaults() {
+        let Request::Run(options) = parse_line("").or_die() else {
+            unreachable!("an empty command line is not a request for help");
+        };
+        let default = Options::default();
+        assert_eq!(options.population, default.population);
+        assert_eq!(options.width, default.width);
+        assert_eq!(options.height, default.height);
+        assert_eq!(options.frames, default.frames);
+        assert_eq!(options.backend, Backend::Auto);
+        assert!(options.view.is_none());
+    }
+
+    /// Both spellings of help are help, and neither is an error.
+    #[test]
+    fn help_is_a_request_and_not_an_error() {
+        for line in ["--help", "-h", "--width 8 --help"] {
+            assert!(
+                matches!(parse_line(line).or_die(), Request::Help),
+                "`{line}` was not help"
+            );
+        }
+    }
+
+    /// A flag whose value is missing says which flag, because that is the only way to find it.
+    #[test]
+    fn a_missing_value_names_the_flag() {
+        let error = usage_error("--width");
+        assert!(matches!(error, Error::Usage(_)), "got {error:?}");
+        assert!(error.to_string().contains("--width"), "got {error}");
+    }
+
+    /// A value that does not parse is a usage error, not a silent default.
+    #[test]
+    fn a_value_that_does_not_parse_is_a_usage_error() {
+        let error = usage_error("--frames many");
+        assert!(matches!(error, Error::Usage(_)), "got {error:?}");
+    }
+
+    /// An unknown flag is refused rather than ignored, so a typo cannot render the wrong thing.
+    #[test]
+    fn an_unknown_flag_is_refused() {
+        let error = usage_error("--widht 8");
+        assert!(matches!(error, Error::Usage(_)), "got {error:?}");
+        assert!(error.to_string().contains("--widht"), "got {error}");
+    }
+
+    /// An unknown backend names the value that was not understood.
+    #[test]
+    fn an_unknown_backend_names_the_value() {
+        let error = usage_error("--backend metal");
+        assert!(matches!(error, Error::Usage(_)), "got {error:?}");
+        assert!(error.to_string().contains("metal"), "got {error}");
+    }
+
+    /// The median of an even count is the upper middle, and an empty set is zero rather than a panic.
+    #[test]
+    fn median_takes_the_middle_and_survives_an_empty_set() {
+        assert!((median(&mut []) - 0.0).abs() < f64::EPSILON);
+        assert!((median(&mut [3.0]) - 3.0).abs() < f64::EPSILON);
+        assert!((median(&mut [9.0, 1.0, 5.0]) - 5.0).abs() < f64::EPSILON);
+        assert!((median(&mut [1.0, 2.0, 3.0, 4.0]) - 3.0).abs() < f64::EPSILON);
+    }
+
+    /// A PNG's header has to name the size and the pixel format, or a viewer renders garbage.
+    #[test]
+    fn the_png_header_describes_the_frame() {
+        let (width, height) = (3_u32, 2_u32);
+        let pixels = vec![0x7f_u8; usize::try_from(width * height * 4).or_die()];
+        let file = png(&pixels, width, height);
+        assert_eq!(
+            file.get(..8),
+            Some(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..]),
+            "not a PNG signature"
+        );
+        // The IHDR chunk is the first one: length, type, then width and height big-endian.
+        assert_eq!(file.get(8..12), Some(&13_u32.to_be_bytes()[..]));
+        assert_eq!(file.get(12..16), Some(&b"IHDR"[..]));
+        assert_eq!(file.get(16..20), Some(&width.to_be_bytes()[..]));
+        assert_eq!(file.get(20..24), Some(&height.to_be_bytes()[..]));
+        // Bit depth 8, colour type 6 (RGBA), no interlacing.
+        assert_eq!(file.get(24..29), Some(&[8, 6, 0, 0, 0][..]));
+        // And it ends with an empty IEND.
+        assert_eq!(file.get(file.len() - 8..file.len() - 4), Some(&b"IEND"[..]));
+    }
+
+    /// A short readback still writes a valid PNG of the rows it has, rather than a truncated file.
+    #[test]
+    fn a_short_readback_writes_the_rows_it_has() {
+        let file = png(&[1, 2, 3, 4], 2, 2);
+        assert_eq!(file.get(12..16), Some(&b"IHDR"[..]));
+        assert_eq!(file.get(file.len() - 8..file.len() - 4), Some(&b"IEND"[..]));
+    }
+}

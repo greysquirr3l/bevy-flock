@@ -11,6 +11,9 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
+# Direct, not just through the demo: this crate converts a linear channel to a byte, and
+# `bevy_flock::domain::num` is where every cast in the repository is written down.
+bevy-flock = { path = ".." }
 bevy-flock-demo = { path = "../demo" }
 bevy_math = "0.20.1"
 # The real backends, so the crate can render on a device when one exists. `noop` stays in the feature
@@ -34,22 +37,45 @@ name = "frame"
 harness = false
 
 [lints.rust]
-missing_docs = "deny"
 unsafe_code = "deny"
-
+missing_docs = "deny"
+# `rust_2018_idioms` is deliberately off here for the same reason as the library: it flags every
+# `Res<T>` and `Query<...>` in a Bevy system as a hidden lifetime, which is the framework's spelling.
 [lints.clippy]
+# --- The spine -------------------------------------------------------------------------------
+# The same table as the library, with one difference: the groups are `deny` rather than `warn`
+# because this crate has no `-D warnings` step of its own, and a rule that only warns is a rule that
+# is not enforced. `scripts/lint_audit.py` covers this crate, so an override here is checked too.
+all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
 cargo = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# Allowed: opted out of, for the reasons `docs/lint-policy.md` states, and identical to the library
+# so a contributor reads one list rather than three.
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 struct_excessive_bools = "allow"
 multiple_crate_versions = "allow"
+# Denied: the same incidents the library denies, and for the same reasons.
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
-suspicious = { level = "deny", priority = -1 }
+needless_pass_by_value = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+missing_const_for_fn = "deny"
+significant_drop_tightening = "deny"
+# `suboptimal_flops` is denied here and allowed in the library, which is the point of the rule being
+# a documented deviation rather than a style: the library's kernels must not fuse because the SIMD,
+# threaded and scalar roads are compared bit for bit, and this crate has no such contract, so the
+# lint's advice is simply correct.
+suboptimal_flops = "deny"

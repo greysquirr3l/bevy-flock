@@ -131,6 +131,43 @@ pub const fn f64_to_i64(value: f64) -> i64 {
     value as i64
 }
 
+/// Converts a `u32` to `usize`, widening losslessly on every target this crate supports.
+#[inline]
+#[must_use]
+pub const fn u32_to_usize(value: u32) -> usize {
+    value as usize
+}
+/// Converts a `u32` to `u8`, saturating at 255.
+#[inline]
+#[must_use]
+pub const fn u32_to_u8(value: u32) -> u8 {
+    if value > u8::MAX as u32 {
+        u8::MAX
+    } else {
+        value as u8
+    }
+}
+/// Converts an `i32` to `u8`, saturating at both ends; negative values become zero.
+#[inline]
+#[must_use]
+pub const fn i32_to_u8(value: i32) -> u8 {
+    if value < 0 {
+        0
+    } else if value > u8::MAX as i32 {
+        u8::MAX
+    } else {
+        value as u8
+    }
+}
+/// Converts an `f64` to `usize`, truncating toward zero and saturating; `NaN` becomes zero.
+///
+/// The counterpart of [`f32_to_usize`] for a value that arrived as a `f64`: a JSON number, a
+/// measurement from a file, anything the simulation did not compute itself.
+#[inline]
+#[must_use]
+pub const fn f64_to_usize(value: f64) -> usize {
+    value as usize
+}
 /// Converts an `f64` to `i16`, truncating toward zero and saturating; `NaN` becomes zero.
 #[inline]
 #[must_use]
@@ -429,6 +466,13 @@ mod tests {
         assert_eq!(f32_to_i32(f32::NAN), 0);
         assert_eq!(f32_to_usize(f32::NAN), 0);
         assert_eq!(f64_to_i64(f64::NAN), 0);
+        assert_eq!(u32_to_u8(255), 255);
+        assert_eq!(u32_to_u8(256), 255);
+        assert_eq!(i32_to_u8(-1), 0);
+        assert_eq!(i32_to_u8(300), 255);
+        assert_eq!(f64_to_usize(3.9), 3);
+        assert_eq!(f64_to_usize(-1.0), 0);
+        assert_eq!(f64_to_usize(f64::INFINITY), usize::MAX);
     }
 
     #[test]

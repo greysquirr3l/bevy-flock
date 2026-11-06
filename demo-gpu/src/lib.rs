@@ -23,6 +23,7 @@
 //! adapter it came from, through [`Adapter::label`], because a figure without its adapter is a figure
 //! without meaning.
 
+use bevy_flock::domain::num;
 use bevy_flock_demo::gltf::Mesh;
 use bevy_flock_demo::render3d::{Meshes, Shot};
 use bevy_flock_demo::scene::{Instance, Scene};
@@ -783,15 +784,7 @@ impl GpuRenderer {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| GpuError::Readback(format!("{error}")))?;
-        let mut out = Vec::with_capacity((unpadded * self.height) as usize);
-        for row in 0..self.height {
-            let start = (row * row_bytes) as usize;
-            let end = start + unpadded as usize;
-            match mapped.get(start..end) {
-                Some(slice) => out.extend_from_slice(slice),
-                None => return Err(GpuError::Readback(format!("row {row} is out of range"))),
-            }
-        }
+        let out = pack_rows(&mapped, self.width, self.height)?;
         drop(mapped);
         buffer.unmap();
         Ok(out)
@@ -808,6 +801,36 @@ impl GpuRenderer {
             255,
         ]
     }
+}
+
+/// Copy a mapped texture readback into tightly packed rows.
+///
+/// `wgpu` pads every copied row to [`COPY_ALIGN`], so the mapped buffer is wider than the frame: a
+/// 3-pixel-wide frame occupies 12 bytes of a 256-byte row. Dropping the padding is arithmetic that
+/// is easy to get subtly wrong and impossible to see in a screenshot, so it is a function of its own
+/// with tests rather than four lines inside a method that needs a device to run.
+///
+/// # Errors
+///
+/// [`GpuError::Readback`] when a row falls outside the mapped buffer, which means the copy and the
+/// request disagreed about the size.
+fn pack_rows(mapped: &[u8], width: u32, height: u32) -> Result<Vec<u8>, GpuError> {
+    let unpadded = width * 4;
+    let row_bytes = unpadded.div_ceil(COPY_ALIGN) * COPY_ALIGN;
+    let capacity = usize::try_from(unpadded)
+        .ok()
+        .and_then(|row| usize::try_from(height).ok().map(|rows| row * rows))
+        .unwrap_or(0);
+    let mut out = Vec::with_capacity(capacity);
+    for row in 0..height {
+        let start = usize::try_from(row * row_bytes).unwrap_or(usize::MAX);
+        let end = start.saturating_add(usize::try_from(unpadded).unwrap_or(usize::MAX));
+        match mapped.get(start..end) {
+            Some(slice) => out.extend_from_slice(slice),
+            None => return Err(GpuError::Readback(format!("row {row} is out of range"))),
+        }
+    }
+    Ok(out)
 }
 
 /// Every model slug a scene can name.
@@ -948,16 +971,12 @@ fn linear_to_srgb(value: f32) -> u8 {
 
 /// A rounded, clamped 0-255 value as a byte.
 ///
-/// The cast is the point: the value is clamped into `0..=255` first, so it cannot truncate anything
-/// but the fraction `round` has already removed. Every alternative that avoids the cast either
-/// reinterprets the float's bits (wrong) or is unsafe.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the value is rounded and clamped into 0..=255 first, so neither can apply"
-)]
+/// The rounding happens here; the conversion belongs to `bevy_flock::domain::num`, which is where
+/// every cast in this repository lives. It truncates toward zero and saturates, so a negative or
+/// enormous input lands on `0` or `255` instead of wrapping, and `NaN` becomes `0`. Rounding first is
+/// what makes this a rounding rather than a truncation.
 const fn to_byte(value: f32) -> u8 {
-    value.round().clamp(0.0, 255.0) as u8
+    num::f32_to_u8(value.round())
 }
 
 /// Ask the adapter for a device with default limits, which is all this pipeline needs.
@@ -1157,3 +1176,272 @@ fn fs(input: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(mix(lit, camera.fog_colour.rgb, fog), 1.0);
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_flock::testkit::{OrDie, OrDieErr};
+
+    /// An instance at the origin facing north, for tests that only vary one field.
+    const fn instance(yaw: f32, scale: f32, position: Vec3) -> Instance {
+        Instance {
+            model: "block",
+            position,
+            yaw,
+            scale,
+            tint: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    /// Every backend's printed name parses back to itself, because the name is also the flag value.
+    #[test]
+    fn backend_names_round_trip_through_parse() {
+        for backend in [Backend::Auto, Backend::Vulkan, Backend::Gl, Backend::Noop] {
+            assert_eq!(Backend::parse(backend.name()), Some(backend));
+        }
+    }
+
+    /// `gles` is what `wgpu` calls the backend and `gl` is what a person types; both mean OpenGL.
+    #[test]
+    fn backend_parse_accepts_both_spellings_of_opengl_and_rejects_nonsense() {
+        assert_eq!(Backend::parse("gl"), Some(Backend::Gl));
+        assert_eq!(Backend::parse("gles"), Some(Backend::Gl));
+        assert_eq!(Backend::parse("metal"), None);
+        assert_eq!(Backend::parse(""), None);
+    }
+
+    /// The default is the one that opens whatever the machine has, not a backend it may not.
+    #[test]
+    fn the_default_backend_is_auto() {
+        assert_eq!(Backend::default(), Backend::Auto);
+    }
+
+    /// Rounding is half away from zero and the conversion saturates, so nothing wraps.
+    #[test]
+    fn to_byte_rounds_and_saturates() {
+        assert_eq!(to_byte(0.0), 0);
+        assert_eq!(to_byte(0.4), 0);
+        assert_eq!(to_byte(0.5), 1);
+        assert_eq!(to_byte(1.5), 2);
+        assert_eq!(to_byte(254.4), 254);
+        assert_eq!(to_byte(254.6), 255);
+        assert_eq!(to_byte(-3.0), 0);
+        assert_eq!(to_byte(1.0e9), 255);
+        assert_eq!(to_byte(f32::NAN), 0);
+    }
+
+    /// The transfer function hits both ends exactly and matches the published value at mid grey.
+    ///
+    /// `linear_to_srgb` is what `clear_colour` compares a frame against, so an error here makes every
+    /// "was anything drawn" check wrong in the same direction.
+    #[test]
+    fn linear_to_srgb_hits_the_endpoints_and_the_midpoint() {
+        assert_eq!(linear_to_srgb(0.0), 0);
+        assert_eq!(linear_to_srgb(1.0), 255);
+        // 0.5^(1/2.4) = 0.7492, and 1.055 * 0.7492 - 0.055 = 0.7354, which is 188/255.
+        assert_eq!(linear_to_srgb(0.5), 188);
+        // Out of range clamps rather than wrapping.
+        assert_eq!(linear_to_srgb(-1.0), 0);
+        assert_eq!(linear_to_srgb(4.0), 255);
+    }
+
+    /// The transfer function is monotone, which is what makes a dithered frame readable at all.
+    #[test]
+    fn linear_to_srgb_is_monotone() {
+        let mut previous = 0;
+        for step in 0..=64 {
+            let value = f32::from(u8::try_from(step).or_die()) / 64.0;
+            let encoded = linear_to_srgb(value);
+            assert!(
+                encoded >= previous,
+                "encoding fell from {previous} to {encoded} at {value}"
+            );
+            previous = encoded;
+        }
+    }
+
+    /// A yaw of a quarter turn swaps the two horizontal axes and the scale reaches both.
+    #[test]
+    fn instance_raw_rotates_scales_and_translates() {
+        let raw = instance_raw(&instance(
+            std::f32::consts::FRAC_PI_2,
+            2.0,
+            Vec3::new(1.0, 2.0, 3.0),
+        ));
+        // Column 0 is the rotated x axis: (cos, 0, -sin) * scale = (0, 0, -2) at a quarter turn.
+        assert!((raw.model[0][0]).abs() < 1.0e-6);
+        assert!((raw.model[0][2] + 2.0).abs() < 1.0e-6);
+        // Column 2 is the rotated z axis: (sin, 0, cos) * scale = (2, 0, 0).
+        assert!((raw.model[2][0] - 2.0).abs() < 1.0e-6);
+        // Column 3 is the translation, with the homogeneous 1 in `w`.
+        assert!((raw.model[3][0] - 1.0).abs() < 1.0e-6);
+        assert!((raw.model[3][1] - 2.0).abs() < 1.0e-6);
+        assert!((raw.model[3][2] - 3.0).abs() < 1.0e-6);
+        assert!((raw.model[3][3] - 1.0).abs() < 1.0e-6);
+    }
+
+    /// A zero yaw and unit scale is the identity, so an instance with no rotation draws where it says.
+    #[test]
+    fn instance_raw_at_rest_is_a_translation() {
+        let raw = instance_raw(&instance(0.0, 1.0, Vec3::new(-4.0, 0.5, 7.0)));
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-4.0, 0.5, 7.0, 1.0],
+        ];
+        for (column, expected) in raw.model.iter().zip(identity) {
+            for (value, want) in column.iter().zip(expected) {
+                assert!((value - want).abs() < 1.0e-6, "expected {expected:?}");
+            }
+        }
+    }
+
+    /// A scaled cube carries its half extent in the diagonal, which is what `scaled_cube` is for.
+    #[test]
+    fn scaled_cube_is_half_extent_and_centre() {
+        let raw = scaled_cube(
+            Vec3::new(3.0, 4.0, 5.0),
+            Vec3::new(2.0, 6.0, 8.0),
+            [0.1, 0.2, 0.3, 1.0],
+        );
+        assert!((raw.model[0][0] - 2.0).abs() < 1.0e-6);
+        assert!((raw.model[1][1] - 6.0).abs() < 1.0e-6);
+        assert!((raw.model[2][2] - 8.0).abs() < 1.0e-6);
+        assert!((raw.model[3][0] - 3.0).abs() < 1.0e-6);
+        assert!((raw.model[3][1] - 4.0).abs() < 1.0e-6);
+        assert!((raw.model[3][2] - 5.0).abs() < 1.0e-6);
+    }
+
+    /// The vertex layout in the pipeline is written as a stride and two offsets, so the struct the
+    /// bytes come from has to keep the size the layout promises. A field added here without a change
+    /// there silently reads the next vertex's position as this one's normal.
+    #[test]
+    fn the_packed_structs_keep_the_strides_the_pipeline_declares() {
+        assert_eq!(size_of::<VertexRaw>(), 24);
+        assert_eq!(size_of::<InstanceRaw>(), 80);
+        assert_eq!(size_of::<CameraUniform>(), 192);
+    }
+
+    /// A row of 3 pixels is 12 bytes in a 256-byte stride, and the copy has to drop the other 244.
+    #[test]
+    fn pack_rows_strips_the_row_padding() {
+        let (width, height) = (3_u32, 2_u32);
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let mut mapped = vec![0xEE_u8; row_bytes * 2];
+        // First row: 12 bytes of 0x01, second: 12 bytes of 0x02.
+        for (index, byte) in mapped.iter_mut().take(12).enumerate() {
+            *byte = u8::try_from(index).or_die();
+        }
+        for (index, byte) in mapped.iter_mut().skip(row_bytes).take(12).enumerate() {
+            *byte = u8::try_from(index).or_die() + 100;
+        }
+        let packed = pack_rows(&mapped, width, height).or_die();
+        assert_eq!(packed.len(), 24);
+        let expected: Vec<u8> = (0..12_u8).chain(100..112_u8).collect();
+        assert_eq!(packed, expected);
+    }
+
+    /// A buffer that is short by a row is an error rather than a frame with a hole in it.
+    #[test]
+    fn pack_rows_reports_a_row_outside_the_buffer() {
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let short = vec![0_u8; row_bytes];
+        let error = pack_rows(&short, 1, 2).or_die_err();
+        assert!(matches!(error, GpuError::Readback(_)), "got {error:?}");
+    }
+
+    /// A frame narrower than the copy alignment still packs one row, which is the off-by-one that
+    /// `div_ceil` exists to avoid.
+    #[test]
+    fn pack_rows_handles_a_frame_narrower_than_the_alignment() {
+        let row_bytes = usize::try_from(COPY_ALIGN).or_die();
+        let mut mapped = vec![0_u8; row_bytes];
+        for (index, byte) in mapped.iter_mut().take(4).enumerate() {
+            *byte = u8::try_from(index).or_die();
+        }
+        let packed = pack_rows(&mapped, 1, 1).or_die();
+        assert_eq!(packed, vec![0, 1, 2, 3]);
+    }
+
+    /// The cube is twelve triangles, six faces, and each face's four corners share its normal.
+    #[test]
+    fn the_cube_is_six_flat_faces() {
+        let mesh = cube();
+        assert_eq!(mesh.positions.len(), 24);
+        assert_eq!(mesh.normals.len(), 24);
+        assert_eq!(mesh.indices.len(), 36);
+        for face in 0..6 {
+            let base = face * 4;
+            let normal = mesh.normals.get(base).copied().or_die();
+            for corner in 0..4 {
+                let other = mesh.normals.get(base + corner).copied().or_die();
+                assert_eq!(
+                    normal.map(f32::to_bits),
+                    other.map(f32::to_bits),
+                    "face {face} corner {corner} is not flat"
+                );
+            }
+            // A unit cube's corners are all at distance sqrt(3) from its centre.
+            for corner in 0..4 {
+                let position = mesh.positions.get(base + corner).copied().or_die();
+                let length = Vec3::from_array(position).length();
+                assert!((length - 3.0_f32.sqrt()).abs() < 1.0e-6);
+            }
+        }
+    }
+
+    /// Every triangle's winding agrees with the normal it carries, which is what back-face culling
+    /// depends on: a flipped pair of indices draws nothing and looks like a modelling bug.
+    #[test]
+    fn every_triangle_winds_with_its_normal() {
+        for mesh in [cube(), plane()] {
+            for triangle in mesh.indices.chunks_exact(3) {
+                let [a, b, c] = <[u32; 3]>::try_from(triangle).or_die();
+                let position = |index: u32| {
+                    Vec3::from_array(
+                        mesh.positions
+                            .get(usize::try_from(index).or_die())
+                            .copied()
+                            .or_die(),
+                    )
+                };
+                let normal = Vec3::from_array(
+                    mesh.normals
+                        .get(usize::try_from(a).or_die())
+                        .copied()
+                        .or_die(),
+                );
+                let geometric = (position(b) - position(a)).cross(position(c) - position(a));
+                let agreement = geometric.normalize().dot(normal);
+                assert!(
+                    agreement > 0.9,
+                    "{}: a triangle's winding disagrees with its normal ({agreement})",
+                    mesh.name
+                );
+            }
+        }
+    }
+
+    /// The ground is four corners and two triangles, all facing up.
+    #[test]
+    fn the_plane_is_two_triangles_facing_up() {
+        let mesh = plane();
+        assert_eq!(mesh.positions.len(), 4);
+        assert_eq!(mesh.indices.len(), 6);
+        for normal in &mesh.normals {
+            assert_eq!(
+                normal.map(f32::to_bits),
+                [0.0_f32.to_bits(), 1.0_f32.to_bits(), 0.0_f32.to_bits()],
+                "the ground is not facing up"
+            );
+        }
+    }
+
+    /// A view that selects nothing is an error, not a black frame that looks like a driver problem.
+    #[test]
+    fn the_empty_view_error_says_what_happened() {
+        let message = GpuError::EmptyView.to_string();
+        assert!(message.contains("no geometry"), "got {message}");
+    }
+}
