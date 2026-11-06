@@ -1048,3 +1048,14 @@ evaluation_criteria = [
   "The forward job can be tightened to `-D warnings` without touching code.",
   "The benchmarks in `docs/performance.md` still reproduce.",
 ]
+
+[[completed]]
+slug          = "asset-skill-port"
+title         = "Port the Meshy asset skills and make their contract checkable"
+phase         = "Reach"
+delivered_in  = "HEAD"
+evidence      = """Four skills ported from greysquirr3l/trapgrid-arsenal at 69b7ce0: bevy-flock-meshy-assets (from trapgrid-meshy-operators), bevy-flock-npc-character-package (trapgrid-character-production), bevy-flock-external-asset-placeholders, and bevy-flock-npc-animation-library (trapgrid-operator-animation-pipeline, with both Blender scripts).
+
+The port rewrote the domain rather than the mechanics: an operator is an NPC archetype, the deck portrait is a roster card, the selection voice line is a `BarkTable` entry, and `deploy` plus the four per-operator primaries became a single `interaction` clip, so the shared library is 11 clips instead of 15. The crate boundary is explicit in every skill: flock loads no media, `build_render_plan` emits `VisibleInstance` and the game decides what a variant looks like, and no asset may change simulation state.
+
+Two additions: a variant budget in the Meshy skill (4-6 bodies and 6-8 heads with 16 tints, because `VisibleInstance::variant` and `tint_from_seed` mean a crowd needs few meshes, and `LodTier::Ambient` is culled before the plan), and `check_action_contract.py`, which reads `SELECTED_ACTIONS`, `EXPECTED_ACTIONS` and the skill's index table with `ast` and fails when the three disagree or when the documented order stops being alphabetical. The three copies existed in the source project with nothing comparing them; the checker's self-test proves six distinct disagreement shapes are caught, and a deliberate one-character source change in the doc fails the live check. CI compiles every skill script with `py_compile` (bpy is never imported) and runs both checks in the `scripts` job."""

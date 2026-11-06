@@ -96,6 +96,15 @@ cargo bench --locked --bench tiers -- tier_frame      # the tier numbers in the 
 If a number here and a number you measure disagree by more than the tolerance those scripts
 use, that is a bug report, not a difference of opinion.
 
+## Asset pipeline skills
+
+`skills/` holds the agent-facing playbooks for the work that surrounds the crate: generating NPC
+bodies and portraits with Meshy, shipping a complete archetype, keeping media out of Git without
+breaking the build, and building the shared humanoid action library every rig plays. They are written
+for *your* game, not for this crate — flock loads no media, and `build_render_plan` is the only seam
+between a simulation and a mesh. See [skills/README.md](skills/README.md) for what changed when they
+were ported from another project and why.
+
 ## The book
 
 [`docs/book/src/`](docs/book/src/SUMMARY.md) is the long form: getting started, the model,

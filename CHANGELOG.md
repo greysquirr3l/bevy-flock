@@ -233,6 +233,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Crowd` users only: `push` and `desired` use `[f32; 3]`, and `configure` lost its `plane`
   argument.
 
+### Asset pipeline skills, ported and made checkable
+
+`skills/` gains four playbooks carried over from the TrapGrid Arsenal project and rewritten for a
+crowd library: Meshy NPC assets, the complete archetype package, Git-safe external placeholders, and
+the shared humanoid action library. The vocabulary moved (operator -> NPC archetype, deck -> roster
+card, selection line -> bark) and so did the boundary: this crate loads no media, so every skill
+produces files for the game that consumes it and names `build_render_plan` as the seam.
+
+Two things were added rather than translated. The Meshy skill opens with a variant budget, because a
+crowd needs four bodies and sixteen tints rather than ten thousand meshes: `VisibleInstance` carries
+`variant` and `tint`, and `LodTier::Ambient` is culled before it ever reaches the plan. And the
+animation pipeline's clip list existed in three files with nothing comparing them, so
+`check_action_contract.py` parses both scripts and the skill's own table with `ast` and fails on any
+disagreement, including an index order that is not alphabetical — that order is what
+`GltfAssetLabel::Animation(n)` means. The Blender scripts themselves cannot run in CI, which is
+exactly why the thing that can run checks their contract instead.
 
 ### Lint drift is a catalogue, not a sentence
 
