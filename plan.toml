@@ -1212,7 +1212,7 @@ version of a fallback gate is one a contributor can find.
 slug = "lint-spine-enforced"
 title = "Make the lint spine true: deny the eight allowed lints and satisfy them by construction"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "891c765"
 evidence = """`Cargo.toml` denied eight lints on paper and allowed them in the same table, so the manifest read
 as strict while VS Code reported ninety findings across `src`, `tests`, `benches` and `examples`.
 They are denied now and the code satisfies them, which is a different kind of work from adding a
