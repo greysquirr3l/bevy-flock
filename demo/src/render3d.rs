@@ -82,6 +82,15 @@ pub struct Shot {
     pub ground_reach: f32,
     /// Ground tile size, metres.
     pub ground_tile: f32,
+    /// Smallest triangle worth shading, pixels; zero draws every triangle.
+    pub min_area: f32,
+    /// Beyond this distance a body is drawn as a two-triangle billboard, metres.
+    ///
+    /// Infinite by default, which draws every triangle of every body: the shipped PNGs are made at
+    /// full detail because they are read, not steered. A forty-metre billboard covers a handful of
+    /// pixels in a terminal, where the mesh beside it costs eleven thousand triangles for the same
+    /// handful.
+    pub impostor_distance: f32,
 }
 
 const fn camera(eye: Vec3, target: Vec3, fov_y: f32) -> Camera {
@@ -248,6 +257,8 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             draw_distance: 190.0,
             max_bodies: 420,
             block_distance: 380.0,
+            min_area: 0.0,
+            impostor_distance: f32::INFINITY,
             ground_reach: 700.0,
             ground_tile: 40.0,
         },
@@ -260,6 +271,8 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             draw_distance: 140.0,
             max_bodies: 200,
             block_distance: 220.0,
+            min_area: 0.0,
+            impostor_distance: f32::INFINITY,
             ground_reach: 420.0,
             ground_tile: 24.0,
         },
@@ -280,6 +293,8 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             max_bodies: 10,
             body_margin: 1.4,
             block_distance: 150.0,
+            min_area: 0.0,
+            impostor_distance: f32::INFINITY,
             ground_reach: 220.0,
             ground_tile: 12.0,
         },
@@ -292,6 +307,8 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             draw_distance: 40.0,
             max_bodies: 4,
             block_distance: 80.0,
+            min_area: 0.0,
+            impostor_distance: f32::INFINITY,
             ground_reach: 120.0,
             ground_tile: 12.0,
         },
@@ -308,6 +325,8 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             draw_distance: 1400.0,
             max_bodies: 900,
             block_distance: 2100.0,
+            min_area: 0.0,
+            impostor_distance: f32::INFINITY,
             ground_reach: 2200.0,
             ground_tile: 110.0,
         },
@@ -502,14 +521,67 @@ fn draw_statics(
         .filter(|(_, distance)| *distance <= shot.draw_distance)
         .collect();
     nearby.sort_by(|left, right| left.1.total_cmp(&right.1));
-    for (instance, _) in nearby.into_iter().take(shot.max_bodies) {
-        if let Some(mesh) = meshes.get(instance.model) {
+    for (instance, distance) in nearby.into_iter().take(shot.max_bodies) {
+        stats.bodies += 1;
+        let mesh = meshes.get(instance.model);
+        if distance > shot.impostor_distance {
+            let base = mesh.map_or([0.5, 0.5, 0.5], |mesh| mesh.base_colour);
+            push_billboard(renderer, image, &shot.camera, instance, base);
+            stats.triangles += 2;
+        } else if let Some(mesh) = mesh {
             stats.triangles += push_instance(renderer, image, mesh, instance);
-            stats.bodies += 1;
         }
     }
 
     stats
+}
+
+/// Draw a body as a camera-facing quad, which is what a body looks like at forty metres.
+///
+/// Two triangles, a body's height and a third of it wide, tinted with the instance's own colour and
+/// with normals pointing back at the camera so the sun shades it the way the mesh would. The mesh is
+/// eleven thousand triangles; at forty metres it covers a dozen pixels, which is what this is for.
+fn push_billboard(
+    renderer: &Renderer,
+    image: &mut Image,
+    camera: &Camera,
+    instance: &Instance,
+    base: [f32; 3],
+) {
+    let forward = (camera.target - camera.eye).normalize_or_zero();
+    let right = forward.cross(Vec3::Y).normalize_or_zero();
+    let up = right.cross(forward).normalize_or_zero();
+    let height = 1.75 * instance.scale;
+    // Shoulder width is about a quarter of a standing height.
+    let half_width = height * 0.13;
+    let foot = instance.position;
+    let bottom_left = foot - right * half_width;
+    let bottom_right = foot + right * half_width;
+    let top_left = bottom_left + up * height;
+    let top_right = bottom_right + up * height;
+    let normal = -forward;
+    // The material the mesh beside it would have used: the asset table's colour times the instance
+    // tint, so a billboard and a body at the same distance agree.
+    let material = assets::model(instance.model).map_or(base, |model| model.material);
+    let tint = [
+        material[0] * instance.tint[0],
+        material[1] * instance.tint[1],
+        material[2] * instance.tint[2],
+    ];
+    let vertex = |world: Vec3| Vertex { world, normal };
+    for triangle in [
+        [bottom_left, bottom_right, top_right],
+        [bottom_left, top_right, top_left],
+    ] {
+        renderer.triangle(
+            image,
+            &Face {
+                vertices: triangle.map(vertex),
+                albedo: tint,
+                style: Style::Lit,
+            },
+        );
+    }
 }
 
 /// Render a shot, drawing a procession of walkers as well as the static bodies.
@@ -527,7 +599,8 @@ pub fn render_with(
 ) -> (Image, Stats) {
     let started = std::time::Instant::now();
     let aspect = width as f32 / height.max(1) as f32;
-    let renderer = Renderer::new(&shot.camera, aspect, shot.atmosphere);
+    let renderer =
+        Renderer::new(&shot.camera, aspect, shot.atmosphere).with_min_area(shot.min_area);
     let mut image = Image::new(width, height);
     // Where the camera's eye level cuts the frame, in NDC then in rows: the sky gradient reaches
     // the fog colour exactly there, so the ground plane's far edge has nothing to end against.

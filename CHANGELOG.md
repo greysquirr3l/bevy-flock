@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **The playground is explorable, in a terminal.** `demo/src/bin/ashfall-play.rs` flies the same
+  scene the PNGs show — `wasd`, arrows, `1`-`5` to jump views, `p` for the scripted flight — with no
+  window, GPU or widget toolkit: the software rasteriser draws into a fixed-size image and the
+  terminal paints it two pixels to a cell with `▀`. `session.rs` is a pure, tested core (camera, view,
+  lens, draw budget); `input.rs` decodes keys with an escape timeout. To hold 28 fps the interactive
+  path draws under a `Budget` (420 bodies, 240 m, sub-pixel triangle cull) and past 24 m a body is a
+  two-triangle billboard instead of an 11,000-triangle mesh — 850 ms a frame becomes 19.0 ms at
+  112 by 72 pixels, and 38 ms in a real terminal, which is 26 fps. `--play N` runs the same flight headlessly and writes a PNG per frame plus
+  `playback.json`, so CI can exercise it and `ffmpeg` can turn it into a video.
+- **The rasteriser's CPU cost is measured against a wgpu pipeline.** `demo/benches/render_pipeline.rs`
+  draws the same 2,000-body district scene through `raster.rs` and through a real `wgpu` device on its
+  `noop` backend — pipeline, buffers, instance upload, render pass, submission, commands discarded.
+  The CPU half of a wgpu frame is 33.6 µs for 2,064 instances and does not care how big the target is;
+  the software path is 850 ms at full detail and 19.0 ms under the interactive budget. Figures,
+  caveats and what they do *not* say are in `docs/performance.md` and ADR 0050.
 - **A 3D playground with an animated crowd.** `demo/src/bin/ashfall-3d.rs` renders five views of the
   same city with no GPU, window or renderer dependency: a software rasteriser (`raster.rs`, with
   near-plane clipping, a depth buffer, footprint-aware procedural shading, supersampling and a

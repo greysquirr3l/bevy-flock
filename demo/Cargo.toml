@@ -24,6 +24,18 @@ bevy_time = "0.20.1"
 
 [dev-dependencies]
 bevy_flock = { package = "bevy-flock", path = "..", default-features = false, features = ["simd", "threads"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# The comparison in `benches/render_pipeline.rs` needs a second renderer's CPU cost, and wgpu's
+# `noop` backend is the only one that runs without a GPU, a driver or a display: it validates and
+# encodes exactly as the real backends do and throws the commands away. Dev-dependency, so the demo
+# itself still builds with no graphics stack at all.
+wgpu = { version = "30", default-features = false, features = ["noop", "std", "wgsl"] }
+futures-lite = "2"
+bytemuck = { version = "1", features = ["derive"] }
+
+[[bench]]
+name = "render_pipeline"
+harness = false
 
 [lints.rust]
 unsafe_code = "deny"

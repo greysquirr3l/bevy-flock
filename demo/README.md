@@ -81,6 +81,75 @@ The demo deliberately does *not* ship a blend tree, additive layers or IK. The l
 behaviour; the clip-to-vertices arithmetic is the smallest thing that makes the seam real, and
 anything more belongs to the game that embeds it.
 
+## Flying it in a terminal
+
+The five views are still images. `ashfall-play` makes the same scene a place to stand in, without a
+window, a GPU or a widget toolkit:
+
+```text
+cargo run --release --manifest-path demo/Cargo.toml --bin ashfall-play
+cargo run --release --manifest-path demo/Cargo.toml --bin ashfall-play -- --view street --cols 200
+cargo run --release --manifest-path demo/Cargo.toml --bin ashfall-play -- --play 24 --out target/demo/flight
+```
+
+| Key | What it does |
+| --- | --- |
+| `w` `a` `s` `d` | walk and strafe, in the direction you are looking |
+| `e` / `c` | climb and descend |
+| arrows | look |
+| `1`-`5` | jump to a view |
+| `p` | watch the scripted flight, hands off |
+| `[` / `]` | change the lens |
+| `+` / `-` | change the walking speed |
+| `h` | the key list, in the corner |
+| `q` | quit |
+
+A cell is split by `▀` into two pixels, so a 112-cell terminal shows a 112 × 40-pixel picture with
+square pixels. It is not a screenshot: it is the same rasteriser, called every frame.
+
+![The street view in a terminal](../docs/demo/ashfall-play.png)
+
+*The street view, 120 × 88 pixels, captured from a real pty and enlarged four times without smoothing.
+The figures near the camera are meshes; the ones further off are the two-triangle impostors.*
+
+Two things make it fast enough to steer. The *budget* in `session::Budget` changes the shot rather than
+the world — 420 bodies, 240 m of crowd, a 0.75-pixel triangle cull — and everything past 24 m is drawn
+as a two-triangle billboard instead of an 11,000-triangle mesh. Measured on the district view: 850 ms a
+frame at full detail, 19.0 ms under the budget, 38 ms in a real 112 × 88-pixel terminal (26 fps). The budget
+is a `Copy` struct, so a bigger terminal or a faster machine is four numbers, not a code change.
+
+`--play N` runs the same flight the `p` key runs, `N` frames per view, and writes a PNG per frame plus
+`playback.json`. It needs no tty, so it works in CI and in a pipe:
+
+```text
+ffmpeg -framerate 30 -i target/demo/flight/%03d.png -pix_fmt yuv420p flight.mp4
+```
+
+**On `bevy-archie`:** the windowed front end is the one thing here that is not wired, and the reason is
+the environment — `winit` needs a display server and this machine has none, nor `libvulkan`, nor
+`libxkbcommon`. What a windowed front end needs from this side exists and is tested: `Session` (camera,
+view, lens, budget), `Session::advance(&CameraInput, dt)`, `input::Command` and `session::Budget`.
+See [ADR 0050](../docs/adr/0050-interactive-playground.md).
+
+## Costing the two pipelines
+
+`demo/benches/render_pipeline.rs` draws the same 2,000-body district scene through the software
+rasteriser and through a `wgpu` device on its `noop` backend — a real device, pipeline, buffers, render
+pass and submission, with the commands discarded — so the CPU half of each frame can be compared:
+
+| Case | Median |
+| --- | --- |
+| `software/full/600x375` | 850 ms |
+| `software/interactive/112x72` | 19.0 ms |
+| `wgpu/full/600x375` | 33.6 µs |
+| `wgpu/interactive/112x72` | 34.7 µs |
+| `wgpu_upload/2064_instances` | 106 µs |
+
+The wgpu figure is the API's CPU cost, not a frame time; nothing here was measured on a GPU. Read the
+ratio as the shape of the work — per-pixel and per-triangle labour belongs to the device, and what is
+left on the CPU is fixed and scales with the draw list. `docs/performance.md` records the run.
+
+
 ## The city
 
 Six settlements on a jittered 34 m grid, joined by 9 m streets, inside 1800 m of ruins. Classes

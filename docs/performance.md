@@ -838,3 +838,37 @@ as a single number.
 `perception/*_indexed` matching or beating the linear scan on the dense case, and beating it 2.6× on
 the spread one, is the bucketed index from ADR 0047 doing what it was added for; on a dense crowd
 the index's grid window covers everything, so the fallback keeps it honest instead of slower.
+
+## The software rasteriser against a wgpu pipeline (2026-11-05, ADR 0050)
+
+The playground renders with a CPU rasteriser, because CI and the remote shells this project is
+developed in have no window, no GPU and no `libvulkan`. That is a deliberate choice with a cost, and
+the cost is worth recording: `demo/benches/render_pipeline.rs` draws the same 2,000-body district
+scene twice, once through `raster.rs` and once through a real `wgpu` device on its `noop` backend.
+
+The wgpu number is the CPU half of a frame — pipeline, buffers, instance upload, render pass,
+submission — with the commands discarded. It says nothing about GPU time, and this ADR claims
+nothing about it.
+
+`cargo bench --manifest-path demo/Cargo.toml --bench render_pipeline`, release, this sandbox:
+
+| Case | Median | Notes |
+| --- | --- | --- |
+| `software/full/600x375` | 850 ms | 2,064 instances, full mesh detail, supersampled |
+| `software/interactive/112x72` | 19.0 ms | budget: 420 bodies, 240 m, 0.75 px cull, 24 m impostors |
+| `wgpu/full/600x375` | 33.6 µs | noop backend: encode and submit |
+| `wgpu/interactive/112x72` | 34.7 µs | unchanged by the framebuffer size |
+| `wgpu_upload/2064_instances` | 106 µs | isolated `write_buffer` of 165 KB |
+
+What the table says: the CPU cost of a wgpu frame here is a fixed 34 µs that scales with the draw
+list, not with the picture; the software path's cost scales with both, and its pixel work is what the
+GPU would have done. What it also says is that the interactive budget is a rendering decision, not a
+simulation one — the crowd is the same crowd, and the 45× between the two software cases is the LOD
+thresholds, the sub-pixel cull and a framebuffer a fiftieth of the area. Against a wgpu frame's CPU
+half the ratio is about 550× at terminal size and about 25,000× at full detail.
+
+Measured in a real terminal (`script -qec` on a pty, 112 × 40 pixels), the interactive front end ran
+111 frames in four seconds — 28 fps, 35 ms a frame, just over the loop's 30 fps pacing target, so the
+loop never sleeps and the frame time is the whole cost including the terminal write. The narrower
+112 × 72-pixel picture in the table above is 19.0 ms, so a terminal roughly twice this size lands
+between the two.

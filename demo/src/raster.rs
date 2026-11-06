@@ -639,6 +639,8 @@ pub struct Renderer {
     view_projection: Mat4,
     eye: Vec3,
     fov_y: f32,
+    /// Smallest screen-space triangle worth shading, pixels; zero draws everything.
+    min_area: f32,
     atmosphere: Atmosphere,
 }
 
@@ -661,7 +663,20 @@ impl Renderer {
             eye: camera.eye,
             fov_y: camera.fov_y,
             atmosphere,
+            min_area: 0.0,
         }
+    }
+
+    /// Skip triangles smaller than `pixels` of screen area.
+    ///
+    /// A distant body at a terminal's resolution covers less than a pixel per triangle, and shading
+    /// four million of them to fill eight thousand pixels is most of the frame. Zero — the default —
+    /// draws everything, which is what the shipped PNGs are made at; the interactive front end turns
+    /// it on, because a picture somebody is steering has a different budget from one that is read.
+    #[must_use]
+    pub fn with_min_area(mut self, pixels: f32) -> Self {
+        self.min_area = pixels.max(0.0);
+        self
     }
 
     /// Radians per pixel across one pixel of a raster of the given height, which is the world-space
@@ -767,7 +782,8 @@ impl Renderer {
             return;
         };
         let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
-        if area.abs() < 1.0e-6 {
+        // `area` is twice the triangle's pixel area, so the floor is twice the requested minimum.
+        if area.abs() < 1.0e-6_f32.max(self.min_area * 2.0) {
             return;
         }
         let min_x = a.0.min(b.0).min(c.0).floor().max(0.0) as usize;

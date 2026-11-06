@@ -16,16 +16,23 @@
 
 pub mod app;
 pub mod assets;
+pub mod camera_rig;
 pub mod city;
 pub mod gltf;
+pub mod input;
 pub mod json;
 pub mod jsonr;
 pub mod plan;
+pub mod playback;
 pub mod raster;
 pub mod render3d;
 pub mod report;
 pub mod scene;
+pub mod session;
 pub mod skinned;
+pub mod terminal;
+#[cfg(test)]
+pub mod test_support;
 
 use std::fmt;
 
