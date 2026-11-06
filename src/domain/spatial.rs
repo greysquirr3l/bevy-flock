@@ -30,6 +30,7 @@
 use bevy_math::Vec3;
 
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::error::ConfigError;
 
 /// The most cells a grid will materialise.
@@ -96,7 +97,7 @@ impl SpatialGridConfig {
             min,
             max,
             cell_size,
-            max_cells: DEFAULT_MAX_CELLS as u32,
+            max_cells: num::u64_to_u32(DEFAULT_MAX_CELLS),
         })
     }
 
@@ -116,9 +117,9 @@ impl SpatialGridConfig {
         let extent = self.max - self.min;
         let per_axis = extent / cell_size;
         [
-            per_axis.x.ceil().max(1.0) as u32,
-            per_axis.y.ceil().max(1.0) as u32,
-            per_axis.z.ceil().max(1.0) as u32,
+            num::f32_to_u32(per_axis.x.ceil().max(1.0)),
+            num::f32_to_u32(per_axis.y.ceil().max(1.0)),
+            num::f32_to_u32(per_axis.z.ceil().max(1.0)),
         ]
     }
 }
@@ -130,7 +131,7 @@ impl Default for SpatialGridConfig {
             min: Vec3::splat(-500.0),
             max: Vec3::splat(500.0),
             cell_size: 4.0,
-            max_cells: DEFAULT_MAX_CELLS as u32,
+            max_cells: num::u64_to_u32(DEFAULT_MAX_CELLS),
         }
     }
 }
@@ -211,7 +212,7 @@ impl SpatialGrid {
                 value: cell_size,
             });
         }
-        let cells = total as usize;
+        let cells = num::u64_to_usize(total);
         Ok(Self {
             config,
             cell_size,
@@ -271,18 +272,18 @@ impl SpatialGrid {
     /// Total number of cells, never more than [`MAX_CELLS`].
     #[must_use]
     pub fn cell_count(&self) -> usize {
-        cell_count(self.dims) as usize
+        num::u64_to_usize(cell_count(self.dims))
     }
 
     /// Number of agents currently in the grid.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether the grid is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -341,7 +342,8 @@ impl SpatialGrid {
         let x = cell % self.dims[0];
         let y = (cell / self.dims[0]) % self.dims[1];
         let z = cell / (self.dims[0] * self.dims[1]);
-        let offset = Vec3::new(x as f32, y as f32, z as f32) + Vec3::splat(0.5);
+        let offset = Vec3::new(num::u32_to_f32(x), num::u32_to_f32(y), num::u32_to_f32(z))
+            + Vec3::splat(0.5);
         self.config.min + offset * self.cell_size
     }
 
@@ -378,7 +380,7 @@ impl SpatialGrid {
                 None => continue,
             };
             if let Some(slot) = self.order.get_mut(target) {
-                *slot = index as u32;
+                *slot = num::usize_to_u32(index);
             }
             if let Some(cursor) = self.cursor.get_mut(cell) {
                 *cursor += 1;
@@ -404,14 +406,15 @@ impl SpatialGrid {
             return;
         }
         let radius_squared = radius * radius;
-        let span = (radius / self.cell_size).ceil() as i64;
+        let span = num::f32_to_i64((radius / self.cell_size).ceil());
         let bounds = self.cell_bounds(centre, span);
 
         for z in bounds.min_z..=bounds.max_z {
             for y in bounds.min_y..=bounds.max_y {
                 for x in bounds.min_x..=bounds.max_x {
-                    let cell =
-                        ((z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x) as u32;
+                    let cell = num::i64_to_u32(
+                        (z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x,
+                    );
                     for index in self.cell_window(cell) {
                         let Some(entry) = self.entries.get(*index as usize) else {
                             continue;
@@ -464,8 +467,9 @@ impl SpatialGrid {
                         {
                             continue;
                         }
-                        let cell = ((z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x)
-                            as u32;
+                        let cell = num::i64_to_u32(
+                            (z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x,
+                        );
                         for index in self.cell_window(cell) {
                             let Some(entry) = self.entries.get(*index as usize) else {
                                 continue;
@@ -500,9 +504,9 @@ impl SpatialGrid {
         // `floor`, not `ceil`: the centre cell must be the cell `cell_of` would
         // report, or the window sits one cell to the side — and on a negative
         // coordinate that window is clipped away entirely.
-        let cx = local.x.floor() as i64;
-        let cy = local.y.floor() as i64;
-        let cz = local.z.floor() as i64;
+        let cx = num::f32_to_i64(local.x.floor());
+        let cy = num::f32_to_i64(local.y.floor());
+        let cz = num::f32_to_i64(local.z.floor());
         let clamp_axis = |value: i64, axis: usize| {
             let max = i64::from(self.dims.get(axis).copied().unwrap_or(1)) - 1;
             value.clamp(0, max)
@@ -539,7 +543,7 @@ fn clamp_axis(value: f32, cells: u32) -> u32 {
     if !value.is_finite() || value <= 0.0 {
         return 0;
     }
-    let floored = value as u32;
+    let floored = num::f32_to_u32(value);
     floored.min(max)
 }
 
@@ -740,7 +744,7 @@ mod tests {
         for index in 0..1_000_u32 {
             grid.insert(GridEntry {
                 id: NpcId::unique(index),
-                position: Vec3::splat(index as f32),
+                position: Vec3::splat(num::u32_to_f32(index)),
                 velocity: Vec3::ZERO,
             });
         }
@@ -749,7 +753,7 @@ mod tests {
         for index in 0..1_000_u32 {
             grid.insert(GridEntry {
                 id: NpcId::unique(index),
-                position: Vec3::splat(index as f32),
+                position: Vec3::splat(num::u32_to_f32(index)),
                 velocity: Vec3::ZERO,
             });
         }
@@ -775,7 +779,7 @@ mod tests {
         for index in 0..3_u32 {
             grid.insert(GridEntry {
                 id: NpcId::unique(index),
-                position: Vec3::new(index as f32 * 10.0, 0.0, 0.0),
+                position: Vec3::new(num::u32_to_f32(index) * 10.0, 0.0, 0.0),
                 velocity: Vec3::ZERO,
             });
         }

@@ -17,6 +17,7 @@
 //!   of leaving a crowd walking through a wall that is no longer there.
 
 use crate::domain::nav::{NavBounds, NavCell, NavSource, NavVersion};
+use crate::domain::num;
 use bevy_math::{Vec2, Vec3};
 use smallvec::SmallVec;
 use std::collections::BinaryHeap;
@@ -127,7 +128,7 @@ impl FlowField {
             if x < 0.0 || y < 0.0 {
                 return Vec2::ZERO;
             }
-            let (x, y) = (x as u16, y as u16);
+            let (x, y) = (num::f32_to_u16(x), num::f32_to_u16(y));
             if x >= self.bounds.width || y >= self.bounds.height {
                 return Vec2::ZERO;
             }
@@ -153,13 +154,13 @@ impl FlowField {
 
     /// Whether this field followed any links.
     #[must_use]
-    pub fn has_links(&self) -> bool {
+    pub const fn has_links(&self) -> bool {
         !self.via.is_empty()
     }
 
     /// Bytes this field occupies.
     #[must_use]
-    pub fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> usize {
         FLOW_FIELD_OVERHEAD_BYTES
             + self.cost.len() * core::mem::size_of::<u32>()
             + self.dir.len() * 8
@@ -287,7 +288,7 @@ impl FlowSolver {
         let mut heap = BinaryHeap::new();
         heap.push(std::cmp::Reverse((
             0,
-            target.cell.index(bounds.width) as u32,
+            num::usize_to_u32(target.cell.index(bounds.width)),
         )));
         let via = if source.has_links() {
             vec![0_u16; bounds.cell_count()]
@@ -342,8 +343,8 @@ impl FlowSolver {
             spent += 1;
             self.expanded = self.expanded.saturating_add(1);
             let cell = NavCell::new(
-                (index % width as usize) as u16,
-                (index / width as usize) as u16,
+                num::usize_to_u16(index % width as usize),
+                num::usize_to_u16(index / width as usize),
             );
             let mut neighbours: SmallVec<[(NavCell, u32); 8]> = SmallVec::new();
             source.neighbours(cell, &mut neighbours);
@@ -377,8 +378,10 @@ impl FlowSolver {
         };
         if candidate < *slot {
             *slot = candidate;
-            self.heap
-                .push(std::cmp::Reverse((candidate, next_index as u32)));
+            self.heap.push(std::cmp::Reverse((
+                candidate,
+                num::usize_to_u32(next_index),
+            )));
         }
     }
 
@@ -485,13 +488,13 @@ impl FlowCache {
 
     /// How many fields it currently holds.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether the cache is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 

@@ -50,6 +50,7 @@ use std::collections::BTreeMap;
 use smallvec::SmallVec;
 
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// The size of one memory slot, in bytes.
@@ -275,8 +276,8 @@ impl MemorySlot {
             valence,
             encounters,
             flags,
-            first_seen: first_seen.get() as u32,
-            last_seen: last_seen.get() as u32,
+            first_seen: num::u64_to_u32(first_seen.get()),
+            last_seen: num::u64_to_u32(last_seen.get()),
         }
     }
 
@@ -378,11 +379,11 @@ fn decay_signed(value: i16, shifts: u32) -> i16 {
     if value < 0 { -magnitude } else { magnitude }
 }
 
-fn stamp_of(tick: Tick) -> u32 {
+const fn stamp_of(tick: Tick) -> u32 {
     // Ticks are `u64`; slots are 16 bytes. A `u32` stamp wraps after 828 days at
     // 60 Hz, and decay treats a wrapped age as very old, which is the safe
     // direction for a value that should fade anyway.
-    tick.get() as u32
+    num::u64_to_u32(tick.get())
 }
 
 /// How fast memory fades, in ticks.
@@ -544,7 +545,7 @@ impl MemoryStore {
     /// a budget before it spawns and so ADR 0016's claims are checked by a test rather
     /// than by arithmetic in a document.
     #[must_use]
-    pub fn footprint(&self) -> usize {
+    pub const fn footprint(&self) -> usize {
         self.slots.capacity() * core::mem::size_of::<MemorySlot>()
             + self.owners.capacity() * core::mem::size_of::<Option<NpcId>>()
             + self.free.capacity() * core::mem::size_of::<u32>()
@@ -570,7 +571,7 @@ impl MemoryStore {
 
     /// Bytes of slot storage.
     #[must_use]
-    pub fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> usize {
         self.slots.len() * SLOT_BYTES
     }
 
@@ -635,10 +636,9 @@ impl MemoryStore {
     /// save format only writes what exists, and a crowd of hermits should save to a
     /// header.
     pub fn enrolled(&self) -> impl Iterator<Item = (MemoryIndex, NpcId)> + '_ {
-        self.owners
-            .iter()
-            .enumerate()
-            .filter_map(|(index, owner)| owner.map(|npc| (MemoryIndex(index as u32), npc)))
+        self.owners.iter().enumerate().filter_map(|(index, owner)| {
+            owner.map(|npc| (MemoryIndex(num::usize_to_u32(index)), npc))
+        })
     }
 
     /// The NPC a row belongs to.
@@ -868,11 +868,12 @@ impl MemoryStore {
         }
         report.swept = true;
         report.freed = self.sweep_keeping(now, decay, policy.min_familiarity, keep);
-        report.retained = self
-            .owners
-            .iter()
-            .filter(|owner| owner.is_some_and(&keep))
-            .count() as u32;
+        report.retained = num::usize_to_u32(
+            self.owners
+                .iter()
+                .filter(|owner| owner.is_some_and(&keep))
+                .count(),
+        );
         report
     }
 
@@ -927,7 +928,7 @@ impl MemoryStore {
     }
 
     fn count_enrolled(&self) -> u32 {
-        self.owners.iter().filter(|owner| owner.is_some()).count() as u32
+        num::usize_to_u32(self.owners.iter().filter(|owner| owner.is_some()).count())
     }
 }
 
@@ -946,7 +947,7 @@ pub struct MemoryArchive {
 impl MemoryArchive {
     /// An archive holding at most `capacity` records.
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub const fn new(capacity: usize) -> Self {
         Self {
             capacity,
             entries: BTreeMap::new(),
@@ -1237,7 +1238,7 @@ mod tests {
     fn sixty_four_subjects_costs_four_times_sixteen() {
         let sixteen = MemoryStore::new(10_000, 16).footprint();
         let sixty_four = MemoryStore::new(10_000, 64).footprint();
-        let ratio = sixty_four as f64 / sixteen as f64;
+        let ratio = num::usize_to_f64(sixty_four) / num::usize_to_f64(sixteen);
         assert!(
             (3.9..4.1).contains(&ratio),
             "the stride quadruples while the bookkeeping does not: {ratio}"

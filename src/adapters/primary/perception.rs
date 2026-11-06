@@ -150,6 +150,10 @@ type ObserverTargets<'a> = (
 ///
 /// Runs in `FlockSet::Perception`, after the spatial index is rebuilt, so the distance test uses
 /// this tick's positions rather than last tick's.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn observe_players(
     clock: Res<SimClock>,
     config: Res<PerceptionConfig>,
@@ -190,6 +194,10 @@ pub fn observe_players(
 }
 
 /// Forget people who have not been seen for long enough.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn forget_the_absent(
     clock: Res<SimClock>,
     config: Res<PerceptionConfig>,
@@ -203,6 +211,7 @@ pub fn forget_the_absent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::num;
     use bevy_app::App;
     use bevy_math::Vec3;
     fn app_with_players() -> App {
@@ -297,14 +306,14 @@ mod tests {
     #[test]
     fn memory_is_bounded_and_evicts_the_least_recent() {
         let mut noticed = NoticedPeople::default();
-        for index in 0..(NOTICED_CAPACITY as u32 + 3) {
+        for index in 0..(num::usize_to_u32(NOTICED_CAPACITY) + 3) {
             noticed.note(NpcId::unique(index), Tick::new(u64::from(index)));
         }
         assert_eq!(noticed.len(), NOTICED_CAPACITY);
         assert!(noticed.last_seen(NpcId::unique(0)).is_none());
         assert_eq!(
             noticed.most_recent(),
-            Some(NpcId::unique(NOTICED_CAPACITY as u32 + 2))
+            Some(NpcId::unique(num::usize_to_u32(NOTICED_CAPACITY) + 2))
         );
     }
 

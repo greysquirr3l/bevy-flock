@@ -7,6 +7,7 @@
 //! simulated volume, and no silent stacking under the default.
 
 use bevy_app::App;
+use bevy_flock::domain::num;
 use bevy_flock::error::ConfigError;
 use bevy_flock::prelude::*;
 use bevy_flock::testkit::OrDie;
@@ -65,7 +66,7 @@ fn a_uniform_disc_scatters_the_crowd_inside_the_disc() {
             offset.length() <= radius / 2.0
         })
         .count();
-    let fraction = inner as f64 / placed.len() as f64;
+    let fraction = num::usize_to_f64(inner) / num::usize_to_f64(placed.len());
     assert!(
         (0.15..0.36).contains(&fraction),
         "inner half held {fraction:.2} of the crowd"
@@ -124,7 +125,7 @@ fn the_default_placement_is_the_spiral() {
     let placed = positions(&mut app);
     // The spiral is draw-free and index-ordered, so the free function must agree with it.
     for (index, point) in placed.iter().enumerate() {
-        let expected = spawn_position(index as u32);
+        let expected = spawn_position(num::usize_to_u32(index));
         assert!(
             (*point - expected).length() < 0.02,
             "NPC {index} at {point} should have started at {expected}"

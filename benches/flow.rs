@@ -10,6 +10,7 @@
 
 use bevy_flock::domain::flow::{FlowCache, FlowLookup, FlowTarget, solve};
 use bevy_flock::domain::nav::{GridNavSource, NavCell};
+use bevy_flock::domain::num;
 use bevy_flock::testkit::OrDie;
 use bevy_math::Vec3;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -62,9 +63,9 @@ fn bench_sample(c: &mut Criterion) {
     let positions: Vec<Vec3> = (0..1_000_u32)
         .map(|index| {
             Vec3::new(
-                (index % u32::from(size)) as f32 + 0.5,
+                num::u32_to_f32(index % u32::from(size)) + 0.5,
                 0.0,
-                (index / u32::from(size)) as f32 + 0.5,
+                num::u32_to_f32(index / u32::from(size)) + 0.5,
             )
         })
         .collect();

@@ -19,6 +19,7 @@
 
 use crate::adapters::primary::components::{LodTier, Npc, NpcIdentity};
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use bevy_ecs::prelude::*;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
@@ -107,19 +108,19 @@ impl RenderPlan {
 
     /// The buffer's capacity, which must not grow from frame to frame.
     #[must_use]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.instances.capacity()
     }
 
     /// How many instances the plan holds.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.instances.len()
     }
 
     /// Whether the plan is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.instances.is_empty()
     }
 
@@ -139,9 +140,9 @@ impl RenderPlan {
 #[must_use]
 pub fn tint_from_seed(seed: u64) -> [f32; 4] {
     let mixed = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    let r = ((mixed >> 8) & 0xFF) as f32 / 255.0;
-    let g = ((mixed >> 24) & 0xFF) as f32 / 255.0;
-    let b = ((mixed >> 40) & 0xFF) as f32 / 255.0;
+    let r = num::u64_to_f32((mixed >> 8) & 0xFF) / 255.0;
+    let g = num::u64_to_f32((mixed >> 24) & 0xFF) / 255.0;
+    let b = num::u64_to_f32((mixed >> 40) & 0xFF) / 255.0;
     // Bias toward mid tones so the crowd is not neon.
     [0.35 + r * 0.5, 0.35 + g * 0.5, 0.35 + b * 0.5, 1.0]
 }
@@ -150,6 +151,10 @@ pub fn tint_from_seed(seed: u64) -> [f32; 4] {
 ///
 /// Ordering is `(variant, npc)` so the result is stable across runs and across
 /// frame-to-frame iteration order changes in the ECS.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn build_render_plan(
     view: Res<CrowdView>,
     mut plan: ResMut<RenderPlan>,
@@ -304,7 +309,7 @@ mod tests {
                 spawn(
                     &mut app,
                     id,
-                    Vec3::new(id as f32, 0.0, 0.0),
+                    Vec3::new(num::u32_to_f32(id), 0.0, 0.0),
                     LodTier::Mid,
                     u64::from(id),
                 );
@@ -318,8 +323,13 @@ mod tests {
     #[test]
     fn a_tint_is_mid_tone_and_deterministic() {
         let first = tint_from_seed(42);
-        assert_eq!(first, tint_from_seed(42));
+        // The tint is a pure function of the seed, so the comparison is exact by intent:
+        // two runs must agree bit for bit, not merely within a tolerance.
+        assert_eq!(
+            first.map(f32::to_bits),
+            tint_from_seed(42).map(f32::to_bits)
+        );
         assert!((0.3..=0.9).contains(&first[0]));
-        assert_eq!(first[3], 1.0);
+        assert_eq!(first[3].to_bits(), 1.0_f32.to_bits());
     }
 }

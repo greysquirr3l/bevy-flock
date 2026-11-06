@@ -9,6 +9,7 @@
 use core::fmt;
 
 use crate::behavior::blackboard::Blackboard;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// A guard: a predicate over working memory.
@@ -51,7 +52,7 @@ where
 {
     /// Start in `initial`.
     #[must_use]
-    pub fn new(initial: S, at: Tick) -> Self {
+    pub const fn new(initial: S, at: Tick) -> Self {
         Self {
             current: initial,
             entered: at,
@@ -62,7 +63,7 @@ where
     /// Allow `from -> to` whenever `guard` holds.
     #[must_use]
     pub fn transition(mut self, from: S, to: S, guard: Guard) -> Self {
-        let priority = self.transitions.len() as u8;
+        let priority = num::usize_to_u8(self.transitions.len());
         self.transitions.push(Transition {
             from,
             to,
@@ -76,7 +77,7 @@ where
     /// Allow `from -> to` once the machine has dwelt in `from` for `ticks`.
     #[must_use]
     pub fn transition_after(mut self, from: S, to: S, ticks: u64, guard: Guard) -> Self {
-        let priority = self.transitions.len() as u8;
+        let priority = num::usize_to_u8(self.transitions.len());
         self.transitions.push(Transition {
             from,
             to,
@@ -133,14 +134,14 @@ where
     ///
     /// Used by group directives, which outrank guards: a leader shouting "take
     /// cover" does not wait for a predicate to agree.
-    pub fn force(&mut self, state: S, now: Tick) {
+    pub const fn force(&mut self, state: S, now: Tick) {
         self.current = state;
         self.entered = now;
     }
 
     /// How many transitions are registered.
     #[must_use]
-    pub fn transition_count(&self) -> usize {
+    pub const fn transition_count(&self) -> usize {
         self.transitions.len()
     }
 }

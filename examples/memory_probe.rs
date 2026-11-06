@@ -23,6 +23,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy_flock::application::packed::{Pack, SteerParams};
+use bevy_flock::domain::num;
 
 /// Counts allocations and bytes, so a steady-state loop can be held to zero.
 struct Counting;
@@ -79,7 +80,7 @@ fn main() {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1);
-        ((state >> 33) as f32 / (u32::MAX >> 1) as f32) * params.extent
+        (num::u64_to_f32(state >> 33) / num::u32_to_f32(u32::MAX >> 1)) * params.extent
     };
     for _ in 0..agents {
         let x = next();
@@ -116,7 +117,7 @@ fn main() {
     );
     println!(
         "heap: {allocations} allocations, {bytes} bytes over {frames} frames ({:.2} ms/frame)",
-        elapsed.as_secs_f64() * 1000.0 / frames as f64
+        elapsed.as_secs_f64() * 1000.0 / num::usize_to_f64(frames)
     );
     println!("pairs: {pairs}");
     // positions + velocities + desired, 8 bytes each, plus the two index arrays at 4 bytes.

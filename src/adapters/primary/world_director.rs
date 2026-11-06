@@ -18,6 +18,7 @@ use crate::application::SimClock;
 use crate::application::director::{
     AmbientDirector, Director, DirectorBoard, DirectorCommand, DirectorCommands, DirectorInputs,
 };
+use crate::domain::num;
 use crate::domain::tick::Tick;
 use bevy_ecs::prelude::*;
 
@@ -138,6 +139,10 @@ impl Default for CrowdDirector {
 }
 
 /// Build the inputs, let the director decide, and publish what it ordered.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn run_world_director(
     clock: Res<SimClock>,
     pulse: Res<CrowdPulse>,
@@ -153,7 +158,7 @@ pub fn run_world_director(
         tiers: pulse.tiers,
         mean_mood: pulse.mean_mood,
         tension: pulse.tension,
-        alarms: pulse.alarms.max(alarms.0.len() as u32),
+        alarms: pulse.alarms.max(num::usize_to_u32(alarms.0.len())),
         ticks_since_player: None,
     };
     // Split the borrow: the board and the policy are separate fields of one resource.

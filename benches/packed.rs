@@ -11,8 +11,9 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 use bevy_flock::application::packed::{Pack, SteerParams, scatter};
+use bevy_flock::domain::num;
 
-fn params() -> SteerParams {
+const fn params() -> SteerParams {
     SteerParams {
         radius: 12.0,
         separation: 4.0,
@@ -52,9 +53,12 @@ fn bench_packed_density(c: &mut Criterion) {
         let params = SteerParams { extent, ..params() };
         let mut pack = Pack::with_capacity(5_000, params);
         scatter(5_000, extent, &mut pack);
-        group.bench_function(BenchmarkId::new("5000_agents", extent as u32), |b| {
-            b.iter(|| black_box(pack.steer(&params)));
-        });
+        group.bench_function(
+            BenchmarkId::new("5000_agents", num::f32_to_u32(extent)),
+            |b| {
+                b.iter(|| black_box(pack.steer(&params)));
+            },
+        );
     }
     group.finish();
 }

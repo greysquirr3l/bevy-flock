@@ -138,7 +138,7 @@ impl PerceptionSettings {
     /// # Errors
     ///
     /// Returns [`StimulusError::Empty`] for a capacity of zero.
-    pub fn try_new(capacity: usize) -> Result<Self, StimulusError> {
+    pub const fn try_new(capacity: usize) -> Result<Self, StimulusError> {
         // The buffer is the only fallible part of these settings, and it is built by the plugin;
         // validating here keeps the failure at configuration time rather than at first add.
         if capacity == 0 {
@@ -206,6 +206,10 @@ impl Plugin for StimulusPlugin {
 }
 
 /// Publish one pulse per live emitter, then retire the expired records.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn emit_stimuli(
     clock: Res<SimClock>,
     mut stimuli: ResMut<StimulusBufferResource>,
@@ -223,12 +227,16 @@ pub fn emit_stimuli(
 
 impl StimulusBufferResource {
     /// The buffer, mutably, for the emit system. Kept private so a caller cannot forget to sweep.
-    fn buffer_mut(&mut self) -> &mut StimulusBuffer {
+    const fn buffer_mut(&mut self) -> &mut StimulusBuffer {
         &mut self.buffer
     }
 }
 
 /// Give every due observer its list of what is nearby.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn perceive_stimuli(
     clock: Res<SimClock>,
     stimuli: Res<StimulusBufferResource>,

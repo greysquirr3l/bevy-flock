@@ -46,7 +46,7 @@ impl Groups {
     }
 
     /// The underlying store, mutably.
-    pub fn store_mut(&mut self) -> &mut GroupStore {
+    pub const fn store_mut(&mut self) -> &mut GroupStore {
         &mut self.0
     }
 
@@ -150,6 +150,10 @@ pub fn reconcile_despawns(
 /// no leader transform to read: the system writes a target and lets steering do the
 /// walking, because teleporting a member into formation is how a crowd starts
 /// looking like a puppet show.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn assign_formation_slots(
     groups: Res<Groups>,
     leaders: Query<(&GroupLeader, &bevy_transform::prelude::Transform)>,

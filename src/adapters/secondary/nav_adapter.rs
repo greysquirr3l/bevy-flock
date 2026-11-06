@@ -55,7 +55,7 @@ impl NavGrid {
 
     /// The grid, mutably. Changing it without calling [`NavGrid::bump`] leaves stale
     /// fields in the cache, which is why the setter is a method and not a field.
-    pub fn source_mut(&mut self) -> &mut GridNavSource {
+    pub const fn source_mut(&mut self) -> &mut GridNavSource {
         &mut self.source
     }
 
@@ -86,7 +86,7 @@ impl NavGrid {
 
     /// Bytes the grid occupies.
     #[must_use]
-    pub fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> usize {
         self.source.bytes()
     }
 }
@@ -136,7 +136,7 @@ impl FlowFields {
 
     /// Hits, misses and evictions since startup.
     #[must_use]
-    pub fn stats(&self) -> (u64, u64, u64) {
+    pub const fn stats(&self) -> (u64, u64, u64) {
         (
             self.cache.hits(),
             self.cache.misses(),
@@ -152,13 +152,13 @@ impl FlowFields {
 
     /// How many fields are cached.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.cache.len()
     }
 
     /// Whether nothing is cached.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.cache.is_empty()
     }
 }
@@ -172,6 +172,10 @@ impl Default for FlowFields {
 }
 
 /// Drop cached fields whenever the layout changed.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn invalidate_stale_fields(nav: Res<NavGrid>, mut flows: ResMut<FlowFields>) {
     let _ = flows.invalidate_stale(nav.version());
 }

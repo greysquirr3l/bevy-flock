@@ -215,12 +215,12 @@ impl ThinkSchedule {
 
     /// Whether an identifier is inside the schedule's capacity.
     #[must_use]
-    pub fn in_range(&self, id: u32) -> bool {
+    pub const fn in_range(&self, id: u32) -> bool {
         (id as usize) < self.costs.len()
     }
 
     /// Note an identifier the schedule cannot serve.
-    pub fn note_beyond_capacity(&mut self) {
+    pub const fn note_beyond_capacity(&mut self) {
         self.stats.beyond_capacity = self.stats.beyond_capacity.saturating_add(1);
     }
 
@@ -228,7 +228,7 @@ impl ThinkSchedule {
     ///
     /// Called once at the top of the tick, before any system observes a tier, so the
     /// promotion ration counts what this tick promoted rather than what the last one did.
-    pub fn begin_tick(&mut self) {
+    pub const fn begin_tick(&mut self) {
         self.stats.promoted = 0;
         self.stats.beyond_capacity = 0;
     }
@@ -330,6 +330,10 @@ type TierTargets<'a> = (
 ///
 /// Runs in [`FlockSet::Perception`](crate::adapters::primary::plugin::FlockSet::Perception):
 /// how close you are is a fact about the world, and the tier is derived from it.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn assign_tiers(
     weight_config: Res<WeightConfig>,
     tier_config: Res<TierConfig>,
@@ -375,6 +379,10 @@ fn nearest_focus_squared(
 }
 
 /// Record every brain's declared cost and ask each tier who thinks this tick.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn plan_thinks(
     clock: Res<crate::application::SimClock>,
     config: Res<TierConfig>,
@@ -405,6 +413,10 @@ pub fn plan_thinks(
 /// Without a [`FlockRegistry`] resource there is nothing to dispatch leaves to, so nothing
 /// is ticked: a game that forgot to register its logic sees `chosen` counts with no effect
 /// rather than a crowd that mysteriously stands still.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn tick_chosen(
     clock: Res<crate::application::SimClock>,
     schedule: Res<ThinkSchedule>,
@@ -461,7 +473,7 @@ mod tests {
     }
 
     fn tree() -> Arc<BehaviorTree> {
-        Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
+        Arc::new(BehaviorTree::try_from_spec(&NodeSpec::Action(0)).or_die())
     }
 
     fn spawn(app: &mut App, id: u32, x: f32, cost: VirtualCost) {

@@ -23,6 +23,7 @@
 //! writing a fear component to every NPC near a fire — is exactly the O(n) stall
 //! this crate exists to avoid.
 
+use crate::domain::num;
 use crate::domain::tick::Tick;
 use bevy_math::Vec3;
 use smallvec::SmallVec;
@@ -66,7 +67,7 @@ impl DirectorInputs {
             return 0.0;
         }
         let ticks = self.tick.get() % (ticks_per_hour * 24);
-        ticks as f32 / ticks_per_hour as f32
+        num::u64_to_f32(ticks) / num::u64_to_f32(ticks_per_hour)
     }
 
     /// Whether it is between two hours, wrap-around included.
@@ -216,7 +217,7 @@ pub struct AmbientDirector {
 impl AmbientDirector {
     /// A director that decides once a second on a 24-hour clock.
     #[must_use]
-    pub fn new(ticks_per_hour: u64) -> Self {
+    pub const fn new(ticks_per_hour: u64) -> Self {
         Self {
             ticks_per_hour,
             last_decision: None,
@@ -483,7 +484,9 @@ impl AlarmField {
             }
             let falloff = 1.0 - (distance / alarm.radius);
             let decay = 1.0
-                - (now.since(alarm.raised) as f32 / alarm.ttl_ticks.max(1) as f32).clamp(0.0, 1.0);
+                - (num::u64_to_f32(now.since(alarm.raised))
+                    / num::u64_to_f32(alarm.ttl_ticks.max(1)))
+                .clamp(0.0, 1.0);
             let value = alarm.strength * falloff * decay;
             if value > worst {
                 worst = value;
@@ -735,11 +738,11 @@ mod tests {
         let far = field.sample(Vec3::new(30.0, 0.0, 0.0), Tick::new(10));
         let outside = field.sample(Vec3::new(200.0, 0.0, 0.0), Tick::new(10));
         assert!(near > far, "distance should attenuate: {near} vs {far}");
-        assert_eq!(outside, 0.0);
+        assert_eq!(outside.to_bits(), 0.0_f32.to_bits());
         let later = field.sample(Vec3::new(2.0, 0.0, 0.0), Tick::new(500));
         assert!(later < near, "time should attenuate");
         let gone = field.sample(Vec3::new(2.0, 0.0, 0.0), Tick::new(700));
-        assert_eq!(gone, 0.0);
+        assert_eq!(gone.to_bits(), 0.0_f32.to_bits());
     }
 
     #[test]
@@ -750,7 +753,12 @@ mod tests {
         let at_edge = field.sample(Vec3::new(30.0, 0.0, 0.0), Tick::new(5));
         assert!(at_edge < 1.0, "calming did nothing");
         field.calm(Vec3::new(30.0, 0.0, 0.0), 2.0, Tick::new(6));
-        assert_eq!(field.sample(Vec3::new(30.0, 0.0, 0.0), Tick::new(6)), 0.0);
+        assert_eq!(
+            field
+                .sample(Vec3::new(30.0, 0.0, 0.0), Tick::new(6))
+                .to_bits(),
+            0.0_f32.to_bits()
+        );
     }
 
     #[test]
@@ -758,7 +766,7 @@ mod tests {
         let mut field = AlarmField::new();
         for index in 0..64_u32 {
             field.raise(
-                Vec3::new(index as f32, 0.0, 0.0),
+                Vec3::new(num::u32_to_f32(index), 0.0, 0.0),
                 1.0,
                 10.0,
                 Tick::new(u64::from(index)),
@@ -801,7 +809,7 @@ mod tests {
                 .map(|index| Beat {
                     tick: Tick::new(index * 10),
                     command: DirectorCommand::Alarm {
-                        at: Vec3::new(index as f32, 0.0, 0.0),
+                        at: Vec3::new(num::u64_to_f32(index), 0.0, 0.0),
                         strength: 0.5,
                         radius: 15.0,
                     },
@@ -824,6 +832,6 @@ mod tests {
             out.push(DirectorCommand::Quiesce { ttl_ticks: 1 });
         }
         assert_eq!(out.as_slice().len(), MAX_COMMANDS);
-        assert_eq!(out.overflowed(), MAX_COMMANDS as u32);
+        assert_eq!(out.overflowed(), num::usize_to_u32(MAX_COMMANDS));
     }
 }

@@ -7,6 +7,7 @@
 use core::fmt;
 use core::num::NonZeroU32;
 
+use crate::domain::num;
 use crate::error::ConfigError;
 
 /// A simulation tick.
@@ -105,7 +106,7 @@ impl TicksPerSecond {
     /// platform that rounds correctly.
     #[must_use]
     pub fn delta_seconds(self) -> f32 {
-        1.0_f32 / self.get() as f32
+        1.0_f32 / num::u32_to_f32(self.get())
     }
 
     /// How many ticks are needed to cover `ticks` ticks' worth of scheduling at

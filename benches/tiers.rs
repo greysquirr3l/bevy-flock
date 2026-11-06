@@ -40,7 +40,7 @@ use bevy_flock::domain::tick::Tick;
 ///
 /// These are the numbers ADR 0017 quotes (50–200 ns, 1–3 µs, 4–12 µs, 20–50 µs), reduced to
 /// one representative value each so the bench measures one thing at a time.
-fn tier_cost(tier: CognitionTier) -> VirtualCost {
+const fn tier_cost(tier: CognitionTier) -> VirtualCost {
     match tier {
         CognitionTier::Reflex => VirtualCost::new(200), // 200 ns: the top of the reflex range
         CognitionTier::Reactive => VirtualCost::from_micros(2),
@@ -50,7 +50,7 @@ fn tier_cost(tier: CognitionTier) -> VirtualCost {
 }
 
 /// Where an NPC has to stand to be placed in a tier.
-fn tier_distance(tier: CognitionTier) -> f32 {
+const fn tier_distance(tier: CognitionTier) -> f32 {
     match tier {
         // Beyond the reflex boundary (120 units by default).
         CognitionTier::Reflex => 400.0,
@@ -62,7 +62,7 @@ fn tier_distance(tier: CognitionTier) -> f32 {
 }
 
 fn tree() -> Arc<BehaviorTree> {
-    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
+    Arc::new(BehaviorTree::try_from_spec(&NodeSpec::Action(0)).or_die())
 }
 
 fn world(count: u32, tier: Option<CognitionTier>) -> App {

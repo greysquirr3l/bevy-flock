@@ -23,6 +23,16 @@ indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
 suspicious = "deny"
 
+# Right about the code, wrong about the rule: satisfied at the boundary instead of suppressed.
+needless_pass_by_value = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+significant_drop_tightening = "deny"
+missing_const_for_fn = "deny"
+
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "deny"
@@ -51,6 +61,12 @@ nothing. The probe also fails loudly if the probe itself errors, because "the co
 errors in practice. The `deny` list is the part that matters most: `unwrap`, `expect`, `panic` and
 direct indexing are how a library that is supposed to survive a crowd of 100,000 turns a bad input
 into a crashed game.
+
+The last group is the one this page argues for. Those nine lints were `allow`ed with a paragraph of
+justification each, and every one of those paragraphs was a description of a deviation rather than a
+reason: "an `f32` simulation converts at audited boundaries" is an argument for a conversion module,
+not for three hundred casts. They are denied now, the conversion module exists, and the exceptions
+that remain are `#[expect]`s the audit checks by rule — see [The exceptions](#the-exceptions).
 
 ## How a test fails
 
@@ -135,24 +151,56 @@ that is:
 | `missing_panics_doc` | the crate denies `panic`, so the section would be empty in every signature |
 | `struct_excessive_bools` | `BoidsConfig` and friends are flags by design; splitting them hides the defaults |
 | `multiple_crate_versions` | Bevy's dependency graph is not ours to flatten |
-| `needless_pass_by_value` | Bevy hands systems their parameters by value; the signature is the framework's |
-| `cast_precision_loss` | an `f32` simulation converts at audited boundaries; `cast_lossless` is still denied, so widening uses `From` |
-| `cast_possible_truncation` | counts narrow to lane values at audited boundaries, bounded by `MAX_AGENTS` |
-| `cast_sign_loss` | cell offsets and lane counts are non-negative by construction |
-| `cast_possible_wrap` | index arithmetic stays inside `i32` by the same bound as truncation |
-| `suboptimal_flops` | fusing into `mul_add` changes rounding, and the formulas are pinned bit-exactly |
-| `float_cmp` | exact comparison is the substance of the determinism tests |
-| `significant_drop_tightening` | Criterion's `BenchmarkGroup` is a guard by design |
-| `missing_const_for_fn` | `const` is added where it enables a static, not for its own sake |
+
+Seven. The list used to be fifteen, and the eight that left are the interesting part, because each
+one was a rule that turned out to be *right about the code and wrong about the rule*, which is the
+only case where an exception is correct at all:
+
+| Was allowed | What replaced it |
+| --- | --- |
+| `needless_pass_by_value` | `#[expect]` on the system itself — `&Res<T>` is not a `SystemParam`, so the signature is the framework's |
+| `cast_precision_loss` | `src/domain/num.rs`, which converts at one boundary and says what each conversion does |
+| `cast_possible_truncation` | the same module, plus `u64_to_low_u32` where truncation *is* the operation (hashes, PRNG words) |
+| `cast_sign_loss` | the same module: `i32_to_usize` and friends clamp the negative case in a branch |
+| `cast_possible_wrap` | the same module |
+| `float_cmp` | `.to_bits()` on both sides — exact comparison, spelled as bit equality, which is what a determinism test means |
+| `significant_drop_tightening` | the benchmark group's scope is the measurement; the guard is dropped where the timing ends |
+| `missing_const_for_fn` | `const` is now on the functions where it costs nothing, and the conversion helpers are `const` so a `const fn` can call them |
+
+One of them came back. `suboptimal_flops` was denied, the kernels were fused by hand, and
+`application::packed::tests::the_vectorised_kernel_agrees_with_the_scalar_one` failed within the
+hour on a one-ulp difference: fusing the wide lane and not the scalar reference changes the result.
+Fusion is a numerical decision, not a tidy-up, so the lint is allowed again with that reason and the
+kernels stay unfused.
+
+Three `#[expect]`s are therefore permitted, and the audit checks all three:
+
+1. **In `src/domain/num.rs`, for a cast lint.** The module exists so a numeric conversion happens
+   once, with its rounding written down, instead of at three hundred call sites. Every helper there
+   carries an expectation naming the cast it owns.
+2. **On a Bevy system, for `needless_pass_by_value`.** The parameter is `Res<T>`, `ResMut<T>`,
+   `Query<…>`, `Commands`, `Local<T>`, `EventReader<T>`, `EventWriter<T>`, `Single<…>` or
+   `ParamSet<…>`; the framework hands it over by value and a reference would not be a `SystemParam`.
+   The audit reads the sixty lines below the attribute and only accepts the expectation when one of
+   those types is in the signature.
+3. **In `benches/`, for `significant_drop_tightening`.** Criterion writes its report when the
+   benchmark group drops, so the group's scope *is* the measurement; shortening the guard's life
+   would measure less, not more. The audit only accepts the expectation in a bench, and only when
+   the reason names Criterion.
+
+An `#[expect]` is not a suppression. It fails the build the day the lint stops firing, so it cannot
+rot into an `allow`; it is a statement that the lint is wrong here, and the compiler holds you to it.
+A bare `#[allow]` is never correct and the audit rejects one outright, `reason` or not.
 
 ## Policing the exceptions
 
 `scripts/lint_audit.py` scans every Rust file in the tree — `src`, `tests`, `benches`, `examples`,
 `compat`, `fuzz` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint, clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
-half the crate's doc comments talk about the overrides they forbid. A hit that is not in the script's
-`SANCTIONED` table fails the build; so does a `SANCTIONED` entry that has disappeared, because an
-exception nobody needs is an exception nobody reads.
+half the crate's doc comments talk about the overrides they forbid. An `#[allow]` that is not in
+the script's `SANCTIONED` table fails the build; so does a `SANCTIONED` entry that has disappeared,
+because an exception nobody needs is an exception nobody reads. An `#[expect]` is judged by the two
+rules above instead: right file or right signature, and a reason.
 
 The `reason = "…"` argument is stripped as a unit before an attribute is split on commas, so a
 reason with a comma in it does not become a phantom lint name, and a name that is not an identifier
@@ -162,15 +210,18 @@ It also reads `Cargo.toml` and fails if the policy there is not the policy this 
 both directions:
 
 - **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
-  `unwrap_used`, `expect_used`, `panic`, `indexing_slicing` and `cast_ptr_alignment`; the `all`,
-  `pedantic`, `nursery`, `cargo` and `perf` groups must still be `warn` for `-D warnings` to do its
-  job. A clean tree under a weakened manifest is not a passing audit.
+  `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment`, and the nine
+  cast, float, `const` and `needless_pass_by_value` lints above; the `all`, `pedantic`, `nursery`,
+  `cargo` and `perf` groups must still be `warn` for `-D warnings` to do its job. A clean tree under
+  a weakened manifest is not a passing audit.
 - **Allowed stays allowed, and nothing else.** The set of `allow` entries in the manifest must equal
   the `TOLERATED` table exactly, entry for entry, in both directions.
 
 `--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level
 `allow`, an item-level `expect`, a `cfg_attr`-wrapped `expect`, a bare rustc lint in each of `allow`
-and `expect`; then the sanction mechanism (a listed override passes, the same override unlisted
+and `expect`, a documented cast expectation inside the conversion module, the same expectation
+without a reason, the same expectation in another file, a documented expectation on a Bevy system,
+and one on a function that is not a system; then the sanction mechanism (a listed override passes, the same override unlisted
 fails, a stale entry fails); then the manifest (a downgraded deny, a deny replaced by an allow, an
 undocumented allow, a tolerated allow that vanished, an intact manifest). CI runs both.
 

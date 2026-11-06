@@ -67,6 +67,17 @@ REQUIRED = (
     ("lints.clippy", "nursery", "warn"),
     ("lints.clippy", "cargo", "warn"),
     ("lints.clippy", "perf", "warn"),
+    # The lints below were allowed with a paragraph of justification each. They are denied now, and
+    # the code satisfies them; `num` and the Bevy system signatures carry the only `#[expect]`s,
+    # under the three rules `expected_is_allowed` states.
+    ("lints.clippy", "needless_pass_by_value", "deny"),
+    ("lints.clippy", "cast_precision_loss", "deny"),
+    ("lints.clippy", "cast_possible_truncation", "deny"),
+    ("lints.clippy", "cast_sign_loss", "deny"),
+    ("lints.clippy", "cast_possible_wrap", "deny"),
+    ("lints.clippy", "float_cmp", "deny"),
+    ("lints.clippy", "missing_const_for_fn", "deny"),
+    ("lints.clippy", "significant_drop_tightening", "deny"),
 )
 
 #: Every lint the manifest may allow, and the reason the spine cannot be satisfied without it. The
@@ -79,16 +90,27 @@ TOLERATED: dict[str, str] = {
     "missing_panics_doc": "the crate denies `panic`, so the section would be empty in every signature",
     "struct_excessive_bools": "`BoidsConfig` and friends are flags by design; splitting them hides the defaults",
     "multiple_crate_versions": "Bevy's dependency graph is not ours to flatten",
-    "needless_pass_by_value": "Bevy hands systems their parameters by value; the signature is the framework's",
-    "cast_precision_loss": "an f32 simulation converts at audited boundaries; `cast_lossless` is still denied, so widening uses `From`",
-    "cast_possible_truncation": "counts narrow to lane values at audited boundaries, bounded by `MAX_AGENTS`",
-    "cast_sign_loss": "cell offsets and lane counts are non-negative by construction",
-    "cast_possible_wrap": "index arithmetic stays inside `i32` by the same bound as truncation",
-    "suboptimal_flops": "fusing into `mul_add` changes rounding, and the formulas are pinned bit-exactly",
-    "float_cmp": "exact comparison is the substance of the determinism tests",
-    "significant_drop_tightening": "Criterion's `BenchmarkGroup` is a guard by design",
-    "missing_const_for_fn": "`const` is added where it enables a static, not for its own sake",
+    "suboptimal_flops": "the kernels must not fuse: a fused op rounds once where the scalar road rounds twice",
 }
+
+#: The lints `src/domain/num.rs` is allowed to `#[expect]`: it exists so that a numeric cast happens
+#: once, with its rounding written down, instead of at three hundred call sites.
+CAST_LINTS = frozenset(
+    {
+        "cast_precision_loss",
+        "cast_possible_truncation",
+        "cast_sign_loss",
+        "cast_possible_wrap",
+    }
+)
+#: The conversion module: the one file permitted to carry a cast expectation.
+NUM_MODULE = "src/domain/num.rs"
+#: A Bevy system parameter, by value, as the framework's `SystemParam` contract requires.
+BEVY_PARAM = re.compile(
+    r"\b(?:Res|ResMut|Query|Commands|Local|EventReader|EventWriter|Single|ParamSet)<"
+)
+#: How far past an `#[expect]` to look for the signature it is attached to.
+SIGNATURE_WINDOW = 60
 
 #: Attributes worth finding. `cfg_attr` wraps `expect`/`allow`, so the inner lint name is what
 #: matters and the search is textual rather than syntactic.
@@ -231,6 +253,39 @@ def walk(root: Path) -> list[Path]:
     return files
 
 
+def expected_is_allowed(path: Path, relative: str, line: int, lint: str) -> bool:
+    """Whether an `#[expect]` at this site is one of the two the policy permits.
+
+    An `#[expect]` is not a suppression: it fails the build when the lint stops firing, so it cannot
+    rot into an `allow`. It is still only correct where the lint is *right about the code and wrong
+    about the rule*, which is true in exactly three places here:
+
+    * `num` owns every numeric cast, and each of its helpers says what it does with the bits.
+    * A Bevy system is handed its parameters by value; `&Res<T>` is not a `SystemParam`, so the
+      signature cannot be changed to satisfy the lint.
+    * Criterion writes its report when the benchmark group drops, so the group's scope *is* the
+      measurement; shortening its life would measure less, not more.
+
+    Everything else is code to fix, which is why the reason is required and the rules are narrow.
+    """
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not 0 < line <= len(lines):
+        return False
+    attribute = "\n".join(lines[line - 1 : line + 8])
+    if not REASON.search(attribute):
+        return False
+    if relative == NUM_MODULE:
+        return lint in CAST_LINTS
+    if lint == "needless_pass_by_value":
+        window = "\n".join(lines[line - 1 : line + SIGNATURE_WINDOW])
+        return bool(BEVY_PARAM.search(window))
+    if lint == "significant_drop_tightening":
+        # Criterion writes its report when the group drops, so the group's scope is the measurement.
+        return relative.startswith("benches/") and "Criterion" in attribute
+    return False
+
+
 def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tuple[str, str]]]:
     """Split every override in the tree into unsanctioned ones and sanctioned ones seen."""
     unsanctioned = []
@@ -240,6 +295,9 @@ def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tu
         for line, kind, lint in scan(path):
             key = (relative, lint)
             if key in SANCTIONED:
+                seen.add(key)
+                continue
+            if kind == "expect" and expected_is_allowed(path, relative, line, lint):
                 seen.add(key)
                 continue
             unsanctioned.append((relative, line, kind, lint))
@@ -282,7 +340,7 @@ def check(root: Path) -> int:
     print(
         f"lint audit: {len(walk(root))} file(s) scanned, {len(REQUIRED)} required and "
         f"{len(TOLERATED)} tolerated manifest entries verified, {len(seen_sanctioned)} sanctioned "
-        "override(s), none unsanctioned"
+        "override(s) and documented expectation(s), none unsanctioned"
     )
     return 0
 
@@ -345,6 +403,56 @@ def self_test() -> int:
             "a bare rustc lint in an allow",
         ),
         (
+            "src/domain/num.rs",
+            '#[expect(\n    clippy::cast_precision_loss,\n    reason = "a coordinate conversion"\n)]\n'
+            "fn f(v: u32) -> f32 { v as f32 }\n",
+            0,
+            "a documented cast expectation in the conversion module",
+        ),
+        (
+            "src/domain/num.rs",
+            "#[expect(clippy::cast_precision_loss)]\nfn f() {}\n",
+            1,
+            "a cast expectation with no reason",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::cast_precision_loss,\n    reason = "elsewhere"\n)]\n'
+            "fn f(v: u32) -> f32 { v as f32 }\n",
+            1,
+            "a cast expectation outside the conversion module",
+        ),
+        (
+            "src/sys.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n    reason = "a system"\n)]\n'
+            "pub fn s(config: Res<BoidsConfig>) { let _ = config; }\n",
+            0,
+            "a documented expectation on a Bevy system",
+        ),
+        (
+            "benches/x.rs",
+            '#[expect(\n    clippy::significant_drop_tightening,\n'
+            '    reason = "Criterion writes the report when the group drops"\n)]\n'
+            "fn b() {}\n",
+            0,
+            "a documented Criterion guard expectation in a bench",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::significant_drop_tightening,\n'
+            '    reason = "Criterion writes the report when the group drops"\n)]\n'
+            "fn b() {}\n",
+            1,
+            "a Criterion guard expectation outside the benches",
+        ),
+        (
+            "src/plain.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n    reason = "a helper"\n)]\n'
+            "pub fn h(value: String) { let _ = value; }\n",
+            1,
+            "a pass-by-value expectation on something that is not a system",
+        ),
+        (
             "src/other.rs",
             "#![cfg_attr(\n    feature = \"simd\",\n    expect(clippy::indexing_slicing, reason = \"x\")\n)]\nfn f() {}\n",
             1,
@@ -405,7 +513,7 @@ def self_test() -> int:
         ("a downgraded deny fails", 'panic = "warn"', None, None, 1),
         ("an allow in place of a deny fails", 'unwrap_used = "allow"', None, None, 1),
         ("an undocumented allow fails", None, "dead_code", None, 1),
-        ("a tolerated allow that vanished fails", None, None, "float_cmp", 1),
+        ("a tolerated allow that vanished fails", None, None, "must_use_candidate", 1),
         ("an intact manifest passes", 'panic = "deny"', None, None, 0),
     ]:
         with tempfile.TemporaryDirectory() as directory:

@@ -32,6 +32,7 @@ use bevy_flock::adapters::primary::band::{
     Band, BandAgent, BandAnchor, BandConfig, BandPlugin, seed_field,
 };
 use bevy_flock::adapters::primary::cognition::PlayerFocus;
+use bevy_flock::domain::num;
 
 /// Counts allocations so gate 7 can be asserted rather than hoped for.
 struct Counting;
@@ -131,7 +132,7 @@ impl Harness {
     /// One tick: move the camera along its path, update, and return the live count.
     fn tick(&mut self, tick: u32) -> usize {
         let amplitude = self.app.world().resource::<Band>().fold_radius;
-        let x = 256.0 + amplitude * (f64::from(tick) * 0.010_472).sin() as f32;
+        let x = amplitude.mul_add(num::f64_to_f32((f64::from(tick) * 0.010_472).sin()), 256.0);
         if let Some(mut transform) = self.app.world_mut().get_mut::<Transform>(self.camera) {
             transform.translation.x = x;
         }
@@ -175,10 +176,10 @@ fn gate_4_population_is_conserved_on_every_tick() {
 fn gate_5_the_boundary_never_pops() {
     let mut harness = Harness::new();
     let ration = i64::from(harness.app.world().resource::<BandConfig>().ration);
-    let mut previous = harness.live as i64;
+    let mut previous = num::usize_to_i64(harness.live);
 
     for tick in 0..TICKS {
-        let live = harness.tick(tick) as i64;
+        let live = num::usize_to_i64(harness.tick(tick));
         let delta = (live - previous).abs();
         assert!(
             delta <= ration,

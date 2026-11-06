@@ -20,6 +20,7 @@ use std::fs;
 
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MAX_SUBJECTS, MemoryStore, SubjectId};
+use bevy_flock::domain::num;
 use bevy_flock::domain::saves::{SubjectEntry, SubjectKey, SubjectKind, SubjectRegistry};
 use bevy_flock::domain::telemetry::{Sample, measure, references_to, retire};
 use bevy_flock::domain::tick::Tick;
@@ -61,12 +62,12 @@ impl Lcg {
     /// showed up here as a fifth of arrivals meeting somebody instead of two fifths
     /// and as subjects clustering on half the identifier space — a fixture bug that
     /// made the graph flatter than the situation it was meant to show.
-    fn next(&mut self) -> u32 {
+    const fn next(&mut self) -> u32 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        (z ^ (z >> 31)) as u32
+        num::u64_to_u32(z ^ (z >> 31))
     }
 }
 
@@ -116,7 +117,7 @@ fn main() {
         }
         for index in arrival {
             if rng.next() % 5 < 2 {
-                let subject = SubjectId::new((rng.next() % u32::from(SUBJECTS)) as u16);
+                let subject = SubjectId::new(num::u32_to_u16(rng.next() % u32::from(SUBJECTS)));
                 store.remember(
                     index,
                     subject,
@@ -222,10 +223,13 @@ fn write_rows_panel(svg: &mut String, samples: &[Sample]) {
         .max()
         .unwrap_or(1)
         .max(1);
-    let scale_y =
-        |rows: u32| TOP_BOTTOM - (f64::from(rows) / f64::from(max_rows)) * (TOP_BOTTOM - TOP_TOP);
-    let scale_x =
-        |session: usize| LEFT + 24.0 + (session as f64 / (SESSIONS as f64 - 1.0)) * (PLOT_W - 60.0);
+    let scale_y = |rows: u32| {
+        (f64::from(rows) / f64::from(max_rows)).mul_add(-(TOP_BOTTOM - TOP_TOP), TOP_BOTTOM)
+    };
+    let scale_x = |session: usize| {
+        (num::usize_to_f64(session) / (num::usize_to_f64(SESSIONS) - 1.0))
+            .mul_add(PLOT_W - 60.0, LEFT + 24.0)
+    };
 
     let _ = writeln!(
         svg,
@@ -306,7 +310,7 @@ fn write_subject_panel(svg: &mut String, samples: &[Sample], per_subject: &[u32]
     let columns = per_subject.len().max(1);
     let panel_left = LEFT;
     let panel_w = f64::from(WIDTH) - 40.0 - panel_left;
-    let column_w = panel_w / columns as f64;
+    let column_w = panel_w / num::usize_to_f64(columns);
     let bar_w = (column_w - 3.0).max(2.0);
     let peak = per_subject.iter().copied().max().unwrap_or(1).max(1);
     let bar_scale =
@@ -322,7 +326,7 @@ fn write_subject_panel(svg: &mut String, samples: &[Sample], per_subject: &[u32]
         panel_left + panel_w
     );
     for (raw, count) in per_subject.iter().enumerate() {
-        let x = panel_left + column_w * raw as f64;
+        let x = panel_left + column_w * num::usize_to_f64(raw);
         let height = bar_scale(*count);
         let fill = if raw >= retired_from {
             RETIRED

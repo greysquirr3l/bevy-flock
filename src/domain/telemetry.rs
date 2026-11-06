@@ -63,7 +63,7 @@ impl Sample {
 
     /// Slots no live subject can claim, in permille of all slots.
     #[must_use]
-    pub fn orphan_slot_permille(self) -> u32 {
+    pub const fn orphan_slot_permille(self) -> u32 {
         if self.slots == 0 {
             return 0;
         }
@@ -72,7 +72,7 @@ impl Sample {
 
     /// Rows enrolled but empty, in permille of all enrolled rows.
     #[must_use]
-    pub fn ghost_row_permille(self) -> u32 {
+    pub const fn ghost_row_permille(self) -> u32 {
         if self.enrolled == 0 {
             return 0;
         }

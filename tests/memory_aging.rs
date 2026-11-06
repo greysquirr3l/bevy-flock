@@ -21,7 +21,7 @@ use bevy_flock::testkit::OrDie;
 const CADENCE: u64 = 600;
 const HALF_LIFE: u32 = 3_600;
 
-fn decay() -> DecayPolicy {
+const fn decay() -> DecayPolicy {
     DecayPolicy {
         half_life_ticks: HALF_LIFE,
     }

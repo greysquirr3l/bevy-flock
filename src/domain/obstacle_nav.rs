@@ -29,6 +29,7 @@
 use bevy_math::Vec3;
 
 use super::nav::{GridNavSource, NavBounds, NavCell, NavError, NavVersion};
+use crate::domain::num;
 
 /// An axis-aligned obstacle footprint, in world units.
 ///
@@ -90,8 +91,14 @@ impl ObstacleFootprint {
         if high_x < 0.0 || high_z < 0.0 || low_x > last_x || low_z > last_z {
             return None;
         }
-        let (min_x, min_z) = (clamp_x(low_x) as u16, clamp_z(low_z) as u16);
-        let (max_x, max_z) = (clamp_x(high_x) as u16, clamp_z(high_z) as u16);
+        let (min_x, min_z) = (
+            num::f32_to_u16(clamp_x(low_x)),
+            num::f32_to_u16(clamp_z(low_z)),
+        );
+        let (max_x, max_z) = (
+            num::f32_to_u16(clamp_x(high_x)),
+            num::f32_to_u16(clamp_z(high_z)),
+        );
         let min = NavCell::new(min_x.min(max_x), min_z.min(max_z));
         let max = NavCell::new(min_x.max(max_x), min_z.max(max_z));
         Some((min, max))
@@ -206,7 +213,7 @@ impl ObstacleNav {
 
     /// The source callers should path against: the last *complete* rebuild.
     #[must_use]
-    pub fn source(&self) -> Option<&GridNavSource> {
+    pub const fn source(&self) -> Option<&GridNavSource> {
         self.published.as_ref()
     }
 
@@ -380,17 +387,21 @@ fn erode(walkable: &[bool], bounds: NavBounds, radius: u16) -> Vec<bool> {
             if walkable.get(z * width + x).copied().unwrap_or(false) {
                 continue;
             }
-            let (x, z) = (x as i32, z as i32);
+            let (x, z) = (num::usize_to_i32(x), num::usize_to_i32(z));
             for dz in -radius..=radius {
                 for dx in -radius..=radius {
                     if dx * dx + dz * dz > radius * radius {
                         continue;
                     }
                     let (nx, nz) = (x + dx, z + dz);
-                    if nx < 0 || nz < 0 || nx >= width as i32 || nz >= height as i32 {
+                    if nx < 0
+                        || nz < 0
+                        || nx >= num::usize_to_i32(width)
+                        || nz >= num::usize_to_i32(height)
+                    {
                         continue;
                     }
-                    let index = nz as usize * width + nx as usize;
+                    let index = num::i32_to_usize(nz) * width + num::i32_to_usize(nx);
                     if let Some(cell) = out.get_mut(index) {
                         *cell = false;
                     }

@@ -33,6 +33,7 @@
 //! is a few integers, and the text is borrowed from the loaded graph.
 
 use crate::behavior::blackboard::{Blackboard, BlackboardKey, Value};
+use crate::domain::num;
 use smallvec::SmallVec;
 
 /// The most choices one node may offer.
@@ -66,7 +67,7 @@ impl Condition {
     pub fn holds(self, blackboard: &Blackboard) -> bool {
         let value = match blackboard.get(self.key) {
             Some(Value::Float(value)) => value,
-            Some(Value::Int(value)) => value as f32,
+            Some(Value::Int(value)) => num::i64_to_f32(value),
             Some(Value::Bool(value)) => f32::from(u8::from(value)),
             _ => 0.0,
         };
@@ -99,7 +100,7 @@ impl DialogChoice {
 
     /// Offer this choice only when a condition holds.
     #[must_use]
-    pub fn requiring(mut self, key: BlackboardKey, at_least: f32) -> Self {
+    pub const fn requiring(mut self, key: BlackboardKey, at_least: f32) -> Self {
         self.requires = Some(Condition { key, at_least });
         self
     }
@@ -133,7 +134,7 @@ impl DialogNode {
 
     /// Whether the node ends the conversation.
     #[must_use]
-    pub fn is_terminal(&self) -> bool {
+    pub const fn is_terminal(&self) -> bool {
         self.choices.is_empty()
     }
 }
@@ -196,14 +197,14 @@ impl DialogGraph {
 
     /// How many nodes the graph has.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.nodes.len()
     }
 
     /// Whether the graph has no nodes. A validated graph cannot, but the method
     /// exists so the type is usable where an emptiness check is idiomatic.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
@@ -364,7 +365,7 @@ impl DialogGraph {
 
     /// Open a conversation.
     #[must_use]
-    pub fn open(&self) -> DialogSession {
+    pub const fn open(&self) -> DialogSession {
         DialogSession {
             cursor: self.root,
             visited: 0,
@@ -453,7 +454,7 @@ impl DialogSession {
     }
 
     /// End the conversation without choosing.
-    pub fn close(&mut self) {
+    pub const fn close(&mut self) {
         self.finished = true;
     }
 
@@ -734,7 +735,7 @@ mod tests {
 
     #[test]
     fn too_many_choices_are_rejected() {
-        let choices: Vec<DialogChoice> = (0..=MAX_CHOICES as u16)
+        let choices: Vec<DialogChoice> = (0..=num::usize_to_u16(MAX_CHOICES))
             .map(|index| DialogChoice::new(format!("Option {index}"), 1))
             .collect();
         let error = DialogGraph::new(

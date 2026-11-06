@@ -129,7 +129,7 @@ fn bench_shapes(c: &mut Criterion) {
         ("20_nodes", wide_tree(4, 4)),
         ("1000_nodes", wide_tree(32, 31)),
     ] {
-        let tree = BehaviorTree::try_from_spec(spec).or_die();
+        let tree = BehaviorTree::try_from_spec(&spec).or_die();
         let mut cursor = TreeCursor::new();
         let mut board = Blackboard::new();
         let mut dispatch = registry.dispatcher();

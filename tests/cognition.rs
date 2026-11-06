@@ -33,7 +33,7 @@ fn app() -> App {
 }
 
 fn tree() -> Arc<BehaviorTree> {
-    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
+    Arc::new(BehaviorTree::try_from_spec(&NodeSpec::Action(0)).or_die())
 }
 
 fn spawn_brain(app: &mut App, id: u32, x: f32, cost: VirtualCost) -> Entity {

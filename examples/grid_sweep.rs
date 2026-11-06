@@ -16,6 +16,7 @@
 use std::time::Instant;
 
 use bevy_flock::application::crowd::{Crowd, CrowdParams};
+use bevy_flock::domain::num;
 use bevy_flock::domain::spatial::SpatialGridConfig;
 use bevy_flock::domain::steering::SteeringParams;
 use bevy_flock::prelude::*;
@@ -69,7 +70,7 @@ fn main() {
     );
 }
 
-fn road() -> &'static str {
+const fn road() -> &'static str {
     if cfg!(feature = "simd") {
         "transposed"
     } else {
@@ -82,7 +83,7 @@ fn road() -> &'static str {
 /// The cap is the point of ADR 0003's budget, applied by hand: the production grid would coarsen
 /// rather than allocate 8 million cells.
 fn dims_for(cell: f32) -> [u32; 3] {
-    let per_axis = ((EXTENT / cell).ceil() as u32).clamp(8, 200);
+    let per_axis = (num::f32_to_u32((EXTENT / cell).ceil())).clamp(8, 200);
     [per_axis; 3]
 }
 
@@ -97,7 +98,7 @@ fn build(config: &SpatialGridConfig, cell: f32, dims: [u32; 3], population: u32)
 /// The spawn spiral, packed so each cell holds as many agents as the density allows.
 fn refill(crowd: &mut Crowd, population: u32, _cell: f32) {
     for index in 0..population {
-        let step = index as f32;
+        let step = num::u32_to_f32(index);
         let ring = 1.6 * libm::sqrtf(step);
         let angle = step * 2.399_963_2;
         crowd.push(
@@ -119,7 +120,7 @@ fn occupancy(crowd: &Crowd, cell: f32, dims: [u32; 3]) -> f64 {
     let mut blocked = 0_u64;
     for index in 0..crowd.len() {
         // The crowd does not expose positions, so rebuild them the way `refill` did.
-        let step = index as f32;
+        let step = num::usize_to_f32(index);
         let ring = 1.6 * libm::sqrtf(step);
         let angle = step * 2.399_963_2;
         let position = [libm::cosf(angle) * ring, 0.0, libm::sinf(angle) * ring];
@@ -135,16 +136,16 @@ fn occupancy(crowd: &Crowd, cell: f32, dims: [u32; 3]) -> f64 {
     if total == 0 {
         return 0.0;
     }
-    blocked as f64 / total as f64
+    num::u64_to_f64(blocked) / num::u64_to_f64(total)
 }
 
 fn cell_of(position: [f32; 3], cell: f32, dims: [u32; 3]) -> usize {
     let axis = |value: f32, dim: u32| {
-        let index = ((value + EXTENT * 0.5) / cell).floor();
+        let index = (EXTENT.mul_add(0.5, value) / cell).floor();
         if index < 0.0 {
             return 0_u32;
         }
-        let index = index as u32;
+        let index = num::f32_to_u32(index);
         index.min(dim - 1)
     };
     let x = axis(position[0], dims[0]);

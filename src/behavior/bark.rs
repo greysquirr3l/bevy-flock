@@ -121,7 +121,7 @@ impl BarkLine {
 
     /// A line with a relative weight.
     #[must_use]
-    pub fn weighted(mut self, weight: u32) -> Self {
+    pub const fn weighted(mut self, weight: u32) -> Self {
         self.weight = weight;
         self
     }
@@ -359,7 +359,7 @@ impl BarkQueue {
 
     /// The events currently queued.
     #[must_use]
-    pub fn events(&self) -> &VecDeque<BarkEvent> {
+    pub const fn events(&self) -> &VecDeque<BarkEvent> {
         &self.events
     }
 

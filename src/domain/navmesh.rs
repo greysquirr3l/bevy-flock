@@ -31,6 +31,7 @@ use bevy_math::{Vec2, Vec3};
 use smallvec::SmallVec;
 
 use crate::domain::nav::{GridNavSource, NavBounds, NavCell, NavError, NavSource, NavVersion};
+use crate::domain::num;
 
 /// How many distinct areas a mesh can tag its polygons with.
 pub const MAX_AREAS: usize = 32;
@@ -47,7 +48,7 @@ impl AreaId {
     /// An area from a number, folded into the maskable range.
     #[must_use]
     pub const fn new(area: u8) -> Self {
-        Self(area % MAX_AREAS as u8)
+        Self(area % num::usize_to_u8(MAX_AREAS))
     }
 }
 
@@ -196,7 +197,7 @@ fn point_key(point: Vec3) -> u64 {
         } else {
             0.0
         };
-        (scaled.round() as i64).wrapping_add(1 << 32) as u64 & 0xffff_ffff
+        ((num::f32_to_i64(scaled.round())).wrapping_add(1 << 32)).cast_unsigned() & 0xffff_ffff
     };
     quantise(point.x) << 32 | quantise(point.z)
 }
@@ -254,11 +255,11 @@ impl NavMesh {
             }
             let range = polygon.range();
             if let Some(last) = range.clone().last()
-                && last as u32 >= vertex_count
+                && num::usize_to_u32(last) >= vertex_count
             {
                 return Err(NavMeshError::VertexOutOfRange {
                     index,
-                    vertex: last as u32,
+                    vertex: num::usize_to_u32(last),
                     count: vertex_count,
                 });
             }
@@ -382,13 +383,13 @@ impl NavMesh {
 
     /// How many polygons.
     #[must_use]
-    pub fn polygon_count(&self) -> usize {
+    pub const fn polygon_count(&self) -> usize {
         self.polygons.len()
     }
 
     /// How many vertices.
     #[must_use]
-    pub fn vertex_count(&self) -> usize {
+    pub const fn vertex_count(&self) -> usize {
         self.vertices.len()
     }
 
@@ -478,7 +479,7 @@ impl NavMesh {
             };
             let edge = Vec2::new(b.x, b.z) - Vec2::new(a.x, a.z);
             let relative = point - Vec2::new(a.x, a.z);
-            let cross = edge.x * relative.y - edge.y * relative.x;
+            let cross = edge.y.mul_add(-relative.x, edge.x * relative.y);
             if cross.abs() <= 1.0e-6 {
                 continue;
             }
@@ -892,7 +893,7 @@ fn polygon_area(vertices: &[Vec3], range: &core::ops::Range<usize>) -> f32 {
         let Some(b) = vertices.get(range.start + (offset + 1) % len).copied() else {
             continue;
         };
-        total += a.x * b.z - b.x * a.z;
+        total += b.x.mul_add(-a.z, a.x * b.z);
     }
     total * 0.5
 }
@@ -907,7 +908,7 @@ fn centroid_of(vertices: &[Vec3], range: &core::ops::Range<usize>) -> Vec3 {
             count += 1;
         }
     }
-    sum / count.max(1) as f32
+    sum / num::u32_to_f32(count.max(1))
 }
 
 /// A distance in millimetres, which is the mesh's integer cost unit.
@@ -915,7 +916,7 @@ fn millimetres(distance: f32) -> u32 {
     if !distance.is_finite() || distance <= 0.0 {
         return 0;
     }
-    u32::try_from((distance * 1000.0).round() as i64).unwrap_or(u32::MAX)
+    u32::try_from(num::f32_to_i64((distance * 1000.0).round())).unwrap_or(u32::MAX)
 }
 
 /// Whether two positions are the same point to a millimetre.
@@ -925,7 +926,7 @@ fn same_point(a: Vec3, b: Vec3) -> bool {
 
 /// The 2D cross product of `b - a` and `c - a`, positive when `c` is to the left.
 fn cross_2d(a: Vec2, b: Vec2, c: Vec2) -> f32 {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    (b.y - a.y).mul_add(-(c.x - a.x), (b.x - a.x) * (c.y - a.y))
 }
 
 /// A polygon mesh presented to the crate as a grid, so a flow field can be built over it.
@@ -964,9 +965,9 @@ impl NavMeshSource {
                 for x in min_x..=max_x {
                     let cell = NavCell::new(x, y);
                     let centre = Vec3::new(
-                        bounds.origin.x + (f32::from(x) + 0.5) * bounds.cell_size,
+                        (f32::from(x) + 0.5).mul_add(bounds.cell_size, bounds.origin.x),
                         bounds.origin.y,
-                        bounds.origin.z + (f32::from(y) + 0.5) * bounds.cell_size,
+                        (f32::from(y) + 0.5).mul_add(bounds.cell_size, bounds.origin.z),
                     );
                     if !bounds.contains(cell) || !mesh.contains(*polygon, centre) {
                         continue;
@@ -1013,7 +1014,7 @@ fn clamp_cell(bounds: NavBounds, point: Vec3) -> (u16, u16) {
         } else if value >= capped {
             last
         } else {
-            (value as u16).min(last)
+            (num::f32_to_u16(value)).min(last)
         }
     };
     let x = ((point.x - bounds.origin.x) / bounds.cell_size).floor();

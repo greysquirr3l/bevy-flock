@@ -308,7 +308,7 @@ impl NpcBundle {
 
     /// Place the NPC.
     #[must_use]
-    pub fn with_position(mut self, position: Vec3) -> Self {
+    pub const fn with_position(mut self, position: Vec3) -> Self {
         self.transform.translation = position;
         self
     }

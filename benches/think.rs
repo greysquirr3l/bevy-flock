@@ -21,7 +21,7 @@ const BUDGET: VirtualCost = VirtualCost::from_micros(16_600);
 
 /// A plausible mix: most NPCs cheap, a minority expensive, as measured in
 /// `benches/brain.rs`. The scheduler's job is to notice the difference.
-fn cost_of(id: u32) -> VirtualCost {
+const fn cost_of(id: u32) -> VirtualCost {
     match id % 16 {
         0 => VirtualCost::from_micros(12),
         1..=3 => VirtualCost::from_micros(4),
@@ -106,7 +106,7 @@ fn world(count: u32, brains: bool) -> bevy_app::App {
     if brains {
         let tree = std::sync::Arc::new(
             bevy_flock::behavior::tree::BehaviorTree::try_from_spec(
-                bevy_flock::behavior::tree::NodeSpec::Action(0),
+                &bevy_flock::behavior::tree::NodeSpec::Action(0),
             )
             .or_die(),
         );

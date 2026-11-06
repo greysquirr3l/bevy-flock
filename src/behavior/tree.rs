@@ -42,6 +42,7 @@ use smallvec::SmallVec;
 use crate::behavior::blackboard::Blackboard;
 use crate::domain::cost::VirtualCost;
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// Identifier of a leaf behaviour in a [`crate::behavior::registry::FlockRegistry`].
@@ -175,31 +176,31 @@ pub enum NodeSpec {
 
 /// Build a [`NodeSpec::Sequence`].
 #[must_use]
-pub fn sequence(children: Vec<NodeSpec>) -> NodeSpec {
+pub const fn sequence(children: Vec<NodeSpec>) -> NodeSpec {
     NodeSpec::Sequence(children)
 }
 
 /// Build a [`NodeSpec::Selector`].
 #[must_use]
-pub fn selector(children: Vec<NodeSpec>) -> NodeSpec {
+pub const fn selector(children: Vec<NodeSpec>) -> NodeSpec {
     NodeSpec::Selector(children)
 }
 
 /// Build a [`NodeSpec::Parallel`].
 #[must_use]
-pub fn parallel(policy: ParallelPolicy, children: Vec<NodeSpec>) -> NodeSpec {
+pub const fn parallel(policy: ParallelPolicy, children: Vec<NodeSpec>) -> NodeSpec {
     NodeSpec::Parallel { policy, children }
 }
 
 /// Build a [`NodeSpec::Action`].
 #[must_use]
-pub fn action(leaf: LeafId) -> NodeSpec {
+pub const fn action(leaf: LeafId) -> NodeSpec {
     NodeSpec::Action(leaf)
 }
 
 /// Build a [`NodeSpec::Condition`].
 #[must_use]
-pub fn condition(leaf: LeafId) -> NodeSpec {
+pub const fn condition(leaf: LeafId) -> NodeSpec {
     NodeSpec::Condition(leaf)
 }
 
@@ -286,12 +287,12 @@ impl BehaviorTree {
     /// Returns [`TreeError::EmptyComposite`] for a composite with no children,
     /// [`TreeError::TooDeep`] beyond [`BehaviorTree::MAX_DEPTH`], and
     /// [`TreeError::TooManyChildren`] beyond [`BehaviorTree::MAX_CHILDREN`].
-    pub fn try_from_spec(spec: NodeSpec) -> Result<Self, TreeError> {
+    pub fn try_from_spec(spec: &NodeSpec) -> Result<Self, TreeError> {
         let mut builder = Builder {
             nodes: Vec::new(),
             children: Vec::new(),
         };
-        let root = builder.push(&spec, 1)?;
+        let root = builder.push(spec, 1)?;
         let depth = builder.nodes.iter().map(|node| u32::from(node.depth)).max();
         Ok(Self {
             nodes: builder.nodes,
@@ -304,7 +305,7 @@ impl BehaviorTree {
 
     /// Attach a name for debug output.
     #[must_use]
-    pub fn named(mut self, name: &'static str) -> Self {
+    pub const fn named(mut self, name: &'static str) -> Self {
         self.name = name;
         self
     }
@@ -317,13 +318,13 @@ impl BehaviorTree {
 
     /// The number of nodes.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.nodes.len()
     }
 
     /// Whether the tree is empty, which a compiled tree never is.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
@@ -402,7 +403,7 @@ impl BehaviorTree {
         for (offset, child) in children.iter().enumerate().skip(start) {
             match self.tick_node(*child, cursor, dispatch, ctx) {
                 Status::Running => {
-                    cursor.set_child_cursor(index, offset as u32);
+                    cursor.set_child_cursor(index, num::usize_to_u32(offset));
                     return Status::Running;
                 }
                 Status::Failure => {
@@ -428,7 +429,7 @@ impl BehaviorTree {
         for (offset, child) in children.iter().enumerate().skip(start) {
             match self.tick_node(*child, cursor, dispatch, ctx) {
                 Status::Running => {
-                    cursor.set_child_cursor(index, offset as u32);
+                    cursor.set_child_cursor(index, num::usize_to_u32(offset));
                     return Status::Running;
                 }
                 Status::Success => {
@@ -684,7 +685,7 @@ impl TryFrom<NodeSpec> for BehaviorTree {
     /// composite or a tree deeper than [`BehaviorTree::MAX_DEPTH`] is an authoring
     /// error, and the caller decides whether that is fatal.
     fn try_from(spec: NodeSpec) -> Result<Self, Self::Error> {
-        Self::try_from_spec(spec)
+        Self::try_from_spec(&spec)
     }
 }
 
@@ -700,7 +701,7 @@ impl Builder {
                 max: BehaviorTree::MAX_DEPTH,
             });
         }
-        let index = self.nodes.len() as u32;
+        let index = num::usize_to_u32(self.nodes.len());
         let kind = Self::kind_of(spec);
         let leaf = match spec {
             NodeSpec::Action(leaf) | NodeSpec::Condition(leaf) => *leaf,
@@ -731,7 +732,9 @@ impl Builder {
             end: index + 1,
             leaf,
             ticks,
-            depth: depth as u8,
+            // `depth` is bounded by `MAX_DEPTH`, far below `u8::MAX`, so this saturates only
+            // for a tree the compiler has already rejected.
+            depth: u8::try_from(depth).unwrap_or(u8::MAX),
         });
         // Recurse first, then append: a child's own descendants push onto this
         // same array, so appending as we go would make `len` count grandchildren
@@ -740,10 +743,10 @@ impl Builder {
         for child in children {
             direct.push(self.push(child, depth + 1)?);
         }
-        let start = self.children.len() as u32;
-        let len = direct.len() as u32;
+        let start = num::usize_to_u32(self.children.len());
+        let len = num::usize_to_u32(direct.len());
         self.children.extend_from_slice(&direct);
-        let end = self.nodes.len() as u32;
+        let end = num::usize_to_u32(self.nodes.len());
         if let Some(node) = self.nodes.get_mut(index as usize) {
             node.start = start;
             node.len = len;
@@ -752,7 +755,7 @@ impl Builder {
         Ok(index)
     }
 
-    fn kind_of(spec: &NodeSpec) -> NodeKind {
+    const fn kind_of(spec: &NodeSpec) -> NodeKind {
         match spec {
             NodeSpec::Sequence(_) => NodeKind::Sequence,
             NodeSpec::Selector(_) => NodeKind::Selector,
@@ -891,7 +894,7 @@ impl TreeCursor {
     /// The recorded child cursor for a node, or `0`.
     #[must_use]
     pub fn child_cursor(&self, node: u32) -> u32 {
-        self.state(node).map_or(0, |state| state as u32)
+        self.state(node).map_or(0, num::u64_to_u32)
     }
 
     /// Record the child cursor for a node.
@@ -940,7 +943,7 @@ impl TreeCursor {
 
     /// How many nodes the cursor is tracking, which is bounded by tree depth.
     #[must_use]
-    pub fn depth_used(&self) -> usize {
+    pub const fn depth_used(&self) -> usize {
         self.entries.len()
     }
 
@@ -981,7 +984,7 @@ impl LeafContext<'_> {
         let value = self.blackboard.get(key)?;
         value
             .as_float()
-            .or_else(|| value.as_int().map(|int| int as f32))
+            .or_else(|| value.as_int().map(num::i64_to_f32))
     }
 }
 
@@ -1015,7 +1018,7 @@ mod tests {
     use crate::testkit::OrDie;
 
     /// Compile a tree for testing; a failure here is a broken fixture.
-    fn tree(spec: NodeSpec) -> BehaviorTree {
+    fn tree(spec: &NodeSpec) -> BehaviorTree {
         BehaviorTree::try_from_spec(spec).or_die()
     }
 
@@ -1076,7 +1079,7 @@ mod tests {
 
     #[test]
     fn sequence_requires_every_child() {
-        let tree = tree(sequence(vec![action(0), action(0)]));
+        let tree = tree(&sequence(vec![action(0), action(0)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1088,7 +1091,7 @@ mod tests {
 
     #[test]
     fn sequence_stops_at_the_first_failure() {
-        let tree = tree(sequence(vec![action(1), action(0)]));
+        let tree = tree(&sequence(vec![action(1), action(0)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1101,7 +1104,7 @@ mod tests {
 
     #[test]
     fn selector_stops_at_the_first_success() {
-        let tree = tree(selector(vec![action(1), action(0), action(1)]));
+        let tree = tree(&selector(vec![action(1), action(0), action(1)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1113,7 +1116,7 @@ mod tests {
 
     #[test]
     fn a_selector_of_failures_fails() {
-        let tree = tree(selector(vec![action(1), action(5)]));
+        let tree = tree(&selector(vec![action(1), action(5)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1125,7 +1128,7 @@ mod tests {
 
     #[test]
     fn sequence_resumes_at_the_running_child() {
-        let tree = tree(sequence(vec![action(2), action(0)]));
+        let tree = tree(&sequence(vec![action(2), action(0)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1144,7 +1147,7 @@ mod tests {
     fn resumable_leaf_is_not_restarted() {
         // If the sequence restarted at child 0 every tick, leaf 3 would never
         // reach its second run and never complete.
-        let tree = tree(sequence(vec![action(3), action(0)]));
+        let tree = tree(&sequence(vec![action(3), action(0)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1160,7 +1163,7 @@ mod tests {
 
     #[test]
     fn inverter_swaps_success_and_failure_but_passes_running() {
-        let inverted = tree(invert(action(1)));
+        let inverted = tree(&invert(action(1)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1169,7 +1172,7 @@ mod tests {
             Status::Success
         );
 
-        let running_inverted = tree(invert(action(2)));
+        let running_inverted = tree(&invert(action(2)));
         let mut other_cursor = TreeCursor::new();
         assert_eq!(
             running_inverted.tick(&mut other_cursor, &mut dispatch, &mut ctx(&mut board)),
@@ -1179,7 +1182,7 @@ mod tests {
 
     #[test]
     fn repeat_until_fail_is_capped_instead_of_hanging() {
-        let tree = tree(repeat_until_fail(action(0)));
+        let tree = tree(&repeat_until_fail(action(0)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1191,7 +1194,7 @@ mod tests {
 
     #[test]
     fn repeat_until_fail_succeeds_when_the_child_fails() {
-        let tree = tree(repeat_until_fail(action(1)));
+        let tree = tree(&repeat_until_fail(action(1)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1203,7 +1206,7 @@ mod tests {
 
     #[test]
     fn parallel_all_requires_every_child() {
-        let tree = tree(parallel(
+        let tree = tree(&parallel(
             ParallelPolicy::RequireAll,
             vec![action(0), action(1)],
         ));
@@ -1218,7 +1221,7 @@ mod tests {
 
     #[test]
     fn parallel_any_succeeds_on_one_child() {
-        let tree = tree(parallel(
+        let tree = tree(&parallel(
             ParallelPolicy::RequireAny,
             vec![action(1), action(0)],
         ));
@@ -1236,7 +1239,7 @@ mod tests {
         // Child 0 succeeds immediately, child 1 runs forever. On the second tick
         // the completed mask must stop child 0 being re-entered — observable
         // because a re-entry would succeed again and mask nothing.
-        let tree = tree(parallel(
+        let tree = tree(&parallel(
             ParallelPolicy::RequireAll,
             vec![action(0), action(2)],
         ));
@@ -1257,7 +1260,7 @@ mod tests {
 
     #[test]
     fn cooldown_blocks_until_the_period_elapses() {
-        let tree = tree(cooldown(5, action(0)));
+        let tree = tree(&cooldown(5, action(0)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1292,7 +1295,7 @@ mod tests {
 
     #[test]
     fn cooldown_zero_never_blocks() {
-        let tree = tree(cooldown(0, action(0)));
+        let tree = tree(&cooldown(0, action(0)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1306,7 +1309,7 @@ mod tests {
 
     #[test]
     fn timeout_fails_a_child_that_never_finishes() {
-        let tree = tree(timeout(4, action(2)));
+        let tree = tree(&timeout(4, action(2)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1332,7 +1335,7 @@ mod tests {
 
     #[test]
     fn timeout_aborts_the_running_child() {
-        let tree = tree(timeout(2, sequence(vec![action(2)])));
+        let tree = tree(&timeout(2, sequence(vec![action(2)])));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1356,7 +1359,7 @@ mod tests {
 
     #[test]
     fn timeout_that_completes_resets_its_clock() {
-        let tree = tree(timeout(3, action(0)));
+        let tree = tree(&timeout(3, action(0)));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1381,7 +1384,7 @@ mod tests {
 
     #[test]
     fn a_condition_that_runs_is_treated_as_failure() {
-        let tree = tree(condition(2));
+        let tree = tree(&condition(2));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1394,7 +1397,7 @@ mod tests {
 
     #[test]
     fn abort_clears_the_cursor() {
-        let tree = tree(sequence(vec![action(2)]));
+        let tree = tree(&sequence(vec![action(2)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1409,7 +1412,7 @@ mod tests {
         // Nested: a sequence inside a sequence, with the leaf running. The abort
         // must reach the leaf, and it must reach it before anything shallower, so
         // that a conversation is closed before its participants are reset.
-        let tree = tree(sequence(vec![sequence(vec![action(2)])]));
+        let tree = tree(&sequence(vec![sequence(vec![action(2)])]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1420,7 +1423,7 @@ mod tests {
 
     #[test]
     fn abort_does_not_tell_an_unstarted_leaf_to_clean_up() {
-        let tree = tree(sequence(vec![action(0), action(2)]));
+        let tree = tree(&sequence(vec![action(0), action(2)]));
         let mut cursor = TreeCursor::new();
         let mut dispatch = Scripted::new();
         let mut board = board();
@@ -1436,15 +1439,15 @@ mod tests {
     #[test]
     fn empty_composites_are_rejected() {
         assert_eq!(
-            BehaviorTree::try_from_spec(sequence(vec![])),
+            BehaviorTree::try_from_spec(&sequence(vec![])),
             Err(TreeError::EmptyComposite)
         );
         assert_eq!(
-            BehaviorTree::try_from_spec(selector(vec![])),
+            BehaviorTree::try_from_spec(&selector(vec![])),
             Err(TreeError::EmptyComposite)
         );
         assert_eq!(
-            BehaviorTree::try_from_spec(parallel(ParallelPolicy::RequireAll, vec![])),
+            BehaviorTree::try_from_spec(&parallel(ParallelPolicy::RequireAll, vec![])),
             Err(TreeError::EmptyComposite)
         );
     }
@@ -1456,7 +1459,7 @@ mod tests {
             spec = invert(spec);
         }
         assert!(matches!(
-            BehaviorTree::try_from_spec(spec),
+            BehaviorTree::try_from_spec(&spec),
             Err(TreeError::TooDeep { max: _ })
         ));
     }
@@ -1465,7 +1468,7 @@ mod tests {
     fn too_many_children_are_rejected_rather_than_truncated() {
         let children = vec![action(0); BehaviorTree::MAX_CHILDREN + 1];
         assert!(matches!(
-            BehaviorTree::try_from_spec(sequence(children)),
+            BehaviorTree::try_from_spec(&sequence(children)),
             Err(TreeError::TooManyChildren { max: _ })
         ));
     }
@@ -1474,13 +1477,13 @@ mod tests {
     fn exactly_the_maximum_children_is_accepted() {
         let children = vec![action(0); BehaviorTree::MAX_CHILDREN];
         assert!(
-            BehaviorTree::try_from_spec(parallel(ParallelPolicy::RequireAll, children)).is_ok()
+            BehaviorTree::try_from_spec(&parallel(ParallelPolicy::RequireAll, children)).is_ok()
         );
     }
 
     #[test]
     fn depth_and_leaf_listing_are_reported() {
-        let tree = tree(sequence(vec![
+        let tree = tree(&sequence(vec![
             action(0),
             selector(vec![condition(1), action(2)]),
         ]));
@@ -1491,7 +1494,7 @@ mod tests {
 
     #[test]
     fn declared_cost_counts_a_repeated_leaf_once() {
-        let tree = tree(sequence(vec![
+        let tree = tree(&sequence(vec![
             action(0),
             selector(vec![action(1), action(0)]),
         ]));
@@ -1525,8 +1528,8 @@ mod tests {
 
         // Identical structure is not the same as identical behaviour: the traces
         // have to agree too.
-        let from_ron = tree(authored);
-        let from_builder = tree(built);
+        let from_ron = tree(&authored);
+        let from_builder = tree(&built);
         let mut left = TreeCursor::new();
         let mut right = TreeCursor::new();
         // Separate dispatchers: `Scripted` counts its own runs, so sharing one
@@ -1557,7 +1560,7 @@ mod tests {
 
     #[test]
     fn evaluation_order_is_stable_across_ticks() {
-        let tree = tree(selector(vec![action(1), action(0)]));
+        let tree = tree(&selector(vec![action(1), action(0)]));
         let mut dispatch = Scripted::new();
         let mut board = board();
         let mut first = TreeCursor::new();
@@ -1585,7 +1588,7 @@ mod tests {
         let mut seed = 0x5EED_u32;
         for _ in 0..200 {
             let spec = random_spec(&mut seed, 0);
-            let Ok(tree) = BehaviorTree::try_from_spec(spec) else {
+            let Ok(tree) = BehaviorTree::try_from_spec(&spec) else {
                 continue;
             };
             let mut cursor = TreeCursor::new();

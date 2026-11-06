@@ -88,7 +88,7 @@ fn thousand_node_tree() -> BehaviorTree {
             sequence(steps)
         })
         .collect();
-    BehaviorTree::try_from_spec(selector(branches)).or_die()
+    BehaviorTree::try_from_spec(&selector(branches)).or_die()
 }
 
 #[test]

@@ -13,6 +13,7 @@ use bevy_flock::adapters::primary::components::LodTier;
 use bevy_flock::adapters::secondary::network::NpcNetState;
 use bevy_flock::behavior::blackboard::{BLACKBOARD_CAPACITY, Blackboard, BlackboardKey, Value};
 use bevy_flock::domain::ids::{NpcId, SimSeed};
+use bevy_flock::domain::num;
 use bevy_flock::domain::rng::RngStream;
 use bevy_flock::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use bevy_flock::domain::temperament::Weight;
@@ -87,7 +88,7 @@ proptest! {
         let mut grid = SpatialGrid::new(config).or_die();
         for (index, point) in points.iter().enumerate() {
             grid.insert(GridEntry {
-                id: NpcId::unique(index as u32),
+                id: NpcId::unique(num::usize_to_u32(index)),
                 position: *point,
                 velocity: Vec3::ZERO,
             });
@@ -101,7 +102,7 @@ proptest! {
             .enumerate()
             .filter_map(|(index, point)| {
                 let distance = point.distance(centre);
-                (distance <= radius).then_some((NpcId::unique(index as u32), distance))
+                (distance <= radius).then_some((NpcId::unique(num::usize_to_u32(index)), distance))
             })
             .collect();
         expected.sort_by_key(|(id, _)| *id);
@@ -152,7 +153,10 @@ proptest! {
     fn a_weight_is_always_in_range(value in -100.0_f32..100.0) {
         let weight = Weight::clamped(value);
         prop_assert!((0.0..=1.0).contains(&weight.get()));
-        prop_assert_eq!(Weight::clamped(weight.get()).get(), weight.get());
+        prop_assert_eq!(
+            Weight::clamped(weight.get()).get().to_bits(),
+            weight.get().to_bits()
+        );
     }
 
     /// Ticks advance monotonically and never wrap into the past.

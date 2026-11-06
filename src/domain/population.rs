@@ -3,6 +3,7 @@
 use core::fmt;
 use core::num::NonZeroU32;
 
+use crate::domain::num;
 use crate::error::{MAX_POPULATION, PopulationError};
 
 /// A validated population size.
@@ -61,7 +62,7 @@ impl PopulationSize {
     /// The count as a `u32`, which every population here fits inside.
     #[must_use]
     pub const fn as_u32(self) -> u32 {
-        self.0 as u32
+        num::usize_to_u32(self.0)
     }
 }
 

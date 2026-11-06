@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MemoryArchive, MemoryStore, SubjectId};
+use bevy_flock::domain::num;
 use bevy_flock::domain::saves::{
     LEGACY_VERSION, MAGIC, MemorySnapshot, Origin, SaveRecord, SavedSlot, SubjectEntry, SubjectKey,
     SubjectKind, SubjectRegistry,
@@ -95,7 +96,7 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
     out.extend_from_slice(&1_u16.to_le_bytes());
     out.extend_from_slice(&snapshot.half_life_ticks.to_le_bytes());
     out.extend_from_slice(&SUBJECTS.to_le_bytes());
-    out.extend_from_slice(&(snapshot.records.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(num::usize_to_u32(snapshot.records.len())).to_le_bytes());
     out.extend_from_slice(&0_u16.to_le_bytes());
     let header_crc = crc32(&out);
     out.extend_from_slice(&header_crc.to_le_bytes());
@@ -103,7 +104,7 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
     for record in &snapshot.records {
         out.extend_from_slice(&record.npc.to_bits().to_le_bytes());
         out.push(0);
-        out.extend_from_slice(&(record.slots.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(num::usize_to_u16(record.slots.len())).to_le_bytes());
         for (subject, slot) in &record.slots {
             out.extend_from_slice(&subject.get().to_le_bytes());
             out.extend_from_slice(&slot.familiarity.to_le_bytes());
@@ -124,7 +125,8 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
 /// The same CRC-32 the writer uses, so the benchmark measures the format rather than a stub.
 fn crc32(bytes: &[u8]) -> u32 {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(index as u32)));
+    let table =
+        TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(num::usize_to_u32(index))));
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in bytes {
         let index = usize::from(u8::try_from((crc ^ u32::from(*byte)) & 0xFF).unwrap_or(0));
@@ -146,6 +148,10 @@ const fn crc_entry(index: u32) -> u32 {
     value
 }
 
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "Criterion writes the report when the group drops; the group is the measurement"
+)]
 fn save_format(c: &mut Criterion) {
     let store = world();
     let snapshot = snapshot(&store);
@@ -165,10 +171,9 @@ fn save_format(c: &mut Criterion) {
         "50,000 NPCs x 2 relationships: v1 {} bytes, v2 {} bytes ({} more, {:+.2}%)",
         v1.len(),
         v2.len(),
-        v2.len() as i64 - v1.len() as i64,
-        (v2.len() as f64 / v1.len() as f64 - 1.0) * 100.0
+        num::usize_to_i64(v2.len()) - num::usize_to_i64(v1.len()),
+        (num::usize_to_f64(v2.len()) / num::usize_to_f64(v1.len()) - 1.0) * 100.0
     );
-
     let mut group = c.benchmark_group("save_encode");
     group.sample_size(20);
     group.bench_with_input(
@@ -186,7 +191,6 @@ fn save_format(c: &mut Criterion) {
         },
     );
     group.finish();
-
     let mut group = c.benchmark_group("save_decode");
     group.sample_size(20);
     group.bench_with_input(BenchmarkId::new("v1", NPCS), &v1, |bencher, bytes| {
@@ -196,7 +200,6 @@ fn save_format(c: &mut Criterion) {
         bencher.iter(|| black_box(MemorySnapshot::from_bytes(black_box(bytes)).or_die()));
     });
     group.finish();
-
     let mut group = c.benchmark_group("save_round_trip");
     group.sample_size(20);
     group.bench_function(BenchmarkId::new("v2", NPCS), |bencher| {

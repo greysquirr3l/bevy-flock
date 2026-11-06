@@ -22,6 +22,7 @@
 //! which is why the caller must not.
 
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use crate::domain::tick::Tick;
 
 /// A cell's coordinate. Not an index: the field owns the mapping, so the grid can be
@@ -276,7 +277,7 @@ impl AmbientField {
     }
 
     /// Move the field's south-west corner. Population is not resampled; the grid clips.
-    pub fn set_origin(&mut self, origin: [f32; 2]) {
+    pub const fn set_origin(&mut self, origin: [f32; 2]) {
         self.origin = origin;
     }
 
@@ -315,7 +316,7 @@ impl AmbientField {
 
     /// Bytes of cell storage, for a budget audit.
     #[must_use]
-    pub fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> usize {
         self.cells.len() * core::mem::size_of::<CellState>()
     }
 
@@ -338,7 +339,7 @@ impl AmbientField {
         if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
             return None;
         }
-        let (x, y) = (x as u32, y as u32);
+        let (x, y) = (num::f32_to_u32(x), num::f32_to_u32(y));
         (x < self.width && y < self.height).then_some(CellId::new(x, y))
     }
 
@@ -346,8 +347,8 @@ impl AmbientField {
     #[must_use]
     pub fn centre_of(&self, id: CellId) -> [f32; 2] {
         [
-            self.origin[0] + (id.x as f32 + 0.5) * self.spacing,
-            self.origin[1] + (id.y as f32 + 0.5) * self.spacing,
+            (num::u32_to_f32(id.x) + 0.5).mul_add(self.spacing, self.origin[0]),
+            (num::u32_to_f32(id.y) + 0.5).mul_add(self.spacing, self.origin[1]),
         ]
     }
 
@@ -364,7 +365,7 @@ impl AmbientField {
         dt: f32,
     ) -> AdvectReport {
         let mut report = AdvectReport::default();
-        let seconds = stride as f32 * dt;
+        let seconds = num::u32_to_f32(stride) * dt;
         if !seconds.is_finite() || seconds <= 0.0 {
             return report;
         }
@@ -393,7 +394,8 @@ impl AmbientField {
                     }
                     continue;
                 }
-                let departing = (f64::from(cell.population()) * f64::from(reach)).floor() as u32;
+                let departing =
+                    num::f64_to_u32((f64::from(cell.population()) * f64::from(reach)).floor());
                 if departing == 0 {
                     if let Some(cell) = self.cells.get_mut(index) {
                         cell.alarm = decay_alarm(cell.alarm, stride);
@@ -515,7 +517,7 @@ impl AmbientField {
     /// Pure in `(seed, cell, tick)` and ordinal: the same call twice returns the same
     /// people, and a save file needs to store nothing to reproduce them.
     #[must_use]
-    pub fn manifest(&self, id: CellId, count: u32, tick: Tick) -> ManifestIter {
+    pub const fn manifest(&self, id: CellId, count: u32, tick: Tick) -> ManifestIter {
         ManifestIter {
             seed: self.seed,
             cell: id,
@@ -525,7 +527,7 @@ impl AmbientField {
         }
     }
 
-    fn index(&self, id: CellId) -> Option<usize> {
+    const fn index(&self, id: CellId) -> Option<usize> {
         if id.x >= self.width || id.y >= self.height {
             return None;
         }
@@ -561,7 +563,7 @@ impl Iterator for ManifestIter {
             ^ mix(self.tick)
             ^ mix(u64::from(ordinal).wrapping_add(0x9E37_79B9_7F4A_7C15));
         let mixed = mix(mixed);
-        Some(NpcId::unique(mixed as u32))
+        Some(NpcId::unique(num::u64_to_low_u32(mixed)))
     }
 }
 
@@ -579,16 +581,20 @@ fn mean_velocity(
     let axis = |index: usize| -> i16 {
         let held = existing.get(index).copied().unwrap_or_default();
         let fresh = newcomer.get(index).copied().unwrap_or_default();
-        let weighted = f64::from(held) * holders as f64
-            + f64::from((fresh * 1000.0).round() as i32) * arrivals as f64;
-        (weighted / total as f64)
-            .round()
-            .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+        let weighted = f64::from(held).mul_add(
+            num::u64_to_f64(holders),
+            f64::from(num::f32_to_i32((fresh * 1000.0).round())) * num::u64_to_f64(arrivals),
+        );
+        num::f64_to_i16(
+            (weighted / num::u64_to_f64(total))
+                .round()
+                .clamp(f64::from(i16::MIN), f64::from(i16::MAX)),
+        )
     };
     [axis(0), axis(1)]
 }
 
-fn mix(mut x: u64) -> u64 {
+const fn mix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = x;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -638,7 +644,7 @@ fn split(count: u32, velocity: [f32; 2]) -> [u32; 4] {
     let mut remainders = [(0_f64, 0_usize); 4];
     for (slot, weight) in weights.iter().enumerate() {
         let exact = f64::from(count) * f64::from(*weight) / f64::from(total);
-        let whole = exact.floor() as u32;
+        let whole = num::f64_to_u32(exact.floor());
         if let Some(slot_out) = out.get_mut(slot) {
             *slot_out = whole;
         }
@@ -721,7 +727,7 @@ mod tests {
         let mut state = 0x1234_5678_u64;
         for stride in 0..10_000_u32 {
             state = mix(state);
-            let angle = (state % 6283) as f32 / 1000.0;
+            let angle = num::u64_to_f32(state % 6283) / 1000.0;
             let wind = [angle.cos() * 3.0, angle.sin() * 3.0];
             field.advect(&wind, 1, 1.0 / 60.0);
             if stride % 997 == 0 {

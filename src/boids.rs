@@ -76,7 +76,7 @@ impl NeedsDecay {
     ///
     /// Returns [`ConfigError::ZeroBudget`] for zero, which would leave needs frozen while the
     /// documentation promised otherwise.
-    pub fn try_new(every: u32) -> Result<Self, ConfigError> {
+    pub const fn try_new(every: u32) -> Result<Self, ConfigError> {
         if every == 0 {
             return Err(ConfigError::ZeroBudget {
                 field: "needs_decay",
@@ -174,7 +174,7 @@ impl BoidsConfig {
     /// The grid is where cell size and the cell budget live, so this is how a game picks the
     /// density its crowd is scanned at — see ADR 0031 for what the cell size costs and buys.
     #[must_use]
-    pub fn with_grid(mut self, grid: SpatialGridConfig) -> Self {
+    pub const fn with_grid(mut self, grid: SpatialGridConfig) -> Self {
         self.grid = grid;
         self
     }
@@ -201,14 +201,14 @@ impl BoidsConfig {
     /// `SteeringRoad::Threads` on a machine with cores to spare, `SteeringRoad::Scalar` for a
     /// replay somebody wants to step through one agent at a time.
     #[must_use]
-    pub fn with_road(mut self, road: SteeringRoad) -> Self {
+    pub const fn with_road(mut self, road: SteeringRoad) -> Self {
         self.road = road;
         self
     }
 
     /// Where a frame is steered.
     #[must_use]
-    pub fn road(&self) -> SteeringRoad {
+    pub const fn road(&self) -> SteeringRoad {
         self.road
     }
 
@@ -219,14 +219,14 @@ impl BoidsConfig {
     /// discovering is a crowd library that ships the bug. `None` restores pure boids steering
     /// for a game that solves separation itself.
     #[must_use]
-    pub fn with_avoidance(mut self, avoidance: Option<AvoidanceParams>) -> Self {
+    pub const fn with_avoidance(mut self, avoidance: Option<AvoidanceParams>) -> Self {
         self.avoidance = avoidance;
         self
     }
 
     /// The avoidance settings, if the pass runs.
     #[must_use]
-    pub fn avoidance(&self) -> Option<AvoidanceParams> {
+    pub const fn avoidance(&self) -> Option<AvoidanceParams> {
         self.avoidance
     }
 
@@ -239,14 +239,14 @@ impl BoidsConfig {
     /// The configured weights stay the baseline and the bias multiplies them, so a game tuning
     /// `separation` still gets what the number says, per agent.
     #[must_use]
-    pub fn with_temperament(mut self, temperament: Option<TemperamentDrive>) -> Self {
+    pub const fn with_temperament(mut self, temperament: Option<TemperamentDrive>) -> Self {
         self.temperament = temperament;
         self
     }
 
     /// The temperament drive, if personalities steer.
     #[must_use]
-    pub fn temperament(&self) -> Option<TemperamentDrive> {
+    pub const fn temperament(&self) -> Option<TemperamentDrive> {
         self.temperament
     }
 
@@ -256,14 +256,14 @@ impl BoidsConfig {
     /// Decay is on by default because a need that never moves cannot influence anything: the
     /// bias would be a constant, and every NPC would read as content.
     #[must_use]
-    pub fn with_needs_decay(mut self, needs: Option<NeedsDecay>) -> Self {
+    pub const fn with_needs_decay(mut self, needs: Option<NeedsDecay>) -> Self {
         self.needs = needs;
         self
     }
 
     /// The needs decay interval, if the plugin decays them.
     #[must_use]
-    pub fn needs_decay(&self) -> Option<NeedsDecay> {
+    pub const fn needs_decay(&self) -> Option<NeedsDecay> {
         self.needs
     }
 
@@ -331,7 +331,7 @@ type SteerQuery<'w, 's> = Query<
 impl FlockSpatialGrid {
     /// Wrap a grid.
     #[must_use]
-    pub fn new(grid: SpatialGrid) -> Self {
+    pub const fn new(grid: SpatialGrid) -> Self {
         Self(grid)
     }
 }
@@ -453,6 +453,10 @@ fn bias_of(
 /// Runs after integration, once per `interval` frames. `Needs::decayed` is linear in ticks, so a
 /// burst is the same arithmetic as a tick-by-tick pass; the counter is a `Local`, so the system
 /// allocates nothing and its state is part of the schedule rather than of the world.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn decay_needs(
     config: Res<BoidsConfig>,
     mut elapsed: Local<u32>,
@@ -481,6 +485,10 @@ pub fn decay_needs(
 /// This is the path ADR 0026 records. The model is unchanged — the same weights, the same
 /// priority truncation, the same arrival curve — but the loop is inverted, and the distance sort
 /// and the per-agent `Vec<Neighbour>` are gone.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn steer_flock(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
@@ -550,6 +558,10 @@ pub fn steer_flock(
 ///
 /// Not in the schedule: it materialises a sorted `Vec<Neighbour>` per agent, which is the cost
 /// [`steer_flock`] exists to remove.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn steer_flock_reference(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
@@ -604,6 +616,10 @@ pub fn steer_flock_reference(
 /// Reads [`NpcDesiredVelocity`]; writes [`NpcVelocity`] and `Transform`. The
 /// acceleration limit is what stops a crowd from snapping direction and reading
 /// as a particle system.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn integrate_flock(
     clock: Option<Res<SimClock>>,
     config: Res<BoidsConfig>,
@@ -627,6 +643,7 @@ mod tests {
     use super::*;
     use crate::adapters::primary::components::NpcBundle;
     use crate::domain::ids::NpcId;
+    use crate::domain::num;
     use crate::domain::temperament::Weight;
     use crate::testkit::OrDie;
 
@@ -823,7 +840,7 @@ mod tests {
         fn run() -> Vec<Vec3> {
             let mut app = app();
             for index in 0..25_u32 {
-                let angle = index as f32 * 0.25;
+                let angle = num::u32_to_f32(index) * 0.25;
                 let position = Vec3::new(libm::cosf(angle), 0.0, libm::sinf(angle)) * 3.0;
                 app.world_mut()
                     .spawn(NpcBundle::default_for(NpcId::unique(index)).with_position(position))
@@ -862,7 +879,9 @@ mod tests {
         for (index, x) in [0.0_f32, 2.0, 4.0].into_iter().enumerate() {
             let entity = app
                 .world_mut()
-                .spawn(NpcBundle::default_for(NpcId::unique(index as u32)))
+                .spawn(NpcBundle::default_for(NpcId::unique(num::usize_to_u32(
+                    index,
+                ))))
                 .id();
             app.world_mut()
                 .get_mut::<Transform>(entity)

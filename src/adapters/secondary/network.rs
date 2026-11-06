@@ -19,6 +19,7 @@
 
 use crate::adapters::primary::components::{LodTier, Npc, NpcMood};
 use crate::domain::ids::NpcId;
+use crate::domain::num;
 use bevy_ecs::prelude::*;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
@@ -55,11 +56,11 @@ impl NpcNetState {
         let quantise = |value: f32| -> i16 {
             let scaled = (value * POSITION_SCALE).round();
             let clamped = scaled.clamp(f32::from(i16::MIN), f32::from(i16::MAX));
-            clamped as i16
+            num::f32_to_i16(clamped)
         };
         let turn = yaw.rem_euclid(core::f32::consts::TAU) / core::f32::consts::TAU;
-        let yaw_byte = (turn * 255.0).round().clamp(0.0, 255.0) as u8;
-        let mood = (valence.clamp(-1.0, 1.0) * 127.0).round() as i8;
+        let yaw_byte = num::f32_to_u8((turn * 255.0).round().clamp(0.0, 255.0));
+        let mood = num::f32_to_i8((valence.clamp(-1.0, 1.0) * 127.0).round());
         Self {
             npc: npc.to_bits(),
             position: [
@@ -102,7 +103,7 @@ impl NpcNetState {
 
     /// The identity.
     #[must_use]
-    pub fn identity(&self) -> NpcId {
+    pub const fn identity(&self) -> NpcId {
         NpcId::from_bits(self.npc)
     }
 
@@ -114,7 +115,7 @@ impl NpcNetState {
         }
         out.push(self.yaw);
         out.push(self.tier);
-        out.push(self.mood as u8);
+        out.push(self.mood.cast_unsigned());
     }
 
     /// Read a state from the front of a buffer, returning how many bytes were used.
@@ -136,7 +137,7 @@ impl NpcNetState {
         }
         let yaw = take(1)?.first().copied()?;
         let tier = take(1)?.first().copied()?;
-        let mood = take(1)?.first().copied()? as i8;
+        let mood = take(1)?.first().copied()?.cast_signed();
         Some((
             Self {
                 npc,
@@ -201,19 +202,19 @@ impl ReplicationSet {
 
     /// Bytes the states will occupy on the wire.
     #[must_use]
-    pub fn wire_bytes(&self) -> usize {
+    pub const fn wire_bytes(&self) -> usize {
         self.states.len() * NpcNetState::BYTES
     }
 
     /// How many states are queued.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.states.len()
     }
 
     /// Whether nothing is queued.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 
@@ -225,6 +226,10 @@ impl ReplicationSet {
 }
 
 /// Collect the states a viewer needs, bounded and sorted.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn collect_interest(
     interest: Res<InterestSet>,
     mut out: ResMut<ReplicationSet>,

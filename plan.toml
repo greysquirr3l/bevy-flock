@@ -1207,3 +1207,27 @@ first `ci.yml` insertion was found rather than assumed.
 `CONTRIBUTING.md` gains the section that says all of this in three commands, because the useful
 version of a fallback gate is one a contributor can find.
 """
+
+[[completed]]
+slug = "lint-spine-enforced"
+title = "Make the lint spine true: deny the eight allowed lints and satisfy them by construction"
+phase = "Reach"
+delivered_in = "HEAD"
+evidence = """`Cargo.toml` denied eight lints on paper and allowed them in the same table, so the manifest read
+as strict while VS Code reported ninety findings across `src`, `tests`, `benches` and `examples`.
+They are denied now and the code satisfies them, which is a different kind of work from adding a
+rule: every cast moved to `src/domain/num.rs`, which converts at one boundary and says what each
+conversion does with the bits; float equality is compared as `to_bits()`, which is what a determinism
+test means; Bevy systems carry the only `#[expect(needless_pass_by_value)]`s, because `&Res<T>` is
+not a `SystemParam`; and the Criterion guard carries the third expectation, because the group's
+scope is the measurement.
+The interesting finding is `suboptimal_flops`. Fusing the kernels by hand is the lint's advice, and
+it is wrong here: `application::packed::tests::the_vectorised_kernel_agrees_with_the_scalar_one`
+failed on a one-ulp difference, because a fused multiply-add rounds once where the scalar reference
+rounds twice and the two roads are compared bit for bit. Fusion is a numerical decision rather than a
+tidy-up, so the lint is allowed with that reason and the kernels stay unfused; the measurement that
+would justify fusion is a benchmark, not a lint.
+`scripts/lint_audit.py` enforces the three expectation rules, and its self-test holds twenty-one
+fixtures including both halves of the Criterion rule. `docs/lint-policy.md` states the tolerated
+list, the migration of each lint that left it, and the one that came back.
+"""

@@ -196,7 +196,7 @@ pub fn solve_pair(
     let dx = other_position[0] - position[0];
     let dy = other_position[1] - position[1];
     let dz = other_position[2] - position[2];
-    let distance_squared = dx * dx + dy * dy + dz * dz;
+    let distance_squared = dz.mul_add(dz, dy.mul_add(dy, dx * dx));
     if distance_squared <= f32::EPSILON {
         // Exactly coincident: there is no direction to separate along. Any fixed axis would be
         // a hidden coupling between agents, so the pair is left to the separation force, which
@@ -206,7 +206,7 @@ pub fn solve_pair(
     let distance = libm::sqrtf(distance_squared);
     let floor = params.floor();
     // Only pairs that could be inside the floor within the horizon are worth the arithmetic.
-    if distance > floor + params.max_adjust * params.horizon {
+    if distance > params.max_adjust.mul_add(params.horizon, floor) {
         return false;
     }
     let inverse = 1.0 / distance;
@@ -215,9 +215,10 @@ pub fn solve_pair(
     let nz = dz * inverse;
 
     // Closing speed along the line between them: positive when the agent approaches.
-    let closing = (velocity[0] - other_velocity[0]) * nx
-        + (velocity[1] - other_velocity[1]) * ny
-        + (velocity[2] - other_velocity[2]) * nz;
+    let closing = (velocity[2] - other_velocity[2]).mul_add(
+        nz,
+        (velocity[1] - other_velocity[1]).mul_add(ny, (velocity[0] - other_velocity[0]) * nx),
+    );
 
     let gap = distance - floor;
     let need = if gap <= 0.0 {
@@ -252,9 +253,10 @@ pub fn solve_pair(
 
 /// Clamp a correction to the cap and apply it to a desired velocity.
 pub fn apply(params: &AvoidanceParams, desired: [f32; 3], correction: [f32; 3]) -> [f32; 3] {
-    let magnitude_squared = correction[0] * correction[0]
-        + correction[1] * correction[1]
-        + correction[2] * correction[2];
+    let magnitude_squared = correction[2].mul_add(
+        correction[2],
+        correction[1].mul_add(correction[1], correction[0] * correction[0]),
+    );
     if magnitude_squared <= f32::EPSILON {
         return desired;
     }
@@ -265,9 +267,9 @@ pub fn apply(params: &AvoidanceParams, desired: [f32; 3], correction: [f32; 3]) 
         1.0
     };
     [
-        desired[0] + correction[0] * scale,
-        desired[1] + correction[1] * scale,
-        desired[2] + correction[2] * scale,
+        correction[0].mul_add(scale, desired[0]),
+        correction[1].mul_add(scale, desired[1]),
+        correction[2].mul_add(scale, desired[2]),
     ]
 }
 
@@ -311,13 +313,15 @@ mod tests {
                 walk(a, velocity_a, priority_a),
                 &mut correction_b,
             );
-            if correction_a != [0.0; 3] && correction_b != [0.0; 3] {
+            if correction_a.map(f32::to_bits) != [0u32; 3]
+                && correction_b.map(f32::to_bits) != [0u32; 3]
+            {
                 corrected += 1;
             }
             let desired_a = apply(&params, velocity_a, correction_a);
             let desired_b = apply(&params, velocity_b, correction_b);
-            a[0] += desired_a[0] * step;
-            b[0] += desired_b[0] * step;
+            a[0] = desired_a[0].mul_add(step, a[0]);
+            b[0] = desired_b[0].mul_add(step, b[0]);
             let dx = a[0] - b[0];
             let dy = a[1] - b[1];
             let dz = a[2] - b[2];
@@ -356,7 +360,7 @@ mod tests {
             walk(b, [-1.0, 0.0, 0.0], 1.0),
             &mut second
         ));
-        assert_eq!(first, second);
+        assert_eq!(first.map(f32::to_bits), second.map(f32::to_bits));
         // Two metres a second of closing against a 0.25 m gap over a 0.8 s horizon: only the
         // excess over 0.3125 m/s has to go (1.6875 m/s), and an equal-priority pair splits it,
         // so each removes 0.84375 m/s. Removing the whole closing speed would stop a crowd dead
@@ -394,7 +398,7 @@ mod tests {
             walk([1.0, 0.0, 0.0], [2.0, 0.0, 0.0], 1.0),
             &mut correction
         ));
-        assert_eq!(correction, [0.0; 3]);
+        assert_eq!(correction.map(f32::to_bits), [0u32; 3]);
     }
 
     #[test]

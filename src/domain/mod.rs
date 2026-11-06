@@ -18,6 +18,7 @@ pub mod memory;
 pub mod nav;
 #[cfg(feature = "navmesh")]
 pub mod navmesh;
+pub mod num;
 pub mod obstacle_nav;
 pub mod population;
 pub mod rng;

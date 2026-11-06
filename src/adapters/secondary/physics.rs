@@ -140,6 +140,7 @@ pub fn export_velocities(mut bridge: ResMut<PhysicsBridge>, npcs: Query<(&Npc, &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::num;
     use crate::testkit::OrDie;
     use bevy_app::{App, Update};
     use bevy_transform::prelude::Transform;
@@ -200,7 +201,7 @@ mod tests {
         for index in 0..3_u32 {
             app.world_mut().spawn((
                 Npc(NpcId::unique(index)),
-                NpcVelocity(Vec3::new(index as f32, 0.0, 0.0)),
+                NpcVelocity(Vec3::new(num::u32_to_f32(index), 0.0, 0.0)),
                 Transform::default(),
             ));
         }
