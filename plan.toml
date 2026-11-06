@@ -1106,7 +1106,7 @@ The view set, the ppm-scale timing and the honest limits (no blend tree, no IK, 
 slug = "ashfall-demo-interactive"
 title = "Fly the playground in a terminal, and cost the rasteriser against wgpu"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "e0cb276"
 evidence = """`demo/src/bin/ashfall-play.rs` flies the same seeded city the PNGs show without a window, a GPU or a widget toolkit. `session.rs` is a pure core — camera, view, lens, draw budget — with eleven unit tests, so the interactive path is testable in CI; `input.rs` decodes keys with a 140 ms escape timeout and twelve tests; `terminal.rs` enters raw mode through `stty`, paints one cell per two pixels with `▀`, and restores on `Drop` and on `SIGINT`; `playback.rs` runs the same flight headlessly and writes a PNG per frame plus `playback.json`, which is what CI holds down.
 
 Making it steerable was a rendering decision, not a simulation one: `session::Budget` changes the shot rather than the world (420 bodies inside 240 m, ruins inside 300 m, triangles under 0.75 px dropped) and past 24 m a body is a two-triangle camera-facing billboard tinted with the asset's own material instead of an 11,000-triangle mesh. `impostor_distance` defaults to infinity, so the five shipped PNGs are byte-identical after the change — re-rendering them left `docs/demo/` untouched.
