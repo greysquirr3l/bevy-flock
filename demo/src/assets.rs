@@ -39,6 +39,13 @@ pub struct Model {
     pub concept: &'static str,
     /// One line on what it is for.
     pub purpose: &'static str,
+    /// What the model reads as when its texture is not sampled, sRGB.
+    ///
+    /// The renderer in `raster.rs` has no texture sampler, and these are texture-only Meshy
+    /// materials whose `baseColorFactor` is white — so without this, every model would render as
+    /// white plastic. The value is the model's dominant tone, chosen by eye from the concept and
+    /// recorded here rather than buried in the renderer, because it is a statement about the asset.
+    pub material: [f32; 3],
 }
 
 /// Every model the demo ships.
@@ -50,6 +57,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 1.80,
         concept: "concepts/gatewarden.png",
         purpose: "the city watch: plate over quilted coat, teal chevron tabard",
+        material: [0.40, 0.44, 0.48],
     },
     Model {
         slug: "aerie",
@@ -58,6 +66,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 1.80,
         concept: "concepts/aerie.png",
         purpose: "aerial-settlement trader: gliding membranes and a flight harness",
+        material: [0.48, 0.40, 0.27],
     },
     Model {
         slug: "scavenger",
@@ -66,6 +75,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 1.75,
         concept: "concepts/scavenger.png",
         purpose: "ruin scavenger: hooded, patched, satchel and dust mask",
+        material: [0.38, 0.33, 0.27],
     },
     Model {
         slug: "pylon",
@@ -74,6 +84,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 3.00,
         concept: "concepts/pylon.png",
         purpose: "wayfinding: stacked enamel plates on a cast-iron post",
+        material: [0.21, 0.31, 0.30],
     },
     Model {
         slug: "shelter-door",
@@ -82,6 +93,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 2.50,
         concept: "concepts/shelter-door.png",
         purpose: "a shelter door in a stone frame: wheel latch, hazard stripes",
+        material: [0.29, 0.19, 0.14],
     },
     Model {
         slug: "market-stall",
@@ -90,6 +102,7 @@ pub const MODELS: [Model; 6] = [
         height_m: 2.50,
         concept: "concepts/market-stall.png",
         purpose: "a collapsible stall: timber frame, striped awning, balance scale",
+        material: [0.43, 0.35, 0.28],
     },
 ];
 

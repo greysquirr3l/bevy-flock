@@ -17,10 +17,15 @@
 pub mod app;
 pub mod assets;
 pub mod city;
+pub mod gltf;
 pub mod json;
+pub mod jsonr;
 pub mod plan;
+pub mod raster;
+pub mod render3d;
 pub mod report;
 pub mod scene;
+pub mod skinned;
 
 use std::fmt;
 

@@ -1,6 +1,6 @@
 # Ashfall Verge — a `bevy-flock` playground
 
-A city, a crowd, and four artefacts that prove what happened. Ashfall Verge is a technical
+A city, a crowd, and nine artefacts that prove what happened. Ashfall Verge is a technical
 playground for this crate: it exists to answer "what does this library look like when it is a
 place?" without asking a reader to take a README's word for it.
 
@@ -39,6 +39,48 @@ demo that needs a GPU cannot run in CI, and a demo that cannot run in CI stops b
 `ashfall.scene.json` is the `build_render_plan` contract written down — a real consumer for real
 GLBs — and a game with a `bevy_render` front end can load it in an afternoon.
 
+## The 3D views
+
+The same scene also renders five images without a GPU, a window, or a renderer dependency: a
+software rasteriser in `src/raster.rs` (perspective, near-plane clipping, a depth buffer, a
+footprint-aware shaded ground, and a deflate/PNG writer), and a glTF geometry reader in
+`src/gltf.rs`.
+
+```text
+cargo run --release --bin ashfall-3d                          # five views into target/demo
+cargo run --release --bin ashfall-3d -- --view hero --supersample 1
+```
+
+| View | What it shows |
+| --- | --- |
+| `district` | the gate settlement from the air: 2,000 bodies, the street grid, the ruins beyond |
+| `street` | eye level in the crowd, 190 m of settlement ahead |
+| `procession` | eighteen animated walkers on one rig, each at a different phase of the same clip |
+| `hero` | one body at 5 m, framed from the crowd and lit from its sun side |
+| `skyline` | the whole verge from 200 m, with aerial perspective |
+
+![The procession](../docs/demo/ashfall-3d-procession.png)
+
+**The Meshy bodies are static.** They are generated meshes with no skeleton, so a crowd of them
+stands still; that is a property of the assets, not of the library. The walkers are a second kind of
+asset — a KayKit mannequin (CC0, `assets/anim/KAYKIT-LICENSE.txt`) with a 23-joint skeleton and
+eleven clips — and `src/skinned.rs` samples a clip, composes the joint matrices and skins the mesh
+on the CPU per instance:
+
+```rust
+let pose = rig.pose(rig.clips().get("Walking_B").unwrap(), phase);
+rig.skin(&pose, transform, |positions, normals| renderer.triangle(image, &face));
+```
+
+Fourteen to eighteen instances of one rig, each at a staggered phase, cost about 7,000 triangles
+each and read as a street rather than as a diorama. `tests` in `skinned.rs` hold the seams down: the
+rig loads with its clips, weights sum to one, a walk clip moves a knee through more than 15 cm while
+the bind pose is still, two evaluations of the same time are bit-identical, and the clip loops.
+
+The demo deliberately does *not* ship a blend tree, additive layers or IK. The library owns
+behaviour; the clip-to-vertices arithmetic is the smallest thing that makes the seam real, and
+anything more belongs to the game that embeds it.
+
 ## The city
 
 Six settlements on a jittered 34 m grid, joined by 9 m streets, inside 1800 m of ruins. Classes
@@ -64,6 +106,7 @@ a name or a likeness from it.
 | `pylon` | prop | 3.00 m | 6,131 | 270 KB | Wayfinding: one per gate, four at junctions |
 | `shelter-door` | prop | 2.50 m | 5,971 | 240 KB | Shelters, in the ruins between settlements |
 | `market-stall` | prop | 2.50 m | 7,180 | 340 KB | Stalls, in the market classes |
+| `kaykit-walker` | rig | 2.20 m | 6,916 | 674 KB | The animated crowd: 23 joints, 11 clips (CC0) |
 
 Three bodies carry five archetypes, and tint plus scale jitter does the rest — the variant budget
 argument from the crate documentation, made concrete rather than asserted.
@@ -125,12 +168,17 @@ demo/
   src/assets.rs     The model table, the body mapping, the GLB probe
   src/scene.rs      Engine-agnostic instances + crowd fingerprint
   src/plan.rs       The SVG plan
+  src/raster.rs     A software rasteriser + PNG writer (no GPU, no image crate)
+  src/gltf.rs       glTF geometry reader for the shipped GLBs
+  src/skinned.rs    Rigged meshes: clip sampling, joint matrices, CPU skinning
+  src/render3d.rs   The five views, the procession, the shot table
+  src/bin/ashfall-3d.rs  The 3D entry point
   src/report.rs     run.json
   src/json.rs       A 90-line writer (no serde: the demo writes four small documents)
   src/main.rs       Flags and artefacts
   tests/            assets.rs (the gate), playground.rs (determinism, walking, placement)
   tools/            shrink_glb.py
-  assets/           npcs/, props/, concepts/
+  assets/           npcs/, props/, concepts/, anim/
 ```
 
 The crate is not in the root workspace, for the same reason `compat/` is not: a demo should not be

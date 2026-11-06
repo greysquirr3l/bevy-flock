@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **A 3D playground with an animated crowd.** `demo/src/bin/ashfall-3d.rs` renders five views of the
+  same city with no GPU, window or renderer dependency: a software rasteriser (`raster.rs`, with
+  near-plane clipping, a depth buffer, footprint-aware procedural shading, supersampling and a
+  deflate/PNG writer) over glTF geometry (`gltf.rs`). Skeletons are handled too — `skinned.rs` reads
+  a rig, samples a clip, composes joint matrices and skins the mesh per instance — so `procession`
+  shows eighteen walkers on one CC0 KayKit mannequin at staggered phases rather than a row of
+  T-posed statues. The Meshy bodies stay static on purpose: generated meshes carry no skeleton, and
+  the demo is honest about which asset carries what.
 - **A playground that ships assets and evidence.** `demo/` is a separate package: a six-district
   city of 2096 ruined blocks, a crowd placed by district keyed on `NpcId`, and four artefacts per
   run (SVG plan, engine-agnostic scene, run report, asset manifest). Six models were generated with
