@@ -993,7 +993,7 @@ evidence     = "ADR 0047's index section plus src/domain/stimulus.rs: StimulusBu
 slug = "kernel-bounds-checks"
 title = "Remove the last two indexing expectations from the kernels"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "851a1ff"
 evidence = """Both expectations are gone: `scripts/lint_audit.py` reports 113 files scanned and zero overrides, and `cargo clippy --all-targets --all-features -- -D warnings` passes with no `indexing_slicing` exception anywhere.
 
 `src/application/packed.rs` converted 44 sites to `get`/`let-else` plus a literal-index `lane!(0..3)` macro for the four-lane tails, because a literal index into a `[f32; 4]` is exempt from the lint (the length is known) while a loop variable is not.
