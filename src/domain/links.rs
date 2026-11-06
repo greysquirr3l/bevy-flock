@@ -330,13 +330,21 @@ mod tests {
             table
                 .add(NavLink::new(cell(1, 1), cell(1, 1), 10, UNTAGGED))
                 .or_die_err(),
-            NavError::BadLink { .. }
+            NavError::BadLink {
+                from: _,
+                to: _,
+                reason: _
+            }
         ));
         assert!(matches!(
             table
                 .add(NavLink::new(cell(1, 1), cell(2, 1), 0, UNTAGGED))
                 .or_die_err(),
-            NavError::BadLink { .. }
+            NavError::BadLink {
+                from: _,
+                to: _,
+                reason: _
+            }
         ));
     }
 
@@ -347,7 +355,11 @@ mod tests {
         table.add(link).or_die();
         assert!(matches!(
             table.add(link).or_die_err(),
-            NavError::BadLink { .. }
+            NavError::BadLink {
+                from: _,
+                to: _,
+                reason: _
+            }
         ));
     }
 

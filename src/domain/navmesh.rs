@@ -1287,7 +1287,11 @@ mod tests {
         ];
         assert!(matches!(
             NavMesh::from_polygons(vertices, vec![NavPolygon::new(1, 3)]).or_die_err(),
-            NavMeshError::VertexOutOfRange { .. }
+            NavMeshError::VertexOutOfRange {
+                index: _,
+                vertex: _,
+                count: _
+            }
         ));
     }
 

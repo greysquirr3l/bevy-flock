@@ -9,7 +9,10 @@
 // A counting allocator is the only way to prove "allocates nothing" from outside the crate, and
 // `GlobalAlloc` is unsafe by definition. The unsafe code forwards to the system allocator; the
 // crate itself still denies unsafe.
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "a counting allocator is the only way to assert zero allocations per frame"
+)]
 
 use bevy_flock::testkit::OrDie;
 use std::alloc::{GlobalAlloc, Layout, System};

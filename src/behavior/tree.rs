@@ -707,7 +707,9 @@ impl Builder {
             _ => 0,
         };
         let ticks = match spec {
-            NodeSpec::Cooldown { ticks, .. } | NodeSpec::Timeout { ticks, .. } => *ticks,
+            NodeSpec::Cooldown { ticks, child: _ } | NodeSpec::Timeout { ticks, child: _ } => {
+                *ticks
+            }
             _ => 0,
         };
         let (children, limit) = Self::children_of(spec);
@@ -754,11 +756,14 @@ impl Builder {
         match spec {
             NodeSpec::Sequence(_) => NodeKind::Sequence,
             NodeSpec::Selector(_) => NodeKind::Selector,
-            NodeSpec::Parallel { policy, .. } => NodeKind::Parallel(*policy),
+            NodeSpec::Parallel {
+                policy,
+                children: _,
+            } => NodeKind::Parallel(*policy),
             NodeSpec::Inverter(_) => NodeKind::Inverter,
             NodeSpec::RepeatUntilFail(_) => NodeKind::RepeatUntilFail,
-            NodeSpec::Cooldown { .. } => NodeKind::Cooldown,
-            NodeSpec::Timeout { .. } => NodeKind::Timeout,
+            NodeSpec::Cooldown { ticks: _, child: _ } => NodeKind::Cooldown,
+            NodeSpec::Timeout { ticks: _, child: _ } => NodeKind::Timeout,
             NodeSpec::Action(_) => NodeKind::Action,
             NodeSpec::Condition(_) => NodeKind::Condition,
         }
@@ -769,11 +774,14 @@ impl Builder {
     fn children_of(spec: &NodeSpec) -> (Vec<&NodeSpec>, bool) {
         match spec {
             NodeSpec::Sequence(items) | NodeSpec::Selector(items) => (items.iter().collect(), true),
-            NodeSpec::Parallel { children, .. } => (children.iter().collect(), true),
+            NodeSpec::Parallel {
+                children,
+                policy: _,
+            } => (children.iter().collect(), true),
             NodeSpec::Inverter(child)
             | NodeSpec::RepeatUntilFail(child)
-            | NodeSpec::Cooldown { child, .. }
-            | NodeSpec::Timeout { child, .. } => (vec![child.as_ref()], true),
+            | NodeSpec::Cooldown { child, ticks: _ }
+            | NodeSpec::Timeout { child, ticks: _ } => (vec![child.as_ref()], true),
             NodeSpec::Action(_) | NodeSpec::Condition(_) => (Vec::new(), false),
         }
     }
@@ -1449,7 +1457,7 @@ mod tests {
         }
         assert!(matches!(
             BehaviorTree::try_from_spec(spec),
-            Err(TreeError::TooDeep { .. })
+            Err(TreeError::TooDeep { max: _ })
         ));
     }
 
@@ -1458,7 +1466,7 @@ mod tests {
         let children = vec![action(0); BehaviorTree::MAX_CHILDREN + 1];
         assert!(matches!(
             BehaviorTree::try_from_spec(sequence(children)),
-            Err(TreeError::TooManyChildren { .. })
+            Err(TreeError::TooManyChildren { max: _ })
         ));
     }
 
@@ -1541,7 +1549,7 @@ mod tests {
 
         let error = NodeSpec::from_ron("Selector([Action(0)").or_die_err();
         assert!(
-            matches!(error, TreeError::MalformedSource { .. }),
+            matches!(error, TreeError::MalformedSource { line: _, column: _ }),
             "{error:?}"
         );
         assert!(error.to_string().contains(':'), "{error}");

@@ -166,7 +166,11 @@ pub fn run_world_director(
             .saturating_add(commands.as_slice().len() as u64);
     }
     for command in commands.as_slice() {
-        if let DirectorCommand::Mood { value, .. } = command {
+        if let DirectorCommand::Mood {
+            value,
+            ttl_ticks: _,
+        } = command
+        {
             mood.0 = (*value).clamp(-1.0, 1.0);
         }
     }

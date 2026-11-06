@@ -124,11 +124,18 @@ impl DirectorCommand {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Mood { .. } => "mood",
-            Self::Alarm { .. } => "alarm",
-            Self::Calm { .. } => "calm",
-            Self::Spawn { .. } => "spawn",
-            Self::Quiesce { .. } => "quiesce",
+            Self::Mood {
+                value: _,
+                ttl_ticks: _,
+            } => "mood",
+            Self::Alarm {
+                at: _,
+                strength: _,
+                radius: _,
+            } => "alarm",
+            Self::Calm { at: _, radius: _ } => "calm",
+            Self::Spawn { count: _ } => "spawn",
+            Self::Quiesce { ttl_ticks: _ } => "quiesce",
         }
     }
 }
@@ -580,9 +587,12 @@ impl DirectorBoard {
             } => {
                 self.alarms.calm(position, radius, at);
             }
-            DirectorCommand::Mood { .. }
-            | DirectorCommand::Spawn { .. }
-            | DirectorCommand::Quiesce { .. } => {}
+            DirectorCommand::Mood {
+                value: _,
+                ttl_ticks: _,
+            }
+            | DirectorCommand::Spawn { count: _ }
+            | DirectorCommand::Quiesce { ttl_ticks: _ } => {}
         }
         self.applied = self.applied.saturating_add(1);
         if self.trace.len() >= TRACE_CAPACITY {
@@ -663,7 +673,7 @@ mod tests {
         assert!(
             out.as_slice()
                 .iter()
-                .any(|command| matches!(command, DirectorCommand::Quiesce { .. }))
+                .any(|command| matches!(command, DirectorCommand::Quiesce { ttl_ticks: _ }))
         );
         assert!(director.mood() < 0.0);
     }
@@ -713,7 +723,7 @@ mod tests {
         ];
         assert!(matches!(
             ScriptedDirector::new(beats).or_die_err(),
-            DirectorError::OutOfOrder { .. }
+            DirectorError::OutOfOrder { tick: _, after: _ }
         ));
     }
 

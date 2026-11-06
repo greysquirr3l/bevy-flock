@@ -153,7 +153,16 @@ fn a_placement_outside_the_volume_is_refused_before_it_spawns() {
     let outside = Placement::uniform_disc(Vec3::new(0.0, 0.0, 0.0), 5_000.0);
     let rejected = config.with_placement(outside);
     assert!(
-        matches!(rejected, Err(ConfigError::PlacementOutsideGrid { .. })),
+        matches!(
+            rejected,
+            Err(ConfigError::PlacementOutsideGrid {
+                field: _,
+                axis: _,
+                value: _,
+                min: _,
+                max: _
+            })
+        ),
         "a disc larger than the world must not reach the spawner"
     );
 }

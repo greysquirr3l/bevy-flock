@@ -31,17 +31,25 @@ missing_docs = "deny"
 Three lints are missing from that list on purpose: `raw_borrows_via_references`,
 `unnecessary_rest_pattern` and `rest_pattern_accessible_field` exist in 1.99 and not in the pinned
 1.97 toolchain, and naming a lint a compiler does not know turns every downstream build into an
-`unknown_lints` warning. The `lint-future` CI job probes for each one and enables the ones it finds.
+`unknown_lints` warning.
+
+The `lint-future` job closes that gap. It probes each of the three on a throwaway file with
+`+stable`, then runs `cargo +stable clippy --all-targets --all-features` denying the ones that exist
+— so the tree is already clean for them, and moving the pin is a version bump instead of a sweep. It
+denies *only* those three: a newer stable also carries newer nursery lints (11 warnings on 1.99
+today, tracked as `stable-lint-drift`), and a forward check that fails on tomorrow's diagnostics
+would be noise rather than a gate.
+
+Everything in the job is pinned with `+stable` or `rustup run stable`, deliberately.
+`rust-toolchain.toml` pins 1.97.1 and rustup honours that file over the installed default, so a bare
+`cargo clippy` in a job that installs stable would quietly run 1.97, find no new lints, and check
+nothing. The probe also fails loudly if the probe itself errors, because "the compile failed" and
+"the lint does not exist" are different answers and only one of them is good news.
 
 `-D warnings` promotes the `warn` groups, so `pedantic`, `nursery`, `cargo`, `perf` and `all` are
 errors in practice. The `deny` list is the part that matters most: `unwrap`, `expect`, `panic` and
 direct indexing are how a library that is supposed to survive a crowd of 100,000 turns a bad input
 into a crashed game.
-
-Two lints from the target profile do not exist in clippy 0.1.97 —
-`unnecessary_rest_pattern` and `rest_pattern_accessible_field` are 1.99 additions. The manifest
-cannot name a lint the running toolchain does not know, so the dedicated CI job turns them on when
-the nightly/stable in use supports them.
 
 ## How a test fails
 
@@ -63,13 +71,27 @@ value`. `OrDieErr` is the mirror for a constructor whose refusal is the assertio
 
 ## The exceptions
 
-**There are none.** Every file-level `#[allow]` and `#[expect]` in the tree has been removed, the
-steering kernels included.
+**Four**, and they are all the same lint: `unsafe_code`, in a file that installs a counting
+allocator to prove a frame allocates nothing. `GlobalAlloc` is unsafe by definition and there is no
+way to observe allocations from inside the crate under test, so the test has to own the allocator.
 
-The last two were `indexing_slicing` in `src/application/packed.rs` (44 index expressions) and in
-the wide kernel of `src/application/crowd.rs` (18). Both were defensible — every index was bounded
-by a length check earlier in the same function — but "defensible" is not the standard the manifest
-sets, so `kernel-bounds-checks` removed them instead of documenting them:
+| File | Why |
+| --- | --- |
+| `tests/crowd_no_alloc.rs` | asserts the crowd kernel allocates nothing per frame |
+| `tests/tree_no_alloc.rs` | asserts behaviour-tree evaluation allocates nothing |
+| `tests/band_continuity.rs` | asserts the band boundary gates allocate nothing over 10,000 ticks |
+| `examples/memory_probe.rs` | reports steady-state allocation for a developer running it |
+
+They use `#![expect(unsafe_code, reason = "…")]` rather than `#![allow]`, so the day the allocator
+goes away the build fails with "this lint expectation is unfulfilled" instead of carrying a
+permission nobody needs. The crate itself still denies `unsafe_code`: `scripts/lint_audit.py` sees
+these four by name and fails on a fifth.
+
+Everything else was removed rather than documented. The last two clippy expectations were
+`indexing_slicing` in `src/application/packed.rs` (44 index expressions) and in the wide kernel of
+`src/application/crowd.rs` (18). Both were defensible — every index was bounded by a length check
+earlier in the same function — but "defensible" is not the standard the manifest sets, so
+`kernel-bounds-checks` removed them:
 
 - Values that were `buffer[index]` became `buffer.get(index)`, with a `let … else` arm for the case
   that cannot happen. This is not extra work when the bound sits outside a loop — but the first
@@ -84,9 +106,9 @@ sets, so `kernel-bounds-checks` removed them instead of documenting them:
 - The wide kernel's neighbour scan reads a whole row per agent from one buffer instead of seven
   parallel component arrays, so a neighbour is one contiguous 28-byte load rather than seven.
 
-`scripts/lint_audit.py` still lists a `SANCTIONED` table, and it is empty. The table is the
-mechanism, not an artefact: adding an override means adding it there, with a reason and a
-`plan.toml` task that removes it.
+Two `#[allow(dead_code)]` attributes in `tests/save_compat.rs` went the same way: they guarded
+fixture constructors nothing called, so the fixtures were deleted. An allow that protects code
+nobody uses is a comment with a build cost.
 
 Two notes on what the audit does *not* cover, both deliberate:
 
@@ -94,42 +116,63 @@ Two notes on what the audit does *not* cover, both deliberate:
   not reach them, so `something().expect("fresh registry")` survives in three doc examples. They
   are what a game will write at start-up, and a doc example that threads a `Result` through
   `Ok::<(), _>(())` to demonstrate a registry teaches the wrong shape.
-- **`#[deny]` attributes.** A file that turns a lint *up* is not an override; the audit only looks
-  for `allow` and `expect`.
+- **Sibling crates.** `compat/` and `fuzz/` are their own packages with their own manifests, so they
+  do not inherit `[lints]`; the audit scans their sources for overrides and CI builds them, but the
+  spine itself stops at the crate boundary. Closing that is `sibling-crate-lint-spine` in
+  `plan.toml`.
 
-Everything else that a reasonable reader might expect to see is decided in the manifest rather than
-in a file, so it appears once and reads as policy:
+Everything else a reasonable reader might expect to see is decided in the manifest rather than in a
+file, so it appears once and reads as policy. `scripts/lint_audit.py` holds the same list as
+`TOLERATED` and fails if the manifest allows anything that is not in it, or stops allowing something
+that is:
 
 | Allowed | Why |
 | --- | --- |
-| `module_name_repetitions`, `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc` | naming and docs preferences the crate does not want to enforce mechanically |
-| `struct_excessive_bools`, `multiple_crate_versions` | Bevy's dependency graph is not ours to flatten |
-| `needless_pass_by_value` | Bevy system parameters (`Res`, `Query`, `Commands`) are taken by value by construction |
-| `cast_precision_loss`, `cast_possible_truncation`, `cast_sign_loss`, `cast_possible_wrap` | an `f32` simulation converts at audited boundaries; `cast_lossless` is *not* allowed, so every widening cast uses `From` |
-| `suboptimal_flops` | fusing into `mul_add` changes rounding, and the formulas are pinned by bit-exact tests |
+| `module_name_repetitions` | the domain vocabulary is the API; `NpcMemory` in `memory` reads better than `Memory` |
+| `must_use_candidate` | a getter that is obviously pure does not need an attribute to say so |
+| `missing_errors_doc` | every fallible constructor names its error type in `# Errors` prose |
+| `missing_panics_doc` | the crate denies `panic`, so the section would be empty in every signature |
+| `struct_excessive_bools` | `BoidsConfig` and friends are flags by design; splitting them hides the defaults |
+| `multiple_crate_versions` | Bevy's dependency graph is not ours to flatten |
+| `needless_pass_by_value` | Bevy hands systems their parameters by value; the signature is the framework's |
+| `cast_precision_loss` | an `f32` simulation converts at audited boundaries; `cast_lossless` is still denied, so widening uses `From` |
+| `cast_possible_truncation` | counts narrow to lane values at audited boundaries, bounded by `MAX_AGENTS` |
+| `cast_sign_loss` | cell offsets and lane counts are non-negative by construction |
+| `cast_possible_wrap` | index arithmetic stays inside `i32` by the same bound as truncation |
+| `suboptimal_flops` | fusing into `mul_add` changes rounding, and the formulas are pinned bit-exactly |
 | `float_cmp` | exact comparison is the substance of the determinism tests |
 | `significant_drop_tightening` | Criterion's `BenchmarkGroup` is a guard by design |
 | `missing_const_for_fn` | `const` is added where it enables a static, not for its own sake |
 
 ## Policing the exceptions
 
-`scripts/lint_audit.py` scans every crate in the workspace — `src`, `tests`, `benches`, `examples`,
-`compat`, `fuzz` — for `#[allow(clippy::…)]` and `#[expect(clippy::…)]`, including the ones wrapped
-in `cfg_attr`, and fails on any lint that is not in its `SANCTIONED` table. It fails in the other
-direction too: a sanctioned override that has disappeared is an entry to delete, so the table cannot
-rot into a set of exceptions nobody needs. Comments are blanked before scanning, because this
-crate's documentation talks about the overrides it forbids.
+`scripts/lint_audit.py` scans every Rust file in the tree — `src`, `tests`, `benches`, `examples`,
+`compat`, `fuzz` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint, clippy's or rustc's,
+including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
+half the crate's doc comments talk about the overrides they forbid. A hit that is not in the script's
+`SANCTIONED` table fails the build; so does a `SANCTIONED` entry that has disappeared, because an
+exception nobody needs is an exception nobody reads.
 
-It also reads `Cargo.toml` and fails if the policy there is not the policy this page describes: each
-of `unsafe_code`, `missing_docs`, `suspicious`, `unwrap_used`, `expect_used`, `panic`,
-`indexing_slicing` and `cast_ptr_alignment` must still be `deny`, and each of `all`, `pedantic`,
-`nursery`, `cargo` and `perf` must still be `warn`. A clean tree under a weakened manifest is not a
-passing audit.
+The `reason = "…"` argument is stripped as a unit before an attribute is split on commas, so a
+reason with a comma in it does not become a phantom lint name, and a name that is not an identifier
+is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported.
 
-`--self-test` checks the detector against fixtures, including the four that matter for the
-mechanism: a sanctioned override passes, the same override unlisted fails, a stale sanction fails,
-and a manifest that downgrades `panic` to `warn` fails. CI runs both.
+It also reads `Cargo.toml` and fails if the policy there is not the policy this page describes, in
+both directions:
+
+- **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
+  `unwrap_used`, `expect_used`, `panic`, `indexing_slicing` and `cast_ptr_alignment`; the `all`,
+  `pedantic`, `nursery`, `cargo` and `perf` groups must still be `warn` for `-D warnings` to do its
+  job. A clean tree under a weakened manifest is not a passing audit.
+- **Allowed stays allowed, and nothing else.** The set of `allow` entries in the manifest must equal
+  the `TOLERATED` table exactly, entry for entry, in both directions.
+
+`--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level
+`allow`, an item-level `expect`, a `cfg_attr`-wrapped `expect`, a bare rustc lint in each of `allow`
+and `expect`; then the sanction mechanism (a listed override passes, the same override unlisted
+fails, a stale entry fails); then the manifest (a downgraded deny, a deny replaced by an allow, an
+undocumented allow, a tolerated allow that vanished, an intact manifest). CI runs both.
 
 Adding an override therefore takes three steps, in this order: a reason in the script, a plan task
-that removes it, and a sentence here. None of the three is a file-level opt-out that a reviewer
-would have to notice in a diff.
+that removes it, and a sentence here. None of the three is a file-level opt-out a reviewer would have
+to notice in a diff.

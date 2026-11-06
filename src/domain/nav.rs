@@ -558,7 +558,7 @@ mod tests {
         let error = grid
             .add_obstacle(NavCell::new(4, 4), NavCell::new(2, 2))
             .or_die_err();
-        assert!(matches!(error, NavError::BadObstacle { .. }));
+        assert!(matches!(error, NavError::BadObstacle { min: _, max: _ }));
     }
 
     #[test]
@@ -615,7 +615,7 @@ mod tests {
         );
         assert!(matches!(
             NavBounds::new(Vec3::ZERO, 4, 4, 0.0).or_die_err(),
-            NavError::ZeroCellSize { .. }
+            NavError::ZeroCellSize { cell_size: _ }
         ));
     }
 

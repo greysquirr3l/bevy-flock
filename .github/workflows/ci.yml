@@ -22,41 +22,62 @@ jobs:
       - run: cargo fmt --all -- --check
 
   lint-future:
-    name: Lints added after 1.97
+    name: Lints added after the pin
     runs-on: ubuntu-latest
-    # The target profile denies two clippy lints that 1.97 does not have:
-    # `unnecessary_rest_pattern` and `rest_pattern_accessible_field` are 1.99 additions, and the
-    # manifest cannot name a lint the running toolchain does not know. This job turns them on when
-    # the toolchain has them and says so when it does not, so the day the pin moves the tree is
-    # already being held to them instead of discovering them in a release.
+    # Three lints exist in 1.99 and not in the pinned 1.97 toolchain: two clippy
+    # (`unnecessary_rest_pattern`, `rest_pattern_accessible_field`) and one rustc
+    # (`raw_borrows_via_references`). The manifest cannot name them — an unknown lint turns every
+    # downstream build into an `unknown_lints` warning — so this job probes for them on a throwaway
+    # file and enables the ones it finds.
+    #
+    # Everything here is pinned to `stable` with `+stable`/`rustup run stable`, because
+    # rust-toolchain.toml pins 1.97.1 and rustup honours that file over the installed default: a
+    # bare `cargo clippy` in this job would probe 1.97, find nothing, and check nothing.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Probe for the 1.99 lints
+      - name: Probe for the lints the pin cannot name
         run: |
-          # Three lints the pinned 1.97 toolchain cannot name, so they cannot live in Cargo.toml
-          # without turning every build into an `unknown_lints` warning. Probed one at a time: a
-          # toolchain may know some and not others.
+          set -u
+          # A directory, so the file's stem is `probe` and not `tmp.a1b2c3`: a dot in a file stem
+          # is a dot in a crate name, which rustc refuses.
+          work="$(mktemp -d)"
+          probe="$work/probe.rs"
+          printf 'fn main() {}\n' > "$probe"
           flags=""
-          for lint in clippy::unnecessary_rest_pattern clippy::rest_pattern_accessible_field \
-                      raw_borrows_via_references; do
-            if cargo clippy --quiet -- -W "$lint" 2>&1 | grep -q "unknown lint"; then
-              echo "$lint: not known to this toolchain"
-            else
-              echo "$lint: enabled"
-              flags="$flags -W $lint"
+          # $1 is the driver, $2 the lint. Unknown = the toolchain does not have it yet;
+          # any other error means the probe itself broke, which must not read as "supported".
+          check() {
+            local out status
+            out=$(rustup run stable "$1" "$probe" -W "$2" --emit=metadata -o "$work/probe.rmeta" 2>&1)
+            status=$?
+            if printf '%s' "$out" | grep -q 'unknown lint'; then
+              echo "$2: not known to $(rustup run stable rustc --version)"
+              return 0
             fi
-          done
+            if [ $status -ne 0 ] || printf '%s' "$out" | grep -q '^error'; then
+              echo "probe for $2 failed:" >&2
+              printf '%s\n' "$out" >&2
+              return 1
+            fi
+            echo "$2: enabled"
+            flags="$flags -D $2"
+          }
+          check clippy-driver clippy::unnecessary_rest_pattern || exit 1
+          check clippy-driver clippy::rest_pattern_accessible_field || exit 1
+          check rustc raw_borrows_via_references || exit 1
           if [ -z "$flags" ]; then
-            echo "no post-1.97 lint is available here; nothing to check"
+            echo "no post-pin lint is available on stable yet; nothing to check"
             exit 0
           fi
-          # shellcheck disable=SC2086 # the flags are a list built one lint at a time
-          cargo clippy --all-targets --all-features -- -D warnings $flags
-
+          # Only these three are denied here. The pinned job owns the rest of the spine: a newer
+          # stable has newer nursery lints, and failing on tomorrow's diagnostics under today's
+          # code would make this job noise instead of a forward check.
+          # shellcheck disable=SC2086 # flags is a list built one lint at a time
+          cargo +stable clippy --all-targets --all-features -- $flags
   scripts:
     name: Scripts
     runs-on: ubuntu-latest

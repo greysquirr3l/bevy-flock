@@ -838,7 +838,10 @@ mod tests {
             matrix
                 .set(FactionId::new(2), FactionId::new(0), Relation::Ally)
                 .or_die_err(),
-            GroupError::UnknownFaction { .. }
+            GroupError::UnknownFaction {
+                faction: _,
+                size: _
+            }
         ));
         assert_eq!(
             matrix.get(FactionId::new(9), FactionId::new(0)),
@@ -868,7 +871,7 @@ mod tests {
         let _ = store.create(npc(1), Formation::Ring).or_die();
         assert!(matches!(
             store.create(npc(1), Formation::Ring).or_die_err(),
-            GroupError::AlreadyGrouped { .. }
+            GroupError::AlreadyGrouped { npc: _ }
         ));
     }
 
@@ -902,11 +905,11 @@ mod tests {
         assert_eq!(store.get(crowd).map(|g| g.children().len()), Some(1));
         assert!(matches!(
             store.nest(other, squad).or_die_err(),
-            GroupError::NestingTooDeep { .. }
+            GroupError::NestingTooDeep { depth: _ }
         ));
         assert!(matches!(
             store.nest(squad, other).or_die_err(),
-            GroupError::AlreadyNested { .. }
+            GroupError::AlreadyNested { group: _ }
         ));
     }
 

@@ -750,7 +750,14 @@ mod tests {
             ],
         )
         .or_die_err();
-        assert!(matches!(error, DialogError::TooManyChoices { .. }));
+        assert!(matches!(
+            error,
+            DialogError::TooManyChoices {
+                node: _,
+                count: _,
+                limit: _
+            }
+        ));
     }
 
     #[cfg(feature = "serde")]
@@ -766,6 +773,12 @@ mod tests {
     #[test]
     fn a_malformed_file_reports_a_line() {
         let error = DialogGraph::from_ron("(root: 0, nodes: [ (id: 0,").or_die_err();
-        assert!(matches!(error, DialogError::Parse { .. }));
+        assert!(matches!(
+            error,
+            DialogError::Parse {
+                line: _,
+                message: _
+            }
+        ));
     }
 }

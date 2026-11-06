@@ -21,8 +21,8 @@ use std::path::PathBuf;
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MemoryArchive, MemoryStore, SubjectId};
 use bevy_flock::domain::saves::{
-    LEGACY_VERSION, LegacySubjectPolicy, MAGIC, MemorySnapshot, Origin, SaveRecord, SavedSlot,
-    SubjectEntry, SubjectKey, SubjectKind, SubjectRegistry,
+    LEGACY_VERSION, LegacySubjectPolicy, MAGIC, MemorySnapshot, Origin, SubjectEntry, SubjectKey,
+    SubjectKind, SubjectRegistry,
 };
 use bevy_flock::domain::tick::Tick;
 
@@ -420,27 +420,5 @@ fn the_manifest_names_what_the_corpus_covers() {
             "{name} is not described in the manifest"
         );
         assert!(fixture(name).exists(), "{name} is described but absent");
-    }
-}
-
-#[allow(dead_code)]
-fn unused_slot_fixture() -> SavedSlot {
-    // Keeps the type in scope for future fixtures that need a hand-built slot.
-    SavedSlot {
-        familiarity: 1,
-        valence: -1,
-        encounters: 1,
-        flags: 0,
-        first_age: 0,
-        last_age: 0,
-    }
-}
-
-#[allow(dead_code)]
-fn unused_record_fixture() -> SaveRecord {
-    SaveRecord {
-        npc: NpcId::unique(1),
-        origin: Origin::Store,
-        slots: smallvec::SmallVec::new(),
     }
 }

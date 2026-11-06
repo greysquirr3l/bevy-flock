@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn a_table_without_lines_in_a_category_is_rejected() {
         let error = BarkTable::new(vec![BarkLine::new(BarkCategory::Idle, "Hm.")]).or_die_err();
-        assert!(matches!(error, BarkError::EmptyCategory { .. }));
+        assert!(matches!(error, BarkError::EmptyCategory { category: _ }));
     }
 
     #[test]

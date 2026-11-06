@@ -1001,3 +1001,49 @@ evidence = """Both expectations are gone: `scripts/lint_audit.py` reports 113 fi
 The wide kernel of `src/application/crowd.rs` did not survive a mechanical conversion: `crowd_kernel/planar` +9.1% and `crowd_kernel/dense` +18.5% against a saved Criterion baseline, because seven `Option<&f32>` in a tuple pattern at the top of the neighbour loop each carry an exit branch. The measured fix is recorded in ADR 0049: `Soa` holds one 28-byte row per agent (position, velocity, identity) instead of seven parallel `Vec<f32>`s, and the scan slices the bucket's `begin..end` range once per cell, so the neighbour loop has no check in it at all. Final: `dense` 21.71 ms vs 21.51 ms baseline (+0.5%, inside the run-to-run spread), `volumetric` 1.787 ms vs 1.810 ms (-2.1%), `crowd_avoidance/steer_only/100000` 24.10 ms vs 25.35 ms (-4.7%), `steer_and_avoid/100000` 36.42 ms vs 38.36 ms (-5.1%), `steering_step/32_neighbours` 152.4 ns vs 153.3 ns. Numbers and the machine are in `docs/performance.md`.
 
 Parity holds: `application::crowd` (15 tests) and `application::packed` (9) pass, as does the full suite in both feature extremes; the SIMD row layout is covered by `a_parallel_frame_matches_the_scalar_one`."""
+
+[[phases.tasks]]
+slug = "sibling-crate-lint-spine"
+title = "Give the compat and fuzz crates the same lint spine"
+goal = "`compat/` and `fuzz/` are separate packages, so they do not inherit `[lints]` from the root manifest and CI never applies the spine to them: an `expect` in a fuzz target or a `panic!` in a compatibility harness would not be caught by anything. Copy the root `[lints]` tables into both manifests, fix what they find, and extend `scripts/lint_audit.py` to check every manifest it finds rather than only the root one."
+kind = "infrastructure"
+hints = [
+  "`cargo fuzz` builds with nightly and its own manifest; the deny list there is the same policy, not a stricter one — `unwrap` in a fuzz target's setup is not the same as `unwrap` on a hot path, so the honest answer may be an `expect` with a reason in `SANCTIONED` rather than a rewrite.",
+  "The audit currently reads `root / Cargo.toml` once; `manifest_levels` is already a pure function of text, so checking a list of manifests is a loop and a per-manifest label in the output.",
+  "`compat` exists to prove save files survive across versions; if the spine finds real code smells there it is a finding about the harness, not about the policy.",
+]
+test_hints = [
+  "`scripts/lint_audit.py` fails when `compat/Cargo.toml` drops a deny, and passes when all three manifests agree.",
+  "`cargo clippy --manifest-path compat/Cargo.toml --all-targets -- -D warnings` and the fuzz crate's `cargo check` are clean, or their exceptions are in `SANCTIONED` with reasons.",
+]
+must_haves = [
+  "Every manifest in the tree carries the same deny list, or says in `docs/lint-policy.md` why it does not.",
+  "`scripts/lint_audit.py` checks all of them, not just the root.",
+]
+evaluation_criteria = [
+  "The audit output names each manifest it verified.",
+  "CI's `scripts` job still passes, and the new checks have self-test cases.",
+]
+
+[[phases.tasks]]
+slug = "stable-lint-drift"
+title = "Fix what stable clippy reports before the pin moves"
+goal = "The tree passes `-D warnings` on the pinned 1.97.1 and not on stable 1.99: the forward job prints 11 warnings from lints that are new or newly sharper — `assert_is_empty` (6, of the `assert!(!x.is_empty())` shape), `tuple_array_conversions` (2, in `application::packed`), `manual_slice_fill`, `needless_borrows_for_generic_args` and `chunks_exact_to_as_chunks`. Fix them now, while they are warnings somebody can read, rather than in the commit that bumps `rust-toolchain.toml` and has to explain 11 unrelated failures."
+kind = "infrastructure"
+hints = [
+  "`assert_is_empty` suggests `assert_ne!(x, '')` for a string and `assert!(!v.is_empty())` is what it flags for a vector; read each site, because the honest rewrite differs between the two.",
+  "`tuple_array_conversions` in `application::packed` will interact with the lane unpacking; check the benchmark before and after, because the whole point of that kernel is that four lanes are one vector load.",
+  "The forward job (`lint-future`) prints these as warnings on purpose: it denies only the three lints the pin cannot name, so a newer nursery lint does not turn a stable release into a red build.",
+]
+test_hints = [
+  "`cargo +stable clippy --all-targets --all-features -- -D warnings` is clean, which is what the pinned job becomes when the pin moves.",
+  "The pinned job stays clean: `cargo clippy --all-targets --all-features -- -D warnings` on 1.97.1.",
+]
+must_haves = [
+  "Zero warnings under stable on every target, not just the library.",
+  "`docs/lint-policy.md` says which toolchain owns the denials, and the forward job says which lints it denies.",
+]
+evaluation_criteria = [
+  "The forward job can be tightened to `-D warnings` without touching code.",
+  "The benchmarks in `docs/performance.md` still reproduce.",
+]

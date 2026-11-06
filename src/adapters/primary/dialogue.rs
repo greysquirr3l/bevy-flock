@@ -158,7 +158,14 @@ pub fn produce_barks(
         }
         let avoid = state.0.last_line();
         // Split the borrow: the table is read while the stream advances.
-        let Barks { table, stream, .. } = &mut *barks;
+        let Barks {
+            table,
+            stream,
+            queue: _,
+            requests: _,
+            max_per_tick: _,
+            suppressed: _,
+        } = &mut *barks;
         let Some(line) = table.pick(request.category, avoid, stream) else {
             continue;
         };

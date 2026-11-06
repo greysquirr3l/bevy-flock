@@ -678,7 +678,9 @@ mod tests {
             rounds += 1;
             match solver.step(&grid, 16) {
                 SolveProgress::Complete => break,
-                SolveProgress::Running { .. } => assert!(rounds < 1_000, "solve never finished"),
+                SolveProgress::Running { expanded: _ } => {
+                    assert!(rounds < 1_000, "solve never finished");
+                }
             }
         }
         let staged = solver.into_field(&grid);

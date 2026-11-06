@@ -12,7 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   well as `src`. 474 `.expect(…)` and 34 `.unwrap_err()` in the test tree moved to
   `bevy_flock::testkit` (`OrDie`, `OrDieErr`, `GetOrDie`, `GetOrDieMut`), which reports a broken
   fixture as `unreachable!` with the caller's message and location. No `#[allow]` or `#[expect]`
-  remains anywhere in the tree, the steering kernels included. `application::packed` reads through
+  remains in tree except four `unsafe_code` expectations on counting allocators, the steering
+  kernels included. `application::packed` reads through
   `get` and unpacks its lanes with a literal-index macro; the wide kernel of `application::crowd`
   moved to one 28-byte row per agent and slices each bucket's range once, so the neighbour loop has
   no bounds check in it at all. That last part was not cosmetic: a per-neighbour `get` measured 19%
@@ -232,6 +233,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Crowd` users only: `push` and `desired` use `[f32; 3]`, and `configure` lost its `plane`
   argument.
 
+
+### Lint policy is now machine-checked in both directions
+
+`scripts/lint_audit.py` grew the two checks it was missing. It now sees `#[allow]`/`#[expect]` of
+**any** lint, not only `clippy::` ones — which immediately turned up four `unsafe_code` attributes
+and two `dead_code` ones the policy page had been describing as "none". The four are counting
+allocators in tests and an example (`GlobalAlloc` is unsafe by definition, and nothing else can
+observe an allocation from outside the crate); they are now `#![expect(…, reason = "…")]` so they
+fail when the allocator goes away, and they are named in the script. The two `dead_code` ones guarded
+fixture constructors nothing called, so the fixtures were deleted.
+
+It also reads `Cargo.toml` and fails unless every `deny` is still denied *and* the set of `allow`
+entries equals its `TOLERATED` table, so a lint cannot be quietly downgraded and a new allow cannot
+arrive undocumented.
+
+The `lint-future` job was checking nothing: `rust-toolchain.toml` makes rustup run 1.97.1 even in a
+job that installs stable, so every probe said "unknown" and the job exited green. It now probes and
+builds with `+stable` on a throwaway file, fails if the probe itself errors, and denies the three
+post-1.97 lints rather than every warning a newer stable has. Running it found 51 real
+`rest_pattern_accessible_field` sites (`Err(Variant { .. })` → `Err(Variant { field: _, … })`), all
+fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.toml`.
 
 ### Added
 

@@ -759,7 +759,7 @@ mod tests {
         ];
         assert!(matches!(
             UtilityTable::new(entries).or_die_err(),
-            UtilityError::DuplicateBehavior { .. }
+            UtilityError::DuplicateBehavior { id: _ }
         ));
     }
 
@@ -771,7 +771,7 @@ mod tests {
         }
         assert!(matches!(
             set.push(Consideration::keyed(KEY_GRUDGE)).or_die_err(),
-            UtilityError::TooManyConsiderations { .. }
+            UtilityError::TooManyConsiderations { limit: _ }
         ));
     }
 
