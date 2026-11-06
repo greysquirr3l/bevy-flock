@@ -96,21 +96,38 @@ which is why the benchmark keeps both cases.
   with no GPU, and on the sandbox that produced every artefact in `docs/demo/`.
 - **The budget is data.** `session::Budget` is a plain `Copy` struct, so a caller that wants a richer
   picture (a bigger terminal, a faster machine) changes four numbers rather than the renderer.
-- **The switch is hard, and the distance is eye to feet.** A body crossing the threshold in motion
-  pops between an 11,000-triangle mesh and two triangles: there is no cross-fade band. At the sizes
-  this front end targets a body is three or four pixels tall and both are a smudge, so a fade would
-  buy nothing; on a 300-cell terminal it would be visible, and the answer there is a fade band rather
-  than a lower threshold. The distance is measured from the camera to the body's feet, not to its
-  silhouette, so a tall body crosses a fraction late — under a pixel at 24 m. Three tests pin the
-  behaviour instead of leaving it to inspection: the switch is monotone in the threshold and exact at
-  2 triangles per billboard, the quad's projection matches the camera's own matrix to within 2.5 px
-  with a 0.26 width-to-height ratio, and every shipped view still carries an infinite threshold so the
-  committed PNGs stay full detail.
+- **The switch is a band, and it fades by coverage.** `Shot::impostor_band` widens the switch into a
+  window: a body between `impostor_distance - impostor_band` and `impostor_distance` is drawn as both,
+  the quad claiming an increasing share of the pixels while the mesh gives its own share up. The fade
+  is an 8 by 8 ordered dither resolved per pixel (`Renderer::triangle_coverage`), not a blend, and a
+  defect rather than a taste decided that: the first implementation composited a faded mesh, which
+  turns the depth write off, and a body then stops occluding *itself* — a hidden facet overpainted a
+  visible one and faded bodies went blotchy. Coverage keeps every fragment opaque, so a fading body
+  still writes depth, still hides its own back faces, and every pixel of the dissolve belongs to
+  exactly one representation. The price is a hole or two at the silhouette, where the mesh has given a
+  pixel up before the quad has taken it, and that is why the five committed views leave the band at
+  zero while the steered front end sets it: at 112 cells a body is three or four pixels and the
+  dissolve is invisible; on a 300-cell terminal it is the difference between a pop and a fade. The band
+  costs one comparison per pixel and a second draw for the bodies inside it, and the interactive frame
+  measures the same either way — 19.39 ms with the band against 19.63 ms without, which is this
+  machine's noise floor (see `docs/performance.md`). The distance is eye to feet, not to silhouette, so
+  a tall body crosses a fraction late — under a pixel at 24 m.
+- **Five tests pin the switch instead of leaving it to inspection.** The hard switch is monotone in the
+  threshold and exact at two triangles per billboard; the quad's projection matches the camera's own
+  matrix to within 2.5 px at a 0.26 width-to-height ratio; a band of zero is byte-for-byte the hard
+  switch; a body inside the band costs its mesh plus two triangles, and a wider band adds two per body
+  it reaches; and half way through the band about half of the quad's pixels have changed hands, which a
+  switch cannot produce at either end. Every shipped view still carries an infinite threshold and a
+  zero band, so the committed PNGs stay full detail.
 - **`impostor_distance` defaults to infinity.** The shipped PNGs are made at full detail and stay
   byte-identical; the LOD exists for the steered view. A renderer that turned it on by default would
   have silently changed five committed images.
 - **A windowed front end remains unwritten.** Archie would give game controller support, a resizable
   window and a real `wgpu` surface; the work it needs from this side is done and tested, and the
   binding is one file when a machine with a display is available.
+- **The billboard pass has a written-down next step.** Flat-shaded cards, one fused pass per cell
+  bucket, cards aligned to the mesh's measured bounds and a sub-pixel cull on the card are each
+  recorded in `docs/demo/billboard-optimisations.md` with the measurement that would settle them. None
+  is implemented, and none is claimed as a win.
 - **The comparison is CPU-only by construction.** Any claim about end-to-end frame times on a GPU
   needs a GPU, and this ADR claims none.

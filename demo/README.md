@@ -110,7 +110,9 @@ square pixels. It is not a screenshot: it is the same rasteriser, called every f
 ![The street view in a terminal](../docs/demo/ashfall-play.png)
 
 *The street view, 120 × 88 pixels, captured from a real pty and enlarged four times without smoothing.
-The figures near the camera are meshes; the ones further off are the two-triangle impostors.*
+The figures near the camera are meshes; the ones further off are the two-triangle impostors.
+Between sixteen and twenty-four metres a body is both, cross-faded by coverage so it dissolves
+rather than pops.*
 
 Two things make it fast enough to steer. The *budget* in `session::Budget` changes the shot rather
 than the world — 420 bodies, 240 m of crowd, a 0.75-pixel triangle cull — and everything past 24 m is
@@ -133,6 +135,24 @@ the environment — `winit` needs a display server and this machine has none, no
 `libxkbcommon`. What a windowed front end needs from this side exists and is tested: `Session` (camera,
 view, lens, budget), `Session::advance(&CameraInput, dt)`, `input::Command` and `session::Budget`.
 See [ADR 0050](../docs/adr/0050-interactive-playground.md).
+
+### The cross-fade band
+
+`Shot::impostor_band` turns the level-of-detail switch into a window: a body inside
+`impostor_distance - impostor_band .. impostor_distance` is drawn as its mesh *and* its billboard, the
+quad claiming an increasing share of the pixels while the mesh gives its own up. The fade is a per-pixel
+ordered dither, not a blend — a blended fragment cannot write depth, and a body that cannot write depth
+stops occluding itself, which drew blotches where a hidden facet overpainted a visible one. Coverage
+keeps every fragment opaque, so the body still hides its own back faces.
+
+The shipped views leave the band at zero: at their sizes a dissolve is invisible and the committed
+PNGs are full detail. `--play` and the interactive loop set it, because a 300-cell terminal is where a
+pop is actually visible. It costs one comparison per pixel and a second draw for the bodies inside the
+window, and the interactive frame measures the same either way — 19.39 ms with the band, 19.63 ms
+without, both inside the noise of this machine.
+
+Where the billboard pass can still go faster, and how to settle each claim, is
+[`../docs/demo/billboard-optimisations.md`](../docs/demo/billboard-optimisations.md).
 
 ## Costing the two pipelines
 

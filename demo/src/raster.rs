@@ -158,6 +158,40 @@ impl Image {
         }
     }
 
+    /// Whether a pixel is drawn at this coverage, by an 8 by 8 ordered dither.
+    ///
+    /// A cross-fade in a rasteriser with a depth buffer has three options: blend, which forces the
+    /// depth write off and leaves a body unable to occlude *itself* (the first attempt of this fade
+    /// drew dark blotches where a hidden facet overpainted a visible one); drop whole triangles,
+    /// which speckles the silhouette; or fade by coverage at the pixel. Coverage is the only one that
+    /// keeps every fragment opaque, so a faded body still writes depth and still hides its own back
+    /// faces.
+    ///
+    /// The pattern is fixed in screen space, so it crawls slightly as a body moves. At a terminal's
+    /// three pixels a body that is unnoticeable, and the shipped views render at twice size and
+    /// downsample, which averages the pattern into a true blend.
+    fn covers(x: usize, y: usize, coverage: f32) -> bool {
+        if coverage >= 1.0 {
+            return true;
+        }
+        if coverage <= 0.0 {
+            return false;
+        }
+        let threshold = BAYER_8
+            .get(y % 8)
+            .and_then(|row| row.get(x % 8))
+            .copied()
+            .unwrap_or(0);
+        (f32::from(threshold) + 0.5) / 64.0 < coverage
+    }
+
+    /// Write a shaded pixel at `coverage`: opaque where the dither allows it, untouched otherwise.
+    fn write(&mut self, x: usize, y: usize, depth: f32, colour: [f32; 3], coverage: f32) {
+        if Self::covers(x, y, coverage) {
+            self.plot(x, y, depth, encode(colour));
+        }
+    }
+
     /// Encode as a PNG.
     ///
     /// No `png` crate: the format is a signature, an `IHDR`, one `IDAT` of zlib-compressed scanlines
@@ -315,6 +349,18 @@ impl Bits {
         self.bytes
     }
 }
+
+/// An 8 by 8 ordered dither, 0..=63, used to fade a triangle by coverage.
+const BAYER_8: [[u8; 8]; 8] = [
+    [0, 32, 8, 40, 2, 34, 10, 42],
+    [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38],
+    [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41],
+    [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37],
+    [63, 31, 55, 23, 61, 29, 53, 21],
+];
 
 /// Length codes: (base length, extra bits) for codes 257..=285.
 const LENGTHS: [(u32, u32); 29] = [
@@ -688,6 +734,19 @@ impl Renderer {
 
     /// Rasterise one triangle, clipping it against the near plane first.
     pub fn triangle(&self, image: &mut Image, face: &Face) {
+        self.triangle_coverage(image, face, 1.0);
+    }
+
+    /// Rasterise one triangle, drawing only the pixels an ordered dither gives it.
+    ///
+    /// A coverage of one is exactly [`Self::triangle`], so a caller that never fades pays one
+    /// comparison. Anything less draws a stable subset of the triangle's pixels, all of them opaque
+    /// and all of them writing depth, which is how the level-of-detail cross-fade in `render3d` fades
+    /// one representation out and the other in without a blending pass in the pipeline.
+    pub fn triangle_coverage(&self, image: &mut Image, face: &Face, coverage: f32) {
+        if coverage <= 0.0 {
+            return;
+        }
         // Clip space, then clip against z >= 0, which is the near plane for a 0..1 depth range.
         let mut polygon: Vec<([f32; 4], Vertex)> = Vec::with_capacity(4);
         let positions: Vec<([f32; 4], Vertex)> = face
@@ -747,7 +806,7 @@ impl Renderer {
             ) else {
                 continue;
             };
-            self.raster(image, [a, b, c], face.albedo, face.style);
+            self.raster(image, [a, b, c], face.albedo, face.style, coverage);
         }
     }
 
@@ -757,6 +816,7 @@ impl Renderer {
         triangle: [([f32; 4], Vertex); 3],
         albedo: [f32; 3],
         style: Style,
+        coverage: f32,
     ) {
         let mut screen = [(0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32); 3]; // x, y, depth, 1/w
         for (index, (clip, _)) in triangle.iter().enumerate() {
@@ -858,7 +918,7 @@ impl Renderer {
                     shade[1] + (self.atmosphere.fog[1] - shade[1]) * fog,
                     shade[2] + (self.atmosphere.fog[2] - shade[2]) * fog,
                 ];
-                image.plot(px, py, depth, encode(colour));
+                image.write(px, py, depth, colour, coverage);
             }
         }
     }

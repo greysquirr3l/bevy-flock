@@ -559,6 +559,22 @@ fn software(criterion: &mut Criterion) {
             black_box((image.fingerprint(), stats.triangles));
         });
     });
+    // What the cross-fade costs: the same interactive frame with the band switched off, so the pair
+    // differ only in the bodies that are inside it.
+    let mut hard = terminal.clone();
+    hard.impostor_band = 0.0;
+    group.bench_function("interactive-band-off/112x72", |bencher| {
+        bencher.iter(|| {
+            let (image, stats) = render3d::render(
+                black_box(&fixture.scene),
+                black_box(&fixture.meshes),
+                black_box(&hard),
+                TERMINAL_WIDTH,
+                TERMINAL_HEIGHT,
+            );
+            black_box((image.fingerprint(), stats.triangles));
+        });
+    });
     group.finish();
 }
 

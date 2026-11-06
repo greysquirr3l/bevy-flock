@@ -22,7 +22,7 @@ pub const START_SPEED: f32 = 20.0;
 pub const LOOP_STEPS: usize = 24;
 
 /// How the interactive picture is drawn: fewer bodies, shorter distances, impostors past a few
-/// metres.
+/// metres, and a cross-fade across the distance where they take over.
 ///
 /// The shipped PNGs are read at leisure and made at full detail; a terminal picture is steered at
 /// twenty frames a second and is 120 pixels wide. Measured on the district view at 120 by 64 pixels,
@@ -40,6 +40,13 @@ pub struct Budget {
     pub min_area: f32,
     /// Beyond this distance a body is a billboard, metres.
     pub impostor_distance: f32,
+    /// How far below that the billboard fades in, metres.
+    ///
+    /// Eight metres at a twenty-four metre switch is a third of the switch: a body walks through the
+    /// band in well under a second at a stroll, which is the window a pop has to hide in. It costs the
+    /// mesh and the quad for every body inside the band, so it is a knob and not a constant, and the
+    /// five shipped views leave it at zero.
+    pub impostor_band: f32,
 }
 
 impl Default for Budget {
@@ -50,6 +57,7 @@ impl Default for Budget {
             block_distance: 300.0,
             min_area: 0.75,
             impostor_distance: 24.0,
+            impostor_band: 8.0,
         }
     }
 }
@@ -64,6 +72,7 @@ impl Budget {
             block_distance: self.block_distance,
             min_area: self.min_area,
             impostor_distance: self.impostor_distance,
+            impostor_band: self.impostor_band,
             ..shot.clone()
         }
     }

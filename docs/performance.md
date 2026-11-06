@@ -872,3 +872,22 @@ Measured in a real terminal (`script -qec` on a pty, 112 × 40 pixels), the inte
 loop never sleeps and the frame time is the whole cost including the terminal write. The narrower
 112 × 72-pixel picture in the table above is 19.0 ms, so a terminal roughly twice this size lands
 between the two.
+
+## The level-of-detail cross-fade (2026-11-06, ADR 0050)
+
+The pairs below are the same interactive frame, same scene, same camera, differing only in
+`Shot::impostor_band`: eight metres of coverage cross-fade against a hard switch. `cargo bench --bench
+render_pipeline -- "software/interactive"`, release, 2 s warm-up, 4 s measurement, on the machine that
+produced the rest of this page.
+
+| case | median |
+| --- | --- |
+| `software/interactive/112x72` (band 8 m) | 19.39 ms |
+| `software/interactive-band-off/112x72` (hard switch) | 19.63 ms |
+
+The difference is inside the run-to-run noise, and that is the finding: at 112 cells only a handful of
+bodies sit inside the sixteen-to-twenty-four-metre window, each drawn as a mesh *and* a card, and the
+cost is lost in the frame. The band is free where it is invisible. It is not free on a 300-cell
+terminal, where a body is eight to ten pixels and a body inside the band costs its mesh plus two
+triangles — the accounting test in `render3d` pins exactly that, and there is no measurement above
+because no display of that size exists here.

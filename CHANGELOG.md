@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **The level-of-detail switch cross-fades instead of popping.** `Shot::impostor_band` widens the
+  switch into a window: a body between `impostor_distance - impostor_band` and `impostor_distance` is
+  drawn as both, the billboard claiming an increasing share of the pixels while the mesh gives its own
+  up. The fade is a per-pixel ordered dither (`Renderer::triangle_coverage`), not a blend, because a
+  blended fragment cannot write depth and a body that cannot write depth stops occluding itself — the
+  blending implementation drew blotches where a hidden facet overpainted a visible one. The shipped
+  views keep the band at zero, so the committed PNGs are unchanged. The interactive frame measures
+  19.39 ms with the band against 19.63 ms without, which is this machine's noise floor. Where the
+  billboard pass can still go faster — flat-shaded cards, fused card passes, cards aligned to the
+  mesh's own bounds — is written up in `docs/demo/billboard-optimisations.md`.
 - **The playground is explorable, in a terminal.** `demo/src/bin/ashfall-play.rs` flies the same
   scene the PNGs show — `wasd`, arrows, `1`-`5` to jump views, `p` for the scripted flight — with no
   window, GPU or widget toolkit: the software rasteriser draws into a fixed-size image and the

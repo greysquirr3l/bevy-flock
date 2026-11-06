@@ -91,6 +91,15 @@ pub struct Shot {
     /// pixels in a terminal, where the mesh beside it costs eleven thousand triangles for the same
     /// handful.
     pub impostor_distance: f32,
+    /// Width of the cross-fade below [`Self::impostor_distance`], metres; zero for a hard switch.
+    ///
+    /// A body between `impostor_distance - impostor_band` and `impostor_distance` is drawn twice: its
+    /// mesh, and its billboard composited on top with alpha ramping from nothing to opaque. Without
+    /// the band a body walking across the threshold pops between eleven thousand triangles and two,
+    /// which is invisible at a terminal's three pixels a body and obvious on a larger one. A band is
+    /// not free — the bodies inside it pay for both representations — so it is zero on the five
+    /// shipped views and eight metres wide on the interactive budget.
+    pub impostor_band: f32,
 }
 
 const fn camera(eye: Vec3, target: Vec3, fov_y: f32) -> Camera {
@@ -259,6 +268,7 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             block_distance: 380.0,
             min_area: 0.0,
             impostor_distance: f32::INFINITY,
+            impostor_band: 0.0,
             ground_reach: 700.0,
             ground_tile: 40.0,
         },
@@ -273,6 +283,7 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             block_distance: 220.0,
             min_area: 0.0,
             impostor_distance: f32::INFINITY,
+            impostor_band: 0.0,
             ground_reach: 420.0,
             ground_tile: 24.0,
         },
@@ -295,6 +306,7 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             block_distance: 150.0,
             min_area: 0.0,
             impostor_distance: f32::INFINITY,
+            impostor_band: 0.0,
             ground_reach: 220.0,
             ground_tile: 12.0,
         },
@@ -309,28 +321,35 @@ pub fn shots(city: &CityLayout, bodies: &[Body]) -> Vec<Shot> {
             block_distance: 80.0,
             min_area: 0.0,
             impostor_distance: f32::INFINITY,
+            impostor_band: 0.0,
             ground_reach: 120.0,
             ground_tile: 12.0,
         },
-        Shot {
-            name: "skyline",
-            note: "the whole verge from 620 m: six settlements and the ruins between them",
-            camera: camera(
-                centre + Vec3::new(-330.0, 208.0, 452.0),
-                centre + Vec3::new(-70.0, 6.0, -170.0),
-                0.72,
-            ),
-            atmosphere: skyline,
-            body_margin: 0.0,
-            draw_distance: 1400.0,
-            max_bodies: 900,
-            block_distance: 2100.0,
-            min_area: 0.0,
-            impostor_distance: f32::INFINITY,
-            ground_reach: 2200.0,
-            ground_tile: 110.0,
-        },
+        skyline_shot(centre, skyline),
     ]
+}
+
+/// The far view: the whole verge, from high enough that six settlements fit in the frame.
+fn skyline_shot(centre: Vec3, atmosphere: Atmosphere) -> Shot {
+    Shot {
+        name: "skyline",
+        note: "the whole verge from 620 m: six settlements and the ruins between them",
+        camera: camera(
+            centre + Vec3::new(-330.0, 208.0, 452.0),
+            centre + Vec3::new(-70.0, 6.0, -170.0),
+            0.72,
+        ),
+        atmosphere,
+        body_margin: 0.0,
+        draw_distance: 1400.0,
+        max_bodies: 900,
+        block_distance: 2100.0,
+        min_area: 0.0,
+        impostor_distance: f32::INFINITY,
+        impostor_band: 0.0,
+        ground_reach: 2200.0,
+        ground_tile: 110.0,
+    }
 }
 
 /// A place to stand in the street: 34 m south of the settlement centre, nudged along the street
@@ -521,13 +540,27 @@ fn draw_statics(
         .filter(|(_, distance)| *distance <= shot.draw_distance)
         .collect();
     nearby.sort_by(|left, right| left.1.total_cmp(&right.1));
+    let band = shot.impostor_band.max(0.0);
+    let fade_start = shot.impostor_distance - band;
     for (instance, distance) in nearby.into_iter().take(shot.max_bodies) {
         stats.bodies += 1;
         let mesh = meshes.get(instance.model);
+        let base = mesh.map_or([0.5, 0.5, 0.5], |mesh| mesh.base_colour);
         if distance > shot.impostor_distance {
-            let base = mesh.map_or([0.5, 0.5, 0.5], |mesh| mesh.base_colour);
-            push_billboard(renderer, image, &shot.camera, instance, base);
+            push_billboard(renderer, image, &shot.camera, instance, base, 1.0);
             stats.triangles += 2;
+        } else if band > 0.0 && distance > fade_start {
+            // Cross-fade by coverage: the quad claims an increasing share of the pixels first, then
+            // the mesh gives its own up, so a body dissolves instead of popping. Both passes stay
+            // opaque, so they run in the ordinary near-to-far order with no blending and no depth
+            // tricks, and every pixel belongs to exactly one of the two.
+            let coverage = ((distance - fade_start) / band).clamp(0.0, 1.0);
+            push_billboard(renderer, image, &shot.camera, instance, base, coverage);
+            stats.triangles += 2;
+            if let Some(mesh) = mesh {
+                stats.triangles +=
+                    push_instance_coverage(renderer, image, mesh, instance, 1.0 - coverage);
+            }
         } else if let Some(mesh) = mesh {
             stats.triangles += push_instance(renderer, image, mesh, instance);
         }
@@ -547,6 +580,7 @@ fn push_billboard(
     camera: &Camera,
     instance: &Instance,
     base: [f32; 3],
+    coverage: f32,
 ) {
     let forward = (camera.target - camera.eye).normalize_or_zero();
     let right = forward.cross(Vec3::Y).normalize_or_zero();
@@ -554,7 +588,11 @@ fn push_billboard(
     let height = 1.75 * instance.scale;
     // Shoulder width is about a quarter of a standing height.
     let half_width = height * 0.13;
-    let foot = instance.position;
+    // Five centimetres toward the eye. A body's mesh is a surface with volume and the quad stands in
+    // the middle of it, so without the nudge the quad loses the depth test against the body it is
+    // meant to cover and the fade is invisible; five centimetres is a fifth of a pixel of parallax at
+    // the twenty-four metres where the switch lives.
+    let foot = instance.position - forward * 0.05;
     let bottom_left = foot - right * half_width;
     let bottom_right = foot + right * half_width;
     let top_left = bottom_left + up * height;
@@ -573,13 +611,14 @@ fn push_billboard(
         [bottom_left, bottom_right, top_right],
         [bottom_left, top_right, top_left],
     ] {
-        renderer.triangle(
+        renderer.triangle_coverage(
             image,
             &Face {
                 vertices: triangle.map(vertex),
                 albedo: tint,
                 style: Style::Lit,
             },
+            coverage,
         );
     }
 }
@@ -745,6 +784,17 @@ fn push_instance(
     mesh: &Mesh,
     instance: &Instance,
 ) -> usize {
+    push_instance_coverage(renderer, image, mesh, instance, 1.0)
+}
+
+/// Push one instanced mesh at `coverage`, for the cross-fade; one is [`push_instance`].
+fn push_instance_coverage(
+    renderer: &Renderer,
+    image: &mut Image,
+    mesh: &Mesh,
+    instance: &Instance,
+    coverage: f32,
+) -> usize {
     let (sin, cos) = instance.yaw.sin_cos();
     let rotation = |vector: Vec3| -> Vec3 {
         Vec3::new(
@@ -779,13 +829,14 @@ fn push_instance(
         ) else {
             continue;
         };
-        renderer.triangle(
+        renderer.triangle_coverage(
             image,
             &Face {
                 vertices: [a, b, c],
                 albedo,
                 style: Style::Lit,
             },
+            coverage,
         );
         submitted += 1;
     }
@@ -1205,6 +1256,189 @@ mod tests {
     }
 
     #[test]
+    fn the_band_draws_a_body_twice_between_its_edges() {
+        let (_, scene, meshes, shot) = avenue(8, 6.0, 6.0);
+        let trace = |threshold: f32, band: f32| {
+            let mut shot = shot.clone();
+            shot.impostor_distance = threshold;
+            shot.impostor_band = band;
+            let (_, stats) = render(&scene, &meshes, &shot, 200, 140);
+            (stats.bodies, stats.triangles)
+        };
+        let (bodies, detailed) = trace(f32::INFINITY, 0.0);
+        assert_eq!(bodies, 8);
+        let (_, quads) = trace(0.0, 0.0);
+        assert_eq!(quads, 2 * bodies, "a billboard is not two triangles");
+        assert!(detailed > quads + 1000);
+
+        // The bodies sit at 6.24, 12.1, 18.1, 24.1 ... metres from the eye. A switch at 24 m with no
+        // band draws three meshes and five quads.
+        let (_, hard) = trace(24.0, 0.0);
+        // An eight-metre band puts the 18.1 m body inside it, so exactly one body pays for both
+        // representations and the frame grows by exactly one quad.
+        let (_, banded) = trace(24.0, 8.0);
+        assert_eq!(
+            banded,
+            hard + 2,
+            "one body in the band should add one quad: {banded} against {hard}"
+        );
+        // A band that reaches the nearer bodies adds a quad for each: at a 40 m switch with a 12 m
+        // band, the bodies at 30.1 and 36.0 m are inside it, and the ones past 40 m stay quads.
+        let (_, far_hard) = trace(40.0, 0.0);
+        let (_, far_banded) = trace(40.0, 12.0);
+        assert_eq!(far_banded, far_hard + 4);
+        // A band wider than the switch fades in every body the switch keeps: three meshes and eight
+        // quads, so the frame is the hard-switch frame plus a quad for each of the three.
+        let (bodies, degenerate) = trace(24.0, 400.0);
+        assert_eq!(bodies, 8, "a wide band lost a body");
+        assert_eq!(degenerate, hard + 6);
+    }
+
+    /// Pixels where two frames differ by more than a rounding step.
+    fn mask_between(left: &Image, right: &Image) -> Vec<bool> {
+        let mut mask = Vec::with_capacity((left.width * left.height) as usize);
+        for y in 0..left.height {
+            for x in 0..left.width {
+                mask.push(
+                    left.pixel(x, y)
+                        .iter()
+                        .zip(right.pixel(x, y).iter())
+                        .any(|(a, b)| a.abs_diff(*b) > 2),
+                );
+            }
+        }
+        mask
+    }
+
+    #[test]
+    fn the_band_is_a_ramp_and_not_a_step() {
+        // One body, a camera that walks away from it, and the two representations rendered on their
+        // own for comparison. What a coverage fade promises is structural, and that is what is
+        // checked: the band touches only the pixels its own body covers, every pixel on the quad's
+        // footprint is one representation or the other and never a mixture, and the share that has
+        // switched to the quad rises with distance.
+        let (_, scene, meshes, base) = avenue(1, 20.0, 1.0);
+        let render_from = |distance: f32, threshold: f32, band: f32| {
+            let mut shot = base.clone();
+            // The body is twenty metres down -Z from the avenue's eye; move the eye to the distance
+            // under test.
+            shot.camera.eye = base.camera.eye + Vec3::new(0.0, 0.0, distance - 20.0);
+            shot.impostor_distance = threshold;
+            shot.impostor_band = band;
+            let (image, stats) = render(&scene, &meshes, &shot, 160, 160);
+            (image, stats)
+        };
+        let (nothing, _) = {
+            let mut shot = base.clone();
+            shot.max_bodies = 0;
+            render(&scene, &meshes, &shot, 160, 160)
+        };
+        let same = |left: &Image, right: &Image, x: u32, y: u32| {
+            left.pixel(x, y)
+                .iter()
+                .zip(right.pixel(x, y).iter())
+                .all(|(a, b)| a.abs_diff(*b) <= 2)
+        };
+
+        let mut previous_fraction = 0.0_f32;
+        for distance in [16.05_f32, 18.0, 20.0, 22.0, 23.9] {
+            let (mesh_only, mesh_stats) = render_from(distance, f32::INFINITY, 0.0);
+            let (billboard_only, quad_stats) = render_from(distance, 0.0, 0.0);
+            let (faded, stats) = render_from(distance, 24.0, 8.0);
+            assert_eq!(stats.bodies, 1, "the body vanished at {distance} m");
+            // A fading body pays for both representations.
+            assert_eq!(stats.triangles, mesh_stats.triangles + 2);
+            assert!(quad_stats.triangles < mesh_stats.triangles);
+
+            let quad_pixels = mask_between(&billboard_only, &nothing);
+            let body_pixels = mask_between(&mesh_only, &nothing);
+            let mut switched = 0;
+            let mut blended = 0;
+            let mut holes = 0;
+            for y in 0..faded.height {
+                for x in 0..faded.width {
+                    let index = (y as usize) * (faded.width as usize) + (x as usize);
+                    let on_quad = quad_pixels.get(index).copied().unwrap_or(false);
+                    let on_body = body_pixels.get(index).copied().unwrap_or(false);
+                    // Nothing outside the body's own pixels may change.
+                    if !on_quad && !on_body {
+                        assert!(
+                            same(&faded, &mesh_only, x, y),
+                            "the fade changed a pixel at {x},{y} that no body covers"
+                        );
+                    }
+                    if !on_quad {
+                        continue;
+                    }
+                    if same(&faded, &billboard_only, x, y) {
+                        switched += 1;
+                    } else if same(&faded, &mesh_only, x, y) {
+                        // Still the mesh: the quad has not claimed this pixel yet.
+                    } else if same(&faded, &nothing, x, y) {
+                        // A hole: the mesh gave this pixel up before the quad took it. That is what a
+                        // coverage dissolve does at its edges, and it is why the shipped views leave
+                        // the band at zero.
+                        holes += 1;
+                    } else {
+                        blended += 1;
+                    }
+                }
+            }
+            assert_eq!(
+                blended, 0,
+                "{blended} pixels at {distance} m are neither representation, so something blended"
+            );
+            // At the inner edge the body is still its mesh; at the outer edge it is its quad. In
+            // between, the two representations are close enough in colour that "which of the two is
+            // this pixel" stops being decidable, so the ramp is only counted past 20 m, where they
+            // separate.
+            let coverage = ((distance - 16.0) / 8.0).clamp(0.0, 1.0);
+            let footprint = quad_pixels.iter().filter(|seen| **seen).count().max(1);
+            // The body is the mixture, and only a mixture: half way through the band about half the
+            // pixels have changed hands. A hard switch would read as none or all, which is what this
+            // rejects.
+            if (0.4..0.6).contains(&coverage) {
+                assert!(
+                    switched >= footprint / 4 && switched <= footprint * 3 / 4,
+                    "at {distance} m {switched} of {footprint} pixels had switched at coverage \
+                     {coverage}, which is a switch and not a fade"
+                );
+            }
+            if (0.7..0.8).contains(&coverage) {
+                assert!(
+                    switched >= footprint / 2,
+                    "at {distance} m only {switched} of {footprint} pixels had switched at \
+                     coverage {coverage}"
+                );
+            }
+            if coverage > 0.95 {
+                assert!(
+                    switched >= footprint * 19 / 20,
+                    "at {distance} m only {switched} of {footprint} pixels had switched"
+                );
+            }
+            if distance >= 20.0 {
+                // Fractions, not counts: the quad shrinks as the body recedes, so the number of
+                // pixels it covers falls even as its share of them rises.
+                let fraction = switched as f32 / footprint as f32;
+                assert!(
+                    fraction >= previous_fraction - 0.01,
+                    "the ramp went backwards at {distance} m: {fraction:.3} after {previous_fraction:.3}"
+                );
+                previous_fraction = fraction;
+            }
+            // A dissolve opens holes at its own edges; it must not open a third of the body.
+            assert!(
+                holes <= footprint / 3,
+                "{holes} of {footprint} pixels at {distance} m are holes"
+            );
+            // A stippled frame is still deterministic.
+            let (again, _) = render_from(distance, 24.0, 8.0);
+            assert_eq!(faded.fingerprint(), again.fingerprint());
+        }
+    }
+
+    #[test]
     fn the_shipped_views_draw_bodies_at_full_detail() {
         let (city, _scene, bodies) = sample();
         let shipped = shots(&city, &bodies);
@@ -1215,8 +1449,10 @@ mod tests {
                 "{} draws impostors by default, which would change the PNG it writes",
                 shot.name
             );
+            assert_eq!(shot.impostor_band, 0.0, "{} fades by default", shot.name);
             let budgeted = crate::session::Budget::default().apply(shot);
             assert_eq!(budgeted.impostor_distance, 24.0);
+            assert_eq!(budgeted.impostor_band, 8.0);
             // The budget is five drawing knobs: framing, lighting and the note travel with the view,
             // because a flight out of the street fog must not take the fog with it.
             assert_eq!(budgeted.camera.eye.to_array(), shot.camera.eye.to_array());
