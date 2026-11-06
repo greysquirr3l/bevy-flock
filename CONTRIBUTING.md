@@ -22,6 +22,26 @@ in the same commit as the manifest change. The reason is `docs/performance.md`:
 the timings published there are only reproducible against an exact dependency
 graph, so a silent resolution bump would quietly invalidate them.
 
+### The same gate without Actions
+
+CI is the authority, but it is not always available — a billing failure, an outage,
+or a fork with Actions disabled leaves a merged change unverified. `scripts/ci_local.py`
+reads `.github/workflows/ci.yml` and runs the `run:` steps itself, so there is no second
+copy of the commands to drift:
+
+```sh
+python3 scripts/ci_local.py --list             # every job, and what it would run
+python3 scripts/ci_local.py --job fmt          # one job, here
+python3 scripts/ci_local.py --all --keep-going # everything this machine can run
+python3 scripts/ci_local.py --check            # fail if a job cannot be reproduced locally
+```
+
+It skips the steps that provision a runner (`uses:`), refuses any job it cannot translate
+faithfully instead of running part of it, and skips jobs pinned to another OS. `--check` runs in
+CI, so a workflow that grows a shape the translator cannot follow fails there rather than quietly
+going unverified. `release` is tag-gated and `deny` is an action with no shell step; both are
+listed in the script with that reason.
+
 The lint profile (all + pedantic + nursery + cargo + perf, with `unwrap_used`,
 `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and `suspicious`
 denied) lives in `Cargo.toml`, and `docs/lint-policy.md` says what each exception
