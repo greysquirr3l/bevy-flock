@@ -37,14 +37,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Probe for the 1.99 lints
         run: |
-          if cargo clippy --quiet -- -W clippy::unnecessary_rest_pattern 2>&1 | grep -q "unknown lint"; then
-            echo "this toolchain predates the 1.99 lints; nothing to check yet"
+          # Three lints the pinned 1.97 toolchain cannot name, so they cannot live in Cargo.toml
+          # without turning every build into an `unknown_lints` warning. Probed one at a time: a
+          # toolchain may know some and not others.
+          flags=""
+          for lint in clippy::unnecessary_rest_pattern clippy::rest_pattern_accessible_field \
+                      raw_borrows_via_references; do
+            if cargo clippy --quiet -- -W "$lint" 2>&1 | grep -q "unknown lint"; then
+              echo "$lint: not known to this toolchain"
+            else
+              echo "$lint: enabled"
+              flags="$flags -W $lint"
+            fi
+          done
+          if [ -z "$flags" ]; then
+            echo "no post-1.97 lint is available here; nothing to check"
             exit 0
           fi
-          cargo clippy --all-targets --all-features -- \
-            -D warnings \
-            -W clippy::unnecessary_rest_pattern \
-            -W clippy::rest_pattern_accessible_field
+          # shellcheck disable=SC2086 # the flags are a list built one lint at a time
+          cargo clippy --all-targets --all-features -- -D warnings $flags
 
   scripts:
     name: Scripts

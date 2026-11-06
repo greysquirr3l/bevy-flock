@@ -57,12 +57,39 @@ value`. `OrDieErr` is the mirror for a constructor whose refusal is the assertio
 
 ## The exceptions
 
-There are two, both in the steering kernels, both tracked as `kernel-bounds-checks` in `plan.toml`:
+**There are none.** Every file-level `#[allow]` and `#[expect]` in the tree has been removed, the
+steering kernels included.
 
-| File | Lint | Why |
-| --- | --- | --- |
-| `src/application/packed.rs` | `indexing_slicing` | 44 index expressions, each bounded by a length check earlier in the same function. Converting them puts an unreachable arm inside every inner loop of the kernel — the one place where the compiler's proof of the bound is worth more than the lint. |
-| `src/application/crowd.rs` (wide kernel only) | `indexing_slicing` | 24 index expressions in the `simd` lane code, same bound argument. The expectation is `cfg_attr(feature = "simd", …)` because the scalar and threaded roads walk iterators and trip nothing. |
+The last two were `indexing_slicing` in `src/application/packed.rs` (44 index expressions) and in
+the wide kernel of `src/application/crowd.rs` (18). Both were defensible — every index was bounded
+by a length check earlier in the same function — but "defensible" is not the standard the manifest
+sets, so `kernel-bounds-checks` removed them instead of documenting them:
+
+- Values that were `buffer[index]` became `buffer.get(index)`, with a `let … else` arm for the case
+  that cannot happen. This is not extra work when the bound sits outside a loop — but the first
+  attempt put a `get` at the top of the neighbour scan and measured **19% slower** on a dense crowd:
+  seven `Option<&f32>` in a tuple pattern, each with its own exit branch, is not seven subscripts
+  whose checks the optimizer merges. The fix was to slice the bucket's range once per cell and walk
+  the rows, which removed the check from the loop entirely and came out 2% *ahead* of where the
+  kernel started ([ADR 0049](adr/0049-row-major-neighbour-broadcast.md)).
+- The four-lane tails stopped indexing their `[f32; 4]` results at all: a `lane!(0)..lane!(3)` macro
+  spells a literal index once per lane, which the lint exempts because the length is known, and the
+  four records are then walked as an array of `NeighbourSums`.
+- The wide kernel's neighbour scan reads a whole row per agent from one buffer instead of seven
+  parallel component arrays, so a neighbour is one contiguous 28-byte load rather than seven.
+
+`scripts/lint_audit.py` still lists a `SANCTIONED` table, and it is empty. The table is the
+mechanism, not an artefact: adding an override means adding it there, with a reason and a
+`plan.toml` task that removes it.
+
+Two notes on what the audit does *not* cover, both deliberate:
+
+- **Doctests.** `cargo test` compiles the examples in `//!` blocks, but clippy's `-D warnings` does
+  not reach them, so `something().expect("fresh registry")` survives in three doc examples. They
+  are what a game will write at start-up, and a doc example that threads a `Result` through
+  `Ok::<(), _>(())` to demonstrate a registry teaches the wrong shape.
+- **`#[deny]` attributes.** A file that turns a lint *up* is not an override; the audit only looks
+  for `allow` and `expect`.
 
 Everything else that a reasonable reader might expect to see is decided in the manifest rather than
 in a file, so it appears once and reads as policy:
@@ -80,11 +107,16 @@ in a file, so it appears once and reads as policy:
 
 ## Policing the exceptions
 
-`scripts/lint_audit.py` scans `src`, `tests`, `benches` and `examples` for `#[allow(clippy::…)]` and
-`#[expect(clippy::…)]`, including ones wrapped in `cfg_attr`, and fails if it finds a lint that is
-not on the sanctioned list in the script. It also fails if a sanctioned override disappears, so the
-list cannot rot into a set of exceptions nobody needs. `--self-test` checks the detector against
-fixtures; CI runs both.
+`scripts/lint_audit.py` scans every crate in the workspace — `src`, `tests`, `benches`, `examples`,
+`compat`, `fuzz` — for `#[allow(clippy::…)]` and `#[expect(clippy::…)]`, including the ones wrapped
+in `cfg_attr`, and fails on any lint that is not in its `SANCTIONED` table. It fails in the other
+direction too: a sanctioned override that has disappeared is an entry to delete, so the table cannot
+rot into a set of exceptions nobody needs. Comments are blanked before scanning, because this
+crate's documentation talks about the overrides it forbids.
+
+`--self-test` checks the detector against fixtures, including the three that matter for the
+mechanism: a sanctioned override passes, the same override unlisted fails, and a stale sanction
+fails. CI runs both.
 
 Adding an override therefore takes three steps, in this order: a reason in the script, a plan task
 that removes it, and a sentence here. None of the three is a file-level opt-out that a reviewer

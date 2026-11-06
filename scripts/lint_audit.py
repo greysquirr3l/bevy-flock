@@ -7,9 +7,11 @@ warnings, CI passes `-D warnings`, and a named list of lints is denied outright 
 `raw_borrows_via_references`. A file-level `#[allow]` or `#[expect]` for any of those turns the
 policy into a suggestion, so this script exists to keep the count at zero.
 
-Two exceptions are sanctioned today, both in the steering kernels and both tracked as
-`kernel-bounds-checks` in `plan.toml`. They are listed below with the reason they are allowed, and
-the reason is printed if the check fails, so an override cannot be added quietly.
+The sanctioned list below is **empty**, on purpose and as a result: `kernel-bounds-checks` converted
+the last two file-level expectations (the 44 index expressions in `application::packed` and the 18 in
+the wide kernel of `application::crowd`) to `get`/destructuring, so the strict spine now covers the
+kernels too. The list stays because it is the mechanism: adding an override means adding it here,
+with a reason and a `plan.toml` task that removes it, which is a conversation rather than a diff.
 
 Run with `--self-test` to check the detector against fixtures rather than the tree.
 """
@@ -22,24 +24,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: The only overrides the crate is allowed to carry, as (relative path, lint) pairs.
-SANCTIONED = {
-    ("src/application/packed.rs", "indexing_slicing"): (
-        "44 index expressions, each bounded by a length check in the same function; removing them "
-        "is a measured kernel change (plan.toml: kernel-bounds-checks)"
-    ),
-    ("src/application/crowd.rs", "indexing_slicing"): (
-        "24 index expressions in the wide kernel, each bounded by a length check in the same "
-        "function; removing them is a measured kernel change (kernel-bounds-checks)"
-    ),
-}
+#: The only overrides the crate is allowed to carry, as (relative path, lint) -> reason.
+#:
+#: Empty is the intended state. An entry here is a decision that a denied lint is wrong for one
+#: file, which needs a reason and a `plan.toml` task that removes it; see `docs/lint-policy.md`.
+SANCTIONED: dict[tuple[str, str], str] = {}
 
 #: Attributes worth finding. `cfg_attr` wraps `expect`/`allow`, so the inner lint name is what
 #: matters and the search is textual rather than syntactic.
 ATTRIBUTE = re.compile(r"#!?\[(?:cfg_attr\([^]]*?)?(allow|expect)\(([^]]*?)\)\]", re.S)
 LINT = re.compile(r"clippy::([a-z_0-9]+)")
 
-SEARCH = ("src", "tests", "benches", "examples")
+SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz")
 
 
 def strip_comments(text: str) -> str:
@@ -92,18 +88,34 @@ def walk(root: Path) -> list[Path]:
     return files
 
 
-def check(root: Path) -> int:
-    """Check the tree; return a process exit code."""
+def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tuple[str, str]]]:
+    """Split every override in the tree into unsanctioned ones and sanctioned ones seen."""
     unsanctioned = []
-    seen_sanctioned = set()
+    seen = set()
     for path in walk(root):
         relative = path.relative_to(root).as_posix()
         for line, kind, lint in scan(path):
             key = (relative, lint)
             if key in SANCTIONED:
-                seen_sanctioned.add(key)
+                seen.add(key)
                 continue
             unsanctioned.append((relative, line, kind, lint))
+    return unsanctioned, seen
+
+
+def report_sanctioned() -> None:
+    """Print the exceptions with their reasons, so a failure shows the whole picture."""
+    if not SANCTIONED:
+        return
+    print("sanctioned overrides (not a failure):")
+    for (relative, lint), reason in sorted(SANCTIONED.items()):
+        print(f"  {relative}: clippy::{lint} -- {reason}")
+    print()
+
+
+def check(root: Path) -> int:
+    """Check the tree; return a process exit code."""
+    unsanctioned, seen_sanctioned = findings(root)
     if unsanctioned:
         print("clippy overrides outside the sanctioned list:")
         for relative, line, kind, lint in unsanctioned:
@@ -111,16 +123,21 @@ def check(root: Path) -> int:
         print()
         print("Fix the code, or add the site to SANCTIONED in this script with a reason and a")
         print("plan.toml task that removes it.")
+        print()
+        report_sanctioned()
         return 1
     stale = set(SANCTIONED) - seen_sanctioned
     if stale:
         print("sanctioned overrides that are no longer in the tree:")
         for relative, lint in sorted(stale):
-            print(f"  {relative}: clippy::{lint}")
+            print(f"  {relative}: clippy::{lint} -- was: {SANCTIONED[(relative, lint)]}")
         print()
         print("Delete them from SANCTIONED: an exception nobody needs is an exception nobody reads.")
         return 1
-    print(f"lint audit: {len(seen_sanctioned)} sanctioned override(s), none unsanctioned")
+    print(
+        f"lint audit: {len(walk(root))} file(s) scanned, {len(seen_sanctioned)} sanctioned "
+        "override(s), none unsanctioned"
+    )
     return 0
 
 
@@ -143,12 +160,6 @@ def self_test() -> int:
             "an item-level expect",
         ),
         (
-            "src/application/packed.rs",
-            "#![expect(\n    clippy::indexing_slicing,\n    reason = \"bounded\"\n)]\nfn f() {}\n",
-            0,
-            "the sanctioned kernel",
-        ),
-        (
             "src/other.rs",
             "#![cfg_attr(\n    feature = \"simd\",\n    expect(clippy::indexing_slicing, reason = \"x\")\n)]\nfn f() {}\n",
             1,
@@ -162,13 +173,39 @@ def self_test() -> int:
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
-            found = 0
-            for scanned in walk(root):
-                for key in [(scanned.relative_to(root).as_posix(), lint) for _, _, lint in scan(scanned)]:
-                    if key not in SANCTIONED:
-                        found += 1
+            unsanctioned, _ = findings(root)
+            found = len(unsanctioned)
             if found != expected:
                 print(f"self-test FAILED: {label}: expected {expected}, found {found}")
+                failures += 1
+            else:
+                print(f"self-test ok: {label}")
+
+    # The sanction mechanism itself: a listed override passes, the same override unlisted fails,
+    # and a listed override with nothing behind it (a stale entry) fails.
+    mechanism = [
+        ("a sanctioned override passes", True, True, 0),
+        ("the same override unlisted fails", True, False, 1),
+        ("a stale sanction fails", False, True, 1),
+    ]
+    for label, present, sanctioned, expected in mechanism:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            if present:
+                path = root / "src" / "probe.rs"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "#![expect(clippy::indexing_slicing, reason = \"fixture\")]\n", encoding="utf-8"
+                )
+            key = ("src/probe.rs", "indexing_slicing")
+            if sanctioned:
+                SANCTIONED[key] = "self-test only"
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.pop(key, None)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
                 failures += 1
             else:
                 print(f"self-test ok: {label}")

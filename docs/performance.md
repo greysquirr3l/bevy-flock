@@ -400,6 +400,53 @@ The obstacle rebuild is a non-issue at 64×64: one publish is 3.7 µs, so even a
 spread over 16 frames is noise next to a steering pass. Its cost scales with the grid and the
 obstacle count, not with the population.
 
+## Removing the last two lint overrides, and what it cost (2026-11-05)
+
+`kernel-bounds-checks` removed the final `#[expect(clippy::indexing_slicing)]` in the crate, which
+covered 62 index expressions across `application::packed` and the wide kernel of
+`application::crowd`. The conversion is `buffer[index]` → `buffer.get(index)`, and the assumption was
+that it costs nothing because a subscript bounds-checks anyway. Measured against a saved baseline
+(10,000 agents, `cargo bench --bench crowd -- crowd_kernel`):
+
+| Case | Baseline | `get` in the inner loop | Row buffer, slice per cell |
+| --- | --- | --- | --- |
+| `crowd_kernel/planar` | 2.021 ms | 2.208 ms (**+9.1%**) | 2.025 ms (+0.1%) |
+| `crowd_kernel/volumetric` | 1.810 ms | 1.859 ms (+1.5%) | 1.787 ms (**−2.1%**) |
+| `crowd_kernel/dense` | 21.51 ms | 25.61 ms (**+18.5%**) | 21.71 ms (+0.5%) |
+
+The regression lives in the neighbour loop, and only shows when cells are full — `volumetric` spreads
+agents over 20 m in Y and barely moved. Two fixes, in order:
+
+1. **Put the row back together.** `Soa` now holds one 28-byte `SoaRow` per agent (position, velocity,
+   identity) instead of seven parallel `Vec<f32>`s. On its own this was neutral (still +19%), because
+   the check was still in the loop.
+2. **Hoist the check out of the loop.** The bucket already knows `begin..end`, so the scan slices that
+   range once per cell and walks the rows. No check, no `Option`, no index in the inner loop.
+
+With both, the kernel is 2% *ahead* of where it started on `volumetric` and at parity on `dense`
+(+0.5%, inside the run-to-run spread), and the avoidance pair improved too:
+
+| Case | Baseline | After |
+| --- | --- | --- |
+| `steering_step/32_neighbours` | 153.3 ns | 152.4 ns (−0.7%) |
+| `crowd_avoidance/steer_only/100000` | 25.35 ms | 24.10 ms (−4.7%) |
+| `crowd_avoidance/steer_and_avoid/100000` | 38.36 ms | 36.42 ms (−5.1%) |
+
+The 2D `application::packed` kernel took the same conversion with no such trouble — it walks rows
+with `iter`/`zip` and unpacks its lanes with literal indices, so the bound was already outside the
+loop (`cargo bench --bench packed`, same baseline method):
+
+| Case | Baseline | After |
+| --- | --- | --- |
+| `packed_steer/steer_integrate_advance/5000` | 2.239 ms | 2.183 ms (−2.5%) |
+| `packed_steer/steer_integrate_advance/50000` | 55.72 ms | 55.91 ms (+0.3%) |
+| `packed_density/5000_agents/256` | 2.227 ms | 2.258 ms (+1.4%) |
+| `packed_density/5000_agents/128` | 6.721 ms | 6.639 ms (−1.2%) |
+
+Ten samples per case, run on the machine described above; deltas below ~1.5% are not distinguishable
+from run-to-run noise. [ADR 0049](adr/0049-row-major-neighbour-broadcast.md) records the sequence,
+because the interesting part is that the mechanical conversion was not free everywhere.
+
 ## Reciprocal avoidance, on and off (2026-11-05)
 
 `cargo bench --bench crowd -- crowd_avoidance`, `--release`, default features (`simd` and

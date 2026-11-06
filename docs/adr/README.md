@@ -75,3 +75,4 @@ replay.
 | [0046](0046-obstacle-driven-navigation.md) | Obstacle navigation rebuilds in rows and publishes once | Accepted |
 | [0047](0047-stimulus-perception.md) | Stimuli are a bounded, decaying buffer observers read | Accepted |
 | [0048](0048-navigation-links-and-navmesh.md) | Links are search edges; the navmesh is an optional polygon source | Accepted |
+| [0049](0049-row-major-neighbour-broadcast.md) | Row-major neighbour broadcast; the lint spine cost 19% until the bound left the loop | Accepted |

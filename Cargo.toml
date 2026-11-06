@@ -102,10 +102,11 @@ required-features = ["memory"]
 unsafe_code = "deny"
 missing_docs = "deny"
 unreachable_pub = "warn"
-# Creating a real reference and immediately casting it to a raw pointer asserts aliasing that the
-# caller never promised; `&raw const place` does not. Available as a rustc lint (not clippy) since
-# 1.97, verified with a probe before it was added here.
-raw_borrows_via_references = "deny"
+# `raw_borrows_via_references` belongs here and cannot be: creating a real reference and casting it
+# away asserts aliasing the caller never promised, and `&raw const place` does not. The lint exists
+# in rustc 1.99, and naming a lint the pinned 1.97 toolchain does not know turns every downstream
+# build into an `unknown_lints` warning — which is why it is enabled by the probe-gated
+# `lint-future` CI job instead, alongside the two clippy 1.99 lints.
 # `rust_2018_idioms` is deliberately off: it flags every `Res<T>`, `Query<...>`
 # and `Commands` in a Bevy system as a hidden lifetime, which is the framework's
 # idiomatic spelling and not something this crate should paper over.

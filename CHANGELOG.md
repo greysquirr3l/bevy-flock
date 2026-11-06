@@ -5,16 +5,23 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- **One lint spine, two documented exceptions.** `[lints]` in `Cargo.toml` now carries the whole
-  policy: `pedantic`, `nursery`, `cargo`, `perf` and `all` as warnings that CI promotes with
+- **One lint spine, and no exceptions.** `[lints]` in `Cargo.toml` carries the whole policy:
+  `pedantic`, `nursery`, `cargo`, `perf` and `all` as warnings that CI promotes with
   `-D warnings`, and `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
   `cast_ptr_alignment` and `suspicious` denied outright — in `tests`, `benches` and `examples` as
-  well as `src`. 468 `.expect(…)`, 34 `.unwrap_err()` and 52 index expressions in tests moved to
+  well as `src`. 474 `.expect(…)` and 34 `.unwrap_err()` in the test tree moved to
   `bevy_flock::testkit` (`OrDie`, `OrDieErr`, `GetOrDie`, `GetOrDieMut`), which reports a broken
-  fixture as `unreachable!` with the caller's message and location. Every `#[allow]` in the tree is
-  gone except the two in the steering kernels, which are named in `scripts/lint_audit.py` with the
-  reason and a `kernel-bounds-checks` task; CI runs that script and fails on any other override.
-  `docs/lint-policy.md` states what is enforced, what is decided in the manifest and why.
+  fixture as `unreachable!` with the caller's message and location. No `#[allow]` or `#[expect]`
+  remains anywhere in the tree, the steering kernels included. `application::packed` reads through
+  `get` and unpacks its lanes with a literal-index macro; the wide kernel of `application::crowd`
+  moved to one 28-byte row per agent and slices each bucket's range once, so the neighbour loop has
+  no bounds check in it at all. That last part was not cosmetic: a per-neighbour `get` measured 19%
+  slower on a dense crowd, and the row-plus-slice form is 2% faster than the array layout it
+  replaced (`docs/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way — it fails
+  on any override outside its (empty) sanctioned table, and on a sanctioned entry that has
+  disappeared — and `docs/lint-policy.md` states what is enforced and why. `raw_borrows_via_references`
+  and the two clippy 1.99 lints are enabled by a probe-gated CI job rather than the manifest, because
+  the pinned 1.97 toolchain cannot name them and an unknown lint name warns on every downstream build.
 - **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
   already gathers removes the excess closing speed between each pair, split by priority, so two
   agents walking at each other stop at the separation floor instead of sharing space.
