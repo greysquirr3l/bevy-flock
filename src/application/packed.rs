@@ -15,17 +15,6 @@
 //! keeping the kernel pure is what makes it testable without a world and benchmarkable at
 //! a population no ECS would survive.
 
-#![expect(
-    clippy::indexing_slicing,
-    reason = "every index is bounded by the pack's own length checks in the same function"
-)]
-#![expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    reason = "grid coordinates and agent counts are bounded far below 2^53 and validated"
-)]
-
 use core::f32::consts::TAU;
 #[cfg(feature = "simd")]
 use wide::f32x4;
@@ -47,6 +36,77 @@ struct BlockSums {
     away_y: f32x4,
     velocity_x: f32x4,
     velocity_y: f32x4,
+}
+
+/// One lane's sums, unpacked out of the vector registers.
+#[cfg(feature = "simd")]
+struct LaneSums {
+    /// How many neighbours this lane kept.
+    count: f32,
+    /// Sum of the neighbours' positions.
+    centre: [f32; 2],
+    /// Sum of the neighbours' velocities.
+    heading: [f32; 2],
+    /// Sum of the inverse-distance pushes away from too-close neighbours.
+    away: [f32; 2],
+    /// How many of them were inside the separation radius.
+    close: f32,
+    /// The agent's own velocity, carried through the scan.
+    velocity: [f32; 2],
+}
+
+#[cfg(feature = "simd")]
+impl BlockSums {
+    /// Unpack the ten vectors into four per-lane records.
+    ///
+    /// Literal indices, not a lane loop: each of the four records is a register-sized value the
+    /// compiler keeps in place either way, and the literal says so.
+    fn lanes(&self) -> [LaneSums; LANES] {
+        let count = self.counts.to_array();
+        let centre_x = self.centre_x.to_array();
+        let centre_y = self.centre_y.to_array();
+        let heading_x = self.heading_x.to_array();
+        let heading_y = self.heading_y.to_array();
+        let away_x = self.away_x.to_array();
+        let away_y = self.away_y.to_array();
+        let close = self.close.to_array();
+        let velocity_x = self.velocity_x.to_array();
+        let velocity_y = self.velocity_y.to_array();
+        [
+            LaneSums {
+                count: count[0],
+                centre: [centre_x[0], centre_y[0]],
+                heading: [heading_x[0], heading_y[0]],
+                away: [away_x[0], away_y[0]],
+                close: close[0],
+                velocity: [velocity_x[0], velocity_y[0]],
+            },
+            LaneSums {
+                count: count[1],
+                centre: [centre_x[1], centre_y[1]],
+                heading: [heading_x[1], heading_y[1]],
+                away: [away_x[1], away_y[1]],
+                close: close[1],
+                velocity: [velocity_x[1], velocity_y[1]],
+            },
+            LaneSums {
+                count: count[2],
+                centre: [centre_x[2], centre_y[2]],
+                heading: [heading_x[2], heading_y[2]],
+                away: [away_x[2], away_y[2]],
+                close: close[2],
+                velocity: [velocity_x[2], velocity_y[2]],
+            },
+            LaneSums {
+                count: count[3],
+                centre: [centre_x[3], centre_y[3]],
+                heading: [heading_x[3], heading_y[3]],
+                away: [away_x[3], away_y[3]],
+                close: close[3],
+                velocity: [velocity_x[3], velocity_y[3]],
+            },
+        ]
+    }
 }
 
 /// Steering weights and limits. Distances in metres, speeds in metres per second.
@@ -249,8 +309,14 @@ impl Pack {
     fn steer_one(&mut self, index: usize, params: &SteerParams, report: &mut SteerReport) {
         let radius_squared = params.radius * params.radius;
         let separation_squared = params.separation * params.separation;
-        let position = self.positions[index];
-        let velocity = self.velocities[index];
+        // `get` rather than `[index]`: the caller passes an index it took from `0..len`, so the
+        // branch never fires, and it compiles to the same bounds check the subscript emitted.
+        let (Some(position), Some(velocity)) = (
+            self.positions.get(index).copied(),
+            self.velocities.get(index).copied(),
+        ) else {
+            return;
+        };
 
         let mut centre = [0.0_f32; 2];
         let mut heading = [0.0_f32; 2];
@@ -262,9 +328,15 @@ impl Pack {
             if other == index {
                 return;
             }
+            let (Some(other_position), Some(other_velocity)) = (
+                self.positions.get(other).copied(),
+                self.velocities.get(other).copied(),
+            ) else {
+                return;
+            };
             let delta = [
-                self.positions[other][0] - position[0],
-                self.positions[other][1] - position[1],
+                other_position[0] - position[0],
+                other_position[1] - position[1],
             ];
             let distance_squared = delta[0] * delta[0] + delta[1] * delta[1];
             if distance_squared > radius_squared {
@@ -272,10 +344,10 @@ impl Pack {
             }
             report.pairs += 1;
             neighbours += 1;
-            centre[0] += self.positions[other][0];
-            centre[1] += self.positions[other][1];
-            heading[0] += self.velocities[other][0];
-            heading[1] += self.velocities[other][1];
+            centre[0] += other_position[0];
+            centre[1] += other_position[1];
+            heading[0] += other_velocity[0];
+            heading[1] += other_velocity[1];
             if distance_squared < separation_squared {
                 too_close += 1;
                 // Weight by inverse distance so a near miss matters more than a distant
@@ -288,7 +360,9 @@ impl Pack {
 
         if neighbours == 0 {
             report.isolated += 1;
-            self.desired[index] = velocity;
+            if let Some(slot) = self.desired.get_mut(index) {
+                *slot = velocity;
+            }
             return;
         }
 
@@ -305,7 +379,7 @@ impl Pack {
         } else {
             [0.0, 0.0]
         };
-        self.desired[index] = clamp(
+        let steered = clamp(
             [
                 velocity[0]
                     + params.cohesion * cohesion[0]
@@ -318,6 +392,9 @@ impl Pack {
             ],
             params.max_speed,
         );
+        if let Some(slot) = self.desired.get_mut(index) {
+            *slot = steered;
+        }
         report.steered += 1;
     }
 
@@ -333,61 +410,53 @@ impl Pack {
         sums: &BlockSums,
         report: &mut SteerReport,
     ) {
-        let count = sums.counts.to_array();
-        let centre_x = sums.centre_x.to_array();
-        let centre_y = sums.centre_y.to_array();
-        let heading_x = sums.heading_x.to_array();
-        let heading_y = sums.heading_y.to_array();
-        let away_x = sums.away_x.to_array();
-        let away_y = sums.away_y.to_array();
-        let close = sums.close.to_array();
-        let velocity_x = sums.velocity_x.to_array();
-        let velocity_y = sums.velocity_y.to_array();
-
-        for lane in 0..LANES {
-            let index = indices[lane];
-            if index >= self.positions.len() {
+        for (index, lane) in indices.iter().zip(sums.lanes().iter()) {
+            let Some(position) = self.positions.get(*index).copied() else {
                 continue;
-            }
-            if count[lane] == 0.0 {
+            };
+            if lane.count == 0.0 {
                 report.isolated += 1;
-                self.desired[index] = [velocity_x[lane], velocity_y[lane]];
+                if let Some(slot) = self.desired.get_mut(*index) {
+                    *slot = lane.velocity;
+                }
                 continue;
             }
-            let position = self.positions[index];
-            let scaled = count[lane];
+            let scaled = lane.count;
             let cohesion = clamp(
                 [
-                    centre_x[lane] / scaled - position[0],
-                    centre_y[lane] / scaled - position[1],
+                    lane.centre[0] / scaled - position[0],
+                    lane.centre[1] / scaled - position[1],
                 ],
                 params.max_speed,
             );
             let alignment = clamp(
                 sub(
-                    [heading_x[lane] / scaled, heading_y[lane] / scaled],
-                    [velocity_x[lane], velocity_y[lane]],
+                    [lane.heading[0] / scaled, lane.heading[1] / scaled],
+                    lane.velocity,
                 ),
                 params.max_force,
             );
-            let separation = if close[lane] > 0.0 {
-                clamp([away_x[lane], away_y[lane]], params.max_force)
+            let separation = if lane.close > 0.0 {
+                clamp(lane.away, params.max_force)
             } else {
                 [0.0, 0.0]
             };
-            self.desired[index] = clamp(
+            let steered = clamp(
                 [
-                    velocity_x[lane]
+                    lane.velocity[0]
                         + params.cohesion * cohesion[0]
                         + params.alignment * alignment[0]
                         + params.separation_weight * separation[0],
-                    velocity_y[lane]
+                    lane.velocity[1]
                         + params.cohesion * cohesion[1]
                         + params.alignment * alignment[1]
                         + params.separation_weight * separation[1],
                 ],
                 params.max_speed,
             );
+            if let Some(slot) = self.desired.get_mut(*index) {
+                *slot = steered;
+            }
             report.steered += 1;
         }
     }
@@ -403,14 +472,17 @@ impl Pack {
         let mut block = 0_usize;
         while (block + LANES) <= self.order.len() {
             let mut indices = [0_usize; LANES];
-            for (lane, slot) in indices.iter_mut().enumerate() {
-                *slot = self.order[block + lane] as usize;
+            for (slot, agent) in indices
+                .iter_mut()
+                .zip(self.order.get(block..block + LANES).unwrap_or_default())
+            {
+                *slot = *agent as usize;
             }
             self.steer_block(indices, params, report);
             block += LANES;
         }
         while block < self.order.len() {
-            let index = self.order[block] as usize;
+            let index = self.order.get(block).copied().unwrap_or(0) as usize;
             self.steer_one(index, params, report);
             block += 1;
         }
@@ -427,14 +499,19 @@ impl Pack {
         let mut cells = [(0_usize, 0_usize); LANES];
         let mut positions = [(0.0_f32, 0.0_f32); LANES];
         let mut velocities = [(0.0_f32, 0.0_f32); LANES];
-        for lane in 0..LANES {
-            let Some(position) = self.positions.get(indices[lane]).copied() else {
+        for (((cell, position_slot), velocity_slot), index) in cells
+            .iter_mut()
+            .zip(positions.iter_mut())
+            .zip(velocities.iter_mut())
+            .zip(indices.iter())
+        {
+            let Some(position) = self.positions.get(*index).copied() else {
                 continue;
             };
-            positions[lane] = (position[0], position[1]);
-            cells[lane] = self.cell_of(position);
-            if let Some(velocity) = self.velocities.get(indices[lane]) {
-                velocities[lane] = (velocity[0], velocity[1]);
+            *position_slot = (position[0], position[1]);
+            *cell = self.cell_of(position);
+            if let Some(velocity) = self.velocities.get(*index) {
+                *velocity_slot = (velocity[0], velocity[1]);
             }
         }
 
@@ -527,15 +604,15 @@ impl Pack {
                     all_inside
                 } else {
                     let mut inside = [0.0_f32; LANES];
-                    for (lane, slot) in inside.iter_mut().enumerate() {
-                        let (cx, cy) = cells[lane];
+                    for (slot, (cx, cy)) in inside.iter_mut().zip(cells.iter()) {
+                        let (cx, cy) = (*cx, *cy);
                         let near = x + 1 >= cx && x <= cx + 1 && y + 1 >= cy && y <= cy + 1;
                         *slot = if near { f32::from_bits(u32::MAX) } else { 0.0 };
                     }
                     f32x4::from(inside)
                 };
 
-                let mut cursor = self.heads[y * self.side + x];
+                let mut cursor = self.heads.get(y * self.side + x).copied().unwrap_or(-1);
                 let mut guard = 0_usize;
                 while cursor >= 0 && guard <= self.positions.len() {
                     let other = cursor as usize;
@@ -606,17 +683,22 @@ impl Pack {
             *head = -1;
         }
         let side = self.side;
-        for index in 0..self.positions.len() {
-            let cell = self.cell_of(self.positions[index]);
+        for (index, position) in self.positions.iter().enumerate() {
+            let cell = self.cell_of(*position);
             let bucket = cell.1 * side + cell.0;
-            self.next[index] = self.heads[bucket];
-            self.heads[bucket] = index as i32;
+            let previous = self.heads.get(bucket).copied().unwrap_or(-1);
+            if let Some(slot) = self.next.get_mut(index) {
+                *slot = previous;
+            }
+            if let Some(head) = self.heads.get_mut(bucket) {
+                *head = index as i32;
+            }
         }
 
         // Cell-major order, free: the buckets already hold exactly this grouping.
         self.order.clear();
-        for bucket in 0..self.heads.len() {
-            let mut cursor = self.heads[bucket];
+        for head in &self.heads {
+            let mut cursor = *head;
             let mut guard = 0_usize;
             while cursor >= 0 && guard <= self.positions.len() {
                 self.order.push(cursor as u32);
@@ -646,7 +728,7 @@ impl Pack {
         let x_start = cx.saturating_sub(1);
         for y in y_start..=(cy + 1).min(side - 1) {
             for x in x_start..=(cx + 1).min(side - 1) {
-                let mut cursor = self.heads[y * side + x];
+                let mut cursor = self.heads.get(y * side + x).copied().unwrap_or(-1);
                 // A corrupt chain would loop forever, which in a crowd system is a hang in
                 // the frame; the guard is the pack's own length, not a hope.
                 let mut guard = 0_usize;
@@ -718,6 +800,7 @@ pub fn scatter(count: usize, extent: f32, params: &mut Pack) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     fn params() -> SteerParams {
         SteerParams {
@@ -735,8 +818,8 @@ mod tests {
         pack.push([10.5, 10.0], [0.0, 0.0]);
         let report = pack.steer(&params());
         assert_eq!(report.steered, 2);
-        let left = pack.desired(0).expect("index 0");
-        let right = pack.desired(1).expect("index 1");
+        let left = pack.desired(0).or_die();
+        let right = pack.desired(1).or_die();
         // Coincident-with-separation: the pair must move away from each other along x.
         assert!(
             left[0] < 0.0,
@@ -756,7 +839,7 @@ mod tests {
         }
         pack.push([10.0, 11.0], [0.0, 1.0]);
         pack.steer(&params());
-        let straggler = pack.desired(3).expect("index 3");
+        let straggler = pack.desired(3).or_die();
         assert!(
             straggler[0] > 0.0,
             "alignment should add eastward speed: {straggler:?}"
@@ -799,8 +882,8 @@ mod tests {
                 if i == j {
                     continue;
                 }
-                let a = pack.position(i).expect("in range");
-                let b = pack.position(j).expect("in range");
+                let a = pack.position(i).or_die();
+                let b = pack.position(j).or_die();
                 if (a[0] - b[0]).hypot(a[1] - b[1]) <= 8.0 {
                     brute += 1;
                 }
@@ -816,7 +899,7 @@ mod tests {
         pack.steer(&params());
         // Force a fast desired velocity by hand through the public path.
         pack.integrate(3.0);
-        let velocity = pack.velocity(0).expect("index 0");
+        let velocity = pack.velocity(0).or_die();
         let speed = velocity[0].hypot(velocity[1]);
         assert!(speed <= 3.0 + 1e-3, "speed {speed} exceeded the limit");
     }

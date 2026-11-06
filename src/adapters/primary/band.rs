@@ -267,10 +267,6 @@ fn distance_squared(a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 /// Fold agents beyond the fold radius into density. Anchors are skipped.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by the scheduler"
-)]
 pub fn band_fold(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -301,10 +297,6 @@ pub fn band_fold(
 }
 
 /// Manifest density inside the manifest radius, rationed, taking before spawning.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by the scheduler"
-)]
 pub fn band_manifest(
     mut commands: Commands,
     config: Res<BandConfig>,
@@ -399,10 +391,6 @@ pub fn band_manifest(
 }
 
 /// Copy the band into the pack, steer it, and copy the result back.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by the scheduler"
-)]
 pub fn band_steer(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,
@@ -436,10 +424,6 @@ pub fn band_steer(
 }
 
 /// Steer the mid band every `mid_cadence` frames. Same kernel, a third of the rate.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by the scheduler"
-)]
 pub fn band_steer_mid(
     mut band: ResMut<Band>,
     config: Res<BandConfig>,

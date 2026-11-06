@@ -179,12 +179,13 @@ pub fn invalidate_stale_fields(nav: Res<NavGrid>, mut flows: ResMut<FlowFields>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
     use bevy_app::{App, Update};
 
     #[test]
     fn a_field_is_built_once_and_then_hit() {
-        let nav = NavGrid::open(Vec3::ZERO, 32, 32, 1.0).expect("grid");
-        let mut flows = FlowFields::new(2).expect("cache");
+        let nav = NavGrid::open(Vec3::ZERO, 32, 32, 1.0).or_die();
+        let mut flows = FlowFields::new(2).or_die();
         let target = FlowTarget::at_cell(nav.source(), NavCell::new(30, 30));
         let (first, _) = flows.field_for(nav.source(), target);
         let (second, _) = flows.field_for(nav.source(), target);
@@ -195,14 +196,12 @@ mod tests {
 
     #[test]
     fn blocking_a_cell_invalidates_the_cache() {
-        let mut nav = NavGrid::open(Vec3::ZERO, 16, 16, 1.0).expect("grid");
-        let mut flows = FlowFields::new(2).expect("cache");
+        let mut nav = NavGrid::open(Vec3::ZERO, 16, 16, 1.0).or_die();
+        let mut flows = FlowFields::new(2).or_die();
         let target = FlowTarget::at_cell(nav.source(), NavCell::new(15, 15));
         let _ = flows.field_for(nav.source(), target);
         assert_eq!(flows.len(), 1);
-        let version = nav
-            .block(NavCell::new(4, 4), NavCell::new(5, 5))
-            .expect("block");
+        let version = nav.block(NavCell::new(4, 4), NavCell::new(5, 5)).or_die();
         assert_eq!(version, nav.version());
         let removed = flows.invalidate_stale(version);
         assert_eq!(removed, 1);
@@ -215,7 +214,7 @@ mod tests {
     fn the_invalidation_system_runs_with_the_plugin_style_resources() {
         let mut app = App::new();
         app.init_resource::<FlowFields>()
-            .insert_resource(NavGrid::open(Vec3::ZERO, 8, 8, 1.0).expect("grid"))
+            .insert_resource(NavGrid::open(Vec3::ZERO, 8, 8, 1.0).or_die())
             .add_systems(Update, invalidate_stale_fields);
         app.update();
         assert!(app.world().resource::<FlowFields>().is_empty());
@@ -223,8 +222,8 @@ mod tests {
 
     #[test]
     fn the_cache_is_bounded() {
-        let nav = NavGrid::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
-        let mut flows = FlowFields::new(1).expect("cache");
+        let nav = NavGrid::open(Vec3::ZERO, 8, 8, 1.0).or_die();
+        let mut flows = FlowFields::new(1).or_die();
         let first = FlowTarget::at_cell(nav.source(), NavCell::new(7, 7));
         let second = FlowTarget::at_cell(nav.source(), NavCell::new(0, 7));
         let _ = flows.field_for(nav.source(), first);

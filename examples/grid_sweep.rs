@@ -82,7 +82,6 @@ fn road() -> &'static str {
 /// The cap is the point of ADR 0003's budget, applied by hand: the production grid would coarsen
 /// rather than allocate 8 million cells.
 fn dims_for(cell: f32) -> [u32; 3] {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let per_axis = ((EXTENT / cell).ceil() as u32).clamp(8, 200);
     [per_axis; 3]
 }
@@ -136,9 +135,7 @@ fn occupancy(crowd: &Crowd, cell: f32, dims: [u32; 3]) -> f64 {
     if total == 0 {
         return 0.0;
     }
-    #[allow(clippy::cast_precision_loss)]
-    let share = blocked as f64 / total as f64;
-    share
+    blocked as f64 / total as f64
 }
 
 fn cell_of(position: [f32; 3], cell: f32, dims: [u32; 3]) -> usize {
@@ -147,7 +144,6 @@ fn cell_of(position: [f32; 3], cell: f32, dims: [u32; 3]) -> usize {
         if index < 0.0 {
             return 0_u32;
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let index = index as u32;
         index.min(dim - 1)
     };

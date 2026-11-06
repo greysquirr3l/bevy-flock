@@ -13,9 +13,9 @@
 //! 2. `seed_field` filled the field from the origin and stopped when it ran out, so the focus
 //!    at the centre stood in empty country and the manifest reached outward past its radius;
 //! 3. nothing checked the spawn point against the fold bound at all.
-#![expect(clippy::expect_used, reason = "the harness asserts its own fixtures")]
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use bevy_flock::testkit::OrDie;
 use bevy_transform::prelude::Transform;
 
 use bevy_flock::adapters::primary::band::{Band, BandAgent, BandConfig, BandPlugin, seed_field};
@@ -71,7 +71,7 @@ impl Harness {
             .iter(self.app.world())
             .next()
             .map(|transform| (transform.translation.x, transform.translation.y))
-            .expect("the harness spawns a focus");
+            .or_die();
         let mut query = self.app.world_mut().query::<&Transform>();
         let world = self.app.world();
         query

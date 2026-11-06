@@ -26,6 +26,11 @@ that means:
 | Area | State |
 | --- | --- |
 | Boids and steering (separation, alignment, cohesion, seek, arrive) | **Shipped** |
+| Personality that steers: per-NPC weight bias from temperament and unmet needs, decay on by default (ADR 0051) | **Shipped (on by default)** |
+| Reciprocal local avoidance with per-NPC priority (ADR 0045) | **Shipped (on by default)** |
+| Obstacle-derived navigation that rebuilds in budgeted slices (ADR 0046) | **Shipped (opt-in)** |
+| Stimulus perception: sight cone, hearing, decay, occlusion hook (ADR 0047) | **Shipped (opt-in)** |
+| Navigation links and an optional polygon navmesh (ADR 0048, `navmesh` feature) | **Shipped** |
 | Deterministic spatial grid (radius, k-nearest) | **Shipped** |
 | Deterministic RNG with per-NPC streams (PCG32, reference-verified) | **Shipped** |
 | Budgeted, deterministic population spawning (unique and recycled) | **Shipped** |
@@ -80,7 +85,7 @@ cargo bench --locked --bench tiers -- tier_frame      # the tier numbers in the 
 
 | Claim in this README | Where it is pinned |
 | --- | --- |
-| 10,000 agents in 9.18 ms | `benches/crowd.rs`, table in [`docs/performance.md`](docs/performance.md) |
+| 10,000 agents in 4.3 ms | `benches/crowd.rs`, table in [`docs/performance.md`](docs/performance.md) |
 | Per-agent cost is flat | same table, 1,000 / 10,000 / 100,000 rows |
 | Same seed, same world | `tests/determinism.rs`, whole-world digest |
 | No allocation in a tick | `tests/tree_no_alloc.rs`, `tests/crowd_no_alloc.rs` |
@@ -91,6 +96,15 @@ cargo bench --locked --bench tiers -- tier_frame      # the tier numbers in the 
 
 If a number here and a number you measure disagree by more than the tolerance those scripts
 use, that is a bug report, not a difference of opinion.
+
+## Asset pipeline skills
+
+`skills/` holds the agent-facing playbooks for the work that surrounds the crate: generating NPC
+bodies and portraits with Meshy, shipping a complete archetype, keeping media out of Git without
+breaking the build, and building the shared humanoid action library every rig plays. They are written
+for *your* game, not for this crate — flock loads no media, and `build_render_plan` is the only seam
+between a simulation and a mesh. See [skills/README.md](skills/README.md) for what changed when they
+were ported from another project and why.
 
 ## The book
 
@@ -278,15 +292,16 @@ A headless frame — spawn drain, grid rebuild, steering, integration — on the
 
 | NPCs | Frame | Per agent |
 | --- | --- | --- |
-| 1 | 0.99 ms | — |
-| 1,000 | 1.73 ms | 1.7 µs |
-| 10,000 | 9.2 ms | 0.92 µs |
-| 100,000 | 90.0 ms | 0.90 µs |
+| 1 | 1.01 ms | — |
+| 1,000 | 1.74 ms | 1.7 µs |
+| 10,000 | 4.3 ms | 0.43 µs |
+| 100,000 | 29.2 ms | 0.29 µs |
 
 Per-agent cost is flat because neighbour queries are local: a radius-8 m query is
-138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz
-frame with 1.8× of margin — the ADR 0026 kernel cut that frame from 18.2 ms, and the
-three-dimensional kernel in ADR 0028 costs 19% on top of it.
+138 ns at 1,000 agents and 552 ns at 100,000. Ten thousand steered NPCs fit a 60 Hz frame
+3.9× over — the ADR 0026 kernel cut that frame from 18.2 ms, the three-dimensional kernel in
+ADR 0028 cost 19% on top of it, and ADR 0044 took another 48% off by steering on every core
+instead of one. The remaining fixed millisecond is the grid rebuild.
 
 The first version of the spatial index cost **37 ms for a crowd of one**, because
 it materialised 15.6 million cells every tick. The second fixed that and lost 4×
@@ -338,6 +353,32 @@ let upper_floor = Placement::uniform_disc(Vec3::new(0.0, 4.2, 0.0), 18.0);
 32 bytes of steering state per NPC (positions, velocities, desired, bucket chain, cell-major
 order), no allocation in the steady state, 30.5 MiB for a million. Measured, with cache
 profiles, in [`docs/memory.md`](docs/memory.md).
+
+## The playground
+
+![The Ashfall Verge plan](docs/demo/ashfall-plan.png)
+
+`demo/` is a separate package that builds a city, runs a crowd in it and writes four artefacts: a
+top-down plan (`ashfall.svg`), a render payload (`ashfall.scene.json`), a run report with the digest,
+the tier histogram and the wall time (`ashfall.run.json`), and an asset manifest. Three bodies and
+three props were generated with Meshy from six concept images and shipped as GLBs — 2.4 MB after
+`tools/shrink_glb.py` took the 22.9 MB Meshy originals down without touching a vertex.
+
+```text
+cargo run --release --manifest-path demo/Cargo.toml -- --population 4000 --ticks 900
+```
+
+There is no renderer in that crate, deliberately: a demo that needs a GPU cannot run in CI, so
+`ashfall.scene.json` is the `build_render_plan` contract written down and checked instead. The images
+come from the software rasteriser in `demo/src/raster.rs`, and a second front end in `demo-gpu/` draws
+the same scene, meshes and shot table through an instanced `wgpu` pipeline — with a `noop` backend so
+it still validates and encodes on a runner with no driver, and a benchmark that separates a frame's
+latency from its throughput. `docs/playbooks/gpu-demos.md` is the instruction set for building one:
+environment classification, adapter policy, the pipeline recipe, the shader rules, the correctness
+gates and the benchmarking traps. It is written for an agent to follow, and it says where the numbers
+are allowed to come from. `demo/README.md` explains the
+city, the assets, the test that caught a headless app having no clock, and why the tier histogram
+reads 100% reflex below the manifest band.
 
 ## Architecture
 

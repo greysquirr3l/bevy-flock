@@ -49,6 +49,7 @@ replay.
   better than an adjective.
 - State the consequences you do not like. An ADR with no downsides is an
   advertisement.
+| [0022](0022-boundary-test-harness.md) | Drive a camera through every band boundary and assert continuity | Accepted |
 | [0023](0023-simd-steering.md) | Four-agent SIMD steering behind a cell-major order | Accepted |
 | [0024](0024-layout-ordering-and-parity.md) | The packed layout, the ordering constraints, and how parity is proven | Accepted |
 | [0025](0025-manifest-fold-hysteresis.md) | The manifest window is a disc inside the fold radius | Accepted |
@@ -70,3 +71,11 @@ replay.
 | [0041](0041-memory-in-cognition.md) | Memory reaches a tree as three integers; enrolment by proximity and budget | Accepted |
 | [0042](0042-diagnostics-and-fuzzing.md) | Explain on demand, overlay as data, decoders fuzzed on two layers | Accepted |
 | [0043](0043-docs-and-release-shape.md) | Documentation and release shape: book, README verification, release gate | Accepted |
+| [0044](0044-threaded-steering.md) | One frame, cut into slices: threads beat lanes, 2.0x at 10k and 2.8x at 100k | Accepted |
+| [0045](0045-reciprocal-local-avoidance.md) | Reciprocal avoidance: half the responsibility each, +1.0 ms at 10k | Accepted |
+| [0046](0046-obstacle-driven-navigation.md) | Obstacle navigation rebuilds in rows and publishes once | Accepted |
+| [0047](0047-stimulus-perception.md) | Stimuli are a bounded, decaying buffer observers read | Accepted |
+| [0048](0048-navigation-links-and-navmesh.md) | Links are search edges; the navmesh is an optional polygon source | Accepted |
+| [0049](0049-row-major-neighbour-broadcast.md) | Row-major neighbour broadcast; the lint spine cost 19% until the bound left the loop | Accepted |
+| [0050](0050-interactive-playground.md) | Explore the playground in a terminal; software rasteriser against wgpu on the CPU | Accepted |
+| [0051](0051-temperament-drives-behaviour.md) | Personality reaches the simulation: multiplicative steering bias, burst needs decay, archetype presets | Accepted |

@@ -97,9 +97,8 @@ impl BarkCategory {
 }
 
 /// One authored line.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[allow(clippy::derive_partial_eq_without_eq)]
 pub struct BarkLine {
     /// What it is for.
     pub category: BarkCategory,
@@ -129,7 +128,7 @@ impl BarkLine {
 }
 
 /// Every line the crowd can say, grouped by category.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BarkTable {
     lines: Vec<BarkLine>,
@@ -441,15 +440,16 @@ pub enum BarkError {
 mod tests {
     use super::*;
     use crate::domain::ids::SimSeed;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn table() -> BarkTable {
-        BarkTable::starter().expect("starter table")
+        BarkTable::starter().or_die()
     }
 
     #[test]
     fn a_table_without_lines_in_a_category_is_rejected() {
-        let error = BarkTable::new(vec![BarkLine::new(BarkCategory::Idle, "Hm.")]).unwrap_err();
-        assert!(matches!(error, BarkError::EmptyCategory { .. }));
+        let error = BarkTable::new(vec![BarkLine::new(BarkCategory::Idle, "Hm.")]).or_die_err();
+        assert!(matches!(error, BarkError::EmptyCategory { category: _ }));
     }
 
     #[test]
@@ -458,9 +458,7 @@ mod tests {
         let mut rng = RngStream::new(SimSeed::new(3), 9);
         let mut last = None;
         for _ in 0..50 {
-            let pick = table
-                .pick(BarkCategory::Idle, last, &mut rng)
-                .expect("a line");
+            let pick = table.pick(BarkCategory::Idle, last, &mut rng).or_die();
             assert_ne!(Some(pick), last, "the same idle line twice in a row");
             last = Some(pick);
         }
@@ -472,14 +470,12 @@ mod tests {
         for category in BarkCategory::ALL {
             lines.push(BarkLine::new(category, "Only line."));
         }
-        let table = BarkTable::new(lines).expect("table");
+        let table = BarkTable::new(lines).or_die();
         let mut rng = RngStream::new(SimSeed::new(3), 9);
-        let first = table
-            .pick(BarkCategory::Alarm, None, &mut rng)
-            .expect("line");
+        let first = table.pick(BarkCategory::Alarm, None, &mut rng).or_die();
         let second = table
             .pick(BarkCategory::Alarm, Some(first), &mut rng)
-            .expect("line");
+            .or_die();
         assert_eq!(first, second);
     }
 
@@ -499,7 +495,7 @@ mod tests {
 
     #[test]
     fn the_queue_is_bounded_and_counts_its_drops() {
-        let mut queue = BarkQueue::new(4).expect("queue");
+        let mut queue = BarkQueue::new(4).or_die();
         for index in 0..10_u32 {
             queue.push(BarkEvent {
                 npc: NpcId::unique(index),
@@ -517,7 +513,7 @@ mod tests {
 
     #[test]
     fn a_queue_of_zero_is_refused() {
-        assert_eq!(BarkQueue::new(0).unwrap_err(), BarkError::ZeroCapacity);
+        assert_eq!(BarkQueue::new(0).or_die_err(), BarkError::ZeroCapacity);
     }
 
     #[test]

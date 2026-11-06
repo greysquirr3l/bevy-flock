@@ -313,6 +313,7 @@ pub fn arrival_speed(distance: f32, params: &SteeringParams) -> f32 {
 mod tests {
     use super::*;
     use crate::domain::ids::NpcId;
+    use crate::testkit::{GetOrDie, GetOrDieMut};
 
     fn neighbour(id: u32, position: Vec3, velocity: Vec3, centre: Vec3) -> Neighbour {
         Neighbour {
@@ -451,7 +452,7 @@ mod tests {
         for _ in 0..600 {
             let snapshot = positions.clone();
             for index in 0..12 {
-                let centre = snapshot[index];
+                let centre = snapshot.at(index);
                 let neighbours: Vec<Neighbour> = snapshot
                     .iter()
                     .enumerate()
@@ -459,26 +460,26 @@ mod tests {
                     .map(|(other, position)| Neighbour {
                         id: NpcId::unique(other as u32),
                         position: *position,
-                        velocity: velocities[other],
+                        velocity: velocities.at(other),
                         distance_squared: position.distance_squared(centre),
                     })
                     .collect();
                 let agent = AgentState {
                     position: centre,
-                    velocity: velocities[index],
+                    velocity: velocities.at(index),
                     target: Some(Vec3::ZERO),
                 };
-                velocities[index] = desired_velocity(agent, &neighbours, &params);
+                *velocities.at_mut(index) = desired_velocity(agent, &neighbours, &params);
             }
             for index in 0..12 {
-                positions[index] += velocities[index] * (1.0 / 60.0);
+                *positions.at_mut(index) += velocities.at(index) * (1.0 / 60.0);
             }
         }
 
         let mut worst = f32::MAX;
         for a in 0..12 {
             for b in (a + 1)..12 {
-                worst = worst.min(positions[a].distance(positions[b]));
+                worst = worst.min(positions.at(a).distance(positions.at(b)));
             }
         }
         assert!(

@@ -139,3 +139,9 @@ fuzz/target
 fuzz/corpus
 fuzz/artifacts
 fuzz/Cargo.lock
+
+# The demo's artefacts and build output.
+demo/target/
+demo/out/
+# The GPU demo builds into its own package directory, like `demo`.
+/demo-gpu/target/

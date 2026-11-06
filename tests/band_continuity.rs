@@ -174,7 +174,7 @@ fn gate_4_population_is_conserved_on_every_tick() {
 #[test]
 fn gate_5_the_boundary_never_pops() {
     let mut harness = Harness::new();
-    let ration = harness.app.world().resource::<BandConfig>().ration as i64;
+    let ration = i64::from(harness.app.world().resource::<BandConfig>().ration);
     let mut previous = harness.live as i64;
 
     for tick in 0..TICKS {

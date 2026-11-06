@@ -75,10 +75,10 @@ quoted interval, which is the intended relationship between this section and the
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 0.99 ms | — |
-| `flock_frame/1000` | 1.73 ms | 1.7 µs |
-| `flock_frame/10000` | **9.18 ms** | 0.92 µs |
-| `flock_frame_large/100000` | 90.0 ms | 0.90 µs |
+| `flock_frame/1` | 1.01 ms | — |
+| `flock_frame/1000` | 1.74 ms | 1.7 µs |
+| `flock_frame/10000` | **4.27 ms** | 0.43 µs |
+| `flock_frame_large/100000` | **29.2 ms** | 0.29 µs |
 | `spatial_query/radius_8m/1000` | 138 ns | — |
 | `spatial_query/radius_8m/10000` | 185 ns | — |
 | `spatial_query/radius_8m/100000` | 552 ns | — |
@@ -86,17 +86,19 @@ quoted interval, which is the intended relationship between this section and the
 
 Four things to read from that table:
 
-- **Per-agent cost is flat, and it halved.** 1.6 µs at a thousand agents and 0.74 µs at a
-  hundred thousand, because the index makes each agent's work local and the kernel now walks
-  its neighbours once instead of three times (ADR 0026).
-- **10,000 agents fit a 60 Hz frame with room to spare.** 9.18 ms against the 16.6 ms budget is
-  109 fps, and 1.8× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
+- **Per-agent cost is flat, and it halved twice.** 1.7 µs at a thousand agents, 0.43 µs at ten
+  thousand and 0.29 µs at a hundred thousand: the index makes each agent's work local, the kernel
+  walks neighbours once instead of three times (ADR 0026), and the frame now uses every core
+  (ADR 0044).
+- **10,000 agents fit a 60 Hz frame three times over.** 4.27 ms against the 16.6 ms budget is
+  234 fps, and 3.9× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
   frame was 92% steering, at 1.79 µs per agent); the 3D kernel in ADR 0028 added 19% back on top of
   the 7.71 ms planar figure, which is the honest price of the third dimension and is visible here
   rather than buried.
 - **The fixed cost is the grid, not the crowd.** 1.01 ms of `flock_frame/1` is
-  `rebuild_spatial_grid` at the default 1 km volume; the other 6.7 ms of the 10,000 row is
-  everything that scales with agents. A playable area of 200 m across drops the fixed part to
+  `rebuild_spatial_grid` at the default 1 km volume; the other 3.3 ms of the 10,000 row is
+  everything that scales with agents. That fixed millisecond is now a quarter of the 10,000-agent
+  frame and is the next thing worth attacking, not the steering kernel. A playable area of 200 m across drops the fixed part to
   ~20 µs.
 - **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns at 100,000:
   the index walks the same 27 cells, and the cells are fuller. Those numbers are unchanged by
@@ -326,6 +328,145 @@ neighbours per agent at the band's density. The options, in order of expected va
    parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
    knob for exactly this reason.
 
+
+## Threads, not just lanes (2026-11-05)
+
+Every optimisation before this one traded lanes: four agents at a time through `wide::f32x4`. That
+road is finished and measured. What none of it used was the other five cores, and a profile of the
+100,000-agent frame put 84% of samples inside `Crowd::steer` — a pure map over agents — running on
+one thread.
+
+ADR 0044 cuts a frame into contiguous slices of agents and hands them to the ECS compute pool. All
+four roads produce bit-identical output; only where the loop runs changes. Same host, same
+`--locked` build, 20 samples:
+
+| Road | 10,000 agents | 100,000 agents |
+| --- | --- | --- |
+| `wide` (the previous default) | 8.48 ms | 84.0 ms |
+| `scalar` (one thread, reference) | 9.73 ms | 93.0 ms |
+| `threads` (six threads, reference) | 4.31 ms | 30.0 ms |
+| `auto` (what ships) | **4.23 ms** | **29.6 ms** |
+
+The frame-level result, measured on the standard benchmarks either side of the change: 9.18 ms to
+4.27 ms at 10,000 agents (−48%) and 90.0 ms to 29.2 ms at 100,000 (−62%).
+
+Two things the numbers say that are easy to get wrong. The gain is 2.0× on six threads, not 6×: the
+scan is memory-bound, and the neighbour arrays are read by every slice. And a crowd below 1,024
+agents stays on the wide road, which is why `flock_frame/1000` did not move at all.
+
+The wide road is still single-threaded, and the two wins are additive in principle — four lanes
+across six threads. They are not combined yet, because a block writes four non-contiguous agent
+slots and splitting those writes needs either a slot-indexed output buffer or cached per-thread
+scratch. ADR 0044 records the plan and the honest expectation: 2–3× on top, not 6×, for the same
+bandwidth reason.
+
+## Perception and obstacle rebuilds (2026-11-05)
+
+`cargo bench --bench crowd -- perception`, ten samples, `--release`.
+
+| Case | Time | Per unit |
+| --- | ---: | ---: |
+| 10,000 observers against 128 live records | 21.7 ms | 2.2 µs observer |
+| 512 observers against 4,096 live records in a 40 m square | 35.8 ms | 70 µs observer |
+| 512 observers against 4,096 live records spread over 400 m | 9.6 ms | 19 µs observer |
+| 64×64 rebuild, 32 obstacles | 3.7 µs | one full publish |
+
+The two 4,096-record rows are the interesting pair: same record count, same code, 3.8× apart,
+because a linear scan pays the same price for a record on the far side of the level as for one on
+top of the observer. That 9.6 ms floor — 4.7 ns per record per observer — was the scan tax.
+
+Half of it is gone. The buffer now keeps a conservative bounding box, so an observer with nothing
+nearby returns in O(1), and a `StimulusIndex` buckets the live records so an observer only examines
+its own neighbourhood:
+
+| Case | Linear | Indexed | |
+| --- | ---: | ---: | --- |
+| 4,096 records, 40 m square | 36.4 ms | 36.4 ms | index has nothing to prune, so it delegates |
+| 4,096 records, 400 m square | 9.6 ms | 4.0 ms | **2.4× faster** |
+| grid rebuild, 4,096 records | — | 69 µs | amortised over every observer due that tick |
+
+The index is bit-identical to the linear scan by construction (candidate superset, no duplicates,
+total order) and the parity tests drive randomised worlds to prove it; ADR 0047 records the
+argument. Band-scoped observer sets — only observers whose tier consumes perception pay, each with
+its own interval — remain open as `band-scoped-perception`, and that is where the 100,000 case is
+won.
+
+Three optimisations are already banked, the largest being bounded insertion into the six result
+slots instead of collect-sort-truncate: 87.1 ms → 35.8 ms on the dense case. At 128 live records
+and the default six-tick interval, a 10,000-NPC crowd that perceives on every tick of its band
+costs 3.6 ms a frame, which is the number to judge a mid-band budget against.
+
+The obstacle rebuild is a non-issue at 64×64: one publish is 3.7 µs, so even a 1,024-cell budget
+spread over 16 frames is noise next to a steering pass. Its cost scales with the grid and the
+obstacle count, not with the population.
+
+## Removing the last two lint overrides, and what it cost (2026-11-05)
+
+`kernel-bounds-checks` removed the final `#[expect(clippy::indexing_slicing)]` in the crate, which
+covered 62 index expressions across `application::packed` and the wide kernel of
+`application::crowd`. The conversion is `buffer[index]` → `buffer.get(index)`, and the assumption was
+that it costs nothing because a subscript bounds-checks anyway. Measured against a saved baseline
+(10,000 agents, `cargo bench --bench crowd -- crowd_kernel`):
+
+| Case | Baseline | `get` in the inner loop | Row buffer, slice per cell |
+| --- | --- | --- | --- |
+| `crowd_kernel/planar` | 2.021 ms | 2.208 ms (**+9.1%**) | 2.025 ms (+0.1%) |
+| `crowd_kernel/volumetric` | 1.810 ms | 1.859 ms (+1.5%) | 1.787 ms (**−2.1%**) |
+| `crowd_kernel/dense` | 21.51 ms | 25.61 ms (**+18.5%**) | 21.71 ms (+0.5%) |
+
+The regression lives in the neighbour loop, and only shows when cells are full — `volumetric` spreads
+agents over 20 m in Y and barely moved. Two fixes, in order:
+
+1. **Put the row back together.** `Soa` now holds one 28-byte `SoaRow` per agent (position, velocity,
+   identity) instead of seven parallel `Vec<f32>`s. On its own this was neutral (still +19%), because
+   the check was still in the loop.
+2. **Hoist the check out of the loop.** The bucket already knows `begin..end`, so the scan slices that
+   range once per cell and walks the rows. No check, no `Option`, no index in the inner loop.
+
+With both, the kernel is 2% *ahead* of where it started on `volumetric` and at parity on `dense`
+(+0.5%, inside the run-to-run spread), and the avoidance pair improved too:
+
+| Case | Baseline | After |
+| --- | --- | --- |
+| `steering_step/32_neighbours` | 153.3 ns | 152.4 ns (−0.7%) |
+| `crowd_avoidance/steer_only/100000` | 25.35 ms | 24.10 ms (−4.7%) |
+| `crowd_avoidance/steer_and_avoid/100000` | 38.36 ms | 36.42 ms (−5.1%) |
+
+The 2D `application::packed` kernel took the same conversion with no such trouble — it walks rows
+with `iter`/`zip` and unpacks its lanes with literal indices, so the bound was already outside the
+loop (`cargo bench --bench packed`, same baseline method):
+
+| Case | Baseline | After |
+| --- | --- | --- |
+| `packed_steer/steer_integrate_advance/5000` | 2.239 ms | 2.183 ms (−2.5%) |
+| `packed_steer/steer_integrate_advance/50000` | 55.72 ms | 55.91 ms (+0.3%) |
+| `packed_density/5000_agents/256` | 2.227 ms | 2.258 ms (+1.4%) |
+| `packed_density/5000_agents/128` | 6.721 ms | 6.639 ms (−1.2%) |
+
+Ten samples per case, run on the machine described above; deltas below ~1.5% are not distinguishable
+from run-to-run noise. [ADR 0049](adr/0049-row-major-neighbour-broadcast.md) records the sequence,
+because the interesting part is that the mechanical conversion was not free everywhere.
+
+## Reciprocal avoidance, on and off (2026-11-05)
+
+`cargo bench --bench crowd -- crowd_avoidance`, `--release`, default features (`simd` and
+`threads`), ten samples, Criterion's own warm-up. The crowd is the spawn spiral in three
+dimensions at 1.6 m spacing, which is denser than a real square and therefore a pessimistic
+measurement of the neighbour count.
+
+| Population | `steer_only` | `steer_and_avoid` | Avoidance alone |
+| ---------: | -----------: | ----------------: | --------------: |
+|     10,000 |     2.25 ms  |          3.27 ms  |       +1.01 ms  |
+|    100,000 |    25.74 ms  |         38.08 ms  |      +12.34 ms  |
+
+The first implementation was scalar and cost 3.96 ms at 10,000; moving it onto the same
+`SteeringRoad` the kernel uses (read the pre-pass snapshot, write disjoint slots) took it to
+1.01 ms, a 3.9x improvement, and the parallel and scalar passes are held to bit equality by
+`a_parallel_avoidance_pass_matches_the_scalar_one`.
+
+What this means in practice: avoidance costs about 45% of a steering frame at both sizes, because
+both are neighbour-pair bound and the density is the same. A game that tiers its crowd pays it on
+the steered agents only; ambient agents are avoided but do not avoid (ADR 0045).
 
 ## Four-agent SIMD steering (2026-11-04)
 
@@ -631,3 +772,173 @@ is the knob for a game that steers more of its crowd.
 
 The re-open trigger is enforced: `cargo bench --bench crowd -- flock_frame_cell` then
 `python3 scripts/cell_size_gate.py` (3% warn, 10% fail), which is what CI's `cell-size-gate` job runs.
+
+## The whole crowd bench, after the optimisation pass (2026-11-05)
+
+`cargo bench --locked --bench crowd`, one run of every target on an otherwise idle machine
+(aarch64, 4 physical cores, release profile). These are medians, not bests, and the point of
+recording the whole suite is that a table with holes is how a regression hides.
+
+| Case | Median |
+| --- | --- |
+| `flock_frame_road/auto/10000` | 5.217 ms |
+| `flock_frame_road/wide/10000` | 11.61 ms |
+| `flock_frame_road/threads/10000` | 5.236 ms |
+| `flock_frame_road/scalar/10000` | 14.09 ms |
+| `flock_frame_road/auto/100000` | 38.69 ms |
+| `flock_frame_road/wide/100000` | 111.9 ms |
+| `flock_frame_road/threads/100000` | 38.36 ms |
+| `flock_frame_road/scalar/100000` | 137.6 ms |
+| `flock_frame_cell/10000/13.5m_2^20` | 5.226 ms |
+| `flock_frame_cell/10000/9m_2^21` | 5.237 ms |
+| `flock_frame_cell/10000/7m_2^22` | 5.240 ms |
+| `flock_frame_cell/100000/13.5m_2^20` | 39.22 ms |
+| `flock_frame_cell/100000/9m_2^21` | 38.64 ms |
+| `flock_frame_cell/100000/7m_2^22` | 38.53 ms |
+| `spatial_query/radius_8m/1000` | 140.2 ns |
+| `spatial_query/radius_8m/10000` | 184.3 ns |
+| `spatial_query/radius_8m/100000` | 557.7 ns |
+| `steering_step/32_neighbours` | 152.2 ns |
+| `crowd_kernel/planar` | 2.055 ms |
+| `crowd_kernel/volumetric` | 1.806 ms |
+| `crowd_kernel/dense` | 21.45 ms |
+| `crowd_avoidance/steer_only/10000` | 2.226 ms |
+| `crowd_avoidance/steer_and_avoid/10000` | 3.255 ms |
+| `crowd_avoidance/steer_only/100000` | 19.9-22.9 ms |
+| `crowd_avoidance/steer_and_avoid/100000` | 31.1-34.9 ms |
+| `perception/512_observers_4096_records` | 36.63 ms |
+| `perception/512_observers_4096_records_indexed` | 36.65 ms |
+| `perception/512_observers_4096_records_spread_400m` | 10.21 ms |
+| `perception/512_observers_4096_records_spread_400m_indexed` | 3.892 ms |
+| `perception/rebuild_4096_records` | 68.29 µs |
+| `perception/obstacle_rebuild_64x64_32_obstacles` | 3.682 µs |
+
+Three things the table is honest about.
+
+**The kernel did not move.** Against the baseline saved before the row-major rewrite
+(`--save-baseline before`), `crowd_kernel/planar` is 2.021 → 2.055 ms, `volumetric` 1.813 → 1.806 ms
+and `dense` 21.48 → 21.37 ms. A second run of the same binary puts the run-to-run spread at ±1.4%,
+so all three are unchanged — which is the claim ADR 0049 makes: the bounds checks left without the
+kernel slowing down, and that is all it claims.
+
+**Reciprocal avoidance costs about half a steering pass.** At 10,000 the step goes from 2.226 ms to
+3.255 ms (+46%); at 100,000 from roughly 21 to 34 ms (+55%). That is the price of a second neighbour
+pass over the same cells, and it buys the symmetric pair solve in ADR 0045. It is on by default in
+`BoidsConfig` — two agents walking through each other is a bug a player sees in the first minute,
+and 1.03 ms on top of a 2.2 ms steering pass inside a 5.2 ms frame at 10,000 agents is not the place
+to save it — and
+`with_avoidance(None)` is the opt-out for a game that measures differently on its own hardware.
+
+**The 100,000-agent avoidance cases are quoted as a range, not a delta.** Two runs of the same
+binary gave 19.9 and 22.9 ms for `steer_only`, a 15% spread; the case takes 10 samples and allocates
+100,000 agents' worth of state between them. A table that quoted the better run would be a table
+that lies, so the range is what it says. The 10,000-agent cases repeat to within 1.5% and are quoted
+as a single number.
+
+`perception/*_indexed` matching or beating the linear scan on the dense case, and beating it 2.6× on
+the spread one, is the bucketed index from ADR 0047 doing what it was added for; on a dense crowd
+the index's grid window covers everything, so the fallback keeps it honest instead of slower.
+
+## The software rasteriser against a wgpu pipeline (2026-11-05, ADR 0050)
+
+The playground renders with a CPU rasteriser, because CI and the remote shells this project is
+developed in have no window and no GPU. (When this section was written they also had no `libvulkan`;
+they now have a *software* Vulkan driver, `llvmpipe`, which is a CPU in a GPU's clothing — the
+amendment at the end of this page measures it.) That is a deliberate choice with a cost, and
+the cost is worth recording: `demo/benches/render_pipeline.rs` draws the same 2,000-body district
+scene twice, once through `raster.rs` and once through a real `wgpu` device on its `noop` backend.
+
+The wgpu number is the CPU half of a frame — pipeline, buffers, instance upload, render pass,
+submission — with the commands discarded. It says nothing about GPU time, and this ADR claims
+nothing about it.
+
+`cargo bench --manifest-path demo/Cargo.toml --bench render_pipeline`, release, this sandbox:
+
+| Case | Median | Notes |
+| --- | --- | --- |
+| `software/full/600x375` | 850 ms | 2,064 instances, full mesh detail, supersampled |
+| `software/interactive/112x72` | 19.0 ms | budget: 420 bodies, 240 m, 0.75 px cull, 24 m impostors |
+| `wgpu/full/600x375` | 33.6 µs | noop backend: encode and submit |
+| `wgpu/interactive/112x72` | 34.7 µs | unchanged by the framebuffer size |
+| `wgpu_upload/2064_instances` | 106 µs | isolated `write_buffer` of 165 KB |
+
+What the table says: the CPU cost of a wgpu frame here is a fixed 34 µs that scales with the draw
+list, not with the picture; the software path's cost scales with both, and its pixel work is what the
+GPU would have done. What it also says is that the interactive budget is a rendering decision, not a
+simulation one — the crowd is the same crowd, and the 45× between the two software cases is the LOD
+thresholds, the sub-pixel cull and a framebuffer a fiftieth of the area. Against a wgpu frame's CPU
+half the ratio is about 550× at terminal size and about 25,000× at full detail.
+
+Measured in a real terminal (`script -qec` on a pty, 112 × 40 pixels), the interactive front end ran
+111 frames in four seconds — 28 fps, 35 ms a frame, just over the loop's 30 fps pacing target, so the
+loop never sleeps and the frame time is the whole cost including the terminal write. The narrower
+112 × 72-pixel picture in the table above is 19.0 ms, so a terminal roughly twice this size lands
+between the two.
+
+## The level-of-detail cross-fade (2026-11-06, ADR 0050)
+
+The pairs below are the same interactive frame, same scene, same camera, differing only in
+`Shot::impostor_band`: eight metres of coverage cross-fade against a hard switch. `cargo bench --bench
+render_pipeline -- "software/interactive"`, release, 2 s warm-up, 4 s measurement, on the machine that
+produced the rest of this page.
+
+| case | median |
+| --- | --- |
+| `software/interactive/112x72` (band 8 m) | 19.39 ms |
+| `software/interactive-band-off/112x72` (hard switch) | 19.63 ms |
+
+The difference is inside the run-to-run noise, and that is the finding: at 112 cells only a handful of
+bodies sit inside the sixteen-to-twenty-four-metre window, each drawn as a mesh *and* a card, and the
+cost is lost in the frame. The band is free where it is invisible. It is not free on a 300-cell
+terminal, where a body is eight to ten pixels and a body inside the band costs its mesh plus two
+triangles — the accounting test in `render3d` pins exactly that, and there is no measurement above
+because no display of that size exists here.
+
+## A GPU frame on a software Vulkan adapter (2026-11-06, ADR 0050 amendment)
+The sandbox now has a Vulkan loader and an X server, and no `/dev/dri` render node: the only adapter is
+`llvmpipe (LLVM 20.1.2, 128 bits)`, reported as `device_type: Cpu`. `demo-gpu/` renders the same
+district view through an instanced `wgpu` pipeline, so the GPU half of the comparison finally has a
+number — a number about that driver, not about a graphics card.
+`cargo bench --manifest-path demo-gpu/Cargo.toml --bench frame`, release, this sandbox, 600x375,
+615 instances, 7 draws, 5,401,392 triangles, adapter `Vulkan | llvmpipe (LLVM 20.1.2, 128 bits)`:
+| Case | Median | Interval |
+| --- | --- | --- |
+| `frame` (submit and wait) | 974.56 ms | 968.84 - 980.93 ms |
+| `eight_frames_per_drain` | 7.8932 s (986.6 ms/frame) | 7.8580 - 7.9271 s |
+| `frame_with_readback` | 997.35 ms | 994.51 - 1000.5 ms |
+Three facts, and no fourth. A CPU-backed adapter's latency and throughput are the same number (974 ms
+against 987 ms per frame), because there is no second processor to overlap with: the frame has nothing
+to pipeline into. Shipping the frame back costs about 23 ms, which a windowed front end would never pay.
+And the GPU path is not faster than the software rasteriser here — 974 ms against 850 ms for the same
+composition at the same size — because both are the same kind of work on the same kind of processor; the
+GPU path draws every triangle of every body (5.4 million) where the software path spends its time on
+impostors and a culled ground.
+The one number worth carrying forward is the CPU half, measured inside the binary rather than through a
+benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame —
+create the encoder, one render pass, seven draws, one submit. On real hardware that 0.11 ms would be the
+frame's CPU cost and the GPU would be doing the work behind it. This sandbox cannot show that, and no
+figure here pretends to.
+A trap worth recording, because it cost an hour: a benchmark case that submitted frames without ever
+draining the queue reported 992 ms for what it called `encode`, while the same submit inside the binary
+measured 0.1 ms. The loop was measuring saturation, not encoding. The cases are now named after what
+their loops do — `frame`, `eight_frames_per_drain`, `frame_with_readback` — and
+`docs/playbooks/gpu-demos.md` writes the rule down for the next person.
+## Personality costs nothing per frame
+
+`crowd_temperament` in `benches/crowd.rs` measures the same 10,000-agent volumetric fixture twice:
+once with the configured weights for everyone, once with a bias on every agent — the expensive
+shape, since a crowd where only the near ring has a personality pays a fraction of it.
+
+| Case | Median |
+|---|---|
+| `crowd_temperament/uniform` | 1.8766 ms |
+| `crowd_temperament/every_agent_biased` | 1.8772 ms |
+
+The difference is 0.03%, inside this machine's run-to-run noise: one slice lookup, five multiplies
+and a wider `desired_for` argument per agent, against 1.88 ms of neighbour work. `tests/crowd_no_alloc.rs`
+runs the same shape through a counting allocator and asserts zero allocations after warm-up, so the
+buffer is grown once and cleared rather than freed (ADR 0051).
+
+Needs decay is not in this table because it is not per frame: the system runs once every
+`NeedsDecay` ticks (eight by default) and touches one component pair per NPC when it does.
+

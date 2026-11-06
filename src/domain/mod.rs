@@ -12,9 +12,13 @@ pub mod flow;
 pub mod generator;
 pub mod groups;
 pub mod ids;
+pub mod links;
 #[cfg(feature = "memory")]
 pub mod memory;
 pub mod nav;
+#[cfg(feature = "navmesh")]
+pub mod navmesh;
+pub mod obstacle_nav;
 pub mod population;
 pub mod rng;
 #[cfg(feature = "memory")]
@@ -22,6 +26,7 @@ pub mod saves;
 pub mod spatial;
 pub mod spawn;
 pub mod steering;
+pub mod stimulus;
 #[cfg(feature = "memory")]
 pub mod telemetry;
 pub mod temperament;
@@ -40,12 +45,17 @@ pub use groups::{
     MAX_FACTIONS, MAX_NESTING_DEPTH, QueuedDirective, Relation,
 };
 pub use ids::{GroupId, NpcId, SimSeed, SlotId};
+pub use links::{LinkTable, LinkTag, NavLink, UNTAGGED};
 #[cfg(feature = "memory")]
 pub use memory::{
     DecayPolicy, Encounter, EncounterKind, MemoryArchive, MemoryIndex, MemorySlot, MemoryStore,
     NpcMemories, SubjectId,
 };
 pub use nav::{GridNavSource, NavBounds, NavCell, NavError, NavSource, NavVersion};
+#[cfg(feature = "navmesh")]
+pub use navmesh::{
+    AreaId, AreaMask, Crossing, NavMesh, NavMeshError, NavMeshSource, NavPolygon, PathPoint,
+};
 pub use population::{PopulationConfig, PopulationMode, PopulationSize, SlotCount};
 pub use rng::RngStream;
 #[cfg(feature = "memory")]

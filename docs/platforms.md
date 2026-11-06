@@ -47,8 +47,12 @@ test that pins them to `EncounterKind::flag`, rather than import a gated module.
 | `--no-default-features --features memory,serde` | compiles |
 | `--features memory,simd` | compiles |
 
-Nothing in the simulation path needs a clock, a filesystem or threads. The save format is
-bytes in and bytes out, which is the only thing wasm makes awkward (no `File`), and the
+Nothing in the simulation path needs a clock or a filesystem. Threads are optional and only
+ever a speed choice: the `threads` feature (on by default) spreads a steer pass over the ECS
+compute pool, and `default-features = false` builds compile and behave identically on one thread
+(ADR 0044). wasm builds compile with the pool present; a browser gives it one worker unless the
+game configures more, and `Crowd::set_road` pins the wide road when that is not wanted. The save
+format is bytes in and bytes out, which is the only thing wasm makes awkward (no `File`), and the
 crate never opened one.
 
 ### What is *not* claimed

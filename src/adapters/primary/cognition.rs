@@ -316,19 +316,26 @@ impl ThinkSchedule {
 ///
 /// Runs in [`FlockSet::Perception`](crate::adapters::primary::plugin::FlockSet::Perception):
 /// how close you are is a fact about the world, and the tier is derived from it.
-#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+/// What `assign_tiers` reads and writes per NPC, lifted out of the signature so the system reads
+/// as a system rather than as a nested tuple.
+type TierTargets<'a> = (
+    &'a Npc,
+    &'a Transform,
+    &'a mut NpcTier,
+    &'a mut NpcThinkWeight,
+    Option<&'a NpcEngaged>,
+);
+
+/// Turn distance and engagement into a tier and a weight, with hysteresis and a ration.
+///
+/// Runs in [`FlockSet::Perception`](crate::adapters::primary::plugin::FlockSet::Perception):
+/// how close you are is a fact about the world, and the tier is derived from it.
 pub fn assign_tiers(
     weight_config: Res<WeightConfig>,
     tier_config: Res<TierConfig>,
     mut schedule: ResMut<ThinkSchedule>,
     focus: Query<&Transform, With<PlayerFocus>>,
-    mut npcs: Query<(
-        &Npc,
-        &Transform,
-        &mut NpcTier,
-        &mut NpcThinkWeight,
-        Option<&NpcEngaged>,
-    )>,
+    mut npcs: Query<TierTargets<'_>>,
 ) {
     let ration = tier_config.promotions_per_tick;
     schedule.begin_tick();
@@ -368,7 +375,6 @@ fn nearest_focus_squared(
 }
 
 /// Record every brain's declared cost and ask each tier who thinks this tick.
-#[allow(clippy::needless_pass_by_value)]
 pub fn plan_thinks(
     clock: Res<crate::application::SimClock>,
     config: Res<TierConfig>,
@@ -399,7 +405,6 @@ pub fn plan_thinks(
 /// Without a [`FlockRegistry`] resource there is nothing to dispatch leaves to, so nothing
 /// is ticked: a game that forgot to register its logic sees `chosen` counts with no effect
 /// rather than a crowd that mysteriously stands still.
-#[allow(clippy::needless_pass_by_value)]
 pub fn tick_chosen(
     clock: Res<crate::application::SimClock>,
     schedule: Res<ThinkSchedule>,
@@ -441,6 +446,7 @@ pub fn tick_chosen(
 
 #[cfg(test)]
 mod tests {
+    use crate::testkit::OrDie;
     use std::sync::Arc;
 
     use bevy_app::{App, Update};
@@ -455,7 +461,7 @@ mod tests {
     }
 
     fn tree() -> Arc<BehaviorTree> {
-        Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).expect("a leaf is a tree"))
+        Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
     }
 
     fn spawn(app: &mut App, id: u32, x: f32, cost: VirtualCost) {
@@ -537,7 +543,7 @@ mod tests {
                 .iter(app.world())
                 .find(|(npc, _)| npc.0.index() == 1)
                 .map(|(_, entity)| entity)
-                .expect("the far NPC exists")
+                .or_die()
         };
         app.world_mut().entity_mut(entity).insert(NpcEngaged);
         app.update();
@@ -545,7 +551,7 @@ mod tests {
             .world()
             .get::<NpcTier>(entity)
             .map(|tier| tier.0)
-            .expect("the far NPC exists");
+            .or_die();
         assert_eq!(tier, CognitionTier::Social);
     }
 

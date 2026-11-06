@@ -359,13 +359,14 @@ fn stride_for(cost: u64, weight: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{GetOrDie, GetOrDieMut, OrDie};
 
     const COST: VirtualCost = VirtualCost::from_micros(4);
 
     fn enrolled(count: u32, weight: u32) -> ThinkScheduler {
         let mut scheduler = ThinkScheduler::new(count);
         for id in 0..count {
-            scheduler.enrol(id, weight).expect("in range");
+            scheduler.enrol(id, weight).or_die();
         }
         scheduler
     }
@@ -390,7 +391,7 @@ mod tests {
         let mut out = Vec::new();
         let plan = scheduler.plan(VirtualCost::from_micros(50), |_| COST, &mut out);
         assert_eq!(plan.spent.get(), 48_000);
-        assert_eq!(*out.last().expect("chosen"), 11);
+        assert_eq!(*out.last().or_die(), 11);
     }
 
     #[test]
@@ -424,10 +425,10 @@ mod tests {
         // fits roughly eight cheap thinks, must come out about three to one.
         let mut scheduler = ThinkScheduler::new(100);
         for id in 0..50 {
-            scheduler.enrol(id, 1).expect("in range");
+            scheduler.enrol(id, 1).or_die();
         }
         for id in 50..100 {
-            scheduler.enrol(id, 3).expect("in range");
+            scheduler.enrol(id, 3).or_die();
         }
         let mut out = Vec::new();
         let mut runs = [0_u32; 2];
@@ -439,10 +440,10 @@ mod tests {
                 &mut out,
             );
             for id in &out {
-                runs[usize::from(*id >= 50)] += 1;
+                *runs.at_mut(usize::from(*id >= 50)) += 1;
             }
         }
-        let ratio = f64::from(runs[1]) / f64::from(runs[0]);
+        let ratio = f64::from(runs.at(1)) / f64::from(runs.at(0));
         assert!(
             (2.8..=3.2).contains(&ratio),
             "weight 3 should get three times the thinking, got {ratio} ({runs:?})"
@@ -457,7 +458,7 @@ mod tests {
         let mut scheduler = ThinkScheduler::new(100);
         let cost = |id: u32| VirtualCost::from_micros(1 + u64::from(id % 7));
         for id in 0..100 {
-            scheduler.enrol(id, 1).expect("in range");
+            scheduler.enrol(id, 1).or_die();
         }
         let budget = VirtualCost::from_micros(20);
         let mut out = Vec::new();
@@ -467,7 +468,7 @@ mod tests {
             scheduler.advance(Tick::new(ticks));
             scheduler.plan(budget, cost, &mut out);
             for id in &out {
-                seen[*id as usize] = true;
+                *seen.at_mut(*id as usize) = true;
             }
             ticks += 1;
         }
@@ -517,14 +518,14 @@ mod tests {
         // spawned crowd starve the residents for as many ticks as it has members.
         let mut scheduler = ThinkScheduler::new(11);
         for id in 0..10 {
-            scheduler.enrol(id, 1).expect("in range");
+            scheduler.enrol(id, 1).or_die();
         }
         let mut out = Vec::new();
         for tick in 0..200 {
             scheduler.advance(Tick::new(tick));
             scheduler.plan(VirtualCost::from_micros(12), |_| COST, &mut out);
         }
-        scheduler.enrol(10, 1).expect("in range");
+        scheduler.enrol(10, 1).or_die();
 
         let mut runs = 0_u32;
         let mut first_tick = None;
@@ -536,7 +537,7 @@ mod tests {
                 first_tick.get_or_insert(tick);
             }
         }
-        let first = first_tick.expect("the newcomer ran at least once");
+        let first = first_tick.or_die();
         assert!(
             first <= 210,
             "the newcomer waited {} ticks for its first think",
@@ -560,7 +561,7 @@ mod tests {
         // `plan` and this test fails with a burst.
         let mut scheduler = ThinkScheduler::new(16);
         for id in 0..16 {
-            scheduler.enrol(id, 1).expect("in range");
+            scheduler.enrol(id, 1).or_die();
         }
         let expensive = |id: u32| {
             if id == 0 {
@@ -604,7 +605,7 @@ mod tests {
             for id in 0..count {
                 scheduler
                     .enrol(id, if id % 4 == 0 { 4 } else { 1 })
-                    .expect("in range");
+                    .or_die();
             }
             let mut out = Vec::with_capacity(count as usize);
             let mut chosen = 0_u64;
@@ -631,7 +632,7 @@ mod tests {
     #[test]
     fn enrolment_refuses_what_it_cannot_serve() {
         let mut scheduler = ThinkScheduler::new(2);
-        scheduler.enrol(0, 1).expect("in range");
+        scheduler.enrol(0, 1).or_die();
         assert_eq!(
             scheduler.enrol(0, 1),
             Err(SchedulerError::AlreadyEnrolled { id: 0 })
@@ -649,7 +650,7 @@ mod tests {
     #[test]
     fn an_absurd_cost_saturates_instead_of_wrapping() {
         let mut scheduler = ThinkScheduler::new(4);
-        scheduler.enrol(0, 1).expect("in range");
+        scheduler.enrol(0, 1).or_die();
         let mut out = Vec::new();
         for tick in 0..4 {
             scheduler.advance(Tick::new(tick));

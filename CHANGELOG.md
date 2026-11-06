@@ -4,7 +4,158 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+- **Temperament reaches the simulation, and this is a behaviour change.** A personality now scales
+  that NPC's own steering weights — five multipliers on `[separation, alignment, cohesion, seek,
+  arrive]`, centred on `1.0` and clamped to `0.25 ..= 4.0` so a game's tuning stays the baseline —
+  and so do unmet needs, which decay on their own every eight ticks by default
+  (`BoidsConfig::needs`, `NeedsDecay`). The measurable effect: guards hold rank with the highest
+  alignment (1.164) and lowest separation (0.918), urchins the reverse, merchants cluster hardest
+  (cohesion 1.237). Both knobs are `Option`-shaped and turn the feature off cleanly
+  (`with_temperament(None)`, `with_needs_decay(None)`); neither adds a Cargo feature, a dependency
+  or an allocation, and the biased frame costs nothing measurable (1.8772 ms against 1.8766 ms for
+  10,000 agents). Spawned personalities changed for a given seed — the archetype is now a preset an
+  individual deviates from by a third — and `NpcBundle` gained a `needs` field, so a save made
+  after this change carries different temperaments than one made before it (ADR 0051).
+- **The terminal capture is regenerated, not screenshotted.** `docs/demo/ashfall-play.png` is now
+  produced by `demo/examples/frame_capture.rs`, which renders through the client's own `Session` and
+  `Budget` at 120 x 44 cells and blows each framebuffer pixel up four times with the new
+  `Image::scaled` — nearest-neighbour, so a block is the pixel it came from. The capture is the
+  procession view with the impostor cross-fade active (`--band 8`, against `--band 0` for the hard
+  switch it replaced; the two differ by 1,152 pixels, which is how the band was checked), and both
+  captions now name the command that makes it, so the image cannot drift away from the code.
+
+- **A GPU front end, and a playbook for building the next one.** `demo-gpu/` renders the Ashfall
+  district through an instanced `wgpu` pipeline over the same scene, meshes and `Shot` table the
+  software rasteriser uses, with `Backend::{Auto, Vulkan, Gl, Noop}` so it validates and encodes on a
+  machine with no driver. `benches/frame.rs` separates a frame's latency (`frame`), its throughput
+  (`eight_frames_per_drain`) and the cost of shipping pixels back (`frame_with_readback`), and reports
+  the adapter it measured: on this sandbox that is `llvmpipe`, a CPU Vulkan driver, at 974.56 ms for
+  600x375 with 5,401,392 triangles. `docs/playbooks/gpu-demos.md` is the agent-facing instruction set
+  — environment classification, adapter policy, pipeline and shader rules, correctness gates, the
+  benchmarking trap that made a drain-free loop look like encode time, and the documentation duties.
+- **Documentation audit.** ADR 0022 had been on disk and missing from the index since it landed; the
+  index has it now. ADR 0050 gains an amendment correcting two premises that have since changed (this
+  environment has an X server and a *software* Vulkan driver, not the absence of `libvulkan`) and
+  recording the GPU measurements. The release checklist's "23 ADRs" count, which had drifted by
+  twenty-eight, is now a rule instead of a number.
+
 ## [Unreleased]
+- **The level-of-detail switch cross-fades instead of popping.** `Shot::impostor_band` widens the
+  switch into a window: a body between `impostor_distance - impostor_band` and `impostor_distance` is
+  drawn as both, the billboard claiming an increasing share of the pixels while the mesh gives its own
+  up. The fade is a per-pixel ordered dither (`Renderer::triangle_coverage`), not a blend, because a
+  blended fragment cannot write depth and a body that cannot write depth stops occluding itself — the
+  blending implementation drew blotches where a hidden facet overpainted a visible one. The shipped
+  views keep the band at zero, so the committed PNGs are unchanged. The interactive frame measures
+  19.39 ms with the band against 19.63 ms without, which is this machine's noise floor. Where the
+  billboard pass can still go faster — flat-shaded cards, fused card passes, cards aligned to the
+  mesh's own bounds — is written up in `docs/demo/billboard-optimisations.md`.
+- **The playground is explorable, in a terminal.** `demo/src/bin/ashfall-play.rs` flies the same
+  scene the PNGs show — `wasd`, arrows, `1`-`5` to jump views, `p` for the scripted flight — with no
+  window, GPU or widget toolkit: the software rasteriser draws into a fixed-size image and the
+  terminal paints it two pixels to a cell with `▀`. `session.rs` is a pure, tested core (camera, view,
+  lens, draw budget); `input.rs` decodes keys with an escape timeout. To hold 28 fps the interactive
+  path draws under a `Budget` (420 bodies, 240 m, sub-pixel triangle cull) and past 24 m a body is a
+  two-triangle billboard instead of an 11,000-triangle mesh — 850 ms a frame becomes 19.0 ms at
+  112 by 72 pixels, and 38 ms in a real terminal, which is 26 fps. `--play N` runs the same flight headlessly and writes a PNG per frame plus
+  `playback.json`, so CI can exercise it and `ffmpeg` can turn it into a video.
+- **The rasteriser's CPU cost is measured against a wgpu pipeline.** `demo/benches/render_pipeline.rs`
+  draws the same 2,000-body district scene through `raster.rs` and through a real `wgpu` device on its
+  `noop` backend — pipeline, buffers, instance upload, render pass, submission, commands discarded.
+  The CPU half of a wgpu frame is 33.6 µs for 2,064 instances and does not care how big the target is;
+  the software path is 850 ms at full detail and 19.0 ms under the interactive budget. Figures,
+  caveats and what they do *not* say are in `docs/performance.md` and ADR 0050.
+- **A 3D playground with an animated crowd.** `demo/src/bin/ashfall-3d.rs` renders five views of the
+  same city with no GPU, window or renderer dependency: a software rasteriser (`raster.rs`, with
+  near-plane clipping, a depth buffer, footprint-aware procedural shading, supersampling and a
+  deflate/PNG writer) over glTF geometry (`gltf.rs`). Skeletons are handled too — `skinned.rs` reads
+  a rig, samples a clip, composes joint matrices and skins the mesh per instance — so `procession`
+  shows eighteen walkers on one CC0 KayKit mannequin at staggered phases rather than a row of
+  T-posed statues. The Meshy bodies stay static on purpose: generated meshes carry no skeleton, and
+  the demo is honest about which asset carries what.
+- **A playground that ships assets and evidence.** `demo/` is a separate package: a six-district
+  city of 2096 ruined blocks, a crowd placed by district keyed on `NpcId`, and four artefacts per
+  run (SVG plan, engine-agnostic scene, run report, asset manifest). Six models were generated with
+  Meshy — three bodies, three props — and `demo/tools/shrink_glb.py` re-encoded their embedded 2K
+  textures and re-laid the binary chunk, taking 22.9 MB to 2.4 MB with geometry byte-identical.
+  `demo/tests/assets.rs` holds every shipped file to a size budget and its container to glTF 2;
+  `demo/tests/playground.rs` proves the crowd repeats, differs by seed, lands in its settlements and
+  actually walks. Three findings are recorded in `demo/README.md`, including that `App::new()` has no
+  `TimePlugin` and therefore a headless crowd integrates at zero delta, and the band plugin is
+  tracked with a `band-focus-plane` task because it measures the player's distance on `x`/`y` while
+  the 3D crowd uses `x`/`z`.
+- **One lint spine, and no exceptions.** `[lints]` in `Cargo.toml` carries the whole policy:
+  `pedantic`, `nursery`, `cargo`, `perf` and `all` as warnings that CI promotes with
+  `-D warnings`, and `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
+  `cast_ptr_alignment` and `suspicious` denied outright — in `tests`, `benches` and `examples` as
+  well as `src`. 474 `.expect(…)` and 34 `.unwrap_err()` in the test tree moved to
+  `bevy_flock::testkit` (`OrDie`, `OrDieErr`, `GetOrDie`, `GetOrDieMut`), which reports a broken
+  fixture as `unreachable!` with the caller's message and location. No `#[allow]` or `#[expect]`
+  remains in tree except four `unsafe_code` expectations on counting allocators, the steering
+  kernels included. `application::packed` reads through
+  `get` and unpacks its lanes with a literal-index macro; the wide kernel of `application::crowd`
+  moved to one 28-byte row per agent and slices each bucket's range once, so the neighbour loop has
+  no bounds check in it at all. That last part was not cosmetic: a per-neighbour `get` measured 19%
+  slower on a dense crowd, and the row-plus-slice form is 2% faster than the array layout it
+  replaced (`docs/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way: it fails
+  on any override outside its (empty) sanctioned table, on a sanctioned entry that has disappeared,
+  and on a `Cargo.toml` whose `[lints]` no longer denies what the policy says it denies. Both
+  `docs/lint-policy.md` and the script's `--self-test` state and check what is enforced, and why. `raw_borrows_via_references`
+  and the two clippy 1.99 lints are enabled by a probe-gated CI job rather than the manifest, because
+  the pinned 1.97 toolchain cannot name them and an unknown lint name warns on every downstream build.
+- **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
+  already gathers removes the excess closing speed between each pair, split by priority, so two
+  agents walking at each other stop at the separation floor instead of sharing space.
+  `NpcAvoidancePriority` (default 1.0) is how a game says who yields; `BoidsConfig::with_avoidance`
+  turns it off. On by default. The pass runs on the same `SteeringRoad` as steering, is held to bit
+  equality between the scalar and threaded roads, and allocates nothing in a steady frame. Measured
+  at 10,000 agents: 2.25 ms steering, 3.27 ms with avoidance; at 100,000: 25.74 ms and 38.08 ms.
+- **Obstacle-driven navigation (ADR 0046).** `ObstacleNavPlugin` plus a `NavObstacle` component
+  derive a `GridNavSource` from the world's blockers, rebuilding at most `cells_per_tick` cells a
+  frame, a whole row at a time, and publishing atomically: the version increments once, on the step
+  that finishes the rebuild, so no NPC ever paths against a half-built wall.
+- **Stimulus perception (ADR 0047).** `StimulusBuffer` is a bounded, decaying ring of sights,
+  sounds and smells; `perceive` applies range, cone, age and an optional `Occluder`. `StimulusPlugin`
+  publishes from `StimulusSource` entities and writes `PerceivedStimuli` per observer on a tick
+  interval, so a guard can lose sight of a target and search without a special case in its tree.
+- **Navigation links and an optional navmesh (ADR 0048).** `NavLink` with a cost and a `LinkTag`
+  participates in flow-field relaxation rather than being post-processed, so a ladder can be the
+  only route to a floor, and `FlowField::link_tag_at` tells a leaf what it is about to walk onto.
+  The `navmesh` feature adds a polygon source with area costs and a funnel, with the funnel's
+  pinch-restart branches fixed to advance the apex to the opposite corner.
+- **Perception keeps six slots, not thousands.** `perceive` collected every hit and sorted them
+  before truncating to `max_results`; it now inserts in order into a bounded result set, which
+  costs one comparison per slot and no allocation. 75.7 ms → 35.8 ms on the dense benchmark, and
+  `the_bounded_insert_keeps_exactly_the_best_slots` is the parity test against the old behaviour.
+- **The feature extremes build again.** `cargo check --no-default-features --all-targets` failed on
+  main before this: `tests/memory_bridge.rs` imports `domain::memory`, and `Cargo.toml` never
+  declared `required-features = ["memory"]` for it, so the test compiled only in configurations that
+  happened to have the feature on. `fuzz_decoders` now declares it too rather than relying on
+  `#![cfg(feature = "memory")]` to reduce it to an empty binary that reports success.
+  `src/application/crowd.rs` had the matching lint bug: its `#[expect(clippy::indexing_slicing)]`
+  was unfulfilled without `simd` (the kernel that indexes), which `-D warnings` turns into an error,
+  and CI only linted `--all-features`. CI now lints and compiles both extremes with `--all-targets`.
+- **Perception stops scanning the whole world (ADR 0047).** `StimulusBuffer` keeps a conservative
+  bounding box, so an observer with nothing nearby returns in O(1); `StimulusIndex` buckets the live
+  records into a uniform grid rebuilt once per pass (69 µs for 4,096 records) and `perceive_indexed`
+  reads only the observer's neighbourhood. Identical output to the linear scan — candidate superset,
+  one cell per record, total-order selection — held by two randomised parity tests, and the dense
+  case falls back to the linear scan so it is never slower. 4,096 records over 400 m: 9.6 ms → 4.0 ms.
+  The ECS pass uses the index by default.
+- **Three fixes found by the above.** `steer_flock` wrote the kernel's desired velocity as
+  `(x, 0, y)`, dropping vertical and lateral motion; it now writes all three axes. Sorting a
+  `LinkTable` placed same-key edges after every equal key, leaving insertion order to decide ties.
+  `Crowd::begin` and `Crowd::order_by_cell` now share a count reset, so the order is idempotent and
+  the avoidance pass can reuse it.
+- **Steering uses every core (ADR 0044).** `Crowd::steer` cuts a frame into contiguous slices of
+  agents and hands them to the `ComputeTaskPool`, with `SteeringRoad { Auto, Wide, Threads, Scalar }`
+  to pin the choice and `BoidsConfig::with_road` to set it. All four roads assert bit equality with
+  the scalar reference, so determinism and the whole-world digest are untouched. Measured on six
+  vCPUs: 8.48 ms → 4.23 ms at 10,000 agents and 84.0 ms → 29.6 ms at 100,000, against the wide road
+  this supersedes. New `threads` feature (on by default) enables `bevy_tasks/multi_threaded`; without
+  it the pool has one thread and `Auto` stays on the wide road. `flock_frame_road` joins the
+  benchmark suite so the four roads are always measured on the same host in one run.
 - **The book, and a README you can check.** `docs/book/src` is an eight-chapter guide
   (getting started, the model, crowds at scale, behaviour, memory, extending, debugging,
   costs) that reads as Markdown on a forge and builds with `mdbook`. The README gains a
@@ -162,6 +313,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Crowd` users only: `push` and `desired` use `[f32; 3]`, and `configure` lost its `plane`
   argument.
 
+### Asset pipeline skills, ported and made checkable
+
+`skills/` gains four playbooks carried over from the TrapGrid Arsenal project and rewritten for a
+crowd library: Meshy NPC assets, the complete archetype package, Git-safe external placeholders, and
+the shared humanoid action library. The vocabulary moved (operator -> NPC archetype, deck -> roster
+card, selection line -> bark) and so did the boundary: this crate loads no media, so every skill
+produces files for the game that consumes it and names `build_render_plan` as the seam.
+
+Two things were added rather than translated. The Meshy skill opens with a variant budget, because a
+crowd needs four bodies and sixteen tints rather than ten thousand meshes: `VisibleInstance` carries
+`variant` and `tint`, and `LodTier::Ambient` is culled before it ever reaches the plan. And the
+animation pipeline's clip list existed in three files with nothing comparing them, so
+`check_action_contract.py` parses both scripts and the skill's own table with `ast` and fails on any
+disagreement, including an index order that is not alphabetical — that order is what
+`GltfAssetLabel::Animation(n)` means. The Blender scripts themselves cannot run in CI, which is
+exactly why the thing that can run checks their contract instead.
+
+### Lint drift is a catalogue, not a sentence
+
+The eleven warnings a newer stable reports — six `assert_is_empty`, two `tuple_array_conversions` in
+the packed kernel, `manual_slice_fill`, `needless_borrows_for_generic_args` and
+`chunks_exact_to_as_chunks` — used to be one sentence in `plan.toml` with counts. A count is not an
+inventory: it does not say which file, it cannot be checked, and it goes stale silently.
+`docs/lint-drift.md` now lists every site with the rewrite stable wants, and
+`scripts/lint_drift.py` derives that table from a live `cargo +stable clippy` run and fails CI when
+the two disagree in either direction: an unlisted warning, a row that is gone, or a table derived
+from a different clippy than the one running. A clippy that does not compile exits 2 rather than
+reporting "nothing to report", which is the failure mode the old probe had.
+
+### Lint policy is now machine-checked in both directions
+
+`scripts/lint_audit.py` grew the two checks it was missing. It now sees `#[allow]`/`#[expect]` of
+**any** lint, not only `clippy::` ones — which immediately turned up four `unsafe_code` attributes
+and two `dead_code` ones the policy page had been describing as "none". The four are counting
+allocators in tests and an example (`GlobalAlloc` is unsafe by definition, and nothing else can
+observe an allocation from outside the crate); they are now `#![expect(…, reason = "…")]` so they
+fail when the allocator goes away, and they are named in the script. The two `dead_code` ones guarded
+fixture constructors nothing called, so the fixtures were deleted.
+
+It also reads `Cargo.toml` and fails unless every `deny` is still denied *and* the set of `allow`
+entries equals its `TOLERATED` table, so a lint cannot be quietly downgraded and a new allow cannot
+arrive undocumented.
+
+The `lint-future` job was checking nothing: `rust-toolchain.toml` makes rustup run 1.97.1 even in a
+job that installs stable, so every probe said "unknown" and the job exited green. It now probes and
+builds with `+stable` on a throwaway file, fails if the probe itself errors, and denies the three
+post-1.97 lints rather than every warning a newer stable has. Running it found 51 real
+`rest_pattern_accessible_field` sites (`Err(Variant { .. })` → `Err(Variant { field: _, … })`), all
+fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.toml`.
 
 ### Added
 

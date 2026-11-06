@@ -4,10 +4,6 @@
 //! from [`FlockPlugin`] with the `memory` feature on, so they fail if the bridge is not
 //! registered, not ordered after perception, or not fed by the scheduler's crowd — the
 //! three mistakes a unit test cannot see.
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_flock::adapters::primary::cognition::NpcBlackboard;
@@ -21,6 +17,7 @@ use bevy_flock::behavior::memory_leaves::{KEY_MEMORY_FAMILIARITY, KEY_MEMORY_VAL
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MemoryStore, SubjectId};
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 use bevy_transform::prelude::Transform;
 
 fn app(radius: f32) -> App {
@@ -116,7 +113,7 @@ fn a_remembered_player_is_readable_by_a_tree() {
             .iter(app.world())
             .map(|(entity, row)| (entity, row.0))
             .next()
-            .expect("somebody was enrolled after a frame near the player")
+            .or_die()
     };
     {
         let mut store = app.world_mut().resource_mut::<MemoryStore>();
@@ -131,11 +128,7 @@ fn a_remembered_player_is_readable_by_a_tree() {
     let _ = player;
     advance(&mut app, 2);
 
-    let board = app
-        .world()
-        .entity(entity)
-        .get::<NpcBlackboard>()
-        .expect("the enrolled NPC has a blackboard");
+    let board = app.world().entity(entity).get::<NpcBlackboard>().or_die();
     assert!(
         board.0.get(KEY_MEMORY_FAMILIARITY).is_some(),
         "the bridge should publish what the row holds"
@@ -179,7 +172,7 @@ fn a_row_survives_the_npc_walking_out_of_range_and_comes_back() {
         let mut query = app.world_mut().query::<&NpcMemoryRow>();
         query.iter(app.world()).next().copied()
     }
-    .expect("somebody enrolled");
+    .or_die();
     assert!(
         app.world().resource::<MemoryStore>().owner(row.0).is_some(),
         "the row is owned by an NPC"

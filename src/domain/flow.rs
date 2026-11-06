@@ -52,6 +52,9 @@ pub struct FlowField {
     target: FlowTarget,
     cost: Vec<u32>,
     dir: Vec<Vec2>,
+    /// The tag of the link each cell was reached through, or 0. Empty when the source had
+    /// no links, so a game that never opens a door pays nothing for the feature.
+    via: Vec<u16>,
     reachable: u32,
 }
 
@@ -137,12 +140,30 @@ impl FlowField {
         blend.normalize_or_zero()
     }
 
+    /// The tag of the link a cell was reached through, if any.
+    ///
+    /// This is how a behaviour tree learns that an agent's route uses the ladder rather
+    /// than the stairs: `flow.link_tag_at(cell) == Some(LinkTag::new(1))` is a fact, not a
+    /// guess, and it costs two bytes per cell only in a level that has links.
+    #[must_use]
+    pub fn link_tag_at(&self, cell: NavCell) -> Option<crate::domain::links::LinkTag> {
+        let tag = *self.via.get(cell.index(self.bounds.width))?;
+        (tag != 0).then_some(crate::domain::links::LinkTag(tag))
+    }
+
+    /// Whether this field followed any links.
+    #[must_use]
+    pub fn has_links(&self) -> bool {
+        !self.via.is_empty()
+    }
+
     /// Bytes this field occupies.
     #[must_use]
     pub fn bytes(&self) -> usize {
         FLOW_FIELD_OVERHEAD_BYTES
             + self.cost.len() * core::mem::size_of::<u32>()
             + self.dir.len() * 8
+            + self.via.len() * core::mem::size_of::<u16>()
     }
 
     /// Build the direction array from a completed cost field.
@@ -168,9 +189,39 @@ impl FlowField {
                     continue;
                 }
                 let mut sum = Vec2::ZERO;
+                // Ordinary steps and links both descend the field: a route that takes the
+                // ladder has to pull toward the ladder, or the desired velocity would walk
+                // an agent at a wall it is supposed to climb.
+                let mut nexts: SmallVec<[NavCell; 12]> = SmallVec::new();
                 let mut neighbours: SmallVec<[(NavCell, u32); 8]> = SmallVec::new();
                 source.neighbours(cell, &mut neighbours);
-                for (next, _) in neighbours {
+                nexts.extend(neighbours.iter().map(|(next, _)| *next));
+                let mut links: SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]> =
+                    SmallVec::new();
+                source.links_leaving(cell, &mut links);
+                nexts.extend(links.iter().map(|(next, _, _)| *next));
+                // Record the tag on the cell that *takes* the link, which is where an agent
+                // has to decide to climb rather than where it lands, and is the fact a tree
+                // wants. The cheapest link that still descends the field wins.
+                let mut best_link: Option<(u32, u16)> = None;
+                for (next, _step, tag) in links.iter().copied() {
+                    let Some(&next_cost) = self.cost.get(next.index(width)) else {
+                        continue;
+                    };
+                    if next_cost == u32::MAX || next_cost >= own {
+                        continue;
+                    }
+                    let drop = own - next_cost;
+                    if best_link.is_none_or(|(best, _)| drop > best) {
+                        best_link = Some((drop, tag.0));
+                    }
+                }
+                if let Some((_, tag)) = best_link
+                    && let Some(slot) = self.via.get_mut(index)
+                {
+                    *slot = tag;
+                }
+                for next in nexts {
                     let Some(&next_cost) = self.cost.get(next.index(width)) else {
                         continue;
                     };
@@ -217,6 +268,8 @@ pub struct FlowSolver {
     version: NavVersion,
     target: FlowTarget,
     cost: Vec<u32>,
+    /// Link tags per cell, empty when the source has no links.
+    via: Vec<u16>,
     heap: BinaryHeap<std::cmp::Reverse<(u32, u32)>>,
     expanded: u32,
     started: bool,
@@ -236,11 +289,17 @@ impl FlowSolver {
             0,
             target.cell.index(bounds.width) as u32,
         )));
+        let via = if source.has_links() {
+            vec![0_u16; bounds.cell_count()]
+        } else {
+            Vec::new()
+        };
         Self {
             bounds,
             version: source.version(),
             target,
             cost,
+            via,
             heap,
             expanded: 0,
             started: false,
@@ -289,16 +348,15 @@ impl FlowSolver {
             let mut neighbours: SmallVec<[(NavCell, u32); 8]> = SmallVec::new();
             source.neighbours(cell, &mut neighbours);
             for (next, step) in neighbours {
-                let next_index = next.index(width);
-                let candidate = cost.saturating_add(step);
-                let Some(slot) = self.cost.get_mut(next_index) else {
-                    continue;
-                };
-                if candidate < *slot {
-                    *slot = candidate;
-                    self.heap
-                        .push(std::cmp::Reverse((candidate, next_index as u32)));
-                }
+                self.relax(next, step, cost);
+            }
+            let mut links: SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]> =
+                SmallVec::new();
+            // Backward: the search grows from the target, so it crosses a link in reverse
+            // and charges its cost to the cell on the far side.
+            source.links_into(cell, &mut links);
+            for (next, step, _tag) in links {
+                self.relax(next, step, cost);
             }
         }
         if self.heap.is_empty() {
@@ -307,6 +365,20 @@ impl FlowSolver {
             SolveProgress::Running {
                 expanded: self.expanded,
             }
+        }
+    }
+
+    /// Lower the cost of a cell if this route is cheaper.
+    fn relax(&mut self, next: NavCell, step: u32, index_cost: u32) {
+        let next_index = next.index(self.bounds.width);
+        let candidate = index_cost.saturating_add(step);
+        let Some(slot) = self.cost.get_mut(next_index) else {
+            return;
+        };
+        if candidate < *slot {
+            *slot = candidate;
+            self.heap
+                .push(std::cmp::Reverse((candidate, next_index as u32)));
         }
     }
 
@@ -328,6 +400,7 @@ impl FlowSolver {
             target: self.target,
             cost: self.cost,
             dir: vec![Vec2::ZERO; self.bounds.cell_count()],
+            via: self.via,
             reachable: 0,
         }
         .finish(source)
@@ -458,7 +531,6 @@ impl FlowCache {
     /// # Errors
     ///
     /// As [`FlowCache::new`] at construction; lookups themselves cannot fail.
-    #[allow(clippy::indexing_slicing)] // `position` came from `iter().position`.
     pub fn field_for(
         &mut self,
         source: &dyn NavSource,
@@ -469,38 +541,45 @@ impl FlowCache {
             cell: target.cell,
             version: source.version(),
         };
-        if let Some(position) = self.entries.iter().position(|entry| entry.key == key) {
+        // Every mutation happens first and exactly one borrow is taken at the end. Returning a
+        // reference derived from `&mut self` and then touching the cache again in the same body
+        // does not borrow-check, even on a path that returns: the returned reference is good for
+        // the whole `&mut self` lifetime.
+        let hit = self.entries.iter().position(|entry| entry.key == key);
+        let (lookup, position) = if let Some(position) = hit {
             self.hits += 1;
             let clock = self.clock;
             if let Some(entry) = self.entries.get_mut(position) {
                 entry.stamp = clock;
             }
-            // The borrow ends here; the index is re-resolved below.
-            let field = &self.entries[position].field;
-            return (FlowLookup::Hit, field);
-        }
-        self.misses += 1;
-        let field = solve(source, target);
-        if self.entries.len() >= self.capacity {
-            // Evict the least recently used entry: the oldest stamp.
-            if let Some((oldest, _)) = self
-                .entries
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, entry)| entry.stamp)
-            {
-                self.entries.swap_remove(oldest);
-                self.evictions += 1;
+            (FlowLookup::Hit, position)
+        } else {
+            self.misses += 1;
+            let field = solve(source, target);
+            if self.entries.len() >= self.capacity {
+                // Evict the least recently used entry: the oldest stamp.
+                if let Some((oldest, _)) = self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, entry)| entry.stamp)
+                {
+                    self.entries.swap_remove(oldest);
+                    self.evictions += 1;
+                }
             }
-        }
-        let clock = self.clock;
-        self.entries.push(CacheEntry {
-            key,
-            stamp: clock,
-            field,
-        });
-        let position = self.entries.len() - 1;
-        (FlowLookup::Rebuilt, &self.entries[position].field)
+            let clock = self.clock;
+            self.entries.push(CacheEntry {
+                key,
+                stamp: clock,
+                field,
+            });
+            (FlowLookup::Rebuilt, self.entries.len().saturating_sub(1))
+        };
+        let Some(entry) = self.entries.get(position) else {
+            unreachable!("the cache entry was either found or just pushed");
+        };
+        (lookup, &entry.field)
     }
 }
 
@@ -516,18 +595,19 @@ pub enum FlowCacheError {
 mod tests {
     use super::*;
     use crate::domain::nav::{GridNavSource, NavBounds};
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn corridor() -> GridNavSource {
         // 32 x 8, wall along row 4 with a gap at x = 24, so a field has to bend.
-        let mut grid = GridNavSource::open(Vec3::ZERO, 32, 8, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 32, 8, 1.0).or_die();
         grid.add_obstacle(NavCell::new(0, 4), NavCell::new(23, 4))
-            .expect("wall");
+            .or_die();
         grid
     }
 
     #[test]
     fn a_straight_run_points_at_the_target() {
-        let grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(12, 8));
         let field = solve(&grid, target);
         let here = grid.center_of(NavCell::new(2, 8));
@@ -548,7 +628,7 @@ mod tests {
 
     #[test]
     fn inside_the_target_cell_the_agent_seeks_the_point() {
-        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die();
         let target = FlowTarget {
             cell: NavCell::new(4, 4),
             point: grid.center_of(NavCell::new(4, 4)),
@@ -564,12 +644,12 @@ mod tests {
 
     #[test]
     fn unreachable_cells_have_no_direction() {
-        let mut grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die();
         // Wall off a corner entirely.
         grid.add_obstacle(NavCell::new(6, 0), NavCell::new(6, 7))
-            .expect("wall");
+            .or_die();
         grid.add_obstacle(NavCell::new(0, 6), NavCell::new(7, 6))
-            .expect("wall");
+            .or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(2, 2));
         let field = solve(&grid, target);
         let trapped = NavCell::new(7, 7);
@@ -598,7 +678,9 @@ mod tests {
             rounds += 1;
             match solver.step(&grid, 16) {
                 SolveProgress::Complete => break,
-                SolveProgress::Running { .. } => assert!(rounds < 1_000, "solve never finished"),
+                SolveProgress::Running { expanded: _ } => {
+                    assert!(rounds < 1_000, "solve never finished");
+                }
             }
         }
         let staged = solver.into_field(&grid);
@@ -610,7 +692,7 @@ mod tests {
     #[test]
     fn the_cache_hits_then_rebuilds_only_when_the_target_changes() {
         let grid = corridor();
-        let mut cache = FlowCache::new(2).expect("capacity");
+        let mut cache = FlowCache::new(2).or_die();
         let a = FlowTarget::at_cell(&grid, NavCell::new(30, 2));
         assert_eq!(cache.field_for(&grid, a).0, FlowLookup::Rebuilt);
         assert_eq!(cache.field_for(&grid, a).0, FlowLookup::Hit);
@@ -621,7 +703,7 @@ mod tests {
     #[test]
     fn ten_thousand_rebuilds_stay_inside_the_budget() {
         let grid = corridor();
-        let mut cache = FlowCache::new(4).expect("capacity");
+        let mut cache = FlowCache::new(4).or_die();
         let cell_count = grid.bounds().cell_count();
         let budget = 4 * (cell_count * 12 + FLOW_FIELD_OVERHEAD_BYTES);
         for step in 0..10_000_u32 {
@@ -641,23 +723,23 @@ mod tests {
     #[test]
     fn a_rebuild_drops_fields_built_against_the_old_layout() {
         let mut grid = corridor();
-        let mut cache = FlowCache::new(4).expect("capacity");
+        let mut cache = FlowCache::new(4).or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(30, 2));
         let _ = cache.field_for(&grid, target);
         grid.add_obstacle(NavCell::new(10, 0), NavCell::new(10, 3))
-            .expect("new wall");
+            .or_die();
         assert_eq!(cache.invalidate_stale(grid.version()), 1);
         assert!(cache.is_empty());
     }
 
     #[test]
     fn a_cache_needs_room_for_one_field() {
-        assert_eq!(FlowCache::new(0).unwrap_err(), FlowCacheError::ZeroCapacity);
+        assert_eq!(FlowCache::new(0).or_die_err(), FlowCacheError::ZeroCapacity);
     }
 
     #[test]
     fn the_memory_report_adds_up() {
-        let grid = GridNavSource::open(Vec3::ZERO, 64, 64, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 64, 64, 1.0).or_die();
         let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(32, 32)));
         let expected = FLOW_FIELD_OVERHEAD_BYTES + 64 * 64 * 4 + 64 * 64 * 8;
         assert_eq!(field.bytes(), expected);
@@ -666,8 +748,8 @@ mod tests {
 
     #[test]
     fn bounds_are_carried_through() {
-        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 2.0).expect("bounds");
-        let grid = GridNavSource::from_bitmap(bounds, vec![true; 16]).expect("grid");
+        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 2.0).or_die();
+        let grid = GridNavSource::from_bitmap(bounds, vec![true; 16]).or_die();
         let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(0, 0)));
         assert_eq!(field.bounds(), bounds);
     }

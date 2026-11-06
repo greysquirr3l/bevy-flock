@@ -168,6 +168,16 @@ pub enum NavError {
         /// Supplied maximum corner.
         max: NavCell,
     },
+    /// A navigation link that cannot exist.
+    #[error("navigation link {from:?} to {to:?} is invalid: {reason}")]
+    BadLink {
+        /// The cell the link leaves from.
+        from: NavCell,
+        /// The cell the link arrives at.
+        to: NavCell,
+        /// Why it was refused.
+        reason: &'static str,
+    },
 }
 
 /// A source of navigation data.
@@ -187,6 +197,41 @@ pub trait NavSource {
     /// The caller supplies the buffer so a solve allocates none.
     fn neighbours(&self, cell: NavCell, out: &mut SmallVec<[(NavCell, u32); 8]>);
 
+    /// Append the links leaving a cell: connections that are not ordinary steps.
+    ///
+    /// The default is empty, so a source with no ladders or doors does not implement this.
+    /// A source that answers here has its links followed by the flow solver, and the tags
+    /// appear in the finished field for a behaviour tree to read.
+    fn links_leaving(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        let _ = cell;
+        out.clear();
+    }
+
+    /// Append the links arriving at a cell, which is what a backward search follows.
+    ///
+    /// A flow field is solved from its target outward, so an expansion asks what can step
+    /// *into* the cell it is standing on. A source that implemented only the forward
+    /// direction would have every ladder walked in the wrong direction.
+    fn links_into(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        let _ = cell;
+        out.clear();
+    }
+
+    /// Whether this source can ever return a link.
+    ///
+    /// Lets the solver skip allocating the per-cell tag array for the common case.
+    fn has_links(&self) -> bool {
+        false
+    }
+
     /// The cell containing a world position, or `None` outside the bounds.
     fn cell_of(&self, position: Vec3) -> Option<NavCell>;
 
@@ -203,6 +248,7 @@ pub struct GridNavSource {
     bounds: NavBounds,
     walkable: Vec<bool>,
     version: NavVersion,
+    links: crate::domain::links::LinkTable,
 }
 
 impl GridNavSource {
@@ -217,6 +263,7 @@ impl GridNavSource {
             walkable: vec![true; bounds.cell_count()],
             bounds,
             version: NavVersion::FIRST,
+            links: crate::domain::links::LinkTable::new(),
         })
     }
 
@@ -236,6 +283,7 @@ impl GridNavSource {
             bounds,
             walkable,
             version: NavVersion::FIRST,
+            links: crate::domain::links::LinkTable::new(),
         })
     }
 
@@ -286,8 +334,8 @@ impl GridNavSource {
         if radius_cells == 0 {
             return self.clone();
         }
-        let width = self.bounds.width as i32;
-        let height = self.bounds.height as i32;
+        let width = i32::from(self.bounds.width);
+        let height = i32::from(self.bounds.height);
         let radius = i32::from(radius_cells);
         let mut walkable = self.walkable.clone();
         for y in 0..height {
@@ -321,6 +369,7 @@ impl GridNavSource {
             bounds: self.bounds,
             walkable,
             version: self.version.next(),
+            links: self.links.clone(),
         }
     }
 
@@ -334,6 +383,36 @@ impl GridNavSource {
             .get(y as usize * self.bounds.width as usize + x as usize)
             .copied()
             .unwrap_or(false)
+    }
+
+    /// The links this source carries.
+    #[must_use]
+    pub const fn link_table(&self) -> &crate::domain::links::LinkTable {
+        &self.links
+    }
+
+    /// Add a link: a ladder, a ledge, a door that only staff may use.
+    ///
+    /// Bumps the version, because a field solved before the ladder existed does not know
+    /// about it and would route a crowd the long way round for ever.
+    ///
+    /// # Errors
+    ///
+    /// [`NavError::BadLink`] as [`crate::domain::links::LinkTable::add`].
+    pub fn add_link(&mut self, link: crate::domain::links::NavLink) -> Result<(), NavError> {
+        self.links.add(link)?;
+        self.version = self.version.next();
+        Ok(())
+    }
+
+    /// A copy of this source carrying a whole table of links.
+    #[must_use]
+    pub fn with_links(mut self, links: crate::domain::links::LinkTable) -> Self {
+        if !links.is_empty() {
+            self.version = self.version.next();
+        }
+        self.links = links;
+        self
     }
 
     /// Bytes the bitmap occupies.
@@ -388,6 +467,26 @@ impl NavSource for GridNavSource {
         }
     }
 
+    fn links_leaving(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        self.links.leaving_into(cell, out);
+    }
+
+    fn links_into(
+        &self,
+        cell: NavCell,
+        out: &mut SmallVec<[(NavCell, u32, crate::domain::links::LinkTag); 4]>,
+    ) {
+        self.links.arriving_into(cell, out);
+    }
+
+    fn has_links(&self) -> bool {
+        !self.links.is_empty()
+    }
+
     fn cell_of(&self, position: Vec3) -> Option<NavCell> {
         let local_x = (position.x - self.bounds.origin.x) / self.bounds.cell_size;
         let local_y = (position.z - self.bounds.origin.z) / self.bounds.cell_size;
@@ -419,17 +518,16 @@ impl NavSource for GridNavSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn grid() -> GridNavSource {
-        GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("valid grid")
+        GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die()
     }
 
     #[test]
     fn cells_convert_both_ways() {
         let grid = grid();
-        let cell = grid
-            .cell_of(Vec3::new(2.5, 0.0, 3.5))
-            .expect("inside the grid");
+        let cell = grid.cell_of(Vec3::new(2.5, 0.0, 3.5)).or_die();
         assert_eq!(cell, NavCell::new(2, 3));
         let centre = grid.center_of(cell);
         assert_eq!(grid.cell_of(centre), Some(cell));
@@ -448,7 +546,7 @@ mod tests {
         let mut grid = grid();
         let before = grid.version();
         grid.add_obstacle(NavCell::new(2, 2), NavCell::new(3, 3))
-            .expect("valid rectangle");
+            .or_die();
         assert_ne!(grid.version(), before);
         assert!(!grid.is_walkable(NavCell::new(2, 2)));
         assert!(grid.is_walkable(NavCell::new(4, 2)));
@@ -459,8 +557,8 @@ mod tests {
         let mut grid = grid();
         let error = grid
             .add_obstacle(NavCell::new(4, 4), NavCell::new(2, 2))
-            .unwrap_err();
-        assert!(matches!(error, NavError::BadObstacle { .. }));
+            .or_die_err();
+        assert!(matches!(error, NavError::BadObstacle { min: _, max: _ }));
     }
 
     #[test]
@@ -469,9 +567,9 @@ mod tests {
         // Two walls meeting at a corner: (1,0) and (0,1) blocked, so (0,0) to (1,1)
         // must be refused even though both endpoints are walkable.
         grid.add_obstacle(NavCell::new(1, 0), NavCell::new(1, 0))
-            .expect("single cell");
+            .or_die();
         grid.add_obstacle(NavCell::new(0, 1), NavCell::new(0, 1))
-            .expect("single cell");
+            .or_die();
         assert!(!grid.is_walkable(NavCell::new(1, 0)));
         let mut out = SmallVec::new();
         grid.neighbours(NavCell::new(0, 0), &mut out);
@@ -485,9 +583,9 @@ mod tests {
     fn erosion_keeps_a_radius_of_clearance() {
         // A 16-wide grid so the borders do not dominate the result: the grid edge is a
         // wall, which is what keeps a crowd from walking off the map.
-        let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).or_die();
         grid.add_obstacle(NavCell::new(8, 0), NavCell::new(8, 15))
-            .expect("wall");
+            .or_die();
         let eroded = grid.eroded(1);
         // The cell next to the wall is no longer walkable once a body needs clearance.
         assert!(grid.is_walkable(NavCell::new(7, 8)));
@@ -498,8 +596,8 @@ mod tests {
 
     #[test]
     fn a_bitmap_of_the_wrong_size_is_refused() {
-        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 1.0).expect("bounds");
-        let error = GridNavSource::from_bitmap(bounds, vec![true; 15]).unwrap_err();
+        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 1.0).or_die();
+        let error = GridNavSource::from_bitmap(bounds, vec![true; 15]).or_die_err();
         assert!(matches!(
             error,
             NavError::BitmapLength {
@@ -512,12 +610,12 @@ mod tests {
     #[test]
     fn empty_bounds_and_zero_cell_size_are_refused() {
         assert_eq!(
-            NavBounds::new(Vec3::ZERO, 0, 4, 1.0).unwrap_err(),
+            NavBounds::new(Vec3::ZERO, 0, 4, 1.0).or_die_err(),
             NavError::Empty
         );
         assert!(matches!(
-            NavBounds::new(Vec3::ZERO, 4, 4, 0.0).unwrap_err(),
-            NavError::ZeroCellSize { .. }
+            NavBounds::new(Vec3::ZERO, 4, 4, 0.0).or_die_err(),
+            NavError::ZeroCellSize { cell_size: _ }
         ));
     }
 
@@ -590,7 +688,7 @@ mod tests {
     #[test]
     fn a_custom_nav_source_can_be_solved_over() {
         let ring = Ring {
-            bounds: NavBounds::new(Vec3::ZERO, 32, 32, 1.0).expect("bounds"),
+            bounds: NavBounds::new(Vec3::ZERO, 32, 32, 1.0).or_die(),
             inner: 4.0,
             outer: 12.0,
             centre: Vec3::new(16.0, 0.0, 16.0),

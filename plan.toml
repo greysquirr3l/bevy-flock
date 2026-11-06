@@ -915,3 +915,268 @@ slug         = "cell-size-reopen-gate"
 phase        = "Proof"
 delivered_in = "6fa4118"
 evidence     = "`scripts/cell_size_gate.py` reads the committed criterion estimates for the 7 m and 9 m cell budgets and fails when a finer grid would buy more than 10% of a frame, with a noise band so ordinary variance does not trip it; the `cell-size-gate` CI job runs it on every push, and the fail path was proven by perturbing an estimate. ADR 0031 and the task pointed at each other while both were open; both are now closed, with the sweep data and the occupancy figure committed under `docs/`."
+
+[[completed]]
+slug         = "threaded-steering"
+phase        = "Ship"
+delivered_in = "12c5b26"
+evidence     = "`src/application/crowd.rs` carries `SteeringRoad { Auto, Wide, Threads, Scalar }`, a `steer()` that dispatches on it, `steer_agent` shared by the scalar and threaded loops so the arithmetic cannot drift, and `steer_parallel`, which slices a frame into contiguous agent ranges of at least 512 agents with eight slices per thread and hands them to `ComputeTaskPool`. The pool is borrowed with `ComputeTaskPool::try_get()` and created lazily with `get_or_init(TaskPool::default)`, so a host that adds only `FlockPlugin` still gets workers. The `threads` cargo feature enables `bevy_tasks/multi_threaded` and is on by default; without it the pool reports one thread and `Auto` stays on the wide road. `a_parallel_frame_matches_the_scalar_one` and `tests/determinism.rs` hold every road to bit equality, `tests/crowd_no_alloc.rs` holds the threaded road to zero allocation, and `benches/crowd.rs` grows `flock_frame_road` so all four roads are measured on one host in one run. Measured on six vCPUs: 8.48 ms to 4.23 ms at 10,000 agents and 84.0 ms to 29.6 ms at 100,000; the standard benchmarks move 9.18 to 4.27 ms and 90.0 to 29.2 ms. ADR 0044 records the decision, the evidence, and the unclaimed follow-up (threading the wide road) with its expected 2-3x rather than 6x for bandwidth reasons."
+
+# Queued from `docs/research/competitive-analysis.md`, ranked by what a game hits first.
+# None of these depend on a completed task: a dependency on a delivered slug is a plan error.
+[[phases]]
+name  = "Reach"
+order = 10
+tasks = [] # every task in this phase is delivered; see the [[completed]] records below
+
+[[completed]]
+slug         = "reciprocal-avoidance"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0045 plus src/application/avoidance.rs and Crowd::avoid: a priority-weighted half-responsibility projection over the neighbour set the kernel already gathers, on the same SteeringRoad as steering (avoid_scalar / avoid_parallel, bit-equal by a_parallel_avoidance_pass_matches_the_scalar_one). NpcAvoidancePriority (default 1.0, clamped 0.05..=20) is the per-NPC weight; BoidsConfig::with_avoidance(None) is the kill switch, and the pass is on by default. Tests: head-on floor held for all 360 ticks with the soft separation weight off (crowd level and ECS level), bit-stable replay, ambient agents avoided but not steering, steady frame allocates zero (tests/crowd_no_alloc.rs). Measured with crowd_avoidance: 10,000 steer 2.25 ms -> 3.27 ms (+1.01 ms), 100,000 25.74 ms -> 38.08 ms (+12.34 ms); the first scalar pass cost 3.96 ms at 10,000, so the parallel road is 3.9x faster. docs/performance.md records both rows."
+
+[[completed]]
+slug         = "navigation-links"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0048 plus src/domain/links.rs and the flow-solver integration: NavLink { from, to, cost, tag } in a LinkTable indexed both ways, relaxed as edges inside the search (NavSource::links_leaving / links_into) rather than post-processed, with the version bumped through GridNavSource::add_link so a cached field is dropped. FlowField::link_tag_at carries the tag to the leaf boundary, which is what the book's ladder example reads. tests/nav_links.rs covers the cheap-link-wins, expensive-link-loses and only-route cases; iteration_order_does_not_depend_on_insertion_order holds the table to a canonical order (a defect found and fixed here: same-key edges were ordered by insertion). The optional navmesh (feature `navmesh`) ships alongside with area costs and a funnel whose pinch-restart advances the apex to the opposite corner."
+
+[[completed]]
+slug         = "obstacle-driven-navigation"
+phase        = "Reach"
+delivered_in = "74839a7"
+evidence     = "ADR 0046 plus src/domain/obstacle_nav.rs and adapters::primary::obstacle_nav: ObstacleFootprint rasterised into a GridNavSource, staged under a cells-per-tick budget (4,096 default) a whole row at a time, published atomically with one version increment per commit. ObstacleNavPlugin + NavObstacle are opt-in, and the manual NavSource path is untouched. Tests: spawn blocks cells and publishes on the first frame, despawn restores them with version+1, an unchanged set does not rebuild, a 16-cell budget stages a 1,024-cell field across frames without exposing it, request order is not a change, a staged rebuild never exposes a half-built grid, erosion widens the gap, and a blocked corridor is routed around with a dearer detour. The budget is expressed in cells rather than nanoseconds because a cell is a fixed amount of work, which keeps the rebuild's duration identical in a replay."
+
+[[completed]]
+slug         = "stimulus-perception"
+phase        = "Reach"
+delivered_in     = "74839a7"
+evidence     = "ADR 0047 plus src/domain/stimulus.rs and adapters::primary::stimulus: a bounded ring of Stimulus { kind, position, radius, intensity, emitted, ttl } with distance and age falloff, a sight cone, occlusion through the Occluder trait (OpenAir by default, so no physics dependency), and a deterministic sort by strength/distance/kind/position with total_cmp. StimulusPlugin publishes one pulse per StimulusSource per tick, sweeps expired records, and writes PerceivedStimuli per observer on a tick interval (six by default) as a snapshot a tree can read for the length of a think. Tests: behind-the-cone sight rejected, heard shout accepted, falloff with distance and age, expiry, wall stops sight but not sound, limited slots keep the strongest, ring overwrite, deterministic perception, and the ECS path including a despawned emitter expiring."
+
+[[phases]]
+name  = "Scale"
+order = 11
+
+[[phases.tasks]]
+slug = "band-scoped-perception"
+title = "Only the bands that read perception pay for it"
+goal = "Perception is mid-band work, but every observer with a `Perception` component re-reads the buffer on the same tick, whether its tier has any use for the answer or not. Give each band its own interval and observer set, so a reflex-tier crowd that only needs avoidance stops paying for a stimulus list nobody reads."
+kind = "infrastructure"
+hints = [
+  "The index and the bounding-box prune (ADR 0047) already cut the cost per observer; this task cuts the number of observers, which is the lever left at 100,000.",
+  "Drive it from `ThinkScheduler`/the tier component rather than adding another cadence knob: a band's interval is a property of how often that band thinks.",
+  "Keep the tick arithmetic deterministic and budgeted like the think scheduler (ADR 0009): phase each band's perception across ticks so a 100,000 crowd does not synchronise onto one frame.",
+  "`Perception` stays opt-in per NPC; this task decides who reads the buffer, not who publishes to it.",
+]
+test_hints = [
+  "A reflex-tier observer does not perceive at all; a deliberative one perceives on its band's interval.",
+  "The population that perceives on a given tick is within a small factor of 1/interval, asserted on a counter.",
+  "Replay determinism holds: the same seed perceives on the same ticks with the same results.",
+]
+must_haves = [
+  "A band-to-interval mapping documented in ADR 0047, with perception phased across ticks.",
+  "A counter of observers perceived per tick, gated in the benchmark suite.",
+  "`docs/performance.md` records the before and after at 10,000 and 100,000 observers.",
+]
+evaluation_criteria = [
+  "A 100,000-observer crowd with 128 live records costs materially less per frame than it does today.",
+  "`cargo test --all-features` passes, including `tests/determinism.rs`.",
+]
+
+[[completed]]
+slug         = "stimulus-spatial-index"
+phase        = "Scale"
+delivered_in = "17a15cb"
+evidence     = "ADR 0047's index section plus src/domain/stimulus.rs: StimulusBuffer keeps a conservative bounding box (maintained on push, recomputed on retain_live) so an observer with nothing nearby returns in O(1), and StimulusIndex is a uniform bucket grid rebuilt once per pass into CSR offsets (69 us for 4,096 records), filled in ring order with a separate cursor array. perceive_indexed reads only the observer's window and delegates to perceive when the window contains every record, which is what makes it never slower than the linear scan: measured 36.4 ms vs 36.4 ms on a dense 40 m world, and 4.0 ms vs 9.6 ms on the same records spread over 400 m (2.4x). Bit-identical output is argued from a candidate superset (window sized from the query's max reach, so centre-only insertion is safe for a long-radius shout), no duplicates (one cell per record) and a total-order selection (ranks over exactly the fields Perceived carries); the_index_agrees_with_the_linear_scan compares 400 randomised observers against both paths element for element, the_index_agrees_when_records_were_pushed_in_another_order does the same for reversed publish order, and the_index_visits_far_fewer_candidates_when_the_world_is_spread asserts the pruning on a count rather than a clock. The parity test caught a real defect in the CSR fill on its first run (writing through starts destroyed the offsets it needed). The ECS pass uses the index by default."
+
+[[completed]]
+slug = "kernel-bounds-checks"
+title = "Remove the last two indexing expectations from the kernels"
+phase = "Reach"
+delivered_in = "851a1ff"
+evidence = """Both expectations are gone: `scripts/lint_audit.py` reports 113 files scanned and zero overrides, and `cargo clippy --all-targets --all-features -- -D warnings` passes with no `indexing_slicing` exception anywhere.
+
+`src/application/packed.rs` converted 44 sites to `get`/`let-else` plus a literal-index `lane!(0..3)` macro for the four-lane tails, because a literal index into a `[f32; 4]` is exempt from the lint (the length is known) while a loop variable is not.
+
+The wide kernel of `src/application/crowd.rs` did not survive a mechanical conversion: `crowd_kernel/planar` +9.1% and `crowd_kernel/dense` +18.5% against a saved Criterion baseline, because seven `Option<&f32>` in a tuple pattern at the top of the neighbour loop each carry an exit branch. The measured fix is recorded in ADR 0049: `Soa` holds one 28-byte row per agent (position, velocity, identity) instead of seven parallel `Vec<f32>`s, and the scan slices the bucket's `begin..end` range once per cell, so the neighbour loop has no check in it at all. Final: `dense` 21.71 ms vs 21.51 ms baseline (+0.5%, inside the run-to-run spread), `volumetric` 1.787 ms vs 1.810 ms (-2.1%), `crowd_avoidance/steer_only/100000` 24.10 ms vs 25.35 ms (-4.7%), `steer_and_avoid/100000` 36.42 ms vs 38.36 ms (-5.1%), `steering_step/32_neighbours` 152.4 ns vs 153.3 ns. Numbers and the machine are in `docs/performance.md`.
+
+Parity holds: `application::crowd` (15 tests) and `application::packed` (9) pass, as does the full suite in both feature extremes; the SIMD row layout is covered by `a_parallel_frame_matches_the_scalar_one`."""
+
+[[phases.tasks]]
+slug = "sibling-crate-lint-spine"
+title = "Give the compat and fuzz crates the same lint spine"
+goal = "`compat/` and `fuzz/` are separate packages, so they do not inherit `[lints]` from the root manifest and CI never applies the spine to them: an `expect` in a fuzz target or a `panic!` in a compatibility harness would not be caught by anything. Copy the root `[lints]` tables into both manifests, fix what they find, and extend `scripts/lint_audit.py` to check every manifest it finds rather than only the root one."
+kind = "infrastructure"
+hints = [
+  "`cargo fuzz` builds with nightly and its own manifest; the deny list there is the same policy, not a stricter one — `unwrap` in a fuzz target's setup is not the same as `unwrap` on a hot path, so the honest answer may be an `expect` with a reason in `SANCTIONED` rather than a rewrite.",
+  "The audit currently reads `root / Cargo.toml` once; `manifest_levels` is already a pure function of text, so checking a list of manifests is a loop and a per-manifest label in the output.",
+  "`compat` exists to prove save files survive across versions; if the spine finds real code smells there it is a finding about the harness, not about the policy.",
+]
+test_hints = [
+  "`scripts/lint_audit.py` fails when `compat/Cargo.toml` drops a deny, and passes when all three manifests agree.",
+  "`cargo clippy --manifest-path compat/Cargo.toml --all-targets -- -D warnings` and the fuzz crate's `cargo check` are clean, or their exceptions are in `SANCTIONED` with reasons.",
+]
+must_haves = [
+  "Every manifest in the tree carries the same deny list, or says in `docs/lint-policy.md` why it does not.",
+  "`scripts/lint_audit.py` checks all of them, not just the root.",
+]
+evaluation_criteria = [
+  "The audit output names each manifest it verified.",
+  "CI's `scripts` job still passes, and the new checks have self-test cases.",
+]
+
+[[phases.tasks]]
+slug = "stable-lint-drift"
+title = "Fix what stable clippy reports before the pin moves"
+goal = "The tree passes `-D warnings` on the pinned 1.97.1 and not on stable: 11 warnings from lints that are new or newly sharper are catalogued with their sites in `docs/lint-drift.md`, which `scripts/lint_drift.py --check` keeps in step with a live run in CI. Fix each site, re-derive the page, and the pin-bump commit stops having to explain eleven unrelated failures."
+kind = "infrastructure"
+hints = [
+  "`assert_is_empty` suggests `assert_ne!(x, '')` for a string and `assert!(!v.is_empty())` is what it flags for a vector; read each site, because the honest rewrite differs between the two.",
+  "`tuple_array_conversions` in `application::packed` will interact with the lane unpacking; check the benchmark before and after, because the whole point of that kernel is that four lanes are one vector load.",
+  "The forward job (`lint-future`) prints these as warnings on purpose: it denies only the three lints the pin cannot name, so a newer nursery lint does not turn a stable release into a red build.",
+]
+test_hints = [
+  "`cargo +stable clippy --all-targets --all-features -- -D warnings` is clean, which is what the pinned job becomes when the pin moves.",
+  "The pinned job stays clean: `cargo clippy --all-targets --all-features -- -D warnings` on 1.97.1.",
+]
+must_haves = [
+  "Zero warnings under stable on every target, not just the library.",
+  "`docs/lint-policy.md` says which toolchain owns the denials, and the forward job says which lints it denies.",
+  "`docs/lint-drift.md` ends with an empty table rather than eleven rows, and `scripts/lint_drift.py` reports nothing to compare.",
+]
+evaluation_criteria = [
+  "The forward job can be tightened to `-D warnings` without touching code.",
+  "The benchmarks in `docs/performance.md` still reproduce.",
+]
+
+[[completed]]
+slug          = "asset-skill-port"
+title         = "Port the Meshy asset skills and make their contract checkable"
+phase         = "Reach"
+delivered_in  = "HEAD"
+evidence      = """Four skills ported from greysquirr3l/trapgrid-arsenal at 69b7ce0: bevy-flock-meshy-assets (from trapgrid-meshy-operators), bevy-flock-npc-character-package (trapgrid-character-production), bevy-flock-external-asset-placeholders, and bevy-flock-npc-animation-library (trapgrid-operator-animation-pipeline, with both Blender scripts).
+
+The port rewrote the domain rather than the mechanics: an operator is an NPC archetype, the deck portrait is a roster card, the selection voice line is a `BarkTable` entry, and `deploy` plus the four per-operator primaries became a single `interaction` clip, so the shared library is 11 clips instead of 15. The crate boundary is explicit in every skill: flock loads no media, `build_render_plan` emits `VisibleInstance` and the game decides what a variant looks like, and no asset may change simulation state.
+
+Two additions: a variant budget in the Meshy skill (4-6 bodies and 6-8 heads with 16 tints, because `VisibleInstance::variant` and `tint_from_seed` mean a crowd needs few meshes, and `LodTier::Ambient` is culled before the plan), and `check_action_contract.py`, which reads `SELECTED_ACTIONS`, `EXPECTED_ACTIONS` and the skill's index table with `ast` and fails when the three disagree or when the documented order stops being alphabetical. The three copies existed in the source project with nothing comparing them; the checker's self-test proves six distinct disagreement shapes are caught, and a deliberate one-character source change in the doc fails the live check. CI compiles every skill script with `py_compile` (bpy is never imported) and runs both checks in the `scripts` job."""
+
+[[phases.tasks]]
+slug = "band-focus-plane"
+title = "Give the continuum band a 3D focus plane"
+goal = "`BandPlugin::focus_at` reads `translation.x` and `translation.y` for the player's position while the 3D crowd, grid and steering use `x`/`z`. A 3D game that adds the band therefore measures distance on the wrong axis, manifests nobody and folds nobody, silently. Decide the policy (a `FocusPlane` resource with `Xy` and `Xz`, or focus on `x`/`z` always and document the 2D case as `y = 0`), make `focus_at` honour it, and give the demo a `--band` mode that shows the ladder splitting."
+kind = "refactor"
+hints = [
+  "The axis is not cosmetic: `Band::new` uses the same plane for its radius test, so a wrong plane is a wrong fold radius, not a small offset.",
+  "The demo's visitor is at `(1, -38)` in `x`/`z`; with the band's `x`/`y` reading it sits at distance 0 from the origin and the ladder never sees it, which is why `ashfall.run.json` reads 100% reflex at every population.",
+  "A `FocusPlane` resource is the smaller change and keeps the 2D case as a first-class option; defaulting to `Xz` would change behaviour for any existing 2D caller, so default it to `Xy` and let a 3D game opt in.",
+]
+test_hints = [
+  "A band test in the `x`/`z` plane manifests near a focus at `(0, 0, 10)` and folds only what is beyond the radius.",
+  "The demo's `--band` run reports a non-zero habit or social tier once the population passes the manifest band.",
+]
+must_haves = [
+  "No caller can get the plane wrong silently: either the default matches the crowd's own axis or the resource is required by the plugin.",
+  "`docs/performance.md` or the band ADR records the change and the measured effect on the fold/manifest counts.",
+]
+
+[[completed]]
+slug = "ashfall-demo-playground"
+title = "Ship the Ashfall Verge playground: a city, six generated models and four artefacts"
+phase = "Reach"
+delivered_in = "df18dac"
+evidence = """`demo/` is a separate package (own `[workspace]`, like `compat/`) with a bin, a library and nine tests. It builds a six-district city from a seed (large/medium/small/tiny classes, keyed NPC placement, 2096 ruined blocks, 10 shelters, 10 pylons, 44 stalls), spawns a crowd through `FlockPlugin`, places it into the districts and steps it.
+
+Six models were generated with Meshy from six concept images and shipped as GLBs: three bodies (gatewarden, aerie, scavenger) and three props (pylon, shelter-door, market-stall), 12,654 to 5,971 triangles each. `demo/tools/shrink_glb.py` re-encodes the embedded 2K base-colour maps and re-lays the binary chunk with geometry, accessors and indices byte-identical, taking 22.9 MB to 2.4 MB (89%); heights were then measured off the shipped meshes through `--report` and recorded in the asset table, so a scale error is a table error.
+
+The artefacts are the point: `ashfall.svg` (a top-down plan), `ashfall.scene.json` (engine-agnostic instances grouped by model, the `build_render_plan` contract written down), `ashfall.run.json` (seed, library digest, positional crowd fingerprint, tier histogram, wall time, per-asset fingerprints) and `manifest.json`. Rendering is deliberately absent: a demo that needs a GPU cannot run in CI.
+
+Three findings came out of building it, and all three are in the demo's README: the library's `digest` is coarse by design and matches across seeds, so the demo adds `crowd_fingerprint` over quantised positions; `App::new()` has no `TimePlugin`, so `integrate_flock`'s frame delta is zero and a headless crowd stands still (`the_crowd_walks` is the test that caught it); and the default crowd weights walk everyone to one intersection, so the demo disables cohesion. `tests/assets.rs` is the asset gate the ported Meshy skill asks for: every promised file opened, its glTF version and geometry checked, its animation absence asserted, its size held to a 1.2 MB budget and the total under 4 MB."""
+
+[[completed]]
+slug = "ashfall-demo-3d"
+title = "Render the playground in 3D, with an animated crowd"
+phase = "Reach"
+delivered_in = "1d48c95"
+evidence = """`demo/src/bin/ashfall-3d.rs` renders five views of the same seeded city with no GPU, no window and no renderer dependency: `raster.rs` is a software rasteriser (perspective, near-plane clipping, a depth buffer, footprint-aware procedural ground and facades, box-filter supersampling, and a deflate/PNG writer that round-trips against its own inflater in tests) and `gltf.rs` reads the shipped GLBs' geometry.
+The crowd is split by what the assets can actually do. The six Meshy models are static meshes, so 2,000 of them stand still; `skinned.rs` adds the other half of the picture with a CC0 KayKit mannequin (23 joints, 11 clips, licence vendored beside it): clip sampling, joint matrices composed per node, and CPU skinning per instance, so `procession` shows eighteen walkers on one rig at golden-ratio-staggered phases. Four bugs found and fixed on the way are recorded where they happened, because each was a lesson: a channel that assigned its own matrix erased the other two components of the same joint; `block_pitch` is a ruin pitch, so a multiple of it put the column a hundred metres outside the frustum; the sky gradient reached its horizon colour at the bottom row, so the ground plane's far edge read as a bright wedge above the horizon; and `settlement_centre` had to be shared by the shot table and the procession or the camera and the crowd framed different settlements.
+The view set, the ppm-scale timing and the honest limits (no blend tree, no IK, no GPU) are in `demo/README.md`; the shipped images are in `docs/demo/`. The demo crate keeps the root lint spine and passes `cargo clippy --all-targets --all-features -D warnings` with no overrides."""
+
+[[completed]]
+slug = "ashfall-demo-interactive"
+title = "Fly the playground in a terminal, and cost the rasteriser against wgpu"
+phase = "Reach"
+delivered_in = "e0cb276"
+evidence = """`demo/src/bin/ashfall-play.rs` flies the same seeded city the PNGs show without a window, a GPU or a widget toolkit. `session.rs` is a pure core — camera, view, lens, draw budget — with eleven unit tests, so the interactive path is testable in CI; `input.rs` decodes keys with a 140 ms escape timeout and twelve tests; `terminal.rs` enters raw mode through `stty`, paints one cell per two pixels with `▀`, and restores on `Drop` and on `SIGINT`; `playback.rs` runs the same flight headlessly and writes a PNG per frame plus `playback.json`, which is what CI holds down.
+
+Making it steerable was a rendering decision, not a simulation one: `session::Budget` changes the shot rather than the world (420 bodies inside 240 m, ruins inside 300 m, triangles under 0.75 px dropped) and past 24 m a body is a two-triangle camera-facing billboard tinted with the asset's own material instead of an 11,000-triangle mesh. `impostor_distance` defaults to infinity, so the five shipped PNGs are byte-identical after the change — re-rendering them left `docs/demo/` untouched.
+
+Measured: 850 ms a frame at full detail (600x375), 19.0 ms under the budget (112x72), and 38 ms in a real 112x88-pixel pty, which is 26 fps over a run of frames. The pty run is how the front end was verified at all: `script -qec` drives it, a byte decoder turns the captured escapes back into an image, and that image is `docs/demo/ashfall-play.png`.
+
+`demo/benches/render_pipeline.rs` puts the same 2,000-body scene through both pipelines: the software rasteriser, and a real `wgpu` device on its `noop` backend (adapter, pipeline, vertex and index buffers, instance upload, render pass, submission — commands discarded). The CPU half of a wgpu frame is 33.6 us for 2,064 instances and is indifferent to the target size; the software path is 850 ms and 19.0 ms. The ADR is explicit that this is not a GPU benchmark and that the ratio is the shape of the cost, not a verdict.
+
+`bevy-archie` is not wired in and the ADR says why: `winit` needs a display server, and this environment has none, nor `libvulkan`, nor `libxkbcommon`. The seam a windowed front end needs — `Session`, `Session::advance(&CameraInput, dt)`, `Command`, `Budget` — is public and tested, so the binding is one file on a machine with a display. CI gained two steps: a headless playback whose ten frames and table are checked, and a compile of the benchmark so the wgpu comparison does not rot."""
+
+[[completed]]
+slug = "ashfall-demo-cross-fade"
+title = "Cross-fade the impostor switch by pixel coverage, and cost it"
+phase = "Reach"
+delivered_in = "030806e"
+evidence = """`Shot::impostor_band` turns the level-of-detail switch into a window and `render3d` draws a body inside it twice: the quad at an increasing coverage, the mesh at the coverage it gives up. The fade is an 8 by 8 ordered dither resolved per pixel by `Renderer::triangle_coverage`, not a blend, and the reason is a defect found while building it: compositing a faded mesh turns its depth write off, so the body stops occluding itself and a hidden facet overpaints a visible one. Coverage keeps every fragment opaque, so a fading body still writes depth and still hides its own back faces; the cost is a hole or two at the dissolve's silhouette, which is why the five committed views hold the band at zero and only the steered front end sets it. The blending path was removed rather than left as an option — `Image::submit`, `Image::blend` and the `alpha` parameters are gone, so there is one fade and it is the correct one.
+Five tests pin the behaviour: a band of zero is byte-for-byte the hard switch; a body inside the band costs its mesh plus two triangles and a wider band adds two per body it reaches; half way through the band a quarter to three quarters of the quad's pixels have changed hands, which a hard switch cannot produce at either end; nothing outside the body's own pixels changes; and the same frame twice is the same bytes. Restoring a hard switch fails both band tests, which is how the teeth were checked.
+Measured with `cargo bench --bench render_pipeline -- "software/interactive"`: 19.39 ms with an eight-metre band against 19.63 ms with the switch, inside this machine's noise floor, which is the honest claim — the band is free where it is invisible. The case for it is a 300-cell terminal, where a body is eight to ten pixels and the dissolve is the difference between a pop and a fade; no display of that size exists here, so no number is claimed for it. `docs/performance.md` records the pair, ADR 0050 records the design and its limits, and `docs/demo/billboard-optimisations.md` records the four further optimisations with the measurement that would settle each."""
+
+[[completed]]
+slug = "gpu-demo-playbook"
+title = "A GPU front end for the playground, its frame benchmark, and the playbook for both"
+phase = "Reach"
+delivered_in = "61c8640"
+evidence = """`demo-gpu/` is a third crate that renders the Ashfall scene through an instanced wgpu pipeline over the same `Scene`, `Meshes` and `Shot` table the software rasteriser reads, so the two front ends cannot drift into different scenes. `Backend::{Auto,Vulkan,Gl,Noop}` keeps it buildable and testable on a machine with no driver: the noop device validates and encodes every command and executes none, which is what CI holds down. `GpuRenderer::set_shot` applies the shot the way the software path does — bodies by draw distance and body margin capped nearest-first, ruins by block distance and never counted against that cap, ground always — and three defects in that selection were found by looking at the image rather than the tests: a shadowed pattern binding that drew the city out of six planes, a descending sort that kept the farthest bodies under a nearest-first cap, and a cap applied to the whole selection that dropped every ruin.
+
+`benches/frame.rs` separates a frame's latency (`frame`), its throughput (`eight_frames_per_drain`) and the cost of shipping pixels back (`frame_with_readback`), prints the adapter as part of the result, and skips loudly with no adapter. The first version of it was wrong in a way worth recording: a case called `encode` submitted frames without draining the queue and reported 992 ms against 0.1 ms of measured submit time in the binary, because it was measuring saturation. On this machine the only adapter is `llvmpipe`, a CPU Vulkan driver, so latency and throughput agree at 974.56 ms and 986.6 ms for 600x375 and 5,401,392 triangles; `docs/performance.md` records those with the adapter beside them and ADR 0050 gains an amendment correcting its no-`libvulkan` premise and stating plainly that no hardware frame time is claimed.
+
+`docs/playbooks/gpu-demos.md` is the instruction set: which crate may depend on what, how to classify the machine before writing code, the adapter policy, the pipeline recipe, the shader rules that prevent a clipped image, the four correctness gates, the benchmarking traps, and the documentation duties that make a GPU demo finished rather than merely running. It is written to be followed by an agent without re-deriving any of the above. CI gains a `demo-gpu` job that tests the encoder, compiles the benchmark and encodes one frame on the noop device.
+
+The documentation audit found two rot points and fixed them: ADR 0022 had been on disk and missing from the index since it landed, and the release checklist still claimed 23 ADRs. The checklist now states a rule instead of a number."""
+
+[[completed]]
+slug = "terminal-capture-regeneration"
+title = "Regenerate the terminal capture from the client's own session, with the cross-fade on"
+phase = "Reach"
+delivered_in = "ff7066e"
+evidence = """`docs/demo/ashfall-play.png` was the last artefact nothing could reproduce: a pty capture run through an ANSI parser at whatever size the terminal happened to report, made before the impostor cross-fade existed. `demo/examples/frame_capture.rs` replaces it — same crowd, same seed, the client's own `Session` and `Budget`, rendered at 120 by 44 cells and enlarged four times by the new `Image::scaled`. Two runs of the documented command are byte-identical (`5eea90af5fd040c6a6b4206e4f135ce3`).
+
+The band is active and was checked rather than assumed: `--band 8` against `--band 0` differs by 1,152 pixels in this frame, and the triangle count moves with it (809,724 against 809,678) because bodies inside the window draw twice. `Image::scaled` carries a test that a misaligned block would fail, using a gradient whose every row differs.
+
+Both captions now name the command that produces the image, and two claims beside them were false: the impostor switch is hard by default but not hard once `Shot::impostor_band` widens it, and the bevy-archie note said this machine has no display server, no `libvulkan` and no `libxkbcommon` when all three are installed and only the GPU behind them is missing."""
+
+[[completed]]
+slug = "temperament-drives-behaviour"
+title = "Make personality steer: per-NPC weight bias, needs that decay, archetype presets"
+phase = "Reach"
+delivered_in = "60ffb49"
+evidence = """`Temperament` and `Needs` were sampled at spawn and read by nothing, so a guard was as brave as an
+urchin and nobody was ever hungry. The bias is now multiplicative on the configured weights
+(`CrowdParams::weights` stays the baseline, which is why a game's `separation = 2.5` still means that),
+resolved once per agent in `resolve_weights` and shared by the scalar tail, the block kernel and the
+threaded chunks, so a personality cannot mean different things on different roads. `Crowd::set_bias`
+clamps NaN to neutral and everything else into `0.25 ..= 4.0`; the buffer is cleared per frame and
+grows only as far as the highest biased index, so a crowd without personalities pays one `Option::get`
+per agent.
+
+Needs decay in bursts (`NeedsDecay`, eight ticks by default) because `Needs::decayed` is linear in
+ticks, and the interval is a `BoidsConfig` field rather than a constant. Both the drive and the decay
+are on by default: a feature that defaults off leaves the personality unread, which was the defect.
+Both are `Option`-shaped at every level, so a game with its own economy takes the needs back and a
+game with one weight set takes the bias back. Nothing is gated behind a Cargo feature, because the
+gate this crate uses is cost: no dependency, no acceleration structure, no allocation.
+
+`drain_spawn_queue` now blends the archetype preset with the individual at a third, drawing in the
+same order as before so a seed still produces the same numbers it did. The measured table — guards
+0.918 separation and 1.164 alignment, urchins 1.062 and 0.918, merchants 1.237 cohesion — is in ADR
+0051, `docs/book/src/behaviour.md` and the demo's `run.json`. `crowd_temperament` measures the cost
+at 10,000 agents: 1.8772 ms biased against 1.8766 ms uniform, inside noise, and
+`tests/crowd_no_alloc.rs` holds the zero-allocation claim with every agent biased. The demo reports
+the table back per run through `demo/src/behaviour.rs`, and `tests/playground.rs` asserts guards
+align more and jostle less than urchins on the live app, so the drive being unplugged from the
+schedule fails a test rather than a paragraph.
+"""

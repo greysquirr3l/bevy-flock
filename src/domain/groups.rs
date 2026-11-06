@@ -200,10 +200,9 @@ impl FactionMatrix {
     }
 
     /// Bytes the matrix occupies.
-    #[allow(clippy::unused_self)] // A method reads better than a free function here.
     #[must_use]
     pub const fn bytes(&self) -> usize {
-        core::mem::size_of::<Self>()
+        core::mem::size_of_val(self)
     }
 }
 
@@ -806,6 +805,7 @@ pub fn slot_spacing(formation: Formation, count: u16, spacing: f32) -> Option<f3
 mod tests {
     use super::*;
     use crate::behavior::registry::DirectiveKind;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn npc(raw: u32) -> NpcId {
         NpcId::unique(raw)
@@ -813,10 +813,10 @@ mod tests {
 
     #[test]
     fn faction_relations_are_symmetric_and_constant_time() {
-        let mut matrix = FactionMatrix::new(4).expect("matrix");
+        let mut matrix = FactionMatrix::new(4).or_die();
         matrix
             .set(FactionId::new(1), FactionId::new(2), Relation::Hostile)
-            .expect("set");
+            .or_die();
         assert_eq!(
             matrix.get(FactionId::new(2), FactionId::new(1)),
             Relation::Hostile
@@ -833,12 +833,15 @@ mod tests {
 
     #[test]
     fn a_faction_outside_the_matrix_is_refused_on_write_and_neutral_on_read() {
-        let mut matrix = FactionMatrix::new(2).expect("matrix");
+        let mut matrix = FactionMatrix::new(2).or_die();
         assert!(matches!(
             matrix
                 .set(FactionId::new(2), FactionId::new(0), Relation::Ally)
-                .unwrap_err(),
-            GroupError::UnknownFaction { .. }
+                .or_die_err(),
+            GroupError::UnknownFaction {
+                faction: _,
+                size: _
+            }
         ));
         assert_eq!(
             matrix.get(FactionId::new(9), FactionId::new(0)),
@@ -849,15 +852,15 @@ mod tests {
     #[test]
     fn membership_operations_are_bounded_by_the_group() {
         let mut store = GroupStore::new();
-        let group = store.create(npc(1), Formation::Column).expect("create");
+        let group = store.create(npc(1), Formation::Column).or_die();
         for index in 2..=64 {
-            let slot = store.join(group, npc(index)).expect("join");
+            let slot = store.join(group, npc(index)).or_die();
             assert_eq!(u32::from(slot), index - 1);
         }
         assert_eq!(store.get(group).map(Group::len), Some(64));
         // Leaving frees the slot for reuse rather than shifting everyone.
-        let freed = store.leave(group, npc(5)).expect("leave");
-        let reused = store.join(group, npc(99)).expect("join");
+        let freed = store.leave(group, npc(5)).or_die();
+        let reused = store.join(group, npc(99)).or_die();
         assert_eq!(freed, reused);
         assert_eq!(store.group_of(npc(99)).map(Group::id), Some(group));
     }
@@ -865,19 +868,19 @@ mod tests {
     #[test]
     fn the_leader_cannot_lead_two_groups() {
         let mut store = GroupStore::new();
-        let _ = store.create(npc(1), Formation::Ring).expect("create");
+        let _ = store.create(npc(1), Formation::Ring).or_die();
         assert!(matches!(
-            store.create(npc(1), Formation::Ring).unwrap_err(),
-            GroupError::AlreadyGrouped { .. }
+            store.create(npc(1), Formation::Ring).or_die_err(),
+            GroupError::AlreadyGrouped { npc: _ }
         ));
     }
 
     #[test]
     fn despawning_the_leader_promotes_the_lowest_identity() {
         let mut store = GroupStore::new();
-        let group = store.create(npc(7), Formation::Ring).expect("create");
-        let _ = store.join(group, npc(3)).expect("join");
-        let _ = store.join(group, npc(5)).expect("join");
+        let group = store.create(npc(7), Formation::Ring).or_die();
+        let _ = store.join(group, npc(3)).or_die();
+        let _ = store.join(group, npc(5)).or_die();
         let _ = store.on_despawn(npc(7));
         assert_eq!(store.get(group).map(Group::leader), Some(npc(3)));
         assert_eq!(store.get(group).map(Group::len), Some(2));
@@ -886,7 +889,7 @@ mod tests {
     #[test]
     fn the_last_member_leaving_dissolves_the_group() {
         let mut store = GroupStore::new();
-        let group = store.create(npc(1), Formation::Ring).expect("create");
+        let group = store.create(npc(1), Formation::Ring).or_die();
         let _ = store.on_despawn(npc(1));
         assert!(store.is_empty());
         assert!(store.get(group).is_none());
@@ -895,27 +898,27 @@ mod tests {
     #[test]
     fn nesting_stops_at_two_levels() {
         let mut store = GroupStore::new();
-        let crowd = store.create(npc(1), Formation::Free).expect("crowd");
-        let squad = store.create(npc(2), Formation::Wedge).expect("squad");
-        let other = store.create(npc(3), Formation::Ring).expect("other");
-        store.nest(squad, crowd).expect("nest");
+        let crowd = store.create(npc(1), Formation::Free).or_die();
+        let squad = store.create(npc(2), Formation::Wedge).or_die();
+        let other = store.create(npc(3), Formation::Ring).or_die();
+        store.nest(squad, crowd).or_die();
         assert_eq!(store.get(crowd).map(|g| g.children().len()), Some(1));
         assert!(matches!(
-            store.nest(other, squad).unwrap_err(),
-            GroupError::NestingTooDeep { .. }
+            store.nest(other, squad).or_die_err(),
+            GroupError::NestingTooDeep { depth: _ }
         ));
         assert!(matches!(
-            store.nest(squad, other).unwrap_err(),
-            GroupError::AlreadyNested { .. }
+            store.nest(squad, other).or_die_err(),
+            GroupError::AlreadyNested { group: _ }
         ));
     }
 
     #[test]
     fn a_dissolved_child_leaves_its_parent() {
         let mut store = GroupStore::new();
-        let crowd = store.create(npc(1), Formation::Free).expect("crowd");
-        let squad = store.create(npc(2), Formation::Wedge).expect("squad");
-        store.nest(squad, crowd).expect("nest");
+        let crowd = store.create(npc(1), Formation::Free).or_die();
+        let squad = store.create(npc(2), Formation::Wedge).or_die();
+        store.nest(squad, crowd).or_die();
         store.dissolve(squad);
         assert_eq!(store.get(crowd).map(|g| g.children().len()), Some(0));
     }
@@ -923,11 +926,11 @@ mod tests {
     #[test]
     fn directives_expire() {
         let mut store = GroupStore::new();
-        let group = store.create(npc(1), Formation::Ring).expect("create");
+        let group = store.create(npc(1), Formation::Ring).or_die();
         store
             .issue(group, DirectiveKind::Hold, Tick::new(10), 5)
-            .expect("issue");
-        let group_ref = store.get(group).expect("live");
+            .or_die();
+        let group_ref = store.get(group).or_die();
         assert_eq!(group_ref.active_directives(Tick::new(12)).count(), 1);
         assert_eq!(group_ref.active_directives(Tick::new(15)).count(), 0);
     }
@@ -936,13 +939,13 @@ mod tests {
     fn slot_indices_survive_a_member_leaving() {
         let mut store = GroupStore::new();
         let leader = npc(1);
-        let group = store.create(leader, Formation::Ring).expect("create");
-        let _ = store.join(group, npc(2)).expect("join");
-        let _ = store.join(group, npc(3)).expect("join");
+        let group = store.create(leader, Formation::Ring).or_die();
+        let _ = store.join(group, npc(2)).or_die();
+        let _ = store.join(group, npc(3)).or_die();
         assert_eq!(store.get(group).and_then(|g| g.slot_of(npc(2))), Some(1));
         // Removing a different member must not move this one's slot index: a ring
         // reshapes as the count changes, but a queue must not lose its place.
-        let _ = store.leave(group, npc(3)).expect("leave");
+        let _ = store.leave(group, npc(3)).or_die();
         assert_eq!(store.get(group).and_then(|g| g.slot_of(npc(2))), Some(1));
         assert_eq!(store.get(group).map(Group::len), Some(2));
     }
@@ -950,19 +953,19 @@ mod tests {
     #[test]
     fn a_column_keeps_its_targets_as_the_group_shrinks() {
         let mut store = GroupStore::new();
-        let group = store.create(npc(1), Formation::Column).expect("create");
-        let _ = store.join(group, npc(2)).expect("join");
-        let _ = store.join(group, npc(3)).expect("join");
+        let group = store.create(npc(1), Formation::Column).or_die();
+        let _ = store.join(group, npc(2)).or_die();
+        let _ = store.join(group, npc(3)).or_die();
         let anchor = Vec3::new(10.0, 0.0, 10.0);
         let first = store
             .slot_target(npc(2), anchor, 0.0, 1.5)
-            .expect("member")
-            .expect("slot");
-        let _ = store.leave(group, npc(3)).expect("leave");
+            .or_die()
+            .or_die();
+        let _ = store.leave(group, npc(3)).or_die();
         let again = store
             .slot_target(npc(2), anchor, 0.0, 1.5)
-            .expect("member")
-            .expect("slot");
+            .or_die()
+            .or_die();
         assert!(
             (first - again).length() < 1e-5,
             "a column should not reshuffle"
@@ -971,9 +974,9 @@ mod tests {
 
     #[test]
     fn formation_offsets_are_behind_the_leader() {
-        let column = Formation::Column.slot_offset(0, 4, 2.0).expect("offset");
+        let column = Formation::Column.slot_offset(0, 4, 2.0).or_die();
         assert!(column.z > 0.0);
-        let ring = Formation::Ring.slot_offset(0, 8, 2.0).expect("offset");
+        let ring = Formation::Ring.slot_offset(0, 8, 2.0).or_die();
         assert!(ring.length() > 0.0);
         assert!(Formation::Free.slot_offset(0, 8, 2.0).is_none());
         assert!(Formation::Ring.slot_offset(9, 8, 2.0).is_none());
@@ -982,13 +985,11 @@ mod tests {
     #[test]
     fn a_snapshot_counts_what_is_there() {
         let mut store = GroupStore::new();
-        let a = store.create(npc(1), Formation::Ring).expect("a");
-        let _ = store.join(a, npc(2)).expect("join");
-        let b = store.create(npc(3), Formation::Column).expect("b");
-        store.nest(b, a).expect("nest");
-        store
-            .issue(a, DirectiveKind::Hold, Tick::ZERO, 10)
-            .expect("issue");
+        let a = store.create(npc(1), Formation::Ring).or_die();
+        let _ = store.join(a, npc(2)).or_die();
+        let b = store.create(npc(3), Formation::Column).or_die();
+        store.nest(b, a).or_die();
+        store.issue(a, DirectiveKind::Hold, Tick::ZERO, 10).or_die();
         let snapshot = store.snapshot();
         assert_eq!(snapshot.groups, 2);
         assert_eq!(snapshot.members, 3);
@@ -998,7 +999,7 @@ mod tests {
 
     #[test]
     fn the_matrix_reports_its_own_footprint() {
-        let matrix = FactionMatrix::new(16).expect("matrix");
+        let matrix = FactionMatrix::new(16).or_die();
         assert_eq!(matrix.bytes(), core::mem::size_of::<FactionMatrix>());
         assert_eq!(matrix.size(), 16);
     }

@@ -15,11 +15,8 @@
 //! The promotion ration is set out of the way here (every NPC promotes on the first tick).
 //! In a game it stays at sixteen, because the ration exists to protect the frame this bench
 //! is measuring.
-#![expect(
-    clippy::expect_used,
-    reason = "the fixture asserts the tree it just built"
-)]
 
+use bevy_flock::testkit::OrDie;
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
@@ -65,7 +62,7 @@ fn tier_distance(tier: CognitionTier) -> f32 {
 }
 
 fn tree() -> Arc<BehaviorTree> {
-    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).expect("a leaf is a tree"))
+    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
 }
 
 fn world(count: u32, tier: Option<CognitionTier>) -> App {

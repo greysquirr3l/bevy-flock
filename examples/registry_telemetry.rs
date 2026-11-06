@@ -14,16 +14,7 @@
 //! dependency, no floating-point in the measurements, and byte-identical output for
 //! the same arguments, because a diagnostic that changes between runs cannot be used
 //! to compare two builds.
-#![expect(
-    clippy::expect_used,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::needless_raw_string_hashes,
-    clippy::too_many_lines,
-    clippy::write_with_newline,
-    reason = "a diagnostic that aborts loudly on a broken fixture is the useful kind, and the SVG \
-              strings all carry the same hash count so a colour literal cannot terminate one"
-)]
+use bevy_flock::testkit::OrDie;
 use std::fmt::Write as _;
 use std::fs;
 
@@ -168,7 +159,7 @@ fn print_table(samples: &[Sample]) {
             sample.orphan_subject_permille()
         );
     }
-    let last = samples.last().expect("at least one session");
+    let last = samples.last().or_die();
     let sessions = last.session + 1;
     let ghost_pct = f64::from(last.ghost_permille(CAPACITY)) / 10.0;
     let orphan_pct = f64::from(last.orphan_slot_permille()) / 10.0;
@@ -189,43 +180,42 @@ fn print_table(samples: &[Sample]) {
 ///
 /// Hand-rolled SVG rather than a plotting crate: a diagnostic that pulls a dependency
 /// tree into a library's dev-dependencies is a diagnostic nobody runs.
+/// Geometry is computed from the number of subjects rather than assumed: the first version
+/// hard-coded 24-pixel columns, which was fine at sixteen subjects and put the
+/// sixty-four-subject panel 600 pixels off the left edge of the canvas when ADR 0016 raised the
+/// ceiling.
+const WIDTH: u32 = 960;
+const HEIGHT: u32 = 660;
+const LEFT: f64 = 70.0;
+const PLOT_W: f64 = 380.0;
+const TOP_TOP: f64 = 110.0;
+const TOP_BOTTOM: f64 = 280.0;
+const BOTTOM_TOP: f64 = 386.0;
+const BOTTOM_BOTTOM: f64 = 536.0;
+const INK: &str = "#1c1c1e";
+const MUTED: &str = "#6e6e73";
+const GRID: &str = "#dcdce1";
+const GHOST: &str = "#c0392b";
+const LIVE: &str = "#2d7d46";
+const RETIRED: &str = "#8e8e93";
+
 fn render(samples: &[Sample], per_subject: &[u32]) -> String {
-    // Geometry is computed from the number of subjects rather than assumed: the first
-    // version hard-coded 24-pixel columns, which was fine at sixteen subjects and put
-    // the sixty-four-subject panel 600 pixels off the left edge of the canvas when ADR
-    // 0016 raised the ceiling.
-    const WIDTH: u32 = 960;
-    const HEIGHT: u32 = 660;
-    const LEFT: f64 = 70.0;
-    const PLOT_W: f64 = 380.0;
-    const TOP_TOP: f64 = 110.0;
-    const TOP_BOTTOM: f64 = 280.0;
-    const BOTTOM_TOP: f64 = 386.0;
-    const BOTTOM_BOTTOM: f64 = 536.0;
-    const INK: &str = "#1c1c1e";
-    const MUTED: &str = "#6e6e73";
-    const GRID: &str = "#dcdce1";
-    const GHOST: &str = "#c0392b";
-    const LIVE: &str = "#2d7d46";
-    const RETIRED: &str = "#8e8e93";
-
-    let columns = per_subject.len().max(1);
-    let panel_left = LEFT;
-    let panel_w = f64::from(WIDTH) - 40.0 - panel_left;
-    let column_w = panel_w / columns as f64;
-    let bar_w = (column_w - 3.0).max(2.0);
-
     let mut svg = String::new();
-    let _ = write!(
+    let _ = writeln!(
         svg,
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
 <rect width="{WIDTH}" height="{HEIGHT}" fill="#fbfbfd"/>
 <text x="{LEFT}" y="38" font-size="17" fill="{INK}" font-weight="600">Subject registry fragmentation and ghost accumulation</text>
-<text x="{LEFT}" y="58" font-size="11" fill="{MUTED}">{SESSIONS} sessions · {SPAWN_PER_SESSION} spawned each · capacity {CAPACITY} · {SUBJECTS} subjects, {RETIRED_TOTAL} retired at sessions 4 and 8</text>
-"##
+<text x="{LEFT}" y="58" font-size="11" fill="{MUTED}">{SESSIONS} sessions · {SPAWN_PER_SESSION} spawned each · capacity {CAPACITY} · {SUBJECTS} subjects, {RETIRED_TOTAL} retired at sessions 4 and 8</text>"##
     );
+    write_rows_panel(&mut svg, samples);
+    write_subject_panel(&mut svg, samples, per_subject);
+    svg
+}
 
-    let last = samples.last().expect("at least one session");
+/// The rows-per-session panel: two filled areas, the gridlines behind them and the axis labels.
+fn write_rows_panel(svg: &mut String, samples: &[Sample]) {
+    let last = samples.last().or_die();
     let max_rows = samples
         .iter()
         .map(|sample| sample.enrolled)
@@ -237,19 +227,17 @@ fn render(samples: &[Sample], per_subject: &[u32]) -> String {
     let scale_x =
         |session: usize| LEFT + 24.0 + (session as f64 / (SESSIONS as f64 - 1.0)) * (PLOT_W - 60.0);
 
-    let _ = write!(
+    let _ = writeln!(
         svg,
-        r##"<text x="{LEFT}" y="92" font-size="12" fill="{INK}" font-weight="600">Rows per session · stacked: populated, then ghosts</text>
-"##
+        r#"<text x="{LEFT}" y="92" font-size="12" fill="{INK}" font-weight="600">Rows per session · stacked: populated, then ghosts</text>"#
     );
     for step in 0..=4 {
         let rows = max_rows * step / 4;
         let y = scale_y(rows);
-        let _ = write!(
+        let _ = writeln!(
             svg,
-            r##"<line x1="{LEFT}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{GRID}"/>
-<text x="{:.1}" y="{:.1}" font-size="10" fill="{MUTED}" text-anchor="end">{rows}</text>
-"##,
+            r#"<line x1="{LEFT}" y1="{y:.1}" x2="{:.1}" y2="{y:.1}" stroke="{GRID}"/>
+<text x="{:.1}" y="{:.1}" font-size="10" fill="{MUTED}" text-anchor="end">{rows}</text>"#,
             LEFT + PLOT_W,
             LEFT - 6.0,
             y + 3.0
@@ -276,13 +264,12 @@ fn render(samples: &[Sample], per_subject: &[u32]) -> String {
         );
     }
     let label_x = scale_x(0) + 8.0;
-    let _ = write!(
+    let _ = writeln!(
         svg,
-        r##"<path d="{populated_path}L{:.1},{:.1} L{:.1},{:.1} Z" fill="{LIVE}" fill-opacity="0.18" stroke="{LIVE}" stroke-width="2"/>
+        r#"<path d="{populated_path}L{:.1},{:.1} L{:.1},{:.1} Z" fill="{LIVE}" fill-opacity="0.18" stroke="{LIVE}" stroke-width="2"/>
 <path d="{ghost_path}L{:.1},{:.1} L{:.1},{:.1} Z" fill="{GHOST}" fill-opacity="0.14" stroke="{GHOST}" stroke-width="2"/>
 <text x="{label_x:.1}" y="{:.1}" font-size="10" fill="{LIVE}">populated {}</text>
-<text x="{label_x:.1}" y="{:.1}" font-size="10" fill="{GHOST}">ghosts {}</text>
-"##,
+<text x="{label_x:.1}" y="{:.1}" font-size="10" fill="{GHOST}">ghosts {}</text>"#,
         scale_x(last.session),
         TOP_BOTTOM,
         scale_x(0),
@@ -297,35 +284,41 @@ fn render(samples: &[Sample], per_subject: &[u32]) -> String {
         last.enrolled
     );
     for sample in samples {
-        let _ = write!(
+        let _ = writeln!(
             svg,
-            r##"<text x="{:.1}" y="{:.1}" font-size="9" fill="{MUTED}" text-anchor="middle">{}</text>
-"##,
+            r#"<text x="{:.1}" y="{:.1}" font-size="9" fill="{MUTED}" text-anchor="middle">{}</text>"#,
             scale_x(sample.session),
             TOP_BOTTOM + 15.0,
             sample.session
         );
     }
-    let _ = write!(
+    let _ = writeln!(
         svg,
-        r##"<text x="{:.1}" y="{:.1}" font-size="10" fill="{MUTED}" text-anchor="middle">session</text>
-"##,
+        r#"<text x="{:.1}" y="{:.1}" font-size="10" fill="{MUTED}" text-anchor="middle">session</text>"#,
         LEFT + PLOT_W / 2.0,
         TOP_BOTTOM + 33.0
     );
+}
 
+/// The references-per-subject panel and the legend.
+fn write_subject_panel(svg: &mut String, samples: &[Sample], per_subject: &[u32]) {
+    let last = samples.last().or_die();
+    let columns = per_subject.len().max(1);
+    let panel_left = LEFT;
+    let panel_w = f64::from(WIDTH) - 40.0 - panel_left;
+    let column_w = panel_w / columns as f64;
+    let bar_w = (column_w - 3.0).max(2.0);
     let peak = per_subject.iter().copied().max().unwrap_or(1).max(1);
     let bar_scale =
         |count: u32| (f64::from(count) / f64::from(peak)) * (BOTTOM_BOTTOM - BOTTOM_TOP - 10.0);
     let retired_from = usize::from(last.registry_len);
 
-    let _ = write!(
+    let _ = writeln!(
         svg,
-        r##"<text x="{panel_left:.1}" y="350" font-size="12" fill="{INK}" font-weight="600">References per subject</text>
+        r#"<text x="{panel_left:.1}" y="350" font-size="12" fill="{INK}" font-weight="600">References per subject</text>
 <text x="{panel_left:.1}" y="368" font-size="10" fill="{MUTED}">peak {peak} references · {:.1}% of slots point at subjects outside the registry (ids {retired_from}..{columns})</text>
-<line x1="{panel_left:.1}" y1="{BOTTOM_BOTTOM:.1}" x2="{:.1}" y2="{BOTTOM_BOTTOM:.1}" stroke="{GRID}"/>
-"##,
-        last.orphan_slot_permille() as f64 / 10.0,
+<line x1="{panel_left:.1}" y1="{BOTTOM_BOTTOM:.1}" x2="{:.1}" y2="{BOTTOM_BOTTOM:.1}" stroke="{GRID}"/>"#,
+        f64::from(last.orphan_slot_permille()) / 10.0,
         panel_left + panel_w
     );
     for (raw, count) in per_subject.iter().enumerate() {
@@ -338,17 +331,15 @@ fn render(samples: &[Sample], per_subject: &[u32]) -> String {
         } else {
             LIVE
         };
-        let _ = write!(
+        let _ = writeln!(
             svg,
-            r##"<rect x="{x:.1}" y="{:.1}" width="{bar_w:.1}" height="{height:.1}" fill="{fill}" fill-opacity="0.72"/>
-"##,
+            r#"<rect x="{x:.1}" y="{:.1}" width="{bar_w:.1}" height="{height:.1}" fill="{fill}" fill-opacity="0.72"/>"#,
             BOTTOM_BOTTOM - height
         );
         if raw % 8 == 0 {
-            let _ = write!(
+            let _ = writeln!(
                 svg,
-                r##"<text x="{:.1}" y="{:.1}" font-size="9" fill="{MUTED}" text-anchor="middle">{raw}</text>
-"##,
+                r#"<text x="{:.1}" y="{:.1}" font-size="9" fill="{MUTED}" text-anchor="middle">{raw}</text>"#,
                 x + bar_w / 2.0,
                 BOTTOM_BOTTOM + 15.0
             );
@@ -356,19 +347,17 @@ fn render(samples: &[Sample], per_subject: &[u32]) -> String {
     }
 
     let axis_x = panel_left + panel_w / 2.0;
-    let _ = write!(
+    let _ = writeln!(
         svg,
-        r##"<text x="{panel_left:.1}" y="596" font-size="10" fill="{LIVE}">■ live</text>
+        r#"<text x="{panel_left:.1}" y="596" font-size="10" fill="{LIVE}">■ live</text>
 <text x="{:.1}" y="596" font-size="10" fill="{GHOST}">■ registered, never referenced</text>
 <text x="{:.1}" y="596" font-size="10" fill="{RETIRED}">■ retired, still referenced</text>
 <text x="{axis_x:.1}" y="{:.1}" font-size="10" fill="{MUTED}" text-anchor="middle">subject id</text>
 <text x="{LEFT}" y="626" font-size="10" fill="{MUTED}">Ghosts are rows holding no relationship: enrolled on spawn, never met anyone. They cost capacity, not time.</text>
 <text x="{LEFT}" y="642" font-size="10" fill="{MUTED}">Orphan slots point at retired subjects. A version 2 save translates them; a running store cannot, so it pays until they decay.</text>
-</svg>
-"##,
+</svg>"#,
         panel_left + 62.0,
         panel_left + 250.0,
         BOTTOM_BOTTOM + 32.0
     );
-    svg
 }

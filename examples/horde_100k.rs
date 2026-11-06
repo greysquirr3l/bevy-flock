@@ -16,27 +16,19 @@
 //! This is the example to point at when someone asks whether the crate actually
 //! scales, which is why it prints the digest: run it twice and diff.
 
-// An example's job is to be read: it prints, it unwraps, and it keeps its setup next to
-// the thing it demonstrates rather than hoisting every constant to the top.
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::print_stdout,
-    clippy::print_stderr,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::missing_docs_in_private_items,
-    clippy::items_after_statements,
-    clippy::float_cmp
-)]
+// An example's job is to be read: it prints, it reports its own failures through the test kit,
+// and it keeps its fixtures next to the thing it demonstrates.
 use bevy_app::App;
 use bevy_flock::adapters::primary::observability::Diagnostics;
 use bevy_flock::prelude::*;
+use bevy_flock::testkit::OrDie;
 use std::time::Instant;
 
+/// Frames the horde runs before the measurement starts, so the first-tick work is not counted.
+const WARM_FRAMES: u32 = 120;
+
 fn main() {
-    let population = PopulationSize::try_new(100_000).expect("100,000 is a valid population");
+    let population = PopulationSize::try_new(100_000).or_die();
     let config = FlockConfig::default()
         .with_population(population)
         .with_spawn_budget(4_000);
@@ -61,7 +53,6 @@ fn main() {
     let spawn_elapsed = start.elapsed();
 
     let warm = Instant::now();
-    const WARM_FRAMES: u32 = 120;
     for _ in 0..WARM_FRAMES {
         app.update();
     }

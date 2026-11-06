@@ -40,15 +40,74 @@ use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
 use crate::adapters::primary::components::{
-    FlockMember, LodTier, Npc, NpcDesiredVelocity, NpcTarget, NpcVelocity,
+    FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcDesiredVelocity, NpcNeeds, NpcTarget,
+    NpcTemperament, NpcVelocity,
 };
 use crate::adapters::primary::plugin::FlockSet;
 use crate::application::SimClock;
-use crate::application::{Crowd, CrowdParams, CrowdReport};
+use crate::application::{AvoidanceParams, Crowd, CrowdParams, CrowdReport, SteeringRoad};
 use crate::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{AgentState, SteeringParams, desired_velocity};
+use crate::domain::temperament::{Needs, Temperament, TemperamentDrive, WeightBias};
 use crate::domain::tick::TicksPerSecond;
 use crate::error::ConfigError;
+
+/// How often unmet needs decay, in ticks.
+///
+/// [`Needs::decayed`] is linear in ticks, so decaying eight ticks in one pass is the same
+/// arithmetic as eight single-tick passes — to within float rounding — for an eighth of the ECS
+/// traffic. A crowd that ticks in bursts (an interval scheduler, a fast-forward) gets the right
+/// answer rather than a stale one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NeedsDecay {
+    every: u32,
+}
+
+impl NeedsDecay {
+    /// The shipped interval: eight ticks, which is imperceptible and cheap.
+    pub const DEFAULT_INTERVAL: u32 = 8;
+
+    /// Decay every tick.
+    pub const EVERY_TICK: Self = Self { every: 1 };
+
+    /// Decay every `every` ticks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::ZeroBudget`] for zero, which would leave needs frozen while the
+    /// documentation promised otherwise.
+    pub fn try_new(every: u32) -> Result<Self, ConfigError> {
+        if every == 0 {
+            return Err(ConfigError::ZeroBudget {
+                field: "needs_decay",
+            });
+        }
+        Ok(Self { every })
+    }
+
+    /// Decay every `every` ticks, with zero read as one.
+    ///
+    /// The forgiving form, for a knob a game exposes: a zero interval is a slip, not a request to
+    /// stop time.
+    #[must_use]
+    pub const fn every(every: u32) -> Self {
+        Self {
+            every: if every == 0 { 1 } else { every },
+        }
+    }
+
+    /// The interval, in ticks.
+    #[must_use]
+    pub const fn interval(self) -> u32 {
+        self.every
+    }
+}
+
+impl Default for NeedsDecay {
+    fn default() -> Self {
+        Self::every(Self::DEFAULT_INTERVAL)
+    }
+}
 
 /// Configuration for the boids simulation.
 ///
@@ -59,6 +118,10 @@ pub struct BoidsConfig {
     params: SteeringParams,
     grid: SpatialGridConfig,
     max_acceleration: f32,
+    road: SteeringRoad,
+    avoidance: Option<AvoidanceParams>,
+    temperament: Option<TemperamentDrive>,
+    needs: Option<NeedsDecay>,
 }
 
 impl BoidsConfig {
@@ -87,6 +150,10 @@ impl BoidsConfig {
             params,
             grid,
             max_acceleration,
+            road: SteeringRoad::Auto,
+            avoidance: Some(AvoidanceParams::new()),
+            temperament: Some(TemperamentDrive::default()),
+            needs: Some(NeedsDecay::default()),
         })
     }
 
@@ -129,6 +196,77 @@ impl BoidsConfig {
         Ok(self)
     }
 
+    /// Choose where a frame is steered. `Auto` unless a game asks otherwise.
+    ///
+    /// `SteeringRoad::Threads` on a machine with cores to spare, `SteeringRoad::Scalar` for a
+    /// replay somebody wants to step through one agent at a time.
+    #[must_use]
+    pub fn with_road(mut self, road: SteeringRoad) -> Self {
+        self.road = road;
+        self
+    }
+
+    /// Where a frame is steered.
+    #[must_use]
+    pub fn road(&self) -> SteeringRoad {
+        self.road
+    }
+
+    /// Turn reciprocal avoidance on or off, and set its numbers (ADR 0045).
+    ///
+    /// On by default with [`AvoidanceParams::new`]: two agents walking at each other in a
+    /// corridor should not pass through each other, and a crowd library where that needs
+    /// discovering is a crowd library that ships the bug. `None` restores pure boids steering
+    /// for a game that solves separation itself.
+    #[must_use]
+    pub fn with_avoidance(mut self, avoidance: Option<AvoidanceParams>) -> Self {
+        self.avoidance = avoidance;
+        self
+    }
+
+    /// The avoidance settings, if the pass runs.
+    #[must_use]
+    pub fn avoidance(&self) -> Option<AvoidanceParams> {
+        self.avoidance
+    }
+
+    /// Let each NPC's temperament scale its own steering weights (ADR 0051).
+    ///
+    /// On by default: an NPC whose personality never reaches the simulation is a sampled number
+    /// with a doc comment. `None` restores one weight set for the whole crowd, which is what a
+    /// game that builds its own biases on [`crate::application::Crowd::set_bias`] wants.
+    ///
+    /// The configured weights stay the baseline and the bias multiplies them, so a game tuning
+    /// `separation` still gets what the number says, per agent.
+    #[must_use]
+    pub fn with_temperament(mut self, temperament: Option<TemperamentDrive>) -> Self {
+        self.temperament = temperament;
+        self
+    }
+
+    /// The temperament drive, if personalities steer.
+    #[must_use]
+    pub fn temperament(&self) -> Option<TemperamentDrive> {
+        self.temperament
+    }
+
+    /// How often unmet needs decay. `None` leaves needs to the game, which is what a game with
+    /// its own economy wants.
+    ///
+    /// Decay is on by default because a need that never moves cannot influence anything: the
+    /// bias would be a constant, and every NPC would read as content.
+    #[must_use]
+    pub fn with_needs_decay(mut self, needs: Option<NeedsDecay>) -> Self {
+        self.needs = needs;
+        self
+    }
+
+    /// The needs decay interval, if the plugin decays them.
+    #[must_use]
+    pub fn needs_decay(&self) -> Option<NeedsDecay> {
+        self.needs
+    }
+
     /// Change the acceleration limit.
     ///
     /// A non-finite or non-positive value is ignored and the previous limit is
@@ -151,6 +289,10 @@ impl Default for BoidsConfig {
             params: SteeringParams::human_scale(),
             grid: SpatialGridConfig::default(),
             max_acceleration: 4.0,
+            road: SteeringRoad::Auto,
+            avoidance: Some(AvoidanceParams::new()),
+            temperament: Some(TemperamentDrive::default()),
+            needs: Some(NeedsDecay::default()),
         }
     }
 }
@@ -180,6 +322,9 @@ type SteerQuery<'w, 's> = Query<
         Option<&'static NpcTarget>,
         Option<&'static FlockMember>,
         Option<&'static LodTier>,
+        Option<&'static NpcAvoidancePriority>,
+        Option<&'static NpcTemperament>,
+        Option<&'static NpcNeeds>,
     ),
 >;
 
@@ -236,7 +381,12 @@ impl Plugin for BoidsPlugin {
             )
             .add_systems(Update, rebuild_spatial_grid.in_set(FlockSet::Perception))
             .add_systems(Update, steer_flock.in_set(FlockSet::Steering))
-            .add_systems(Update, integrate_flock.in_set(FlockSet::Integration));
+            .add_systems(
+                Update,
+                (integrate_flock, decay_needs)
+                    .chain()
+                    .in_set(FlockSet::Integration),
+            );
     }
 }
 
@@ -259,6 +409,69 @@ pub fn rebuild_spatial_grid(
     grid.0.build();
 }
 
+/// What the steering pass reads from each NPC.
+///
+/// A named alias rather than a tuple at the parameter: eight elements inline is a type a reader has
+/// to parse, and the compiler does not care either way.
+type GatherQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Transform,
+        &'static NpcVelocity,
+        Option<&'static NpcTarget>,
+        Option<&'static LodTier>,
+        Option<&'static NpcAvoidancePriority>,
+        Option<&'static NpcTemperament>,
+        Option<&'static NpcNeeds>,
+    ),
+>;
+
+/// The bias an agent with no personality carries: every weight as configured.
+const NEUTRAL_BIAS: [f32; 5] = [1.0; 5];
+
+/// The weight scale one NPC's personality and unmet needs ask for.
+///
+/// A missing temperament reads as [`Temperament::balanced`] and a missing needs component as
+/// [`Needs::satisfied`], so an NPC spawned without the full bundle still steers — with the
+/// configured weights rather than not at all.
+fn bias_of(
+    temperament: Option<&NpcTemperament>,
+    needs: Option<&NpcNeeds>,
+    drive: TemperamentDrive,
+) -> [f32; 5] {
+    let balanced = Temperament::balanced();
+    let satisfied = Needs::satisfied();
+    let who = temperament.map_or(&balanced, |component| &component.0);
+    let state = needs.map_or(&satisfied, |component| &component.0);
+    drive.bias(who, state).to_array()
+}
+
+/// Decay every NPC's unmet needs, in bursts, scaled by temperament (ADR 0051).
+///
+/// Runs after integration, once per `interval` frames. `Needs::decayed` is linear in ticks, so a
+/// burst is the same arithmetic as a tick-by-tick pass; the counter is a `Local`, so the system
+/// allocates nothing and its state is part of the schedule rather than of the world.
+pub fn decay_needs(
+    config: Res<BoidsConfig>,
+    mut elapsed: Local<u32>,
+    mut query: Query<(&NpcTemperament, &mut NpcNeeds)>,
+) {
+    let Some(decay) = config.needs else {
+        return;
+    };
+    *elapsed = elapsed.saturating_add(1);
+    if *elapsed < decay.interval() {
+        return;
+    }
+    let ticks = u64::from(*elapsed);
+    *elapsed = 0;
+    for (temperament, mut needs) in &mut query {
+        needs.0 = needs.0.decayed(&temperament.0, ticks).sanitised();
+    }
+}
+
 /// Ask every NPC for the velocity it wants, through the cell-major kernel.
 ///
 /// Gathers the crowd into arrays in grid-cell order, steers it with one pass per agent over the
@@ -268,30 +481,22 @@ pub fn rebuild_spatial_grid(
 /// This is the path ADR 0026 records. The model is unchanged — the same weights, the same
 /// priority truncation, the same arrival curve — but the loop is inverted, and the distance sort
 /// and the per-agent `Vec<Neighbour>` are gone.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn steer_flock(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
     mut crowd: Local<Crowd>,
     mut entities: Local<Vec<Entity>>,
-    gather: Query<(
-        Entity,
-        &Transform,
-        &NpcVelocity,
-        Option<&NpcTarget>,
-        Option<&LodTier>,
-    )>,
+    gather: GatherQuery,
     mut desired: Query<&mut NpcDesiredVelocity>,
     mut report: ResMut<FlockSteerReport>,
 ) {
     let params = CrowdParams::from_steering(&config.params);
+    crowd.set_road(config.road);
     crowd.configure_from_grid(&grid.0);
     crowd.begin();
     entities.clear();
-    for (entity, transform, velocity, target, tier) in &gather {
+    let drive = config.temperament;
+    for (entity, transform, velocity, target, tier, priority, temperament, needs) in &gather {
         // Ambient-tier NPCs are population mass: neighbours to everyone, steered by nobody.
         let steers = !matches!(tier, Some(LodTier::Ambient));
         entities.push(entity);
@@ -305,17 +510,38 @@ pub fn steer_flock(
             target.map(|target| [target.0.x, target.0.y, target.0.z]),
             steers,
         );
+        if let Some(priority) = priority {
+            crowd.set_priority(entities.len() - 1, priority.get());
+        }
+        // Personality scales this agent's weights; agents without one keep the configured set, so
+        // the buffer stays short for a crowd nobody gave a temperament to.
+        if let Some(drive) = drive {
+            let bias = bias_of(temperament, needs, drive);
+            if bias != NEUTRAL_BIAS {
+                crowd.set_bias(entities.len() - 1, bias);
+            }
+        }
     }
 
-    report.0 = crowd.steer(&params);
+    let mut crowd_report = crowd.steer(&params);
+
+    // One reciprocal pass over the same cell order, after every agent has said where it wants to
+    // go: correcting during steering would make the result depend on who was processed first.
+    // Ambient agents are in the buffers, so they are avoided without being steered.
+    if let Some(avoidance) = config.avoidance {
+        let avoided = crowd.avoid(&avoidance);
+        crowd_report.avoided = avoided.adjusted;
+        crowd_report.avoid_pairs = avoided.pairs;
+    }
+    report.0 = crowd_report;
 
     for (index, entity) in entities.iter().enumerate() {
         let Ok(mut slot) = desired.get_mut(*entity) else {
             continue;
         };
-        slot.0 = crowd
-            .desired(index)
-            .map_or(Vec3::ZERO, |desired| Vec3::new(desired[0], 0.0, desired[1]));
+        slot.0 = crowd.desired(index).map_or(Vec3::ZERO, |desired| {
+            Vec3::new(desired[0], desired[1], desired[2])
+        });
     }
 }
 
@@ -324,10 +550,6 @@ pub fn steer_flock(
 ///
 /// Not in the schedule: it materialises a sorted `Vec<Neighbour>` per agent, which is the cost
 /// [`steer_flock`] exists to remove.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn steer_flock_reference(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
@@ -335,12 +557,36 @@ pub fn steer_flock_reference(
     mut query: SteerQuery,
 ) {
     let params = config.params;
-    for (transform, velocity, mut desired, target, member, tier) in &mut query {
+    for (transform, velocity, mut desired, target, member, tier, _priority, temperament, needs) in
+        &mut query
+    {
         if matches!(tier, Some(LodTier::Ambient)) {
             desired.0 = Vec3::ZERO;
             continue;
         }
         let _ = member;
+        // The kernel scales the weights per agent; the reference path has to do the same or the
+        // parity tests would be comparing two different simulations.
+        let mut params = params;
+        if let Some(drive) = config.temperament {
+            let bias = bias_of(temperament, needs, drive);
+            if bias != NEUTRAL_BIAS {
+                let scaled = WeightBias::from_array(bias).apply([
+                    params.weights.separation,
+                    params.weights.alignment,
+                    params.weights.cohesion,
+                    params.weights.seek,
+                    params.weights.arrive,
+                ]);
+                params.weights = crate::domain::steering::SteeringWeights {
+                    separation: scaled[0],
+                    alignment: scaled[1],
+                    cohesion: scaled[2],
+                    seek: scaled[3],
+                    arrive: scaled[4],
+                };
+            }
+        }
 
         grid.0
             .radius(transform.translation, params.neighbour_radius, &mut scratch);
@@ -358,10 +604,6 @@ pub fn steer_flock_reference(
 /// Reads [`NpcDesiredVelocity`]; writes [`NpcVelocity`] and `Transform`. The
 /// acceleration limit is what stops a crowd from snapping direction and reading
 /// as a particle system.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn integrate_flock(
     clock: Option<Res<SimClock>>,
     config: Res<BoidsConfig>,
@@ -385,6 +627,8 @@ mod tests {
     use super::*;
     use crate::adapters::primary::components::NpcBundle;
     use crate::domain::ids::NpcId;
+    use crate::domain::temperament::Weight;
+    use crate::testkit::OrDie;
 
     fn app() -> App {
         let mut app = App::new();
@@ -419,23 +663,15 @@ mod tests {
             .id();
         app.world_mut()
             .get_mut::<Transform>(right)
-            .expect("transform exists")
+            .or_die()
             .translation = Vec3::new(0.1, 0.0, 0.0);
 
         for _ in 0..120 {
             app.update();
         }
 
-        let left_position = app
-            .world()
-            .get::<Transform>(left)
-            .expect("transform exists")
-            .translation;
-        let right_position = app
-            .world()
-            .get::<Transform>(right)
-            .expect("transform exists")
-            .translation;
+        let left_position = app.world().get::<Transform>(left).or_die().translation;
+        let right_position = app.world().get::<Transform>(right).or_die().translation;
         assert!(
             left_position.distance(right_position) > 0.4,
             "agents did not separate: {left_position} vs {right_position}"
@@ -452,10 +688,7 @@ mod tests {
             .insert(LodTier::Ambient)
             .id();
         app.update();
-        let desired = app
-            .world()
-            .get::<NpcDesiredVelocity>(entity)
-            .expect("desired velocity exists");
+        let desired = app.world().get::<NpcDesiredVelocity>(entity).or_die();
         assert_eq!(desired.0, Vec3::ZERO);
     }
 
@@ -468,11 +701,7 @@ mod tests {
             .insert(NpcTarget(Vec3::new(100.0, 0.0, 0.0)))
             .id();
         app.update();
-        let velocity = app
-            .world()
-            .get::<NpcVelocity>(entity)
-            .expect("velocity exists")
-            .0;
+        let velocity = app.world().get::<NpcVelocity>(entity).or_die().0;
         let config = *app.world().resource::<BoidsConfig>();
         let limit = config.max_acceleration() * TicksPerSecond::SIXTY.delta_seconds();
         assert!(
@@ -480,6 +709,113 @@ mod tests {
             "velocity {} exceeded the per-tick limit {limit}",
             velocity.length()
         );
+    }
+
+    /// Two NPCs walking at each other down a corridor, with the soft separation weight off so
+    /// steering alone cannot keep them apart. Returns their closest approach in metres.
+    fn head_on(avoidance: Option<AvoidanceParams>) -> (f32, bool) {
+        let mut params = SteeringParams::human_scale();
+        params.weights.separation = 0.0;
+        let config = BoidsConfig::default()
+            .with_params(params)
+            .or_die()
+            .with_avoidance(avoidance);
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(config));
+        let left = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-6.0, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(6.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)))
+            .id();
+        let mut closest = f32::MAX;
+        for _ in 0..360 {
+            app.update();
+            let left = app.world().get::<Transform>(left).or_die().translation;
+            let right = app.world().get::<Transform>(right).or_die().translation;
+            closest = closest.min(left.distance(right));
+        }
+        let left = app.world().get::<Transform>(left).or_die().translation;
+        let right = app.world().get::<Transform>(right).or_die().translation;
+        (closest, left.x < right.x)
+    }
+
+    #[test]
+    fn avoidance_stops_two_agents_walking_through_each_other() {
+        let (without, _) = head_on(None);
+        assert!(
+            without < 0.5,
+            "the fixture must overlap without avoidance, else it proves nothing (got {without})"
+        );
+        let (with, kept_order) = head_on(Some(AvoidanceParams::new()));
+        assert!(
+            with >= 0.7,
+            "the separation floor must hold for the whole approach (closest {with})"
+        );
+        assert!(kept_order, "they must not have swapped sides");
+    }
+
+    #[test]
+    fn avoidance_priority_decides_who_yields() {
+        // A cart (4.0) against a pedestrian (1.0), head-on: the pedestrian does the stepping
+        // aside, so the cart keeps far more of its speed along the corridor.
+        let mut params = SteeringParams::human_scale();
+        params.weights.separation = 0.0;
+        let config = BoidsConfig::default()
+            .with_params(params)
+            .or_die()
+            .with_avoidance(Some(AvoidanceParams::new()));
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(config));
+        let cart = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-1.2, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .insert(NpcAvoidancePriority::new(4.0))
+            .id();
+        let person = app
+            .world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(0.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)))
+            .insert(NpcAvoidancePriority::new(1.0))
+            .id();
+        app.update();
+        let cart = app.world().get::<NpcDesiredVelocity>(cart).or_die().0.x;
+        let person = app.world().get::<NpcDesiredVelocity>(person).or_die().0.x;
+        assert!(
+            cart > -person,
+            "the cart must keep more of its speed than the pedestrian: cart {cart}, person {person}"
+        );
+    }
+
+    #[test]
+    fn avoidance_is_reported() {
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::default());
+        let left = app
+            .world_mut()
+            .spawn(
+                NpcBundle::default_for(NpcId::unique(0)).with_position(Vec3::new(-1.2, 0.0, 0.0)),
+            )
+            .insert(NpcTarget(Vec3::new(9.0, 0.0, 0.0)))
+            .id();
+        app.world_mut()
+            .spawn(NpcBundle::default_for(NpcId::unique(1)).with_position(Vec3::new(0.0, 0.0, 0.0)))
+            .insert(NpcTarget(Vec3::new(-9.0, 0.0, 0.0)));
+        app.update();
+        assert!(app.world().get::<Transform>(left).is_some());
+        let report = app.world().resource::<FlockSteerReport>().0;
+        assert_eq!(report.steered, 2);
+        assert!(report.avoid_pairs > 0, "the pair must be examined");
+        assert!(report.avoided > 0, "at least one agent must be corrected");
     }
 
     #[test]
@@ -516,6 +852,195 @@ mod tests {
             run(),
             run(),
             "the same world must produce the same positions"
+        );
+    }
+
+    /// Three agents in a row: the left one has the group to its right, so cohesion points +x.
+    fn row_app(config: BoidsConfig) -> App {
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(config));
+        for (index, x) in [0.0_f32, 2.0, 4.0].into_iter().enumerate() {
+            let entity = app
+                .world_mut()
+                .spawn(NpcBundle::default_for(NpcId::unique(index as u32)))
+                .id();
+            app.world_mut()
+                .get_mut::<Transform>(entity)
+                .or_die()
+                .translation = Vec3::new(x, 0.0, 0.0);
+        }
+        app
+    }
+
+    /// The desired velocity the first agent was given this frame.
+    fn first_desired(app: &mut App) -> Vec3 {
+        app.update();
+        let mut query = app.world_mut().query::<(&Npc, &NpcDesiredVelocity)>();
+        query
+            .iter(app.world())
+            .find(|(npc, _)| npc.0.index() == 0)
+            .map(|(_, desired)| desired.0)
+            .or_die()
+    }
+
+    #[test]
+    fn a_gregarious_person_drifts_toward_the_group() {
+        let gregarious = Temperament {
+            sociability: Weight::MAX,
+            extraversion: Weight::MAX,
+            ..Temperament::balanced()
+        };
+        let hermit = Temperament {
+            sociability: Weight::MIN,
+            extraversion: Weight::MIN,
+            ..Temperament::balanced()
+        };
+        let mut with_company = row_app(BoidsConfig::default());
+        let mut alone = row_app(BoidsConfig::default());
+        // The same fixture in both apps, and a different person in each: any difference in the
+        // step is the personality's.
+        for (app, temperament) in [(&mut with_company, gregarious), (&mut alone, hermit)] {
+            let entity = app
+                .world_mut()
+                .query_filtered::<Entity, bevy_ecs::prelude::With<Npc>>()
+                .iter(app.world())
+                .next()
+                .or_die();
+            *app.world_mut().get_mut::<NpcTemperament>(entity).or_die() =
+                NpcTemperament(temperament);
+        }
+        let drawn_in = first_desired(&mut with_company).x;
+        let uninterested = first_desired(&mut alone).x;
+        assert!(
+            drawn_in > uninterested + 0.01,
+            "a gregarious agent must drift toward the group harder than a hermit: {drawn_in} vs {uninterested}"
+        );
+    }
+
+    #[test]
+    fn a_lonely_person_drifts_toward_the_group() {
+        let mut app = row_app(BoidsConfig::default());
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, bevy_ecs::prelude::With<Npc>>()
+            .iter(app.world())
+            .next()
+            .or_die();
+        let before = first_desired(&mut app).x;
+        *app.world_mut().get_mut::<NpcNeeds>(entity).or_die() = NpcNeeds(Needs {
+            company: 0.0,
+            ..Needs::satisfied()
+        });
+        let after = first_desired(&mut app).x;
+        assert!(
+            after > before + 0.01,
+            "an unmet need for company must pull the agent in: {before} vs {after}"
+        );
+    }
+
+    #[test]
+    fn a_crowd_without_a_drive_steers_uniformly() {
+        let config = BoidsConfig::default().with_temperament(None);
+        let mut a = row_app(config);
+        let mut b = row_app(config);
+        for (app, temperament) in [
+            (
+                &mut a,
+                Temperament {
+                    sociability: Weight::MAX,
+                    ..Temperament::balanced()
+                },
+            ),
+            (
+                &mut b,
+                Temperament {
+                    sociability: Weight::MIN,
+                    ..Temperament::balanced()
+                },
+            ),
+        ] {
+            let entity = app
+                .world_mut()
+                .query_filtered::<Entity, bevy_ecs::prelude::With<Npc>>()
+                .iter(app.world())
+                .next()
+                .or_die();
+            *app.world_mut().get_mut::<NpcTemperament>(entity).or_die() =
+                NpcTemperament(temperament);
+        }
+        assert_eq!(
+            first_desired(&mut a),
+            first_desired(&mut b),
+            "with the drive off, personality must not reach the steering"
+        );
+    }
+
+    #[test]
+    fn needs_decay_on_their_interval_and_no_faster() {
+        let config = BoidsConfig::default()
+            .with_temperament(None)
+            .with_needs_decay(Some(NeedsDecay::every(4)));
+        let mut app = row_app(config);
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, bevy_ecs::prelude::With<Npc>>()
+            .iter(app.world())
+            .next()
+            .or_die();
+        let start = Needs::satisfied();
+        *app.world_mut().get_mut::<NpcNeeds>(entity).or_die() = NpcNeeds(start);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<NpcNeeds>(entity).or_die().0,
+            start,
+            "decay must not run before the interval elapses"
+        );
+        app.update();
+        let decayed = app.world().get::<NpcNeeds>(entity).or_die().0;
+        assert!(
+            decayed.satiety < start.satiety,
+            "the fourth frame decays the burst"
+        );
+    }
+
+    #[test]
+    fn decay_follows_the_person_and_not_the_clock_alone() {
+        let config = BoidsConfig::default().with_needs_decay(Some(NeedsDecay::EVERY_TICK));
+        let mut app = row_app(config);
+        let entities: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, bevy_ecs::prelude::With<Npc>>()
+            .iter(app.world())
+            .collect();
+        let gregarious = Temperament {
+            sociability: Weight::MAX,
+            extraversion: Weight::MAX,
+            ..Temperament::balanced()
+        };
+        let hermit = Temperament {
+            sociability: Weight::MIN,
+            extraversion: Weight::MIN,
+            ..Temperament::balanced()
+        };
+        for (entity, temperament) in entities.iter().zip([gregarious, hermit, gregarious]) {
+            *app.world_mut().get_mut::<NpcTemperament>(*entity).or_die() =
+                NpcTemperament(temperament);
+            *app.world_mut().get_mut::<NpcNeeds>(*entity).or_die() = NpcNeeds(Needs::satisfied());
+        }
+        for _ in 0..600 {
+            app.update();
+        }
+        let company: Vec<f32> = entities
+            .iter()
+            .map(|entity| app.world().get::<NpcNeeds>(*entity).or_die().0.company)
+            .collect();
+        let first = company.first().or_die();
+        let second = company.get(1).or_die();
+        assert!(
+            first < second,
+            "the gregarious agent must lose company faster: {company:?}"
         );
     }
 }

@@ -66,6 +66,16 @@ impl Weight {
         let delta = (target.0 - self.0) * rate.clamp(0.0, 1.0);
         Self::clamped(self.0 + delta)
     }
+
+    /// A blend of two weights: `share` of `other`, the rest of `self`.
+    ///
+    /// This is how an archetype preset and an individual's own sample become one
+    /// personality — see [`Temperament::generated`].
+    #[must_use]
+    pub fn blend(self, other: Self, share: f32) -> Self {
+        let share = share.clamp(0.0, 1.0);
+        Self::clamped(self.0.mul_add(1.0 - share, other.0 * share))
+    }
 }
 
 impl Default for Weight {
@@ -201,6 +211,302 @@ impl Temperament {
     #[must_use]
     pub fn company_appetite(&self) -> Weight {
         Weight::clamped(self.sociability.0.mul_add(0.6, self.extraversion.0 * 0.4))
+    }
+
+    /// How this personality bends the steering weights.
+    ///
+    /// Every axis is a multiplier centred on `1.0`, so `gain` of zero returns
+    /// [`WeightBias::NEUTRAL`] and the crowd behaves as one. The mapping is
+    /// deliberately legible rather than fitted: the point is that two NPCs running the
+    /// same behaviour code keep different distances, not that the numbers are optimal.
+    ///
+    /// - **separation** rises with neuroticism and falls with agreeableness: a jumpy,
+    ///   disagreeable NPC keeps more room.
+    /// - **alignment** rises with conscientiousness and agreeableness: a follower
+    ///   matches the crowd it is in.
+    /// - **cohesion** is [`Temperament::company_appetite`]: a gregarious NPC drifts
+    ///   toward the middle of the group.
+    /// - **seek** rises with industriousness and openness: a busy, curious NPC pushes
+    ///   toward its target harder.
+    /// - **arrive** is conscientiousness: a careful NPC slows earlier and smoother.
+    #[must_use]
+    pub fn steering_bias(&self, gain: Weight) -> WeightBias {
+        let g = gain.get();
+        let axis = |shape: f32| 1.0 + g * (2.0 * shape - 1.0);
+        let room = self
+            .neuroticism
+            .0
+            .mul_add(0.6, (1.0 - self.agreeableness.0) * 0.4);
+        let follow = self
+            .conscientiousness
+            .0
+            .mul_add(0.6, self.agreeableness.0 * 0.4);
+        let purpose = self.industriousness.0.mul_add(0.6, self.openness.0 * 0.4);
+        WeightBias {
+            separation: axis(room),
+            alignment: axis(follow),
+            cohesion: axis(self.company_appetite().0),
+            seek: axis(purpose),
+            arrive: axis(self.conscientiousness.0),
+        }
+        .clamped()
+    }
+
+    /// The personality a generator gives an archetype: two thirds preset, one third
+    /// individual.
+    ///
+    /// [`Temperament::archetype`] alone would make every guard the same guard, and
+    /// [`Temperament::sample`] alone would make the archetype a costume — which is exactly what the
+    /// spawner used to do, so a guard was no braver than an urchin. This is the same
+    /// two-thirds/one-third blend `domain::generator` applies to archetype weights, so the two
+    /// generators agree about what an archetype means.
+    ///
+    /// The individual is drawn first and in full, so a seed that produced a given personality
+    /// before still draws the same numbers; only the blend on top of them is new.
+    #[must_use]
+    pub fn generated(archetype: Archetype, rng: &mut RngStream) -> Self {
+        let individual = Self::sample(rng);
+        Self::blend(Self::archetype(archetype), individual, 0.34)
+    }
+
+    /// Blend a preset with an individual: `share` of `individual`, the rest preset.
+    #[must_use]
+    pub fn blend(preset: Self, individual: Self, share: f32) -> Self {
+        Self {
+            openness: preset.openness.blend(individual.openness, share),
+            conscientiousness: preset
+                .conscientiousness
+                .blend(individual.conscientiousness, share),
+            extraversion: preset.extraversion.blend(individual.extraversion, share),
+            agreeableness: preset.agreeableness.blend(individual.agreeableness, share),
+            neuroticism: preset.neuroticism.blend(individual.neuroticism, share),
+            bravery: preset.bravery.blend(individual.bravery, share),
+            sociability: preset.sociability.blend(individual.sociability, share),
+            industriousness: preset
+                .industriousness
+                .blend(individual.industriousness, share),
+        }
+    }
+}
+
+/// One multiplier, clamped into the permitted range, with NaN read as neutral.
+fn clean_multiplier(value: f32) -> f32 {
+    if value.is_nan() {
+        1.0
+    } else {
+        value.clamp(WeightBias::MIN, WeightBias::MAX)
+    }
+}
+
+/// Per-agent multipliers on the steering weights.
+///
+/// A bias is *relative*: the weights a game configured stay the baseline, and this
+/// scales them per agent, so tuning a crowd still works the way the documentation says.
+/// Every field is centred on `1.0` and clamped into the range between [`WeightBias::MIN`] and
+/// [`WeightBias::MAX`], which bounds what one personality can do to a frame.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeightBias {
+    /// Multiplier on separation.
+    pub separation: f32,
+    /// Multiplier on alignment.
+    pub alignment: f32,
+    /// Multiplier on cohesion.
+    pub cohesion: f32,
+    /// Multiplier on seek.
+    pub seek: f32,
+    /// Multiplier on arrival.
+    pub arrive: f32,
+}
+
+impl WeightBias {
+    /// No change to any weight.
+    pub const NEUTRAL: Self = Self {
+        separation: 1.0,
+        alignment: 1.0,
+        cohesion: 1.0,
+        seek: 1.0,
+        arrive: 1.0,
+    };
+
+    /// The smallest multiplier any axis may take.
+    pub const MIN: f32 = 0.25;
+
+    /// The largest multiplier any axis may take.
+    pub const MAX: f32 = 4.0;
+
+    /// Every axis set to the same multiplier.
+    #[must_use]
+    pub const fn uniform(value: f32) -> Self {
+        Self {
+            separation: value,
+            alignment: value,
+            cohesion: value,
+            seek: value,
+            arrive: value,
+        }
+    }
+
+    /// Clamp every axis into the permitted range, dropping NaN to `1.0`.
+    ///
+    /// NaN is neutral rather than extreme: a broken sample should leave the agent steering
+    /// normally instead of freezing it in place.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            separation: clean_multiplier(self.separation),
+            alignment: clean_multiplier(self.alignment),
+            cohesion: clean_multiplier(self.cohesion),
+            seek: clean_multiplier(self.seek),
+            arrive: clean_multiplier(self.arrive),
+        }
+    }
+
+    /// True when the bias leaves every weight alone, so a kernel can skip it.
+    #[must_use]
+    pub fn is_neutral(&self) -> bool {
+        *self == Self::NEUTRAL
+    }
+
+    /// Compose two biases multiplicatively.
+    #[must_use]
+    pub fn combined(self, other: Self) -> Self {
+        Self {
+            separation: self.separation * other.separation,
+            alignment: self.alignment * other.alignment,
+            cohesion: self.cohesion * other.cohesion,
+            seek: self.seek * other.seek,
+            arrive: self.arrive * other.arrive,
+        }
+        .clamped()
+    }
+
+    /// The bias as the array the steering kernel consumes.
+    #[must_use]
+    pub const fn to_array(self) -> [f32; 5] {
+        [
+            self.separation,
+            self.alignment,
+            self.cohesion,
+            self.seek,
+            self.arrive,
+        ]
+    }
+
+    /// A bias from the kernel's array form.
+    #[must_use]
+    pub const fn from_array(values: [f32; 5]) -> Self {
+        Self {
+            separation: values[0],
+            alignment: values[1],
+            cohesion: values[2],
+            seek: values[3],
+            arrive: values[4],
+        }
+    }
+
+    /// Apply the bias to a `[separation, alignment, cohesion, seek, arrive]` weight set.
+    #[must_use]
+    pub fn apply(self, weights: [f32; 5]) -> [f32; 5] {
+        let bias = self.to_array();
+        let mut out = weights;
+        for (weight, scale) in out.iter_mut().zip(bias) {
+            *weight *= scale;
+        }
+        out
+    }
+}
+
+/// How far temperament and needs are allowed to move a crowd's steering weights.
+///
+/// Both fields are [`Weight`]s, so the answer to "how much difference can one personality
+/// make?" is a number in `0.0..=1.0` rather than an unbounded knob: `gain` of `0.5` keeps
+/// every temperament multiplier inside `0.5..=1.5`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TemperamentDrive {
+    gain: Weight,
+    needs: Weight,
+}
+
+impl TemperamentDrive {
+    /// The shipped setting: half a swing from temperament, half from unmet needs.
+    pub const DEFAULT: Self = Self {
+        gain: Weight(0.5),
+        needs: Weight(0.5),
+    };
+
+    /// Build a drive, validating both shares.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::WeightOutOfRange`] when either share is outside `0.0..=1.0`.
+    pub fn try_new(gain: f32, needs: f32) -> Result<Self, ConfigError> {
+        Ok(Self {
+            gain: Weight::try_new("temperament_gain", gain)?,
+            needs: Weight::try_new("needs_influence", needs)?,
+        })
+    }
+
+    /// A drive with known-valid shares.
+    #[must_use]
+    pub const fn new(gain: Weight, needs: Weight) -> Self {
+        Self { gain, needs }
+    }
+
+    /// A drive that changes nothing, for a game that wants uniform steering.
+    #[must_use]
+    pub const fn inert() -> Self {
+        Self {
+            gain: Weight::MIN,
+            needs: Weight::MIN,
+        }
+    }
+
+    /// The temperament share.
+    #[must_use]
+    pub const fn gain(self) -> Weight {
+        self.gain
+    }
+
+    /// The needs share.
+    #[must_use]
+    pub const fn needs(self) -> Weight {
+        self.needs
+    }
+
+    /// The bias one agent's personality and needs ask for.
+    ///
+    /// The two are composed multiplicatively and then clamped, so a frightened NPC with a
+    /// gregarious personality both keeps its distance and still wants company.
+    #[must_use]
+    pub fn bias(self, temperament: &Temperament, needs: &Needs) -> WeightBias {
+        self.temperament_bias(temperament)
+            .combined(self.needs_bias(needs))
+    }
+
+    /// The bias the personality alone asks for.
+    #[must_use]
+    pub fn temperament_bias(self, temperament: &Temperament) -> WeightBias {
+        if self.gain == Weight::MIN {
+            return WeightBias::NEUTRAL;
+        }
+        temperament.steering_bias(self.gain)
+    }
+
+    /// The bias the unmet needs alone ask for.
+    #[must_use]
+    pub fn needs_bias(self, needs: &Needs) -> WeightBias {
+        if self.needs == Weight::MIN {
+            return WeightBias::NEUTRAL;
+        }
+        needs.steering_bias(self.needs)
+    }
+}
+
+impl Default for TemperamentDrive {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
@@ -351,6 +657,49 @@ impl Needs {
             }
         }
         worst.map(|(channel, _)| channel)
+    }
+
+    /// How unmet this NPC's needs are, as one number: `1.0` is desperate, `0.0` is content.
+    ///
+    /// The worst channel rather than the mean: one unmet need is what changes behaviour, and
+    /// averaging it away against three satisfied ones would hide exactly the case a game cares
+    /// about.
+    #[must_use]
+    pub fn pressure(&self) -> Weight {
+        let worst = self
+            .energy
+            .min(self.satiety)
+            .min(self.company)
+            .min(self.safety);
+        Weight::clamped(1.0 - worst)
+    }
+
+    /// How this NPC's unmet needs bend the steering weights.
+    ///
+    /// - **cohesion** rises with loneliness: people drift toward company.
+    /// - **separation** rises with fear: a frightened NPC gives everyone more room.
+    /// - **seek** rises with hunger and falls with fatigue, so the hungry press on and the tired
+    ///   drag.
+    /// - **arrive** rises with fear: a frightened NPC slows sooner rather than running into
+    ///   whatever it was heading for.
+    ///
+    /// Unlike [`Temperament::steering_bias`], this is not symmetric around `1.0`: needs only ever
+    /// have one direction, and the clamp stops a starving crowd from becoming a different crowd.
+    #[must_use]
+    pub fn steering_bias(&self, influence: Weight) -> WeightBias {
+        let i = influence.get();
+        let hunger = 1.0 - self.satiety.clamp(0.0, 1.0);
+        let fatigue = 1.0 - self.energy.clamp(0.0, 1.0);
+        let lonely = 1.0 - self.company.clamp(0.0, 1.0);
+        let frightened = 1.0 - self.safety.clamp(0.0, 1.0);
+        WeightBias {
+            separation: (1.0 + i * frightened).min(WeightBias::MAX),
+            alignment: 1.0,
+            cohesion: (1.0 + i * lonely).min(WeightBias::MAX),
+            seek: (1.0 + i * (hunger - fatigue)).clamp(WeightBias::MIN, WeightBias::MAX),
+            arrive: (1.0 + i * frightened).min(WeightBias::MAX),
+        }
+        .clamped()
     }
 
     /// Clamp every channel into `0.0..=1.0`, dropping NaN to zero.
@@ -617,5 +966,208 @@ mod tests {
         };
         assert!(frightened.is_distressed());
         assert!(!Mood::neutral(Tick::ZERO).is_distressed());
+    }
+
+    /// A stream with a fixed seed, for the tests that need two different people.
+    fn stream(seed: u64) -> RngStream {
+        RngStream::for_npc(SimSeed::new(seed), crate::domain::ids::NpcId::unique(0))
+    }
+
+    #[test]
+    fn a_zero_gain_leaves_every_weight_alone() {
+        let mut rng = stream(1);
+        for _ in 0..8 {
+            let who = Temperament::sample(&mut rng);
+            assert_eq!(who.steering_bias(Weight::MIN), WeightBias::NEUTRAL);
+            assert!(who.steering_bias(Weight::MIN).is_neutral());
+        }
+    }
+
+    #[test]
+    fn a_jumpy_disagreeable_person_keeps_more_room() {
+        let jumpy = Temperament {
+            neuroticism: Weight(0.95),
+            agreeableness: Weight(0.05),
+            ..Temperament::balanced()
+        };
+        let easy = Temperament {
+            neuroticism: Weight(0.05),
+            agreeableness: Weight(0.95),
+            ..Temperament::balanced()
+        };
+        let gain = Weight(0.5);
+        assert!(jumpy.steering_bias(gain).separation > 1.4);
+        assert!(easy.steering_bias(gain).separation < 0.65);
+        // The rest of the axes stay inside the gain's band even though only one moved far.
+        for bias in [jumpy.steering_bias(gain), easy.steering_bias(gain)] {
+            assert!(bias.separation <= 1.5 && bias.separation >= 0.5);
+        }
+    }
+
+    #[test]
+    fn a_generous_person_drifts_with_the_crowd() {
+        let gregarious = Temperament {
+            sociability: Weight(1.0),
+            extraversion: Weight(1.0),
+            ..Temperament::balanced()
+        };
+        let hermit = Temperament {
+            sociability: Weight(0.0),
+            extraversion: Weight(0.0),
+            ..Temperament::balanced()
+        };
+        let gain = Weight(0.5);
+        assert!(gregarious.steering_bias(gain).cohesion > 1.4);
+        assert!(hermit.steering_bias(gain).cohesion < 0.6);
+    }
+
+    #[test]
+    fn every_bias_stays_inside_its_bounds() {
+        let extreme = Temperament {
+            openness: Weight(1.0),
+            conscientiousness: Weight(1.0),
+            extraversion: Weight(1.0),
+            agreeableness: Weight(0.0),
+            neuroticism: Weight(1.0),
+            bravery: Weight(0.0),
+            sociability: Weight(1.0),
+            industriousness: Weight(1.0),
+        };
+        let bias = extreme.steering_bias(Weight::MAX);
+        for axis in bias.to_array() {
+            assert!((WeightBias::MIN..=WeightBias::MAX).contains(&axis));
+        }
+        // A NaN multiplier reads as neutral rather than extreme.
+        let broken = WeightBias::uniform(f32::NAN).clamped();
+        assert!(broken.is_neutral());
+    }
+
+    #[test]
+    fn needs_only_point_one_way() {
+        let full = Needs::satisfied();
+        assert!(full.steering_bias(Weight(0.5)).is_neutral());
+        let lonely = Needs {
+            company: 0.0,
+            ..Needs::satisfied()
+        };
+        let hungry = Needs {
+            satiety: 0.0,
+            ..Needs::satisfied()
+        };
+        let frightened = Needs {
+            safety: 0.0,
+            ..Needs::satisfied()
+        };
+        let influence = Weight(0.5);
+        assert!(lonely.steering_bias(influence).cohesion > 1.4);
+        assert!(hungry.steering_bias(influence).seek > 1.4);
+        assert!(frightened.steering_bias(influence).separation > 1.4);
+        // Hunger presses on, fatigue drags: the two cancel when both are unmet.
+        let exhausted = Needs {
+            satiety: 0.0,
+            energy: 0.0,
+            ..Needs::satisfied()
+        };
+        assert!((exhausted.steering_bias(influence).seek - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pressure_reports_the_worst_channel() {
+        assert_eq!(Needs::satisfied().pressure(), Weight::MIN);
+        assert_eq!(Needs::depleted().pressure(), Weight::MAX);
+        let one_bad = Needs {
+            safety: 0.25,
+            ..Needs::satisfied()
+        };
+        assert!((one_bad.pressure().get() - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_drive_composes_temperament_and_needs() {
+        let mut rng = stream(7);
+        let who = Temperament::sample(&mut rng);
+        let needs = Needs {
+            company: 0.1,
+            ..Needs::satisfied()
+        };
+        let drive = TemperamentDrive::default();
+        assert_eq!(
+            drive.bias(&who, &needs),
+            drive
+                .temperament_bias(&who)
+                .combined(drive.needs_bias(&needs))
+        );
+        assert_eq!(
+            drive.bias(&who, &needs).alignment,
+            drive.temperament_bias(&who).alignment
+        );
+        // An inert drive is indistinguishable from no personality at all.
+        assert!(TemperamentDrive::inert().bias(&who, &needs).is_neutral());
+    }
+
+    #[test]
+    fn a_bias_multiplies_the_configured_weights() {
+        let bias = WeightBias {
+            separation: 2.0,
+            alignment: 0.5,
+            cohesion: 1.0,
+            seek: 1.5,
+            arrive: 1.0,
+        };
+        assert_eq!(
+            bias.apply([0.9, 0.4, 0.3, 0.7, 0.6]),
+            [1.8, 0.2, 0.3, 1.05, 0.6]
+        );
+        assert_eq!(WeightBias::from_array(bias.to_array()), bias);
+        // Composing twice is a product, not a sum.
+        assert_eq!(bias.combined(bias).separation, WeightBias::MAX);
+    }
+
+    #[test]
+    fn an_archetype_survives_the_blend_into_an_individual() {
+        let mut guard_rng = stream(11);
+        let mut other_guard_rng = stream(11);
+        let guard = Temperament::generated(Archetype::Guard, &mut guard_rng);
+        let wanderer = Temperament::generated(Archetype::Wanderer, &mut stream(12));
+        // A guard is braver and steadier than nobody-in-particular: the preset carries.
+        assert!(guard.bravery.get() > wanderer.bravery.get() * 0.8);
+        assert!(guard.neuroticism < wanderer.neuroticism);
+        // Two guards from different people are not the same person.
+        let same_person = Temperament::generated(Archetype::Guard, &mut other_guard_rng);
+        assert_eq!(
+            guard, same_person,
+            "the same seed must generate the same guard"
+        );
+        let different = Temperament::generated(Archetype::Guard, &mut stream(99));
+        assert_ne!(guard, different);
+        // The individual is still two thirds of the noise rather than a clone of the preset.
+        assert_ne!(different.bravery, guard.bravery);
+    }
+
+    #[test]
+    fn a_burst_of_decay_matches_single_ticks() {
+        let who = Temperament {
+            sociability: Weight(0.9),
+            extraversion: Weight(0.8),
+            neuroticism: Weight(0.7),
+            ..Temperament::balanced()
+        };
+        let mut burst = Needs::satisfied().decayed(&who, 8);
+        let mut single = Needs::satisfied();
+        for _ in 0..8 {
+            single = single.decayed(&who, 1);
+        }
+        assert!((burst.energy - single.energy).abs() < 1e-6);
+        assert!((burst.company - single.company).abs() < 1e-6);
+        assert!((burst.safety - single.safety).abs() < 1e-6);
+        // A gregarious NPC loses company faster than a stoic one; that is the whole point.
+        let stoic = Temperament {
+            sociability: Weight(0.0),
+            extraversion: Weight(0.0),
+            ..who
+        };
+        burst = Needs::satisfied().decayed(&who, 600);
+        let calm = Needs::satisfied().decayed(&stoic, 600);
+        assert!(burst.company < calm.company);
     }
 }

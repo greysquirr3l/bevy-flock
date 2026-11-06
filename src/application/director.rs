@@ -124,11 +124,18 @@ impl DirectorCommand {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Mood { .. } => "mood",
-            Self::Alarm { .. } => "alarm",
-            Self::Calm { .. } => "calm",
-            Self::Spawn { .. } => "spawn",
-            Self::Quiesce { .. } => "quiesce",
+            Self::Mood {
+                value: _,
+                ttl_ticks: _,
+            } => "mood",
+            Self::Alarm {
+                at: _,
+                strength: _,
+                radius: _,
+            } => "alarm",
+            Self::Calm { at: _, radius: _ } => "calm",
+            Self::Spawn { count: _ } => "spawn",
+            Self::Quiesce { ttl_ticks: _ } => "quiesce",
         }
     }
 }
@@ -580,9 +587,12 @@ impl DirectorBoard {
             } => {
                 self.alarms.calm(position, radius, at);
             }
-            DirectorCommand::Mood { .. }
-            | DirectorCommand::Spawn { .. }
-            | DirectorCommand::Quiesce { .. } => {}
+            DirectorCommand::Mood {
+                value: _,
+                ttl_ticks: _,
+            }
+            | DirectorCommand::Spawn { count: _ }
+            | DirectorCommand::Quiesce { ttl_ticks: _ } => {}
         }
         self.applied = self.applied.saturating_add(1);
         if self.trace.len() >= TRACE_CAPACITY {
@@ -608,6 +618,7 @@ impl DirectorBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn inputs(tick: u64) -> DirectorInputs {
         DirectorInputs {
@@ -662,7 +673,7 @@ mod tests {
         assert!(
             out.as_slice()
                 .iter()
-                .any(|command| matches!(command, DirectorCommand::Quiesce { .. }))
+                .any(|command| matches!(command, DirectorCommand::Quiesce { ttl_ticks: _ }))
         );
         assert!(director.mood() < 0.0);
     }
@@ -686,7 +697,7 @@ mod tests {
                 },
             },
         ];
-        let mut director = ScriptedDirector::new(beats).expect("script");
+        let mut director = ScriptedDirector::new(beats).or_die();
         let mut board = DirectorBoard::new();
         let _ = board.decide(&mut director, &inputs(5));
         assert_eq!(director.fired(), 0);
@@ -711,8 +722,8 @@ mod tests {
             },
         ];
         assert!(matches!(
-            ScriptedDirector::new(beats).unwrap_err(),
-            DirectorError::OutOfOrder { .. }
+            ScriptedDirector::new(beats).or_die_err(),
+            DirectorError::OutOfOrder { tick: _, after: _ }
         ));
     }
 
@@ -796,7 +807,7 @@ mod tests {
                     },
                 })
                 .collect();
-            let mut director = ScriptedDirector::new(beats).expect("script");
+            let mut director = ScriptedDirector::new(beats).or_die();
             let mut board = DirectorBoard::new();
             for tick in 0..60 {
                 let _ = board.decide(&mut director, &inputs(tick));

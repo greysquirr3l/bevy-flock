@@ -286,11 +286,6 @@ impl BehaviorTree {
     /// Returns [`TreeError::EmptyComposite`] for a composite with no children,
     /// [`TreeError::TooDeep`] beyond [`BehaviorTree::MAX_DEPTH`], and
     /// [`TreeError::TooManyChildren`] beyond [`BehaviorTree::MAX_CHILDREN`].
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "the spec is handed over rather than borrowed: a caller that has \
-                  finished describing a tree should not keep it alive"
-    )]
     pub fn try_from_spec(spec: NodeSpec) -> Result<Self, TreeError> {
         let mut builder = Builder {
             nodes: Vec::new(),
@@ -712,7 +707,9 @@ impl Builder {
             _ => 0,
         };
         let ticks = match spec {
-            NodeSpec::Cooldown { ticks, .. } | NodeSpec::Timeout { ticks, .. } => *ticks,
+            NodeSpec::Cooldown { ticks, child: _ } | NodeSpec::Timeout { ticks, child: _ } => {
+                *ticks
+            }
             _ => 0,
         };
         let (children, limit) = Self::children_of(spec);
@@ -759,11 +756,14 @@ impl Builder {
         match spec {
             NodeSpec::Sequence(_) => NodeKind::Sequence,
             NodeSpec::Selector(_) => NodeKind::Selector,
-            NodeSpec::Parallel { policy, .. } => NodeKind::Parallel(*policy),
+            NodeSpec::Parallel {
+                policy,
+                children: _,
+            } => NodeKind::Parallel(*policy),
             NodeSpec::Inverter(_) => NodeKind::Inverter,
             NodeSpec::RepeatUntilFail(_) => NodeKind::RepeatUntilFail,
-            NodeSpec::Cooldown { .. } => NodeKind::Cooldown,
-            NodeSpec::Timeout { .. } => NodeKind::Timeout,
+            NodeSpec::Cooldown { ticks: _, child: _ } => NodeKind::Cooldown,
+            NodeSpec::Timeout { ticks: _, child: _ } => NodeKind::Timeout,
             NodeSpec::Action(_) => NodeKind::Action,
             NodeSpec::Condition(_) => NodeKind::Condition,
         }
@@ -774,11 +774,14 @@ impl Builder {
     fn children_of(spec: &NodeSpec) -> (Vec<&NodeSpec>, bool) {
         match spec {
             NodeSpec::Sequence(items) | NodeSpec::Selector(items) => (items.iter().collect(), true),
-            NodeSpec::Parallel { children, .. } => (children.iter().collect(), true),
+            NodeSpec::Parallel {
+                children,
+                policy: _,
+            } => (children.iter().collect(), true),
             NodeSpec::Inverter(child)
             | NodeSpec::RepeatUntilFail(child)
-            | NodeSpec::Cooldown { child, .. }
-            | NodeSpec::Timeout { child, .. } => (vec![child.as_ref()], true),
+            | NodeSpec::Cooldown { child, ticks: _ }
+            | NodeSpec::Timeout { child, ticks: _ } => (vec![child.as_ref()], true),
             NodeSpec::Action(_) | NodeSpec::Condition(_) => (Vec::new(), false),
         }
     }
@@ -1009,10 +1012,11 @@ where
 mod tests {
     use super::*;
     use crate::behavior::blackboard::Value;
+    use crate::testkit::OrDie;
 
     /// Compile a tree for testing; a failure here is a broken fixture.
     fn tree(spec: NodeSpec) -> BehaviorTree {
-        BehaviorTree::try_from_spec(spec).expect("test tree is valid")
+        BehaviorTree::try_from_spec(spec).or_die()
     }
 
     /// Leaves: 0 = succeed, 1 = fail, 2 = run forever, 3 = run twice then
@@ -1453,7 +1457,7 @@ mod tests {
         }
         assert!(matches!(
             BehaviorTree::try_from_spec(spec),
-            Err(TreeError::TooDeep { .. })
+            Err(TreeError::TooDeep { max: _ })
         ));
     }
 
@@ -1462,7 +1466,7 @@ mod tests {
         let children = vec![action(0); BehaviorTree::MAX_CHILDREN + 1];
         assert!(matches!(
             BehaviorTree::try_from_spec(sequence(children)),
-            Err(TreeError::TooManyChildren { .. })
+            Err(TreeError::TooManyChildren { max: _ })
         ));
     }
 
@@ -1508,7 +1512,7 @@ mod tests {
                 ]),
             ])",
         )
-        .expect("valid authored tree");
+        .or_die();
         let built = selector(vec![
             condition(3),
             sequence(vec![
@@ -1541,9 +1545,11 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn malformed_authored_trees_report_a_position() {
-        let error = NodeSpec::from_ron("Selector([Action(0)").expect_err("unbalanced");
+        use crate::testkit::OrDieErr;
+
+        let error = NodeSpec::from_ron("Selector([Action(0)").or_die_err();
         assert!(
-            matches!(error, TreeError::MalformedSource { .. }),
+            matches!(error, TreeError::MalformedSource { line: _, column: _ }),
             "{error:?}"
         );
         assert!(error.to_string().contains(':'), "{error}");

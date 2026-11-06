@@ -153,10 +153,11 @@ mod tests {
     use crate::domain::ids::NpcId;
     use crate::domain::temperament::Needs;
     use crate::domain::tick::Tick;
+    use crate::testkit::OrDie;
 
     fn setup() -> (FlockRegistry, StandardLeaves) {
         let mut registry = FlockRegistry::new();
-        let leaves = registry.register_standard_leaves().expect("fresh registry");
+        let leaves = registry.register_standard_leaves().or_die();
         (registry, leaves)
     }
 
@@ -164,7 +165,7 @@ mod tests {
         let (registry, leaves) = setup();
         archetype
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("built-in tree is valid")
+            .or_die()
     }
 
     const CONTENT: Needs = Needs {
@@ -195,7 +196,7 @@ mod tests {
         let (registry, leaves) = setup();
         let guard = Archetype::Guard
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("valid");
+            .or_die();
         let expected = [
             leaves.is_alarmed,
             leaves.flee,
@@ -215,7 +216,7 @@ mod tests {
         let (mut registry, leaves) = setup();
         let guard = Archetype::Guard
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("valid");
+            .or_die();
         let mut dispatch = registry.dispatcher();
         let mut board = Blackboard::new();
         write_perception(&mut board, &CONTENT);
@@ -241,7 +242,7 @@ mod tests {
         let (mut registry, leaves) = setup();
         let guard = Archetype::Guard
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("valid");
+            .or_die();
         let mut dispatch = registry.dispatcher();
         let mut board = Blackboard::new();
         write_perception(&mut board, &CONTENT);
@@ -271,7 +272,7 @@ mod tests {
         let (mut registry, leaves) = setup();
         let guard = Archetype::Guard
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("valid");
+            .or_die();
         let mut dispatch = registry.dispatcher();
         let mut board = Blackboard::new();
         write_perception(

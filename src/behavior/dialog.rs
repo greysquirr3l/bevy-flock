@@ -224,14 +224,21 @@ impl DialogGraph {
     /// # Errors
     ///
     /// As [`DialogGraph::new`].
-    // Seven checks in a row, each one a paragraph in ADR 0037; splitting them would
-    // scatter the argument that the set is complete.
-    #[allow(clippy::too_many_lines)]
+    // Seven checks in a row, each one a paragraph in ADR 0037. They run in the order the ADR
+    // argues them, which is why `validate` is a list of four calls rather than one long body:
+    // the order of the errors is part of the contract, and it stays visible.
     pub fn validate(&self) -> Result<(), DialogError> {
+        self.validate_shape()?;
+        self.validate_edges()?;
+        self.validate_reachable()?;
+        self.validate_terminating()
+    }
+
+    /// Non-empty, unique ids, at most [`MAX_CHOICES`] choices per node, and a root that exists.
+    fn validate_shape(&self) -> Result<(), DialogError> {
         if self.nodes.is_empty() {
             return Err(DialogError::Empty);
         }
-        // Unique ids.
         let mut seen: Vec<u16> = Vec::with_capacity(self.nodes.len());
         for node in &self.nodes {
             if seen.contains(&node.id) {
@@ -249,7 +256,11 @@ impl DialogGraph {
         if self.index_of(self.root).is_none() {
             return Err(DialogError::UnknownNode { id: self.root });
         }
-        // Every choice resolves.
+        Ok(())
+    }
+
+    /// Every choice resolves to a node.
+    fn validate_edges(&self) -> Result<(), DialogError> {
         for node in &self.nodes {
             for choice in &node.choices {
                 if self.index_of(choice.next).is_none() {
@@ -260,7 +271,11 @@ impl DialogGraph {
                 }
             }
         }
-        // Reachability from the root.
+        Ok(())
+    }
+
+    /// Every node is reachable from the root.
+    fn validate_reachable(&self) -> Result<(), DialogError> {
         let mut reachable = vec![false; self.nodes.len()];
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
@@ -288,8 +303,12 @@ impl DialogGraph {
         {
             return Err(DialogError::UnreachableNode { id: orphan });
         }
-        // Every reachable node can reach an end node: an authoring loop with no exit
-        // is a soft-lock, and a soft-lock in a conversation is unrecoverable.
+        Ok(())
+    }
+
+    /// There is an ending, and every node can reach one: an authoring loop with no exit is a
+    /// soft-lock, and a soft-lock in a conversation is unrecoverable.
+    fn validate_terminating(&self) -> Result<(), DialogError> {
         let terminals: Vec<usize> = self
             .nodes
             .iter()
@@ -366,32 +385,31 @@ pub struct DialogSession {
     finished: bool,
 }
 
-// A session is a small `Copy` handle and the accessors read better as methods on a
-// borrowed session than as functions taking one by value.
-#[allow(clippy::trivially_copy_pass_by_ref)]
+// A session is a small `Copy` handle, so the accessors take it by value: there is nothing to
+// borrow, and taking `&self` only to copy the fields out would lie about the cost.
 impl DialogSession {
     /// The node the conversation is on.
     #[must_use]
-    pub const fn cursor(&self) -> u16 {
+    pub const fn cursor(self) -> u16 {
         self.cursor
     }
 
     /// How many lines have been said.
     #[must_use]
-    pub const fn visited(&self) -> u32 {
+    pub const fn visited(self) -> u32 {
         self.visited
     }
 
     /// Whether the conversation has ended.
     #[must_use]
-    pub const fn is_finished(&self) -> bool {
+    pub const fn is_finished(self) -> bool {
         self.finished
     }
 
     /// The choices currently on offer, filtered by the blackboard.
     #[must_use]
     pub fn choices<'a>(
-        &self,
+        self,
         graph: &'a DialogGraph,
         blackboard: &Blackboard,
     ) -> SmallVec<[&'a DialogChoice; MAX_CHOICES]> {
@@ -441,7 +459,7 @@ impl DialogSession {
 
     /// The current line, if the graph still has the node.
     #[must_use]
-    pub fn line<'a>(&self, graph: &'a DialogGraph) -> Option<&'a DialogNode> {
+    pub fn line(self, graph: &DialogGraph) -> Option<&DialogNode> {
         graph.node(self.cursor)
     }
 }
@@ -516,6 +534,7 @@ pub enum DialogError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn key(raw: u16) -> BlackboardKey {
         BlackboardKey::new(raw)
@@ -550,7 +569,7 @@ mod tests {
                 },
             ],
         )
-        .expect("a valid graph")
+        .or_die()
     }
 
     #[test]
@@ -597,7 +616,7 @@ mod tests {
                 choices: vec![DialogChoice::new("Bye.", 9)],
             }],
         )
-        .unwrap_err();
+        .or_die_err();
         assert_eq!(error, DialogError::DanglingChoice { from: 0, to: 9 });
     }
 
@@ -610,7 +629,7 @@ mod tests {
                 DialogNode::ending(1, Speaker::Npc, "Nobody hears this."),
             ],
         )
-        .unwrap_err();
+        .or_die_err();
         assert_eq!(error, DialogError::UnreachableNode { id: 1 });
     }
 
@@ -623,7 +642,7 @@ mod tests {
                 DialogNode::ending(0, Speaker::Npc, "Two."),
             ],
         )
-        .unwrap_err();
+        .or_die_err();
         assert_eq!(error, DialogError::DuplicateNode { id: 0 });
     }
 
@@ -647,7 +666,7 @@ mod tests {
                 },
             ],
         )
-        .unwrap_err();
+        .or_die_err();
         assert_eq!(error, DialogError::NoEnding);
     }
 
@@ -675,7 +694,7 @@ mod tests {
                 DialogNode::ending(2, Speaker::Npc, "Safe roads."),
             ],
         )
-        .expect("a loop with an exit is fine");
+        .or_die();
         assert_eq!(graph.len(), 3);
     }
 
@@ -709,7 +728,7 @@ mod tests {
                 DialogNode::ending(3, Speaker::Npc, "Out."),
             ],
         )
-        .unwrap_err();
+        .or_die_err();
         assert_eq!(error, DialogError::CycleWithoutExit { id: 1 });
     }
 
@@ -730,23 +749,36 @@ mod tests {
                 DialogNode::ending(1, Speaker::Npc, "One room."),
             ],
         )
-        .unwrap_err();
-        assert!(matches!(error, DialogError::TooManyChoices { .. }));
+        .or_die_err();
+        assert!(matches!(
+            error,
+            DialogError::TooManyChoices {
+                node: _,
+                count: _,
+                limit: _
+            }
+        ));
     }
 
     #[cfg(feature = "serde")]
     #[test]
     fn a_graph_round_trips_through_ron() {
         let graph = merchant();
-        let text = graph.to_ron().expect("serialise");
-        let loaded = DialogGraph::from_ron(&text).expect("load");
+        let text = graph.to_ron().or_die();
+        let loaded = DialogGraph::from_ron(&text).or_die();
         assert_eq!(loaded, graph);
     }
 
     #[cfg(feature = "serde")]
     #[test]
     fn a_malformed_file_reports_a_line() {
-        let error = DialogGraph::from_ron("(root: 0, nodes: [ (id: 0,").unwrap_err();
-        assert!(matches!(error, DialogError::Parse { .. }));
+        let error = DialogGraph::from_ron("(root: 0, nodes: [ (id: 0,").or_die_err();
+        assert!(matches!(
+            error,
+            DialogError::Parse {
+                line: _,
+                message: _
+            }
+        ));
     }
 }

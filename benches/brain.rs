@@ -14,10 +14,7 @@
 //!   multiplies by its population to size the budget.
 //! - `shape` — the same work in a small tree and a thousand-node tree, to show
 //!   that evaluation cost tracks leaves visited rather than nodes stored.
-#![expect(
-    clippy::expect_used,
-    reason = "benchmark setup asserts its own fixtures"
-)]
+use bevy_flock::testkit::OrDie;
 use std::hint::black_box;
 use std::sync::Arc;
 
@@ -35,9 +32,7 @@ const TICKS_PER_MEASURE: u32 = 1_000;
 
 fn registry_and_leaves() -> (FlockRegistry, StandardLeaves) {
     let mut registry = FlockRegistry::new();
-    let leaves = registry
-        .register_standard_leaves()
-        .expect("the standard catalogue registers once");
+    let leaves = registry.register_standard_leaves().or_die();
     (registry, leaves)
 }
 
@@ -87,7 +82,7 @@ fn bench_archetypes(c: &mut Criterion) {
     for archetype in Archetype::ALL {
         let logic = archetype
             .logic(&leaves, |id| registry.leaf_cost(id))
-            .expect("built-in trees compile");
+            .or_die();
         let tree = Arc::new(logic.into_tree());
         let mut cursor = TreeCursor::new();
         let mut board = Blackboard::new();
@@ -134,7 +129,7 @@ fn bench_shapes(c: &mut Criterion) {
         ("20_nodes", wide_tree(4, 4)),
         ("1000_nodes", wide_tree(32, 31)),
     ] {
-        let tree = BehaviorTree::try_from_spec(spec).expect("valid shape");
+        let tree = BehaviorTree::try_from_spec(spec).or_die();
         let mut cursor = TreeCursor::new();
         let mut board = Blackboard::new();
         let mut dispatch = registry.dispatcher();
@@ -157,7 +152,7 @@ fn bench_crowd_think(c: &mut Criterion) {
     let (mut registry, leaves) = registry_and_leaves();
     let guard = Archetype::Guard
         .logic(&leaves, |id| registry.leaf_cost(id))
-        .expect("built-in tree compiles");
+        .or_die();
     let tree = Arc::new(guard.into_tree());
     let mut brains: Vec<(TreeCursor, Blackboard)> = (0..10_000)
         .map(|_| (TreeCursor::new(), Blackboard::new()))

@@ -154,10 +154,16 @@ impl Placement {
     pub const fn is_random(&self) -> bool {
         matches!(
             self,
-            Self::UniformRect { .. }
-                | Self::UniformDisc { .. }
-                | Self::UniformVolume { .. }
-                | Self::UniformSphere { .. }
+            Self::UniformRect { min: _, max: _ }
+                | Self::UniformDisc {
+                    centre: _,
+                    radius: _
+                }
+                | Self::UniformVolume { min: _, max: _ }
+                | Self::UniformSphere {
+                    centre: _,
+                    radius: _
+                }
         )
     }
 
@@ -361,6 +367,7 @@ fn inside(point: Vec3, grid: &SpatialGridConfig, field: &'static str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     fn grid() -> SpatialGridConfig {
         SpatialGridConfig::default()
@@ -443,7 +450,7 @@ mod tests {
         let min = Vec3::new(-30.0, 1.0, -10.0);
         let max = Vec3::new(20.0, 12.0, 40.0);
         let placement = Placement::uniform_volume(min, max);
-        placement.validate(&grid()).expect("box fits the volume");
+        placement.validate(&grid()).or_die();
         for index in 0..2_000 {
             let point = placement.position_for(NpcId::unique(index), SimSeed::new(3));
             assert!((min.x..=max.x).contains(&point.x), "x {} escaped", point.x);
@@ -480,17 +487,29 @@ mod tests {
         let grid = grid();
         assert!(matches!(
             Placement::uniform_volume(Vec3::ZERO, Vec3::new(10.0, 900.0, 10.0)).validate(&grid),
-            Err(ConfigError::PlacementOutsideGrid { axis: 'y', .. })
+            Err(ConfigError::PlacementOutsideGrid {
+                axis: 'y',
+                field: _,
+                value: _,
+                min: _,
+                max: _
+            })
         ));
         assert!(matches!(
             Placement::uniform_sphere(Vec3::new(0.0, 0.0, 450.0), 100.0).validate(&grid),
-            Err(ConfigError::PlacementOutsideGrid { .. })
+            Err(ConfigError::PlacementOutsideGrid {
+                field: _,
+                axis: _,
+                value: _,
+                min: _,
+                max: _
+            })
         ));
         let inverted =
             Placement::uniform_volume(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
         assert!(matches!(
             inverted.validate(&grid),
-            Err(ConfigError::Empty { .. })
+            Err(ConfigError::Empty { kind: _ })
         ));
     }
 
@@ -498,7 +517,7 @@ mod tests {
     fn authored_positions_keep_their_height() {
         let points = vec![Vec3::new(1.0, 3.5, 2.0), Vec3::new(-2.0, 0.0, 4.0)];
         let placement = Placement::fixed(points.clone());
-        placement.validate(&grid()).expect("points are inside");
+        placement.validate(&grid()).or_die();
         for (index, want) in points.iter().enumerate() {
             let got = placement.position_for(NpcId::unique(index as u32), SimSeed::new(1));
             assert_eq!(got, *want, "authored height must survive");
@@ -525,30 +544,34 @@ mod tests {
     #[test]
     fn placement_inside_the_volume_validates_and_outside_does_not() {
         let grid = grid();
-        Placement::spiral(DEFAULT_SPACING)
-            .validate(&grid)
-            .expect("default spiral fits the default volume");
+        Placement::spiral(DEFAULT_SPACING).validate(&grid).or_die();
         Placement::uniform_disc(Vec3::ZERO, 200.0)
             .validate(&grid)
-            .expect("a disc inside the volume is fine");
+            .or_die();
 
         let outside = Placement::uniform_disc(Vec3::new(450.0, 0.0, 0.0), 100.0);
         assert!(matches!(
             outside.validate(&grid),
-            Err(ConfigError::PlacementOutsideGrid { axis: 'x', .. })
+            Err(ConfigError::PlacementOutsideGrid {
+                axis: 'x',
+                field: _,
+                value: _,
+                min: _,
+                max: _
+            })
         ));
 
         let inverted =
             Placement::uniform_rect(Vec3::new(10.0, 0.0, 0.0), Vec3::new(-10.0, 0.0, 0.0));
         assert!(matches!(
             inverted.validate(&grid),
-            Err(ConfigError::Empty { .. })
+            Err(ConfigError::Empty { kind: _ })
         ));
 
         let bad_radius = Placement::uniform_disc(Vec3::ZERO, f32::NAN);
         assert!(matches!(
             bad_radius.validate(&grid),
-            Err(ConfigError::InvalidDistance { .. })
+            Err(ConfigError::InvalidDistance { field: _, value: _ })
         ));
     }
 }

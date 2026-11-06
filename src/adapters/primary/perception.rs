@@ -138,20 +138,23 @@ impl NoticedPeople {
 ///
 /// Runs in `FlockSet::Perception`, after the spatial index is rebuilt, so the
 /// distance test uses this tick's positions rather than last tick's.
-#[allow(clippy::type_complexity)]
+/// What `observe_players` reads and writes per NPC.
+type ObserverTargets<'a> = (
+    &'a Npc,
+    &'a Transform,
+    Option<&'a mut NoticedPeople>,
+    Option<&'a mut NpcBlackboard>,
+);
+
+/// Notice player characters within range, and write what was noticed into the blackboard.
+///
+/// Runs in `FlockSet::Perception`, after the spatial index is rebuilt, so the distance test uses
+/// this tick's positions rather than last tick's.
 pub fn observe_players(
     clock: Res<SimClock>,
     config: Res<PerceptionConfig>,
     players: Query<(&Npc, &Transform), With<PlayerCharacter>>,
-    mut npcs: Query<
-        (
-            &Npc,
-            &Transform,
-            Option<&mut NoticedPeople>,
-            Option<&mut NpcBlackboard>,
-        ),
-        Without<PlayerCharacter>,
-    >,
+    mut npcs: Query<ObserverTargets<'_>, Without<PlayerCharacter>>,
 ) {
     let radius = config.notice_radius.max(0.0);
     let radius_squared = radius * radius;

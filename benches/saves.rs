@@ -18,17 +18,7 @@
 //! - `decode` — parsing plus every checksum, which happens on a load.
 //! - `round_trip` — both, with a real snapshot in between, which is what a game
 //!   actually experiences when it autosaves and the player reloads.
-#![expect(
-    clippy::expect_used,
-    reason = "benchmark setup asserts its own fixtures"
-)]
-#![expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::indexing_slicing,
-    reason = "benchmark arithmetic is descriptive, not simulation state, and the local CRC table \
-              is indexed by a masked byte"
-)]
+use bevy_flock::testkit::OrDie;
 use std::hint::black_box;
 use std::time::Duration;
 
@@ -67,9 +57,7 @@ fn registry() -> SubjectRegistry {
 fn world() -> MemoryStore {
     let mut store = MemoryStore::new(NPCS, SUBJECTS);
     for npc in 0..NPCS {
-        let index = store
-            .enrol(NpcId::unique(npc))
-            .expect("capacity sized to the crowd");
+        let index = store.enrol(NpcId::unique(npc)).or_die();
         store.remember(
             index,
             SubjectId::new(0),
@@ -133,34 +121,30 @@ fn v1_bytes(snapshot: &MemorySnapshot) -> Vec<u8> {
 }
 
 /// CRC-32 (IEEE), the same table the format uses.
+/// The same CRC-32 the writer uses, so the benchmark measures the format rather than a stub.
 fn crc32(bytes: &[u8]) -> u32 {
+    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(index as u32)));
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in bytes {
-        let index = ((crc ^ u32::from(*byte)) & 0xFF) as usize;
-        crc = (crc >> 8) ^ TABLE[index];
+        let index = usize::from(u8::try_from((crc ^ u32::from(*byte)) & 0xFF).unwrap_or(0));
+        crc = (crc >> 8) ^ table.get(index).copied().unwrap_or_default();
     }
     !crc
 }
-
-const TABLE: [u32; 256] = {
-    let mut table = [0_u32; 256];
-    let mut index = 0;
-    while index < 256 {
-        let mut value = index as u32;
-        let mut bit = 0;
-        while bit < 8 {
-            value = if value & 1 == 1 {
-                (value >> 1) ^ 0xEDB8_8320
-            } else {
-                value >> 1
-            };
-            bit += 1;
-        }
-        table[index] = value;
-        index += 1;
+const fn crc_entry(index: u32) -> u32 {
+    let mut value = index;
+    let mut bit = 0;
+    while bit < 8 {
+        value = if value & 1 == 1 {
+            (value >> 1) ^ 0xEDB8_8320
+        } else {
+            value >> 1
+        };
+        bit += 1;
     }
-    table
-};
+    value
+}
 
 fn save_format(c: &mut Criterion) {
     let store = world();
@@ -206,10 +190,10 @@ fn save_format(c: &mut Criterion) {
     let mut group = c.benchmark_group("save_decode");
     group.sample_size(20);
     group.bench_with_input(BenchmarkId::new("v1", NPCS), &v1, |bencher, bytes| {
-        bencher.iter(|| black_box(MemorySnapshot::from_bytes(black_box(bytes)).expect("valid")));
+        bencher.iter(|| black_box(MemorySnapshot::from_bytes(black_box(bytes)).or_die()));
     });
     group.bench_with_input(BenchmarkId::new("v2", NPCS), &v2, |bencher, bytes| {
-        bencher.iter(|| black_box(MemorySnapshot::from_bytes(black_box(bytes)).expect("valid")));
+        bencher.iter(|| black_box(MemorySnapshot::from_bytes(black_box(bytes)).or_die()));
     });
     group.finish();
 
@@ -218,7 +202,7 @@ fn save_format(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("v2", NPCS), |bencher| {
         bencher.iter(|| {
             let bytes = snapshot.to_bytes();
-            black_box(MemorySnapshot::from_bytes(&bytes).expect("valid"))
+            black_box(MemorySnapshot::from_bytes(&bytes).or_die())
         });
     });
     group.finish();

@@ -15,7 +15,7 @@ use crate::adapters::primary::cognition::{
     ThinkSchedule, TierConfig, WeightConfig, assign_tiers, plan_thinks, tick_chosen,
 };
 use crate::adapters::primary::components::{
-    LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcTemperament, NpcVelocity,
+    LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcNeeds, NpcTemperament, NpcVelocity,
 };
 use crate::application::{SimClock, advance_clock};
 use crate::boids::{BoidsConfig, BoidsPlugin};
@@ -23,7 +23,7 @@ use crate::domain::ids::{NpcId, SimSeed};
 use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 use crate::domain::rng::RngStream;
 use crate::domain::spawn::Placement;
-use crate::domain::temperament::{Archetype, Temperament};
+use crate::domain::temperament::{Archetype, Needs, Temperament};
 use crate::domain::tick::TicksPerSecond;
 use crate::error::ConfigError;
 
@@ -509,10 +509,6 @@ impl Plugin for FlockPlugin {
 ///
 /// Budgeted rather than all at once: a game asking for 100,000 NPCs gets them
 /// over 25 frames at the default budget instead of one 400 ms hitch.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn drain_spawn_queue(
     config: Res<FlockConfig>,
     mut queue: ResMut<SpawnQueue>,
@@ -526,12 +522,18 @@ pub fn drain_spawn_queue(
             break;
         };
         let mut rng = RngStream::for_npc(seed, id);
-        let temperament = Temperament::sample(&mut rng);
+        // The individual is drawn in full before the archetype, so a seed that produced a given
+        // personality before still draws the same numbers; only the blend below is new.
+        let individual = Temperament::sample(&mut rng);
         let archetype_index = rng.next_bounded(Archetype::ALL.len() as u32) as usize;
         let archetype = Archetype::ALL
             .get(archetype_index)
             .copied()
             .unwrap_or(Archetype::Wanderer);
+        // Two thirds preset, one third individual — the same blend `domain::generator` applies, so
+        // an archetype means the same thing on both paths. Without this a guard was exactly as
+        // brave as an urchin and the archetype was a costume (ADR 0051).
+        let temperament = Temperament::blend(Temperament::archetype(archetype), individual, 0.34);
         // Position last: the spiral and an authored list draw nothing from the stream, so the
         // temperaments and archetypes above are the same whatever the placement is.
         let position = config.placement.position(id.index(), &mut rng);
@@ -544,6 +546,9 @@ pub fn drain_spawn_queue(
                 appearance_seed: u64::from(id.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15),
             },
             temperament: NpcTemperament(temperament),
+            // Everyone starts content; the decay system and whatever satisfies needs take it from
+            // here, so an NPC's state is a function of its life rather than of its spawn.
+            needs: NpcNeeds(Needs::satisfied()),
             velocity: NpcVelocity(Vec3::ZERO),
             desired: NpcDesiredVelocity(Vec3::ZERO),
             lod: LodTier::Near,
@@ -614,6 +619,7 @@ pub fn recycled_mode(slots: u32) -> Result<PopulationMode, crate::error::Populat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     fn app_with(config: FlockConfig) -> App {
         let mut app = App::new();
@@ -640,7 +646,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(BoidsPlugin::default());
         app.add_plugins(FlockPlugin::new(FlockConfig {
-            population: PopulationSize::try_new(4).expect("4 is valid"),
+            population: PopulationSize::try_new(4).or_die(),
             spawn_budget: 64,
             ..FlockConfig::default()
         }));
@@ -655,7 +661,7 @@ mod tests {
     #[test]
     fn single_npc_population_works() {
         let mut app = app_with(FlockConfig {
-            population: PopulationSize::try_new(1).expect("1 is valid"),
+            population: PopulationSize::try_new(1).or_die(),
             ..FlockConfig::default()
         });
         app.update();
@@ -670,7 +676,7 @@ mod tests {
     #[test]
     fn spawn_budget_spreads_work_across_frames() {
         let mut app = app_with(FlockConfig {
-            population: PopulationSize::try_new(1_000).expect("valid"),
+            population: PopulationSize::try_new(1_000).or_die(),
             spawn_budget: 100,
             ..FlockConfig::default()
         });
@@ -688,7 +694,7 @@ mod tests {
     fn identical_seeds_generate_identical_individuals() {
         fn temperaments() -> Vec<[f32; 3]> {
             let mut app = app_with(FlockConfig {
-                population: PopulationSize::try_new(20).expect("valid"),
+                population: PopulationSize::try_new(20).or_die(),
                 ..FlockConfig::default()
             });
             app.update();
@@ -716,9 +722,9 @@ mod tests {
     #[test]
     fn recycled_requests_reuse_slot_identities() {
         let mut queue = SpawnQueue::default();
-        let slots = SlotCount::try_new(4).expect("4 is non-zero");
+        let slots = SlotCount::try_new(4).or_die();
         queue.push(
-            FlockRequest::new(PopulationSize::try_new(8).expect("valid"))
+            FlockRequest::new(PopulationSize::try_new(8).or_die())
                 .with_mode(PopulationMode::Recycled(slots)),
         );
         let ids: Vec<u32> = (0..8)
@@ -731,9 +737,7 @@ mod tests {
     #[test]
     fn pending_counts_shrink_as_the_queue_drains() {
         let mut queue = SpawnQueue::default();
-        queue.push(FlockRequest::new(
-            PopulationSize::try_new(5).expect("valid"),
-        ));
+        queue.push(FlockRequest::new(PopulationSize::try_new(5).or_die()));
         assert_eq!(queue.pending(), 5);
         queue.pop();
         assert_eq!(queue.pending(), 4);

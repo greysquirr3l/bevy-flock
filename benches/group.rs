@@ -4,16 +4,9 @@
 //! hundred squads asks for three hundred decisions on the same cadence. The numbers
 //! here are what the staggered cadence in `domain::groups` is tuned against.
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::missing_docs_in_private_items
-)]
-
 use bevy_flock::domain::groups::{Formation, GroupStore};
 use bevy_flock::domain::ids::{GroupId, NpcId};
+use bevy_flock::testkit::OrDie;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn build(groups: usize, members: usize) -> (GroupStore, Vec<GroupId>) {
@@ -29,9 +22,9 @@ fn build(groups: usize, members: usize) -> (GroupStore, Vec<GroupId>) {
         };
         let leader = NpcId::unique(next);
         next += 1;
-        let id = store.create(leader, formation).expect("unique leader");
+        let id = store.create(leader, formation).or_die();
         for _ in 1..members {
-            store.join(id, NpcId::unique(next)).expect("room");
+            store.join(id, NpcId::unique(next)).or_die();
             next += 1;
         }
         ids.push(id);
@@ -74,7 +67,7 @@ fn bench_slots(c: &mut Criterion) {
 fn bench_membership(c: &mut Criterion) {
     let mut group = c.benchmark_group("groups");
     let (mut store, ids) = build(100, 16);
-    let target = *ids.first().expect("a group");
+    let target = *ids.first().or_die();
     let mut next = 900_000_u32;
     group.bench_function("join_and_leave", |bencher| {
         bencher.iter(|| {

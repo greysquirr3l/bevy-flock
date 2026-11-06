@@ -9,13 +9,6 @@
 //! this is a gate, not a fuzzing campaign — and can be raised with
 //! `PROPTEST_CASES=4096`.
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_precision_loss,
-    clippy::missing_docs_in_private_items
-)]
-
 use bevy_flock::adapters::primary::components::LodTier;
 use bevy_flock::adapters::secondary::network::NpcNetState;
 use bevy_flock::behavior::blackboard::{BLACKBOARD_CAPACITY, Blackboard, BlackboardKey, Value};
@@ -24,6 +17,7 @@ use bevy_flock::domain::rng::RngStream;
 use bevy_flock::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use bevy_flock::domain::temperament::Weight;
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 use bevy_math::Vec3;
 use proptest::prelude::*;
 
@@ -56,7 +50,7 @@ proptest! {
                 // survived must be exact.
                 continue;
             };
-            let stored = stored.as_float().expect("a float");
+            let stored = stored.as_float().or_die();
             prop_assert!((stored - value).abs() < f32::EPSILON);
         }
     }
@@ -90,7 +84,7 @@ proptest! {
             cell_size: 8.0,
             ..SpatialGridConfig::default()
         };
-        let mut grid = SpatialGrid::new(config).expect("config");
+        let mut grid = SpatialGrid::new(config).or_die();
         for (index, point) in points.iter().enumerate() {
             grid.insert(GridEntry {
                 id: NpcId::unique(index as u32),
@@ -146,7 +140,7 @@ proptest! {
         );
         let mut bytes = Vec::new();
         state.encode(&mut bytes);
-        let (decoded, used) = NpcNetState::decode(&bytes).expect("decode");
+        let (decoded, used) = NpcNetState::decode(&bytes).or_die();
         prop_assert_eq!(used, NpcNetState::BYTES);
         prop_assert!((decoded.position() - Vec3::new(x, y, z)).length() < 0.02);
         prop_assert!((decoded.valence() - valence).abs() < 0.02);

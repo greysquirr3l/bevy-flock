@@ -202,10 +202,11 @@ impl PopulationConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     #[test]
     fn zero_is_rejected_with_a_usable_message() {
-        let err = PopulationSize::try_new(0).unwrap_err();
+        let err = PopulationSize::try_new(0).or_die_err();
         assert_eq!(
             err,
             PopulationError::Empty {
@@ -235,7 +236,7 @@ mod tests {
     fn recycled_pool_smaller_than_the_population_is_incoherent() {
         let config = PopulationConfig::recycled(
             PopulationSize::clamped(500),
-            SlotCount::try_new(100).expect("100 is non-zero"),
+            SlotCount::try_new(100).or_die(),
         );
         assert!(!config.is_coherent());
     }
@@ -244,7 +245,7 @@ mod tests {
     fn recycled_pool_exactly_the_population_size_is_coherent() {
         let config = PopulationConfig::recycled(
             PopulationSize::clamped(500),
-            SlotCount::try_new(500).expect("500 is non-zero"),
+            SlotCount::try_new(500).or_die(),
         );
         assert!(config.is_coherent());
     }

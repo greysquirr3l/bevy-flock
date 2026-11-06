@@ -338,11 +338,6 @@ impl AmbientField {
         if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
             return None;
         }
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "guarded positive finite values below the grid bounds"
-        )]
         let (x, y) = (x as u32, y as u32);
         (x < self.width && y < self.height).then_some(CellId::new(x, y))
     }
@@ -398,11 +393,6 @@ impl AmbientField {
                     }
                     continue;
                 }
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    clippy::cast_sign_loss,
-                    reason = "reach is finite, positive and at most one"
-                )]
                 let departing = (f64::from(cell.population()) * f64::from(reach)).floor() as u32;
                 if departing == 0 {
                     if let Some(cell) = self.cells.get_mut(index) {
@@ -571,10 +561,6 @@ impl Iterator for ManifestIter {
             ^ mix(self.tick)
             ^ mix(u64::from(ordinal).wrapping_add(0x9E37_79B9_7F4A_7C15));
         let mixed = mix(mixed);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the identifier space is 32 bits by design (NpcId::unique)"
-        )]
         Some(NpcId::unique(mixed as u32))
     }
 }
@@ -652,11 +638,6 @@ fn split(count: u32, velocity: [f32; 2]) -> [u32; 4] {
     let mut remainders = [(0_f64, 0_usize); 4];
     for (slot, weight) in weights.iter().enumerate() {
         let exact = f64::from(count) * f64::from(*weight) / f64::from(total);
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "exact is non-negative and at most count, both u32-bounded"
-        )]
         let whole = exact.floor() as u32;
         if let Some(slot_out) = out.get_mut(slot) {
             *slot_out = whole;
@@ -691,9 +672,10 @@ fn split(count: u32, velocity: [f32; 2]) -> [u32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn field(population: u32) -> AmbientField {
-        let mut field = AmbientField::new(16, 16, 4.0, 0x5EED).expect("valid field");
+        let mut field = AmbientField::new(16, 16, 4.0, 0x5EED).or_die();
         for y in 0..16 {
             for x in 0..16 {
                 if let Some(cell) = field.cell_mut(CellId::new(x, y)) {
@@ -716,14 +698,8 @@ mod tests {
             "conservation is not a rounding error"
         );
         // The east edge must have lost people to its neighbours; the west edge gained.
-        let west = field
-            .cell(CellId::new(0, 8))
-            .expect("in bounds")
-            .population();
-        let east = field
-            .cell(CellId::new(15, 8))
-            .expect("in bounds")
-            .population();
+        let west = field.cell(CellId::new(0, 8)).or_die().population();
+        let east = field.cell(CellId::new(15, 8)).or_die().population();
         // The downwind edge accumulates what the upwind edge cannot replace: it gains
         // from its inner neighbour and loses only to the grid boundary.
         assert!(
@@ -762,7 +738,7 @@ mod tests {
     #[test]
     fn a_million_inhabitants_fit_in_a_megabyte() {
         // 40,000 cells at 4 m spacing is 800 m square; a million people inside it.
-        let mut field = AmbientField::new(200, 200, 4.0, 7).expect("valid field");
+        let mut field = AmbientField::new(200, 200, 4.0, 7).or_die();
         for y in 0..200 {
             for x in 0..200 {
                 if let Some(cell) = field.cell_mut(CellId::new(x, y)) {
@@ -821,7 +797,7 @@ mod tests {
         assert_eq!(field.population(), before - 4, "they left the density");
         field.fold(cell, 4, [1.5, 0.0], 200);
         assert_eq!(field.population(), before, "and came back");
-        let state = field.cell(cell).expect("in bounds");
+        let state = field.cell(cell).or_die();
         assert!(
             (state.velocity()[0] - 0.6).abs() < 0.05,
             "four people at 1.5 m/s into six at rest is 0.6 m/s, got {:?}",
@@ -834,15 +810,15 @@ mod tests {
         let mut field = field(5);
         let centre = field.centre_of(CellId::new(8, 8));
         field.raise_alarm(centre, 8.0, 400);
-        let alarmed = field.cell(CellId::new(8, 8)).expect("in bounds").alarm();
+        let alarmed = field.cell(CellId::new(8, 8)).or_die().alarm();
         assert_eq!(alarmed, 400);
         assert_eq!(
-            field.cell(CellId::new(0, 0)).expect("in bounds").alarm(),
+            field.cell(CellId::new(0, 0)).or_die().alarm(),
             0,
             "alarm is local"
         );
         field.advect(&[0.0, 0.0], 8, 1.0 / 60.0);
-        let after = field.cell(CellId::new(8, 8)).expect("in bounds").alarm();
+        let after = field.cell(CellId::new(8, 8)).or_die().alarm();
         assert_eq!(after, 392, "eight permille per stride of eight ticks");
     }
 
@@ -873,22 +849,22 @@ mod tests {
     #[test]
     fn degenerate_fields_are_refused_not_panicked() {
         assert_eq!(
-            AmbientField::new(0, 4, 4.0, 1).unwrap_err(),
+            AmbientField::new(0, 4, 4.0, 1).or_die_err(),
             FieldError::Empty
         );
         assert_eq!(
-            AmbientField::new(4, 4, 0.0, 1).unwrap_err(),
+            AmbientField::new(4, 4, 0.0, 1).or_die_err(),
             FieldError::BadSpacing
         );
         assert_eq!(
-            AmbientField::new(u32::MAX, 2, 4.0, 1).unwrap_err(),
+            AmbientField::new(u32::MAX, 2, 4.0, 1).or_die_err(),
             FieldError::TooLarge
         );
     }
 
     #[test]
     fn world_positions_map_to_cells_and_back() {
-        let mut field = AmbientField::new(10, 10, 4.0, 1).expect("valid field");
+        let mut field = AmbientField::new(10, 10, 4.0, 1).or_die();
         field.set_origin([-20.0, -20.0]);
         let centre = field.centre_of(CellId::new(2, 3));
         assert_eq!(field.cell_of(centre), Some(CellId::new(2, 3)));

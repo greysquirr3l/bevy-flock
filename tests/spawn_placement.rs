@@ -5,14 +5,11 @@
 //! spiral. Each one is checked through the plugin — add it, ask for a crowd, update — plus the
 //! properties that make a spawner trustworthy: determinism from the seed, positions inside the
 //! simulated volume, and no silent stacking under the default.
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
 
 use bevy_app::App;
 use bevy_flock::error::ConfigError;
 use bevy_flock::prelude::*;
+use bevy_flock::testkit::OrDie;
 
 fn app_with(population: usize, placement: Placement) -> App {
     let mut app = App::new();
@@ -21,9 +18,7 @@ fn app_with(population: usize, placement: Placement) -> App {
         spawn_budget: 1_000_000,
         ..FlockConfig::preset(CrowdPreset::QuietVillage)
     };
-    let config = config
-        .with_placement(placement)
-        .expect("the fixture placement fits the default volume");
+    let config = config.with_placement(placement).or_die();
     app.add_plugins(FlockPlugin::new(config));
     app.update();
     app
@@ -158,7 +153,16 @@ fn a_placement_outside_the_volume_is_refused_before_it_spawns() {
     let outside = Placement::uniform_disc(Vec3::new(0.0, 0.0, 0.0), 5_000.0);
     let rejected = config.with_placement(outside);
     assert!(
-        matches!(rejected, Err(ConfigError::PlacementOutsideGrid { .. })),
+        matches!(
+            rejected,
+            Err(ConfigError::PlacementOutsideGrid {
+                field: _,
+                axis: _,
+                value: _,
+                min: _,
+                max: _
+            })
+        ),
         "a disc larger than the world must not reach the spawner"
     );
 }

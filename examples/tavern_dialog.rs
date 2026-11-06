@@ -12,18 +12,6 @@
 
 // An example's job is to be read: it prints, it unwraps, and it keeps its setup next to
 // the thing it demonstrates rather than hoisting every constant to the top.
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::print_stdout,
-    clippy::print_stderr,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::missing_docs_in_private_items,
-    clippy::items_after_statements,
-    clippy::float_cmp
-)]
 use bevy_flock::behavior::bark::{BarkCategory, BarkRequest, BarkTable};
 use bevy_flock::behavior::blackboard::{Blackboard, BlackboardKey, Value};
 use bevy_flock::behavior::dialog::DialogGraph;
@@ -32,6 +20,7 @@ use bevy_flock::behavior::provider::{
 };
 use bevy_flock::domain::ids::{NpcId, SimSeed};
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 
 const RUMOUR: BlackboardKey = BlackboardKey::new(7);
 
@@ -53,7 +42,7 @@ const GRAPH: &str = r#"(
 )"#;
 
 fn main() {
-    let graph = DialogGraph::from_ron(GRAPH).expect("the graph is valid");
+    let graph = DialogGraph::from_ron(GRAPH).or_die();
     println!("graph: {} nodes, root {}\n", graph.len(), graph.root);
 
     let mut blackboard = Blackboard::new();
@@ -71,9 +60,7 @@ fn main() {
         }
         // A fixed policy rather than input, so the example is reproducible: take the
         // first option. A game feeds a player's choice here instead.
-        let picked = session
-            .choose(&graph, &blackboard, 0)
-            .expect("the first choice is always offered");
+        let picked = session.choose(&graph, &blackboard, 0).or_die();
         if picked == 3 {
             // The debt line only shows once the blackboard knows about it.
             let _ = blackboard.set(RUMOUR, Value::Float(1.0));
@@ -86,7 +73,7 @@ fn main() {
     }
 
     println!("\nnow the same question through the provider seam, with no provider:\n");
-    let table = BarkTable::starter().expect("starter barks");
+    let table = BarkTable::starter().or_die();
     let mut queue = ProviderQueue::new();
     let mut fallback = TemplateProvider::new(table, SimSeed::new(3).get());
     let npc = NpcId::unique(1);
@@ -104,7 +91,7 @@ fn main() {
     );
     // No provider attached: the deadline is already met, so the fallback speaks.
     let mut silent = bevy_flock::behavior::provider::TemplateProvider::new(
-        BarkTable::starter().expect("barks"),
+        BarkTable::starter().or_die(),
         SimSeed::new(9).get(),
     );
     let replies = queue.tick(&mut silent, &mut fallback, Tick::ZERO);
@@ -112,12 +99,12 @@ fn main() {
         println!("{npc:?}: {} ({:?})", reply.text, reply.source);
     }
     println!("\nrequest the same bark twice:");
-    let table = BarkTable::starter().expect("barks");
+    let table = BarkTable::starter().or_die();
     let mut stream = bevy_flock::domain::rng::RngStream::new(SimSeed::new(1), 0);
     for _ in 0..2 {
         let line = table
             .pick(BarkCategory::Greeting, None, &mut stream)
-            .expect("a line");
+            .or_die();
         println!("  {}", table.text(line).unwrap_or("?"));
     }
     let _ = BarkRequest {

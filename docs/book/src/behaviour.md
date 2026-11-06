@@ -67,6 +67,45 @@ An authored tree that names a leaf the registry does not know is an error at loa
 name and the position. That is the difference between "the guard does nothing" and "the guard
 does nothing and the log says why".
 
+## Senses: losing sight of someone
+
+Encounter perception records who met whom, which is what social memory needs. A guard that
+searches needs something else: a memory of *seeing*, with an age (ADR 0047).
+
+```rust,ignore
+use bevy_flock::prelude::*;
+
+// A player-shaped emitter, refreshed every tick it is visible.
+commands.spawn((StimulusSource::sight(30.0, 1.0), Transform::from_translation(player)));
+
+// Every NPC that should notice it is an observer.
+commands.spawn((NpcBundle::default_for(id), Perception, PerceivedStimuli::default()));
+```
+
+`PerceivedStimuli` is rewritten on the perception interval (six ticks by default) and is a
+snapshot, so a tree can read it repeatedly during one think without the world changing under it.
+The guard's search falls out of the data:
+
+```rust,ignore
+// "Chase while I can see them; search where I last saw them when I cannot."
+selector((
+    sequence((
+        condition(|ctx| ctx.sees::<Player>()),
+        action(StandardLeaves::Pursue),
+    )),
+    sequence((
+        condition(|ctx| ctx.remembers::<Player>()),   // the sighting is still live
+        action(StandardLeaves::SearchLastKnown),
+    )),
+    action(StandardLeaves::Patrol),
+))
+```
+
+Hearing works the same way with `StimulusSource::sound`, which is not narrowed by the sight cone
+and ignores occlusion: a shout through a wall is still a shout. Anything the tree needs beyond
+that — "is it my team", "is it the alarm bell" — is a filter at the leaf, which keeps the hot loop
+free of per-game predicates.
+
 ## Utility scoring
 
 When the choice is "what should I want", trees get awkward: priorities interleave, and adding
@@ -160,6 +199,48 @@ world and you get the same afternoon.
 when the second dies), plus faction relations: ally, neutral, hostile. A tree asks the group
 the same way it asks the blackboard, and the group answers for the whole formation.
 
+## Personality that moves people
+
+A temperament is not decoration. Every NPC carries a `Temperament` and four `Needs`, and the
+steering pass scales that NPC's weights by what they say (ADR 0051):
+
+```text
+effective weight = SteeringParams weight x bias
+```
+
+The bias is centred on `1.0` and clamped to `0.25 ..= 4.0`, so a game's tuning stays the baseline
+and a personality is a statement about that tuning rather than a replacement for it. Leaving the
+knob alone gets you a crowd where a guard holds rank and an urchin scatters:
+
+| Archetype | Separation | Alignment | Cohesion | Arrive |
+| --- | --- | --- | --- | --- |
+| Guard | 0.918 | 1.164 | 1.118 | 1.231 |
+| Merchant | 0.991 | 1.061 | 1.237 | 1.000 |
+| Urchin | 1.062 | 0.918 | 1.122 | 0.868 |
+| Noble | 0.933 | 1.089 | 1.127 | 1.198 |
+| Wanderer | 1.056 | 1.003 | 1.051 | 1.000 |
+
+Unmet needs push the same way, harder, and they move on their own: `BoidsConfig::needs` decays
+every `NeedsDecay` interval (eight ticks by default) at a rate the temperament sets, so a gregarious
+NPC runs out of company faster than a hermit. A hungry or lonely NPC jostles more and clusters
+harder, whatever its personality was.
+
+```rust
+# use bevy_app::App;
+# use bevy_flock::prelude::*;
+# use bevy_flock::boids::{BoidsConfig, BoidsPlugin, NeedsDecay};
+let config = BoidsConfig::default()
+    // Personality steers, but the game owns the needs economy.
+    .with_needs_decay(None);
+
+let mut app = App::new();
+app.add_plugins(BoidsPlugin::new(config));
+```
+
+Turn the whole thing off with `BoidsConfig::default().with_temperament(None)`, which restores one
+weight set for the crowd and costs nothing to have left in the build: the bias buffer stays empty
+and the kernel reads the configured weights, as it always did.
+
 ## Where to look
 
 | Want | Read |
@@ -171,3 +252,5 @@ the same way it asks the blackboard, and the group answers for the whole formati
 | Director | `src/application/director.rs` |
 | Dialogue | `src/behavior/dialog.rs` |
 | Barks | `src/behavior/bark.rs` |
+| Temperament and needs | `src/domain/temperament.rs` |
+| Bias plumbing | `src/application/crowd.rs`, `src/boids.rs` |

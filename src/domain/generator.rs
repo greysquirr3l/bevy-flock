@@ -607,9 +607,10 @@ pub fn generate(seed: SimSeed, index: u32, table: &ArchetypeTable) -> NpcBluepri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn table() -> ArchetypeTable {
-        ArchetypeTable::standard().expect("standard table is valid")
+        ArchetypeTable::standard().or_die()
     }
 
     #[test]
@@ -707,12 +708,12 @@ mod tests {
     #[test]
     fn an_empty_table_is_rejected() {
         assert_eq!(
-            ArchetypeTable::new(Vec::new()).unwrap_err(),
+            ArchetypeTable::new(Vec::new()).or_die_err(),
             GeneratorError::EmptyTable
         );
         let zero = ArchetypeEntry::new(Archetype::Guard, 0, "nobody");
         assert_eq!(
-            ArchetypeTable::new(vec![zero]).unwrap_err(),
+            ArchetypeTable::new(vec![zero]).or_die_err(),
             GeneratorError::ZeroWeight
         );
     }
@@ -746,8 +747,8 @@ mod tests {
     #[test]
     fn a_blueprint_survives_a_round_trip() {
         let blueprint = generate(SimSeed::new(12), 9, &table());
-        let encoded = ron::to_string(&blueprint).expect("blueprints serialise");
-        let decoded: NpcBlueprint = ron::from_str(&encoded).expect("blueprints deserialise");
+        let encoded = ron::to_string(&blueprint).or_die();
+        let decoded: NpcBlueprint = ron::from_str(&encoded).or_die();
         assert_eq!(decoded.name, blueprint.name);
         assert_eq!(decoded.appearance_seed, blueprint.appearance_seed);
         assert_eq!(decoded.archetype, blueprint.archetype);

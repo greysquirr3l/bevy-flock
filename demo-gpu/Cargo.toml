@@ -1,0 +1,55 @@
+[package]
+name = "bevy-flock-demo-gpu"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+description = "GPU-accelerated render of the Ashfall Verge playground, with the benchmark that costs it."
+license = "MIT OR Apache-2.0"
+# A package rather than a workspace member, for the same reason `demo/` is: the library must not pay
+# for a demo's graphics stack, and a driver problem must not be able to break the library's build.
+[workspace]
+
+[dependencies]
+bevy-flock-demo = { path = "../demo" }
+bevy_math = "0.20.1"
+# The real backends, so the crate can render on a device when one exists. `noop` stays in the feature
+# list because it is the only backend that runs with no driver at all, and CI needs a case that runs
+# everywhere.
+wgpu = { version = "30", default-features = false, features = [
+    "vulkan",
+    "gles",
+    "noop",
+    "std",
+    "wgsl",
+] }
+bytemuck = { version = "1", features = ["derive"] }
+futures-lite = "2"
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "frame"
+harness = false
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+suspicious = { level = "deny", priority = -1 }

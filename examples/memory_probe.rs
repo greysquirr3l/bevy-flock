@@ -14,7 +14,10 @@
 // A counting allocator is the only way to prove a steady-state loop allocates nothing, and
 // `GlobalAlloc` is unsafe by definition. The unsafe code is four one-line forwards; the crate
 // itself still denies unsafe.
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "a counting allocator is the only way to report steady-state allocation"
+)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
