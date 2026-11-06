@@ -772,3 +772,69 @@ is the knob for a game that steers more of its crowd.
 
 The re-open trigger is enforced: `cargo bench --bench crowd -- flock_frame_cell` then
 `python3 scripts/cell_size_gate.py` (3% warn, 10% fail), which is what CI's `cell-size-gate` job runs.
+
+## The whole crowd bench, after the optimisation pass (2026-11-05)
+
+`cargo bench --locked --bench crowd`, one run of every target on an otherwise idle machine
+(aarch64, 4 physical cores, release profile). These are medians, not bests, and the point of
+recording the whole suite is that a table with holes is how a regression hides.
+
+| Case | Median |
+| --- | --- |
+| `flock_frame_road/auto/10000` | 5.217 ms |
+| `flock_frame_road/wide/10000` | 11.61 ms |
+| `flock_frame_road/threads/10000` | 5.236 ms |
+| `flock_frame_road/scalar/10000` | 14.09 ms |
+| `flock_frame_road/auto/100000` | 38.69 ms |
+| `flock_frame_road/wide/100000` | 111.9 ms |
+| `flock_frame_road/threads/100000` | 38.36 ms |
+| `flock_frame_road/scalar/100000` | 137.6 ms |
+| `flock_frame_cell/10000/13.5m_2^20` | 5.226 ms |
+| `flock_frame_cell/10000/9m_2^21` | 5.237 ms |
+| `flock_frame_cell/10000/7m_2^22` | 5.240 ms |
+| `flock_frame_cell/100000/13.5m_2^20` | 39.22 ms |
+| `flock_frame_cell/100000/9m_2^21` | 38.64 ms |
+| `flock_frame_cell/100000/7m_2^22` | 38.53 ms |
+| `spatial_query/radius_8m/1000` | 140.2 ns |
+| `spatial_query/radius_8m/10000` | 184.3 ns |
+| `spatial_query/radius_8m/100000` | 557.7 ns |
+| `steering_step/32_neighbours` | 152.2 ns |
+| `crowd_kernel/planar` | 2.055 ms |
+| `crowd_kernel/volumetric` | 1.806 ms |
+| `crowd_kernel/dense` | 21.45 ms |
+| `crowd_avoidance/steer_only/10000` | 2.226 ms |
+| `crowd_avoidance/steer_and_avoid/10000` | 3.255 ms |
+| `crowd_avoidance/steer_only/100000` | 19.9-22.9 ms |
+| `crowd_avoidance/steer_and_avoid/100000` | 31.1-34.9 ms |
+| `perception/512_observers_4096_records` | 36.63 ms |
+| `perception/512_observers_4096_records_indexed` | 36.65 ms |
+| `perception/512_observers_4096_records_spread_400m` | 10.21 ms |
+| `perception/512_observers_4096_records_spread_400m_indexed` | 3.892 ms |
+| `perception/rebuild_4096_records` | 68.29 µs |
+| `perception/obstacle_rebuild_64x64_32_obstacles` | 3.682 µs |
+
+Three things the table is honest about.
+
+**The kernel did not move.** Against the baseline saved before the row-major rewrite
+(`--save-baseline before`), `crowd_kernel/planar` is 2.021 → 2.055 ms, `volumetric` 1.813 → 1.806 ms
+and `dense` 21.48 → 21.37 ms. A second run of the same binary puts the run-to-run spread at ±1.4%,
+so all three are unchanged — which is the claim ADR 0049 makes: the bounds checks left without the
+kernel slowing down, and that is all it claims.
+
+**Reciprocal avoidance costs about half a steering pass.** At 10,000 the step goes from 2.226 ms to
+3.255 ms (+46%); at 100,000 from roughly 21 to 34 ms (+55%). That is the price of a second neighbour
+pass over the same cells, and it buys the symmetric pair solve in ADR 0045. It is on by default in
+`BoidsConfig` — two agents walking through each other is a bug a player sees in the first minute,
+and 1.03 ms on top of a 2.2 ms steering pass inside a 5.2 ms frame at 10,000 agents is not the place
+to save it — and
+`with_avoidance(None)` is the opt-out for a game that measures differently on its own hardware.
+
+**The 100,000-agent avoidance cases are quoted as a range, not a delta.** Two runs of the same
+binary gave 19.9 and 22.9 ms for `steer_only`, a 15% spread; the case takes 10 samples and allocates
+100,000 agents' worth of state between them. A table that quoted the better run would be a table
+that lies, so the range is what it says. The 10,000-agent cases repeat to within 1.5% and are quoted
+as a single number.
+
+`perception/*_indexed` matching or beating the linear scan on the dense case, and beating it 2.6× on
+the spread one, is the bucketed index from ADR 0047 doing what it was added for; on a dense crowd
+the index's grid window covers everything, so the fallback keeps it honest instead of slower.
