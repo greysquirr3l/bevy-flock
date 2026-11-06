@@ -1078,7 +1078,6 @@ must_haves = [
   "No caller can get the plane wrong silently: either the default matches the crowd's own axis or the resource is required by the plugin.",
   "`docs/performance.md` or the band ADR records the change and the measured effect on the fold/manifest counts.",
 ]
-delivered_in = "HEAD"
 
 [[completed]]
 slug = "ashfall-demo-playground"
