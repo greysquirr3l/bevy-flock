@@ -37,6 +37,10 @@ struct Waypoints(Vec<Vec3>);
 struct Retargets(u64);
 
 /// Send anyone who has arrived somewhere else.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 fn retarget(
     npcs: Query<(&Npc, &mut NpcTarget, &Transform)>,
     waypoints: Res<Waypoints>,

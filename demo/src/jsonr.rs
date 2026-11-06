@@ -9,6 +9,8 @@
 //! No dependency because the alternative was `serde_json` for one file format, and the crate's
 //! dependency budget is a design decision rather than an accident (see `Cargo.toml`).
 
+use bevy_flock::domain::num;
+
 /// A parsed JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -68,7 +70,7 @@ impl Value {
 
     /// This value as a number.
     #[must_use]
-    pub fn number(&self) -> Option<f64> {
+    pub const fn number(&self) -> Option<f64> {
         match self {
             Self::Number(value) => Some(*value),
             _ => None,
@@ -85,12 +87,7 @@ impl Value {
         if value < 0.0 || value.fract() != 0.0 || value > 1.0e9 {
             return None;
         }
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "the value is non-negative, integral and bounded above, all checked just above"
-        )]
-        Some(value as usize)
+        Some(num::f64_to_usize(value))
     }
 
     /// This value as a string.
@@ -109,15 +106,10 @@ impl Value {
         if items.len() < 3 {
             return None;
         }
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "glTF colours and vectors are 32-bit floats; the parser stores f64 because a \
-                      JSON number has no width"
-        )]
         Some([
-            items.first()?.number()? as f32,
-            items.get(1)?.number()? as f32,
-            items.get(2)?.number()? as f32,
+            num::f64_to_f32(items.first()?.number()?),
+            num::f64_to_f32(items.get(1)?.number()?),
+            num::f64_to_f32(items.get(2)?.number()?),
         ])
     }
 
@@ -125,11 +117,7 @@ impl Value {
     #[must_use]
     pub fn vec4(&self) -> Option<[f32; 4]> {
         let first = self.vec3()?;
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "as `vec3`: glTF stores 32-bit floats, the parser f64"
-        )]
-        let alpha = self.items().get(3).and_then(Self::number)? as f32;
+        let alpha = num::f64_to_f32(self.items().get(3).and_then(Self::number)?);
         Some([first[0], first[1], first[2], alpha])
     }
 }

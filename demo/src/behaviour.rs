@@ -14,6 +14,7 @@ use bevy_ecs::prelude::*;
 use bevy_flock::adapters::primary::components::{
     Npc, NpcIdentity, NpcNeeds, NpcTemperament, NpcVelocity,
 };
+use bevy_flock::domain::num;
 use bevy_flock::domain::temperament::{Archetype, TemperamentDrive};
 use bevy_transform::prelude::Transform;
 use std::collections::BTreeMap;
@@ -86,10 +87,12 @@ pub fn summarise(world: &mut World) -> Vec<ArchetypeBehaviour> {
     }
     let mut groups: BTreeMap<u8, Accumulator> = BTreeMap::new();
     for (row, gap) in rows.iter().zip(nearest) {
-        let key = Archetype::ALL
-            .iter()
-            .position(|candidate| *candidate == row.archetype)
-            .unwrap_or(0) as u8;
+        let key = num::usize_to_u8(
+            Archetype::ALL
+                .iter()
+                .position(|candidate| *candidate == row.archetype)
+                .unwrap_or(0),
+        );
         let group = groups.entry(key).or_default();
         group.count += 1;
         group.speed += row.speed;
@@ -103,7 +106,7 @@ pub fn summarise(world: &mut World) -> Vec<ArchetypeBehaviour> {
         .into_iter()
         .filter_map(|(key, group)| {
             let archetype = Archetype::ALL.get(usize::from(key)).copied()?;
-            let count = group.count.max(1) as f32;
+            let count = num::u32_to_f32(group.count.max(1));
             Some(ArchetypeBehaviour {
                 archetype,
                 count: group.count,
@@ -192,7 +195,7 @@ mod tests {
     fn world_with(pairs: &[(Archetype, Temperament, Vec3)]) -> World {
         let mut world = World::new();
         for (index, (archetype, temperament, position)) in pairs.iter().enumerate() {
-            let mut bundle = NpcBundle::default_for(NpcId::unique(index as u32));
+            let mut bundle = NpcBundle::default_for(NpcId::unique(num::usize_to_u32(index)));
             bundle.identity.archetype = *archetype;
             bundle.temperament = NpcTemperament(*temperament);
             bundle.needs = NpcNeeds(Needs::satisfied());

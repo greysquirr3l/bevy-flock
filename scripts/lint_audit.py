@@ -49,6 +49,28 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "tests/tree_no_alloc.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to assert the tree allocates nothing",
+    (
+        "demo/src/city.rs",
+        "too_many_lines",
+    ): "the layout is one pass of the same generator over districts, blocks, shelters and pylons; \
+each section is the city's own narrative and splitting it would pass a dozen mutable accumulators \
+between helpers to keep a line count down",
+    (
+        "demo/src/plan.rs",
+        "too_many_lines",
+    ): "the plan is drawn in painting order -- roads, ruins, settlements, props, crowd, legend -- and \
+each layer is three to eight lines; the alternative is a dozen mutable buffers in a signature",
+    (
+        "demo/benches/render_pipeline.rs",
+        "too_many_lines",
+    ): "a Criterion body that opens a device, uploads the scene and times a pass: the setup is the \
+measurement's context and cannot be hoisted without hiding what is being timed",
+    (
+        "demo-gpu/src/lib.rs",
+        "too_many_lines",
+    ): "a wgpu pipeline is a description that only compiles in one order: bind groups, then the \
+layout, then the pipeline that consumes them, each borrowing the last, so splitting it moves the \
+borrow rather than the line count",
 }
 
 #: What `Cargo.toml` has to deny or warn, so the policy cannot drift while the exceptions stay clean.
@@ -119,9 +141,19 @@ ATTRIBUTE = re.compile(r"#!?\[(?:cfg_attr\([^]]*?\)?)?(allow|expect)\(([^]]*?)\)
 LEVEL = re.compile(r'level\s*=\s*"([a-z]+)"')
 #: `reason = "…"`, stripped before an attribute body is split on commas.
 NAME = re.compile(r"[a-z_][a-z0-9_]*")
-REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"')
+# `re.S` because a reason is often wrapped across lines with a trailing `\\`, and a pattern that
+# stops at the newline leaves the reason's own words looking like lint names.
+REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"', re.S)
 
-SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz")
+SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz", "demo", "demo-gpu")
+
+#: Every manifest that carries the policy, relative to the repository root. A crate that is not in
+#: this list has no table to weaken; one that is, cannot weaken it quietly.
+MANIFESTS = ("Cargo.toml", "demo/Cargo.toml", "demo-gpu/Cargo.toml")
+
+#: How strong a level is. A crate may be stricter than the policy — the GPU demo denies the groups
+#: instead of warning about them — but never weaker.
+STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
 
 
 def strip_comments(text: str) -> str:
@@ -212,26 +244,39 @@ def manifest_levels(text: str) -> dict[tuple[str, str], str]:
 
 
 def check_manifest(root: Path) -> int:
-    """Fail if the manifest no longer says what the policy says it says."""
-    path = root / "Cargo.toml"
-    if not path.is_file():
-        print(f"lint audit: no Cargo.toml at {path}")
-        return 1
-    levels = manifest_levels(path.read_text(encoding="utf-8"))
+    """Fail if any manifest no longer says what the policy says it says.
+
+    Every crate that carries the table is checked, because a weakened table in the demo crate is
+    exactly as invisible as one in the library. A crate may be *stricter* than the policy — the GPU
+    demo denies the groups rather than warning about them, since it has no `-D warnings` step of its
+    own — so the comparison is against a strength order rather than for equality.
+    """
     problems = []
-    for table, lint, expected in REQUIRED:
-        found = levels.get((table, lint))
-        if found != expected:
-            problems.append(f"  [{table}] {lint}: expected {expected}, found {found or 'nothing'}")
-    allowed = {
-        lint
-        for (table, lint), level in levels.items()
-        if table.startswith("lints.") and level == "allow"
-    }
-    for lint in sorted(allowed - set(TOLERATED)):
-        problems.append(f"  allowed but not in TOLERATED: {lint}")
-    for lint in sorted(set(TOLERATED) - allowed):
-        problems.append(f"  in TOLERATED but no longer allowed: {lint}")
+    covered: set[str] = set()
+    for relative in MANIFESTS:
+        path = root / relative
+        if not path.is_file():
+            continue
+        levels = manifest_levels(path.read_text(encoding="utf-8"))
+        for table, lint, expected in REQUIRED:
+            found = levels.get((table, lint))
+            if STRENGTH.get(found or "", -1) < STRENGTH[expected]:
+                problems.append(
+                    f"  {relative} [{table}] {lint}: expected at least {expected}, "
+                    f"found {found or 'nothing'}"
+                )
+        allowed = {
+            lint
+            for (table, lint), level in levels.items()
+            if table.startswith("lints.") and level == "allow"
+        }
+        for lint in sorted(allowed - set(TOLERATED)):
+            problems.append(f"  {relative}: allowed but not in TOLERATED: {lint}")
+        covered.update(allowed)
+    # A crate may deny what another crate tolerates, so the tolerated set is checked once against
+    # every manifest together: a lint that nothing allows any more is a stale entry.
+    for lint in sorted(set(TOLERATED) - covered):
+        problems.append(f"  no manifest allows the tolerated lint any more: {lint}")
     if problems:
         print("the lint policy in Cargo.toml is not the policy this audit enforces:")
         print("\n".join(problems))
@@ -458,6 +503,14 @@ def self_test() -> int:
             1,
             "a cfg_attr wrapping an expect",
         ),
+        (
+            "src/sys.rs",
+            '#[expect(\n    clippy::needless_pass_by_value,\n'
+            '    reason = "a system hands its \\\nparameters over by value"\n)]\n'
+            "pub fn s(config: Res<BoidsConfig>) { let _ = config; }\n",
+            0,
+            "a reason wrapped across lines does not become a lint name",
+        ),
     ]
     failures = 0
     for relative, body, expected, label in cases:
@@ -519,6 +572,34 @@ def self_test() -> int:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_manifest(root, override, extra, dropped)
+            saved = dict(SANCTIONED)
+            SANCTIONED.clear()
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.update(saved)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
+            else:
+                print(f"self-test ok: {label}")
+
+    # A second manifest is judged on its own: a crate may be stricter than the library, but it may
+    # not allow something the library does not.
+    for label, extra, expected in [
+        ("a crate stricter than the policy passes", None, 0),
+        ("a second manifest with an undocumented allow fails", 'dead_code = "allow"', 1),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root)
+            text = (root / "Cargo.toml").read_text(encoding="utf-8")
+            text = text.replace('suboptimal_flops = "allow"', 'suboptimal_flops = "deny"')
+            if extra is not None:
+                text = text.replace("[lints.clippy]", f"[lints.clippy]\n{extra}", 1)
+            nested = root / "demo-gpu" / "Cargo.toml"
+            nested.parent.mkdir(parents=True, exist_ok=True)
+            nested.write_text(text, encoding="utf-8")
             saved = dict(SANCTIONED)
             SANCTIONED.clear()
             try:

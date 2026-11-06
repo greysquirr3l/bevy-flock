@@ -195,18 +195,20 @@ A bare `#[allow]` is never correct and the audit rejects one outright, `reason` 
 ## Policing the exceptions
 
 `scripts/lint_audit.py` scans every Rust file in the tree — `src`, `tests`, `benches`, `examples`,
-`compat`, `fuzz` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint, clippy's or rustc's,
+`compat`, `fuzz`, `demo`, `demo-gpu` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint,
+clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
 half the crate's doc comments talk about the overrides they forbid. An `#[allow]` that is not in
 the script's `SANCTIONED` table fails the build; so does a `SANCTIONED` entry that has disappeared,
-because an exception nobody needs is an exception nobody reads. An `#[expect]` is judged by the two
+because an exception nobody needs is an exception nobody reads. An `#[expect]` is judged by the three
 rules above instead: right file or right signature, and a reason.
 
 The `reason = "…"` argument is stripped as a unit before an attribute is split on commas, so a
 reason with a comma in it does not become a phantom lint name, and a name that is not an identifier
 is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported.
 
-It also reads `Cargo.toml` and fails if the policy there is not the policy this page describes, in
+It also reads every manifest that carries the table — the library's `Cargo.toml`, `demo/Cargo.toml`
+and `demo-gpu/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
 both directions:
 
 - **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
@@ -215,15 +217,23 @@ both directions:
   `cargo` and `perf` groups must still be `warn` for `-D warnings` to do its job. A clean tree under
   a weakened manifest is not a passing audit.
 - **Allowed stays allowed, and nothing else.** The set of `allow` entries in the manifest must equal
-  the `TOLERATED` table exactly, entry for entry, in both directions.
+  the `TOLERATED` table exactly, entry for entry, in both directions. Because a demo crate may be
+  *stricter* than the library — the GPU demo denies the groups rather than warning about them, since
+  it has no `-D warnings` step of its own — the comparison is against a strength order rather than
+  for equality, and no manifest may allow a lint that `TOLERATED` does not list. The tolerated set
+  itself is checked once against all three manifests together, so an entry nothing allows any more
+  still fails.
 
 `--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level
 `allow`, an item-level `expect`, a `cfg_attr`-wrapped `expect`, a bare rustc lint in each of `allow`
 and `expect`, a documented cast expectation inside the conversion module, the same expectation
 without a reason, the same expectation in another file, a documented expectation on a Bevy system,
-and one on a function that is not a system; then the sanction mechanism (a listed override passes, the same override unlisted
-fails, a stale entry fails); then the manifest (a downgraded deny, a deny replaced by an allow, an
-undocumented allow, a tolerated allow that vanished, an intact manifest). CI runs both.
+one on a function that is not a system, and a reason wrapped across lines with a trailing `\` — the
+shape that used to be split on its commas and read back as a list of lint names; then the sanction
+mechanism (a listed override passes, the same override unlisted fails, a stale entry fails); then
+the manifest (a downgraded deny, a deny replaced by an allow, an undocumented allow, a tolerated
+allow that vanished, an intact manifest, a second crate that is stricter than the library, and a
+second crate that allows what the library does not). CI runs both.
 
 Adding an override therefore takes three steps, in this order: a reason in the script, a plan task
 that removes it, and a sentence here. None of the three is a file-level opt-out a reviewer would have

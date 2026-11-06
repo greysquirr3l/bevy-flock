@@ -233,7 +233,7 @@ impl Session {
 
     /// The help page, one line per key.
     #[must_use]
-    pub fn help_text() -> [&'static str; 8] {
+    pub const fn help_text() -> [&'static str; 8] {
         [
             " wasd move · e climb · c descend · arrows look",
             " 1-5 jump to a view · p watch the scripted flight",

@@ -39,11 +39,11 @@ pub struct Held(u16);
 impl Held {
     /// Whether `key` is down.
     #[must_use]
-    pub fn is_down(self, key: Key) -> bool {
+    pub const fn is_down(self, key: Key) -> bool {
         self.0 & (1 << key as u16) != 0
     }
 
-    fn set(&mut self, key: Key, down: bool) {
+    const fn set(&mut self, key: Key, down: bool) {
         let bit = 1 << key as u16;
         if down {
             self.0 |= bit;
@@ -53,7 +53,7 @@ impl Held {
     }
 
     /// Every key up, which is what a focus loss should do.
-    pub fn release_all(&mut self) {
+    pub const fn release_all(&mut self) {
         self.0 = 0;
     }
 }
@@ -87,7 +87,7 @@ pub enum Key {
 impl Key {
     /// The bit this key occupies.
     #[must_use]
-    pub fn bit(self) -> u16 {
+    pub const fn bit(self) -> u16 {
         1 << self as u16
     }
 }
@@ -114,7 +114,7 @@ impl Decoder {
 
     /// Which keys are down.
     #[must_use]
-    pub fn held(&self) -> Held {
+    pub const fn held(&self) -> Held {
         self.held
     }
 
@@ -224,7 +224,7 @@ impl Decoder {
     /// Note that a key went up. Terminals do not report releases, so the caller decides: the
     /// interactive loop calls this with the key's bit when an arrow key's sequence is re-sent, and
     /// with everything on a focus loss.
-    pub fn release(&mut self, key: Key) {
+    pub const fn release(&mut self, key: Key) {
         self.held.set(key, false);
     }
 
@@ -244,7 +244,7 @@ impl Decoder {
     }
 
     /// Release every key, which is what leaving the window means.
-    pub fn release_all(&mut self) {
+    pub const fn release_all(&mut self) {
         self.held.release_all();
     }
 

@@ -21,6 +21,7 @@
 //! crowd of 2,000 bodies built from the same generator the demo places.
 use std::hint::black_box;
 
+use bevy_flock::domain::num;
 use bevy_flock_demo::city::CityLayout;
 use bevy_flock_demo::render3d::{self, Meshes, Shot};
 use bevy_flock_demo::scene::{Body, Scene};
@@ -72,9 +73,9 @@ impl Fixture {
                 // dense enough that the culling and batching have something to do.
                 position: centre
                     + bevy_math::Vec3::new(
-                        (index % 50) as f32 * 3.0 - 75.0,
+                        num::u64_to_f32(index % 50) * 3.0 - 75.0,
                         0.0,
-                        (index / 50) as f32 * 3.0 - 60.0,
+                        num::u64_to_f32(index / 50) * 3.0 - 60.0,
                     ),
                 yaw: 0.0,
                 appearance_seed: index,
@@ -347,8 +348,8 @@ impl Gpu {
             batches.push(Batch {
                 vertices,
                 indices,
-                count: mesh.indices.len() as u32,
-                instances: instances.len() as u32,
+                count: num::usize_to_u32(mesh.indices.len()),
+                instances: num::usize_to_u32(instances.len()),
             });
         }
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
@@ -396,7 +397,7 @@ impl Gpu {
 
     /// Write the camera's view-projection for `shot`.
     fn upload_camera(&self, shot: &Shot) {
-        let aspect = self.width as f32 / self.height as f32;
+        let aspect = num::u32_to_f32(self.width) / num::u32_to_f32(self.height);
         let matrix = shot.camera.view_projection(aspect);
         self.queue.write_buffer(
             &self.camera,
@@ -601,6 +602,11 @@ fn gpu(criterion: &mut Criterion) {
         .iter()
         .map(|batch| batch.instances as usize)
         .sum();
+    gpu_frames(criterion, &full, &terminal, instances);
+    gpu_upload(criterion, &full, instances);
+}
+/// Time the two frame paths: the full-size shot and the interactive terminal view.
+fn gpu_frames(criterion: &mut Criterion, full: &Gpu, terminal: &Gpu, instances: usize) {
     let mut group = criterion.benchmark_group("wgpu");
     group.throughput(Throughput::Elements(instances as u64));
     group.bench_function("full/600x375", |bencher| {
@@ -616,9 +622,10 @@ fn gpu(criterion: &mut Criterion) {
         });
     });
     group.finish();
-
-    // The crowd upload on its own, which is the part of a wgpu frame that scales with population
-    // rather than with draw calls: one `write_buffer` of every instance.
+}
+/// Time the crowd upload on its own, the part of a wgpu frame that scales with population rather
+/// than with draw calls: one `write_buffer` of every instance.
+fn gpu_upload(criterion: &mut Criterion, full: &Gpu, instances: usize) {
     let mut upload = criterion.benchmark_group("wgpu_upload");
     upload.throughput(Throughput::Bytes(full.instance_bytes.len() as u64));
     upload.bench_function(format!("{instances}_instances"), |bencher| {

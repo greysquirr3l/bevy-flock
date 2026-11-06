@@ -6,6 +6,7 @@
 //! reading every file the manifest promises.
 
 use bevy_flock::domain::ids::SimSeed;
+use bevy_flock::domain::num;
 use bevy_flock::domain::temperament::Archetype;
 use bevy_flock::testkit::OrDie;
 use bevy_flock_demo::app::Playground;
@@ -80,7 +81,7 @@ fn the_crowd_walks() {
         .filter(|(before, after)| before.position.distance(after.position) > 0.5)
         .count();
     assert!(
-        moved as f32 / started.len() as f32 > 0.5,
+        num::usize_to_f32(moved) / num::usize_to_f32(started.len()) > 0.5,
         "only {moved} of {} NPCs moved in {WALK_TICKS} ticks",
         started.len()
     );
@@ -103,7 +104,7 @@ fn the_crowd_lands_in_the_settlements() {
     // The crowd walks, so some agents will have left their district by the end of the run; what
     // must hold is that the city, not the empty ruins, is where nearly all of them are.
     assert!(
-        inside as f32 / bodies.len() as f32 > 0.85,
+        num::usize_to_f32(inside) / num::usize_to_f32(bodies.len()) > 0.85,
         "only {inside} of {} NPCs are near a settlement",
         bodies.len()
     );

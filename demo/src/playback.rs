@@ -14,6 +14,7 @@ use crate::json;
 use crate::raster::{Camera, Image};
 use crate::render3d::{self, Meshes, Shot};
 use crate::scene::Scene;
+use bevy_flock::domain::num;
 
 /// One rendered frame of a scripted flight.
 #[derive(Debug, Clone, PartialEq)]
@@ -56,7 +57,7 @@ impl Report {
         if self.frames.is_empty() {
             0.0
         } else {
-            self.total_ms() / self.frames.len() as f64
+            self.total_ms() / num::usize_to_f64(self.frames.len())
         }
     }
 }
@@ -85,7 +86,7 @@ pub fn cameras(shots: &[Shot], steps_per_view: usize) -> Vec<(usize, Camera)> {
             continue;
         };
         for step in 0..steps {
-            let t = ease(step as f32 / steps as f32);
+            let t = ease(num::usize_to_f32(step) / num::usize_to_f32(steps));
             let eye = from.camera.eye.lerp(to.camera.eye, t);
             let target = from.camera.target.lerp(to.camera.target, t);
             let fov_y = from.camera.fov_y + (to.camera.fov_y - from.camera.fov_y) * t;
@@ -187,7 +188,7 @@ fn write_table(directory: &Path, report: &Report, steps_per_view: usize) -> Resu
             let fields = [
                 ("index", frame.index.to_string()),
                 ("view", json::string(frame.view)),
-                ("ms", json::number(frame.ms as f32, 3)),
+                ("ms", json::number(num::f64_to_f32(frame.ms), 3)),
                 ("fingerprint", format!("\"{:016x}\"", frame.fingerprint)),
                 ("eye", json::vec3(frame.eye)),
                 ("target", json::vec3(frame.target)),
@@ -199,8 +200,14 @@ fn write_table(directory: &Path, report: &Report, steps_per_view: usize) -> Resu
     let fields = [
         ("steps_per_view", steps_per_view.to_string()),
         ("frames", report.frames.len().to_string()),
-        ("total_ms", json::number(report.total_ms() as f32, 3)),
-        ("mean_ms", json::number(report.mean_ms() as f32, 3)),
+        (
+            "total_ms",
+            json::number(num::f64_to_f32(report.total_ms()), 3),
+        ),
+        (
+            "mean_ms",
+            json::number(num::f64_to_f32(report.mean_ms()), 3),
+        ),
         ("table", json::array_block(&rows, 2)),
     ];
     let path = directory.join("playback.json");
@@ -243,8 +250,14 @@ mod tests {
         assert_eq!(once.len(), twice.len());
         for (left, right) in once.iter().zip(twice.iter()) {
             assert_eq!(left.0, right.0);
-            assert_eq!(left.1.eye.to_array(), right.1.eye.to_array());
-            assert_eq!(left.1.target.to_array(), right.1.target.to_array());
+            assert_eq!(
+                left.1.eye.to_array().map(f32::to_bits),
+                right.1.eye.to_array().map(f32::to_bits)
+            );
+            assert_eq!(
+                left.1.target.to_array().map(f32::to_bits),
+                right.1.target.to_array().map(f32::to_bits)
+            );
         }
     }
 

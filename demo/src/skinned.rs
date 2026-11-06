@@ -56,7 +56,7 @@ pub struct Clip {
 impl Clip {
     /// How long the clip runs, seconds.
     #[must_use]
-    pub fn duration(&self) -> f32 {
+    pub const fn duration(&self) -> f32 {
         self.duration
     }
 
@@ -181,7 +181,7 @@ impl Rig {
     /// scales an instance to `target_height / height()` so a short scavenger and a tall warden can
     /// share one rig.
     #[must_use]
-    pub fn height(&self) -> f32 {
+    pub const fn height(&self) -> f32 {
         self.height
     }
 
@@ -196,19 +196,19 @@ impl Rig {
 
     /// The clips by name.
     #[must_use]
-    pub fn clips(&self) -> &BTreeMap<String, Clip> {
+    pub const fn clips(&self) -> &BTreeMap<String, Clip> {
         &self.clips
     }
 
     /// Joint count.
     #[must_use]
-    pub fn joint_count(&self) -> usize {
+    pub const fn joint_count(&self) -> usize {
         self.skin_joints.len()
     }
 
     /// Triangle count across every skinned primitive.
     #[must_use]
-    pub fn triangles(&self) -> usize {
+    pub const fn triangles(&self) -> usize {
         self.indices.len() / 3
     }
 
@@ -831,7 +831,11 @@ mod tests {
             "not every triangle was skinned"
         );
         for (a, b) in first.iter().zip(second.iter()) {
-            assert_eq!(a, b, "two poses of the same time differ");
+            assert_eq!(
+                a.map(f32::to_bits),
+                b.map(f32::to_bits),
+                "two poses of the same time differ"
+            );
             assert!(
                 a.iter().all(|value| value.is_finite()),
                 "a skinned vertex is not finite"

@@ -11,6 +11,7 @@
 //! owes a reader: a picture whose provenance is the code beside it.
 
 use crate::jsonr;
+use bevy_flock::domain::num;
 use bevy_math::{Mat4, Vec3, Vec4};
 
 /// A rendered image: RGB8 plus the depth buffer that produced it.
@@ -48,10 +49,10 @@ impl Image {
     /// where the camera actually puts it makes the plane dissolve instead of ending.
     pub fn sky_to(&mut self, top: [f32; 3], horizon: [f32; 3], horizon_row: u32) {
         let horizon_row = horizon_row.min(self.height.saturating_sub(1));
-        let span = horizon_row.max(1) as f32;
+        let span = num::u32_to_f32(horizon_row.max(1));
         for y in 0..self.height {
             let t = if y <= horizon_row {
-                (y as f32 / span).powf(1.35)
+                (num::u32_to_f32(y) / span).powf(1.35)
             } else {
                 1.0
             };
@@ -109,7 +110,7 @@ impl Image {
         let width = (self.width / factor).max(1);
         let height = (self.height / factor).max(1);
         let mut out = Self::new(width, height);
-        let taps = (factor * factor) as f32;
+        let taps = num::u32_to_f32(factor * factor);
         for y in 0..height {
             for x in 0..width {
                 let mut sum = [0.0_f32; 3];
@@ -124,9 +125,9 @@ impl Image {
                     }
                 }
                 let averaged = [
-                    (sum[0] / taps).round().clamp(0.0, 255.0) as u8,
-                    (sum[1] / taps).round().clamp(0.0, 255.0) as u8,
-                    (sum[2] / taps).round().clamp(0.0, 255.0) as u8,
+                    num::f32_to_u8((sum[0] / taps).round().clamp(0.0, 255.0)),
+                    num::f32_to_u8((sum[1] / taps).round().clamp(0.0, 255.0)),
+                    num::f32_to_u8((sum[2] / taps).round().clamp(0.0, 255.0)),
                 ];
                 let index = (y as usize) * (width as usize) + (x as usize);
                 if let Some(slot) = out.colour.get_mut(index) {
@@ -141,7 +142,7 @@ impl Image {
     #[must_use]
     pub fn coverage(&self) -> f32 {
         let drawn = self.depth.iter().filter(|depth| **depth < 1.0).count();
-        drawn as f32 / self.depth.len().max(1) as f32
+        num::usize_to_f32(drawn) / num::usize_to_f32(self.depth.len().max(1))
     }
 
     /// A nearest-neighbour integer upscale, with the depth buffer reset to the far plane.
@@ -314,7 +315,7 @@ impl Crc {
         }
     }
 
-    fn finish(&self) -> u32 {
+    const fn finish(&self) -> u32 {
         self.value ^ 0xffff_ffff
     }
 }
@@ -346,7 +347,7 @@ struct Bits {
 }
 
 impl Bits {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             bytes: Vec::new(),
             accumulator: 0,
@@ -481,7 +482,7 @@ fn length_symbol(length: u32) -> (u32, u32, u32) {
         let _ = extra;
     }
     let (base, extra) = LENGTHS.get(symbol).copied().unwrap_or((3, 0));
-    (257 + symbol as u32, length - base, extra)
+    (257 + num::usize_to_u32(symbol), length - base, extra)
 }
 
 fn distance_symbol(distance: u32) -> (u32, u32, u32) {
@@ -494,7 +495,7 @@ fn distance_symbol(distance: u32) -> (u32, u32, u32) {
         symbol = index;
     }
     let (base, extra) = DISTANCES.get(symbol).copied().unwrap_or((1, 0));
-    (symbol as u32, distance - base, extra)
+    (num::usize_to_u32(symbol), distance - base, extra)
 }
 
 /// One fixed-Huffman deflate block over LZ77 matches.
@@ -550,10 +551,10 @@ fn deflate(raw: &[u8], out: &mut Vec<u8>) {
         }
 
         if best_length >= 3 {
-            let (code, extra_value, extra_bits) = length_symbol(best_length as u32);
+            let (code, extra_value, extra_bits) = length_symbol(num::usize_to_u32(best_length));
             literal(&mut bits, code);
             bits.push(extra_value, extra_bits);
-            let (code, extra_value, extra_bits) = distance_symbol(best_distance as u32);
+            let (code, extra_value, extra_bits) = distance_symbol(num::usize_to_u32(best_distance));
             bits.huffman(code, 5);
             bits.push(extra_value, extra_bits);
             for step in 0..best_length {
@@ -593,7 +594,7 @@ fn encode(colour: [f32; 3]) -> [u8; 3] {
         let clamped = value.clamp(0.0, 1.0);
         // A light gamma makes the shading read on paper; the scene is not physically lit.
         let shaped = clamped.powf(1.0 / 2.2);
-        (shaped * 255.0 + 0.5) as u8
+        num::f32_to_u8(shaped * 255.0 + 0.5)
     };
     [channel(colour[0]), channel(colour[1]), channel(colour[2])]
 }
@@ -752,7 +753,7 @@ impl Renderer {
     /// draws everything, which is what the shipped PNGs are made at; the interactive front end turns
     /// it on, because a picture somebody is steering has a different budget from one that is read.
     #[must_use]
-    pub fn with_min_area(mut self, pixels: f32) -> Self {
+    pub const fn with_min_area(mut self, pixels: f32) -> Self {
         self.min_area = pixels.max(0.0);
         self
     }
@@ -842,6 +843,31 @@ impl Renderer {
         }
     }
 
+    /// Project a clip-space triangle to screen space as `(x, y, depth, 1/w)` per vertex.
+    ///
+    /// `None` means the triangle is behind the eye and nothing should be drawn.
+    fn project(
+        triangle: &[([f32; 4], Vertex); 3],
+        image: &Image,
+    ) -> Option<[(f32, f32, f32, f32); 3]> {
+        let mut screen = [(0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32); 3]; // x, y, depth, 1/w
+        for (index, (clip, _)) in triangle.iter().enumerate() {
+            let w = clip.get(3).copied().unwrap_or(1.0);
+            if w <= 1.0e-6 {
+                return None;
+            }
+            let x = clip.first().copied().unwrap_or(0.0) / w;
+            let y = clip.get(1).copied().unwrap_or(0.0) / w;
+            let z = clip.get(2).copied().unwrap_or(0.0) / w;
+            let sx = (x * 0.5 + 0.5) * num::u32_to_f32(image.width);
+            // Screen y grows downward, NDC y grows upward.
+            let sy = (1.0 - (y * 0.5 + 0.5)) * num::u32_to_f32(image.height);
+            if let Some(slot) = screen.get_mut(index) {
+                *slot = (sx, sy, z, 1.0 / w);
+            }
+        }
+        Some(screen)
+    }
     fn raster(
         &self,
         image: &mut Image,
@@ -850,27 +876,7 @@ impl Renderer {
         style: Style,
         coverage: f32,
     ) {
-        let mut screen = [(0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32); 3]; // x, y, depth, 1/w
-        for (index, (clip, _)) in triangle.iter().enumerate() {
-            let w = clip.get(3).copied().unwrap_or(1.0);
-            if w <= 1.0e-6 {
-                return;
-            }
-            let x = clip.first().copied().unwrap_or(0.0) / w;
-            let y = clip.get(1).copied().unwrap_or(0.0) / w;
-            let z = clip.get(2).copied().unwrap_or(0.0) / w;
-            let sx = (x * 0.5 + 0.5) * image.width as f32;
-            // Screen y grows downward, NDC y grows upward.
-            let sy = (1.0 - (y * 0.5 + 0.5)) * image.height as f32;
-            if let Some(slot) = screen.get_mut(index) {
-                *slot = (sx, sy, z, 1.0 / w);
-            }
-        }
-        let (Some(a), Some(b), Some(c)) = (
-            screen.first().copied(),
-            screen.get(1).copied(),
-            screen.get(2).copied(),
-        ) else {
+        let Some([a, b, c]) = Self::project(&triangle, image) else {
             return;
         };
         let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
@@ -878,18 +884,20 @@ impl Renderer {
         if area.abs() < 1.0e-6_f32.max(self.min_area * 2.0) {
             return;
         }
-        let min_x = a.0.min(b.0).min(c.0).floor().max(0.0) as usize;
-        let max_x = (a.0.max(b.0).max(c.0).ceil() as usize).min(image.width as usize);
-        let min_y = a.1.min(b.1).min(c.1).floor().max(0.0) as usize;
-        let max_y = (a.1.max(b.1).max(c.1).ceil() as usize).min(image.height as usize);
+        let min_x = num::f32_to_usize(a.0.min(b.0).min(c.0).floor().max(0.0));
+        let max_x =
+            (num::f32_to_usize(a.0.max(b.0).max(c.0).ceil())).min(num::u32_to_usize(image.width));
+        let min_y = num::f32_to_usize(a.1.min(b.1).min(c.1).floor().max(0.0));
+        let max_y =
+            (num::f32_to_usize(a.1.max(b.1).max(c.1).ceil())).min(num::u32_to_usize(image.height));
         if min_x >= max_x || min_y >= max_y {
             return;
         }
         let inverse_area = 1.0 / area;
         for py in min_y..max_y {
-            let sample_y = py as f32 + 0.5;
+            let sample_y = num::usize_to_f32(py) + 0.5;
             for px in min_x..max_x {
-                let sample_x = px as f32 + 0.5;
+                let sample_x = num::usize_to_f32(px) + 0.5;
                 let w0 = ((b.0 - sample_x) * (c.1 - sample_y)
                     - (b.1 - sample_y) * (c.0 - sample_x))
                     * inverse_area;
@@ -1093,7 +1101,7 @@ mod tests {
         // A factor of one is the identity, including the depth buffer.
         let same = source.scaled(1);
         assert_eq!(same.fingerprint(), source.fingerprint());
-        assert_eq!(same.coverage(), source.coverage());
+        assert_eq!(same.coverage().to_bits(), source.coverage().to_bits());
     }
 
     /// Inflate a fixed-Huffman deflate stream, which is all the compressor emits.
@@ -1157,7 +1165,7 @@ mod tests {
         loop {
             let symbol = reader.huffman();
             match symbol {
-                0..=255 => out.push(symbol as u8),
+                0..=255 => out.push(num::u32_to_u8(symbol)),
                 256 => break,
                 length_symbol => {
                     let (base, extra) = LENGTHS
@@ -1198,7 +1206,7 @@ mod tests {
     fn the_compressor_round_trips() {
         let mut raw = Vec::new();
         for index in 0..4096 {
-            raw.push((index % 251) as u8);
+            raw.push(num::i32_to_u8(index % 251));
         }
         raw.extend(std::iter::repeat_n(7_u8, 2000));
         let compressed = zlib(&raw);
@@ -1286,11 +1294,23 @@ mod tests {
 
     #[test]
     fn colours_parse_from_hex_and_json() {
-        assert_eq!(colour("#ff0000"), [1.0, 0.0, 0.0]);
-        assert_eq!(colour("00ff00"), [0.0, 1.0, 0.0]);
+        assert_eq!(
+            colour("#ff0000").map(f32::to_bits),
+            [1.0, 0.0, 0.0].map(f32::to_bits)
+        );
+        assert_eq!(
+            colour("00ff00").map(f32::to_bits),
+            [0.0, 1.0, 0.0].map(f32::to_bits)
+        );
         let value = jsonr::parse("[0.25, 0.5, 0.75]").or_die();
-        assert_eq!(json_colour(Some(&value), [0.0; 3]), [0.25, 0.5, 0.75]);
-        assert_eq!(json_colour(None, [1.0; 3]), [1.0; 3]);
+        assert_eq!(
+            json_colour(Some(&value), [0.0; 3]).map(f32::to_bits),
+            [0.25, 0.5, 0.75].map(f32::to_bits)
+        );
+        assert_eq!(
+            json_colour(None, [1.0; 3]).map(f32::to_bits),
+            [1.0; 3].map(f32::to_bits)
+        );
     }
 
     #[test]
@@ -1360,7 +1380,7 @@ mod tests {
             style: Style::Lit,
         };
         renderer.triangle(&mut image, &face);
-        assert_eq!(image.coverage(), 0.0);
+        assert_eq!(image.coverage().to_bits(), 0.0_f32.to_bits());
     }
 
     #[test]
