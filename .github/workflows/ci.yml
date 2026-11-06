@@ -357,3 +357,25 @@ jobs:
       # by tag in compat/Cargo.toml, so this job goes red when a format change would
       # break players rather than when a test notices (ADR 0014).
       - run: cargo run --locked --manifest-path compat/Cargo.toml
+  demo:
+    name: Demo (ashfall builds, tests and writes its artefacts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: demo
+      # The demo is a separate package on purpose, so nothing in the library's matrix above
+      # builds it. Without this job a regenerated asset, a changed artefact schema or a crowd
+      # that stops walking would go unnoticed until a human ran it.
+      - name: Test the playground
+        run: cargo test --release --manifest-path demo/Cargo.toml
+      - name: Run a city and check what came out
+        run: |
+          cargo run --release --quiet --manifest-path demo/Cargo.toml -- \
+            --population 500 --ticks 120 --out "$RUNNER_TEMP/ashfall"
+          for artefact in ashfall.svg ashfall.scene.json ashfall.run.json manifest.json; do
+            test -s "$RUNNER_TEMP/ashfall/$artefact"
+          done
+          python3 -c "import json,pathlib; run=json.loads(pathlib.Path('$RUNNER_TEMP/ashfall/ashfall.run.json').read_text()); assert run['population']==500, run; assert run['crowd_fingerprint']!='0x0000000000000000'; print('run.json ok', run['digest'], run['crowd_fingerprint'], run['ms_per_tick'], 'ms/tick')"

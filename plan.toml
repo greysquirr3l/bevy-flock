@@ -1059,3 +1059,36 @@ evidence      = """Four skills ported from greysquirr3l/trapgrid-arsenal at 69b7
 The port rewrote the domain rather than the mechanics: an operator is an NPC archetype, the deck portrait is a roster card, the selection voice line is a `BarkTable` entry, and `deploy` plus the four per-operator primaries became a single `interaction` clip, so the shared library is 11 clips instead of 15. The crate boundary is explicit in every skill: flock loads no media, `build_render_plan` emits `VisibleInstance` and the game decides what a variant looks like, and no asset may change simulation state.
 
 Two additions: a variant budget in the Meshy skill (4-6 bodies and 6-8 heads with 16 tints, because `VisibleInstance::variant` and `tint_from_seed` mean a crowd needs few meshes, and `LodTier::Ambient` is culled before the plan), and `check_action_contract.py`, which reads `SELECTED_ACTIONS`, `EXPECTED_ACTIONS` and the skill's index table with `ast` and fails when the three disagree or when the documented order stops being alphabetical. The three copies existed in the source project with nothing comparing them; the checker's self-test proves six distinct disagreement shapes are caught, and a deliberate one-character source change in the doc fails the live check. CI compiles every skill script with `py_compile` (bpy is never imported) and runs both checks in the `scripts` job."""
+
+[[phases.tasks]]
+slug = "band-focus-plane"
+title = "Give the continuum band a 3D focus plane"
+goal = "`BandPlugin::focus_at` reads `translation.x` and `translation.y` for the player's position while the 3D crowd, grid and steering use `x`/`z`. A 3D game that adds the band therefore measures distance on the wrong axis, manifests nobody and folds nobody, silently. Decide the policy (a `FocusPlane` resource with `Xy` and `Xz`, or focus on `x`/`z` always and document the 2D case as `y = 0`), make `focus_at` honour it, and give the demo a `--band` mode that shows the ladder splitting."
+kind = "refactor"
+hints = [
+  "The axis is not cosmetic: `Band::new` uses the same plane for its radius test, so a wrong plane is a wrong fold radius, not a small offset.",
+  "The demo's visitor is at `(1, -38)` in `x`/`z`; with the band's `x`/`y` reading it sits at distance 0 from the origin and the ladder never sees it, which is why `ashfall.run.json` reads 100% reflex at every population.",
+  "A `FocusPlane` resource is the smaller change and keeps the 2D case as a first-class option; defaulting to `Xz` would change behaviour for any existing 2D caller, so default it to `Xy` and let a 3D game opt in.",
+]
+test_hints = [
+  "A band test in the `x`/`z` plane manifests near a focus at `(0, 0, 10)` and folds only what is beyond the radius.",
+  "The demo's `--band` run reports a non-zero habit or social tier once the population passes the manifest band.",
+]
+must_haves = [
+  "No caller can get the plane wrong silently: either the default matches the crowd's own axis or the resource is required by the plugin.",
+  "`docs/performance.md` or the band ADR records the change and the measured effect on the fold/manifest counts.",
+]
+delivered_in = "HEAD"
+
+[[completed]]
+slug = "ashfall-demo-playground"
+title = "Ship the Ashfall Verge playground: a city, six generated models and four artefacts"
+phase = "Reach"
+delivered_in = "HEAD"
+evidence = """`demo/` is a separate package (own `[workspace]`, like `compat/`) with a bin, a library and nine tests. It builds a six-district city from a seed (large/medium/small/tiny classes, keyed NPC placement, 2096 ruined blocks, 10 shelters, 10 pylons, 44 stalls), spawns a crowd through `FlockPlugin`, places it into the districts and steps it.
+
+Six models were generated with Meshy from six concept images and shipped as GLBs: three bodies (gatewarden, aerie, scavenger) and three props (pylon, shelter-door, market-stall), 12,654 to 5,971 triangles each. `demo/tools/shrink_glb.py` re-encodes the embedded 2K base-colour maps and re-lays the binary chunk with geometry, accessors and indices byte-identical, taking 22.9 MB to 2.4 MB (89%); heights were then measured off the shipped meshes through `--report` and recorded in the asset table, so a scale error is a table error.
+
+The artefacts are the point: `ashfall.svg` (a top-down plan), `ashfall.scene.json` (engine-agnostic instances grouped by model, the `build_render_plan` contract written down), `ashfall.run.json` (seed, library digest, positional crowd fingerprint, tier histogram, wall time, per-asset fingerprints) and `manifest.json`. Rendering is deliberately absent: a demo that needs a GPU cannot run in CI.
+
+Three findings came out of building it, and all three are in the demo's README: the library's `digest` is coarse by design and matches across seeds, so the demo adds `crowd_fingerprint` over quantised positions; `App::new()` has no `TimePlugin`, so `integrate_flock`'s frame delta is zero and a headless crowd stands still (`the_crowd_walks` is the test that caught it); and the default crowd weights walk everyone to one intersection, so the demo disables cohesion. `tests/assets.rs` is the asset gate the ported Meshy skill asks for: every promised file opened, its glTF version and geometry checked, its animation absence asserted, its size held to a 1.2 MB budget and the total under 4 MB."""

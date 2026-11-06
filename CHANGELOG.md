@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **A playground that ships assets and evidence.** `demo/` is a separate package: a six-district
+  city of 2096 ruined blocks, a crowd placed by district keyed on `NpcId`, and four artefacts per
+  run (SVG plan, engine-agnostic scene, run report, asset manifest). Six models were generated with
+  Meshy — three bodies, three props — and `demo/tools/shrink_glb.py` re-encoded their embedded 2K
+  textures and re-laid the binary chunk, taking 22.9 MB to 2.4 MB with geometry byte-identical.
+  `demo/tests/assets.rs` holds every shipped file to a size budget and its container to glTF 2;
+  `demo/tests/playground.rs` proves the crowd repeats, differs by seed, lands in its settlements and
+  actually walks. Three findings are recorded in `demo/README.md`, including that `App::new()` has no
+  `TimePlugin` and therefore a headless crowd integrates at zero delta, and the band plugin is
+  tracked with a `band-focus-plane` task because it measures the player's distance on `x`/`y` while
+  the 3D crowd uses `x`/`z`.
 - **One lint spine, and no exceptions.** `[lints]` in `Cargo.toml` carries the whole policy:
   `pedantic`, `nursery`, `cargo`, `perf` and `all` as warnings that CI promotes with
   `-D warnings`, and `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,

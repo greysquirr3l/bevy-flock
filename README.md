@@ -353,6 +353,25 @@ let upper_floor = Placement::uniform_disc(Vec3::new(0.0, 4.2, 0.0), 18.0);
 order), no allocation in the steady state, 30.5 MiB for a million. Measured, with cache
 profiles, in [`docs/memory.md`](docs/memory.md).
 
+## The playground
+
+![The Ashfall Verge plan](docs/demo/ashfall-plan.png)
+
+`demo/` is a separate package that builds a city, runs a crowd in it and writes four artefacts: a
+top-down plan (`ashfall.svg`), a render payload (`ashfall.scene.json`), a run report with the digest,
+the tier histogram and the wall time (`ashfall.run.json`), and an asset manifest. Three bodies and
+three props were generated with Meshy from six concept images and shipped as GLBs — 2.4 MB after
+`tools/shrink_glb.py` took the 22.9 MB Meshy originals down without touching a vertex.
+
+```text
+cargo run --release --manifest-path demo/Cargo.toml -- --population 4000 --ticks 900
+```
+
+There is no renderer, deliberately: a demo that needs a GPU cannot run in CI, so `ashfall.scene.json`
+is the `build_render_plan` contract written down and checked instead. `demo/README.md` explains the
+city, the assets, the test that caught a headless app having no clock, and why the tier histogram
+reads 100% reflex below the manifest band.
+
 ## Architecture
 
 ```

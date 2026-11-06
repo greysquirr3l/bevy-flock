@@ -1,0 +1,98 @@
+[package]
+name = "bevy-flock-demo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+description = "Ashfall Verge: a technical playground for bevy-flock, with generated assets and artefact output rather than a renderer."
+license = "MIT OR Apache-2.0"
+
+# A package rather than a workspace member, for the same reason `compat/` is: a demo should not be
+# able to break the library's build, and the library should not pay for the demo's dependencies.
+[workspace]
+
+[dependencies]
+bevy-flock = { path = "..", default-features = false, features = ["simd", "threads"] }
+bevy_app = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_transform = "0.20.1"
+# A headless `App` has no clock, and an integrator with a zero delta integrates nothing: the
+# crowd stood perfectly still until this was added. The library does not add it because a server
+# may already own its own time source.
+bevy_time = "0.20.1"
+
+[dev-dependencies]
+bevy_flock = { package = "bevy-flock", path = "..", default-features = false, features = ["simd", "threads"] }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "warn"
+# `raw_borrows_via_references` belongs here and cannot be: creating a real reference and casting it
+# away asserts aliasing the caller never promised, and `&raw const place` does not. The lint exists
+# in rustc 1.99, and naming a lint the pinned 1.97 toolchain does not know turns every downstream
+# build into an `unknown_lints` warning — which is why it is enabled by the probe-gated
+# `lint-future` CI job instead, alongside the two clippy 1.99 lints.
+# `rust_2018_idioms` is deliberately off: it flags every `Res<T>`, `Query<...>`
+# and `Commands` in a Bevy system as a hidden lifetime, which is the framework's
+# idiomatic spelling and not something this crate should paper over.
+[lints.clippy]
+# --- The spine -------------------------------------------------------------------------------
+# Groups first, at the lowest priority, so individual lints below can move either way.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# Allowed: opted out of, because they fight the domain vocabulary or duplicate documentation that
+# is enforced elsewhere.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+# Denied: every one of these is a production incident waiting to happen, tests included. The code
+# satisfies them by construction rather than by `#[allow]`: fallible constructors are `Result`,
+# test fixtures use `testkit::OrDie` (which reports the failure with `unreachable!`, not `panic!`),
+# and the kernels address slices through the index helpers in `application::crowd`.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+# --- Documented deviations -------------------------------------------------------------------
+# Each of these is a deliberate departure from the spine, kept in this one table rather than
+# scattered through the tree as `#[allow]` attributes, and each with the reason it cannot be
+# satisfied. `scripts/lint_audit.py` fails if one appears without an entry here.
+#
+# Bevy hands systems their parameters by value (`Res<T>`, `Query<..>`): the signature is the
+# framework's, not an inefficiency to fix, and taking them by reference does not compile.
+needless_pass_by_value = "allow"
+# Numeric simulation code converts between integer counts and f32 lane values in audited places.
+# Precision loss there is inherent to an f32 simulation and bounded by the documented epsilon;
+# `cast_lossless` is exact and is *not* allowed, so every widening cast still has to use `From`.
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# Fusing a multiply-add changes rounding. The simulation's formulas are pinned by tests that compare
+# exact bits, so each site opts in deliberately rather than by suggestion.
+suboptimal_flops = "allow"
+# Exact float comparison is the *point* of the determinism tests: they assert bit-identical output
+# across runs and across the scalar/wide/threaded roads.
+float_cmp = "allow"
+# Criterion's `BenchmarkGroup` is a guard by design: it owns the benchmark it measures and must
+# outlive it, which is exactly what this lint objects to.
+significant_drop_tightening = "allow"
+# `const` is added where it enables a static or a `const` caller, not for its own sake; the scheduler
+# and config types already are.
+missing_const_for_fn = "allow"
+
+# Benchmarks run on the settings a game actually ships with: default release,
+# no LTO. Flattering the numbers with `lto = "fat"` would measure a build nobody
+# uses. Debug symbols stay on so a profile can be read against the source.
+# Release-shaped, with symbols. `cargo flamegraph --profile profiling` then produces a
+# flamegraph whose frames are readable rather than a wall of unresolved addresses.
