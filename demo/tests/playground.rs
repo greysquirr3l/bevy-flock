@@ -10,6 +10,7 @@ use bevy_flock::domain::temperament::Archetype;
 use bevy_flock::testkit::OrDie;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::assets;
+use bevy_flock_demo::behaviour;
 use bevy_flock_demo::city::CityLayout;
 use bevy_flock_demo::plan;
 use bevy_flock_demo::scene::{self, Body, Scene};
@@ -105,6 +106,48 @@ fn the_crowd_lands_in_the_settlements() {
         inside as f32 / bodies.len() as f32 > 0.85,
         "only {inside} of {} NPCs are near a settlement",
         bodies.len()
+    );
+}
+
+#[test]
+fn the_crowd_behaves_like_its_personalities() {
+    // The claim this protects: temperament reaches the steering. It is asserted on the live app,
+    // not on the bias helper, because the failure mode worth catching is the drive being unplugged
+    // from the schedule — the helper would still return a perfectly good number.
+    let mut playground = played(7);
+    let rows = behaviour::summarise(playground.app.world_mut());
+    let find = |archetype: Archetype| {
+        rows.iter()
+            .find(|row| row.archetype == archetype)
+            .cloned()
+            .or_die()
+    };
+    let guard = find(Archetype::Guard);
+    let urchin = find(Archetype::Urchin);
+    let merchant = find(Archetype::Merchant);
+    assert!(
+        guard.alignment > urchin.alignment,
+        "guards must match the neighbours' heading more than urchins: {:.3} vs {:.3}",
+        guard.alignment,
+        urchin.alignment
+    );
+    assert!(
+        guard.separation < urchin.separation,
+        "guards must jostle less than urchins: {:.3} vs {:.3}",
+        guard.separation,
+        urchin.separation
+    );
+    assert!(
+        merchant.cohesion > urchin.cohesion,
+        "merchants must cluster harder than urchins: {:.3} vs {:.3}",
+        merchant.cohesion,
+        urchin.cohesion
+    );
+    // Thirty ticks at the default interval is three decays: needs must have moved, or the drive is
+    // reading a constant and every NPC reads as content forever.
+    assert!(
+        rows.iter().all(|row| row.company < 1.0),
+        "needs did not decay: {rows:?}"
     );
 }
 

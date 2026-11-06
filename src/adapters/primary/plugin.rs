@@ -15,7 +15,7 @@ use crate::adapters::primary::cognition::{
     ThinkSchedule, TierConfig, WeightConfig, assign_tiers, plan_thinks, tick_chosen,
 };
 use crate::adapters::primary::components::{
-    LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcTemperament, NpcVelocity,
+    LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcNeeds, NpcTemperament, NpcVelocity,
 };
 use crate::application::{SimClock, advance_clock};
 use crate::boids::{BoidsConfig, BoidsPlugin};
@@ -23,7 +23,7 @@ use crate::domain::ids::{NpcId, SimSeed};
 use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 use crate::domain::rng::RngStream;
 use crate::domain::spawn::Placement;
-use crate::domain::temperament::{Archetype, Temperament};
+use crate::domain::temperament::{Archetype, Needs, Temperament};
 use crate::domain::tick::TicksPerSecond;
 use crate::error::ConfigError;
 
@@ -522,12 +522,18 @@ pub fn drain_spawn_queue(
             break;
         };
         let mut rng = RngStream::for_npc(seed, id);
-        let temperament = Temperament::sample(&mut rng);
+        // The individual is drawn in full before the archetype, so a seed that produced a given
+        // personality before still draws the same numbers; only the blend below is new.
+        let individual = Temperament::sample(&mut rng);
         let archetype_index = rng.next_bounded(Archetype::ALL.len() as u32) as usize;
         let archetype = Archetype::ALL
             .get(archetype_index)
             .copied()
             .unwrap_or(Archetype::Wanderer);
+        // Two thirds preset, one third individual — the same blend `domain::generator` applies, so
+        // an archetype means the same thing on both paths. Without this a guard was exactly as
+        // brave as an urchin and the archetype was a costume (ADR 0051).
+        let temperament = Temperament::blend(Temperament::archetype(archetype), individual, 0.34);
         // Position last: the spiral and an authored list draw nothing from the stream, so the
         // temperaments and archetypes above are the same whatever the placement is.
         let position = config.placement.position(id.index(), &mut rng);
@@ -540,6 +546,9 @@ pub fn drain_spawn_queue(
                 appearance_seed: u64::from(id.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15),
             },
             temperament: NpcTemperament(temperament),
+            // Everyone starts content; the decay system and whatever satisfies needs take it from
+            // here, so an NPC's state is a function of its life rather than of its spawn.
+            needs: NpcNeeds(Needs::satisfied()),
             velocity: NpcVelocity(Vec3::ZERO),
             desired: NpcDesiredVelocity(Vec3::ZERO),
             lod: LodTier::Near,

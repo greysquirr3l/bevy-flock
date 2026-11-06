@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **Temperament reaches the simulation, and this is a behaviour change.** A personality now scales
+  that NPC's own steering weights — five multipliers on `[separation, alignment, cohesion, seek,
+  arrive]`, centred on `1.0` and clamped to `0.25 ..= 4.0` so a game's tuning stays the baseline —
+  and so do unmet needs, which decay on their own every eight ticks by default
+  (`BoidsConfig::needs`, `NeedsDecay`). The measurable effect: guards hold rank with the highest
+  alignment (1.164) and lowest separation (0.918), urchins the reverse, merchants cluster hardest
+  (cohesion 1.237). Both knobs are `Option`-shaped and turn the feature off cleanly
+  (`with_temperament(None)`, `with_needs_decay(None)`); neither adds a Cargo feature, a dependency
+  or an allocation, and the biased frame costs nothing measurable (1.8772 ms against 1.8766 ms for
+  10,000 agents). Spawned personalities changed for a given seed — the archetype is now a preset an
+  individual deviates from by a third — and `NpcBundle` gained a `needs` field, so a save made
+  after this change carries different temperaments than one made before it (ADR 0051).
 - **The terminal capture is regenerated, not screenshotted.** `docs/demo/ashfall-play.png` is now
   produced by `demo/examples/frame_capture.rs`, which renders through the client's own `Session` and
   `Budget` at 120 x 44 cells and blows each framebuffer pixel up four times with the new

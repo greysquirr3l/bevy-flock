@@ -6,6 +6,7 @@
 //! run rather than typed into a document afterwards — a performance claim in a README rots, a
 //! `run.json` from the binary that made it does not.
 
+use crate::behaviour::{self, ArchetypeBehaviour};
 use crate::json;
 use bevy_flock::adapters::primary::observability::Diagnostics;
 
@@ -36,6 +37,10 @@ pub struct RunReport {
     pub counts: [usize; 5],
     /// Model slug, byte length, fingerprint, per shipped asset.
     pub assets: Vec<(String, u64, u64)>,
+    /// What each archetype's personality asked of the steering, and what the crowd did with it.
+    ///
+    /// Empty for a run that produced no bodies; the report then says nothing rather than guessing.
+    pub behaviour: Vec<ArchetypeBehaviour>,
 }
 
 impl RunReport {
@@ -55,6 +60,7 @@ impl RunReport {
             tiers: diagnostics.pulse.tiers,
             counts: [0; 5],
             assets: Vec::new(),
+            behaviour: Vec::new(),
         }
     }
 
@@ -139,6 +145,7 @@ impl RunReport {
                     ]),
                 ),
                 ("assets", json::array_block(&assets, 2)),
+                ("behaviour", behaviour::to_json_block(&self.behaviour)),
             ],
             0,
         )
@@ -163,6 +170,7 @@ mod tests {
             tiers: [700, 200, 80, 20],
             counts: [6, 120, 10, 10, 40],
             assets: vec![("gatewarden".to_owned(), 1_048_576, 0x1234)],
+            behaviour: Vec::new(),
         }
     }
 

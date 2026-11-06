@@ -26,6 +26,7 @@ that means:
 | Area | State |
 | --- | --- |
 | Boids and steering (separation, alignment, cohesion, seek, arrive) | **Shipped** |
+| Personality that steers: per-NPC weight bias from temperament and unmet needs, decay on by default (ADR 0051) | **Shipped (on by default)** |
 | Reciprocal local avoidance with per-NPC priority (ADR 0045) | **Shipped (on by default)** |
 | Obstacle-derived navigation that rebuilds in budgeted slices (ADR 0046) | **Shipped (opt-in)** |
 | Stimulus perception: sight cone, hearing, decay, occlusion hook (ADR 0047) | **Shipped (opt-in)** |

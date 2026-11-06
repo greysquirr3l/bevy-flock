@@ -923,3 +923,22 @@ draining the queue reported 992 ms for what it called `encode`, while the same s
 measured 0.1 ms. The loop was measuring saturation, not encoding. The cases are now named after what
 their loops do — `frame`, `eight_frames_per_drain`, `frame_with_readback` — and
 `docs/playbooks/gpu-demos.md` writes the rule down for the next person.
+## Personality costs nothing per frame
+
+`crowd_temperament` in `benches/crowd.rs` measures the same 10,000-agent volumetric fixture twice:
+once with the configured weights for everyone, once with a bias on every agent — the expensive
+shape, since a crowd where only the near ring has a personality pays a fraction of it.
+
+| Case | Median |
+|---|---|
+| `crowd_temperament/uniform` | 1.8766 ms |
+| `crowd_temperament/every_agent_biased` | 1.8772 ms |
+
+The difference is 0.03%, inside this machine's run-to-run noise: one slice lookup, five multiplies
+and a wider `desired_for` argument per agent, against 1.88 ms of neighbour work. `tests/crowd_no_alloc.rs`
+runs the same shape through a counting allocator and asserts zero allocations after warm-up, so the
+buffer is grown once and cleared rather than freed (ADR 0051).
+
+Needs decay is not in this table because it is not per frame: the system runs once every
+`NeedsDecay` ticks (eight by default) and touches one component pair per NPC when it does.
+

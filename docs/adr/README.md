@@ -78,3 +78,4 @@ replay.
 | [0048](0048-navigation-links-and-navmesh.md) | Links are search edges; the navmesh is an optional polygon source | Accepted |
 | [0049](0049-row-major-neighbour-broadcast.md) | Row-major neighbour broadcast; the lint spine cost 19% until the bound left the loop | Accepted |
 | [0050](0050-interactive-playground.md) | Explore the playground in a terminal; software rasteriser against wgpu on the CPU | Accepted |
+| [0051](0051-temperament-drives-behaviour.md) | Personality reaches the simulation: multiplicative steering bias, burst needs decay, archetype presets | Accepted |

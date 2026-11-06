@@ -12,6 +12,7 @@
 use bevy_flock_demo::DemoError;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::assets;
+use bevy_flock_demo::behaviour;
 use bevy_flock_demo::json;
 use bevy_flock_demo::plan;
 use bevy_flock_demo::report::RunReport;
@@ -105,6 +106,9 @@ fn run(arguments: impl Iterator<Item = String>) -> Result<(), DemoError> {
         city.stalls.len(),
     ];
     report.assets = shipped;
+    // After the run, not during: the personalities are read out of the finished world, so the
+    // numbers describe what happened rather than what was configured.
+    report.behaviour = behaviour::summarise(playground.app.world_mut());
 
     let scene = Scene::build(city, &bodies);
     write(&options.out.join("manifest.json"), &manifest())?;
@@ -120,6 +124,9 @@ fn run(arguments: impl Iterator<Item = String>) -> Result<(), DemoError> {
 
     println!();
     println!("{}", report.headline());
+    if !report.behaviour.is_empty() {
+        println!("{}", behaviour::headline(&report.behaviour));
+    }
     println!(
         "visitor ({:.0}, {:.0}) — the anchor the cognition ladder measures from",
         playground.anchor.x, playground.anchor.z

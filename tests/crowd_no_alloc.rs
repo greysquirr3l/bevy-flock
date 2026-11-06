@@ -157,3 +157,43 @@ fn a_steady_avoidance_pass_does_not_touch_the_allocator() {
         "a steady avoidance pass allocated {allocations} times"
     );
 }
+
+#[test]
+fn a_steady_frame_with_personalities_does_not_touch_the_allocator() {
+    // The bias buffer is the one thing temperament adds to a frame, so it is the one thing that
+    // could quietly start allocating: it grows with the crowd and is cleared, never freed.
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
+    let params = CrowdParams::from_steering(&SteeringParams::human_scale());
+    let mut crowd = Crowd::default();
+    crowd.configure_from_grid(&grid);
+    let frame = |crowd: &mut Crowd| {
+        crowd.begin();
+        for index in 0..1_000_u32 {
+            let ring = 1.6 * libm::sqrtf(index as f32);
+            let angle = index as f32 * 2.399_963_2;
+            crowd.push(
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(index as f32 * 0.7) * 3.0,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
+                Some([20.0, 2.0, 20.0]),
+                true,
+            );
+            // Every agent biased, which is the expensive shape: a short buffer would pass by
+            // accident if only a handful of agents carried one.
+            let scale = 1.0 + (index % 5) as f32 * 0.1;
+            crowd.set_bias(index as usize, [scale, 1.0, 2.0 - scale, 1.0, 1.0]);
+        }
+        crowd.steer(&params)
+    };
+    frame(&mut crowd);
+    frame(&mut crowd);
+    let (report, allocations) = counting(|| frame(&mut crowd));
+    assert_eq!(report.steered, 1_000);
+    assert_eq!(
+        allocations, 0,
+        "a steady biased frame allocated {allocations} times"
+    );
+}

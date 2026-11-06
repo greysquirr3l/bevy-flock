@@ -161,6 +161,9 @@ pub struct Crowd {
     priorities: Vec<f32>,
     /// Scratch for the avoidance pass, so it writes a second buffer rather than in place.
     corrected: Vec<[f32; 3]>,
+    /// Per-agent multipliers on the steering weights, short when only some agents have one
+    /// (ADR 0051). Empty is the fast path: the configured weights are used as they are.
+    bias: Vec<[f32; 5]>,
     /// Cell-major component arrays, built by the same sort that produces `order` (ADR 0030).
     #[cfg(feature = "simd")]
     soa: Soa,
@@ -356,8 +359,48 @@ impl Crowd {
         self.flags.clear();
         self.desired.clear();
         self.priorities.clear();
+        self.bias.clear();
         self.cells.clear();
         self.order.clear();
+    }
+
+    /// Scale one agent's steering weights.
+    ///
+    /// The array is `[separation, alignment, cohesion, seek, arrive]`, each a multiplier centred on
+    /// `1.0`; the configured weights stay the baseline, so a game's tuning still means what the
+    /// documentation says. [`crate::domain::temperament::Temperament::steering_bias`] produces one
+    /// from a personality, and [`crate::domain::temperament::WeightBias::to_array`] converts it.
+    ///
+    /// Agents without a bias use the configured weights untouched, so a crowd where nobody has a
+    /// personality pays nothing for the feature. NaN and out-of-range multipliers are clamped
+    /// rather than rejected: this is a per-frame setter, and a crowd that freezes because one
+    /// number was wrong is worse than one that steers a little oddly for a tick.
+    pub fn set_bias(&mut self, index: usize, bias: [f32; 5]) {
+        let clamped = bias.map(|value| {
+            if value.is_nan() {
+                1.0
+            } else {
+                value.clamp(0.25, 4.0)
+            }
+        });
+        if index >= self.bias.len() {
+            self.bias.resize(index + 1, [1.0; 5]);
+        }
+        if let Some(slot) = self.bias.get_mut(index) {
+            *slot = clamped;
+        }
+    }
+
+    /// The bias one agent carries, or `None` when it steers with the configured weights.
+    #[must_use]
+    pub fn bias(&self, index: usize) -> Option<[f32; 5]> {
+        self.bias.get(index).copied()
+    }
+
+    /// The weights one agent actually steers with.
+    #[must_use]
+    pub fn weights_for(&self, index: usize, params: &CrowdParams) -> [f32; 5] {
+        resolve_weights(&self.bias, index, params)
     }
 
     /// Add one agent.
@@ -807,6 +850,7 @@ impl Crowd {
                 sep,
             },
             params,
+            resolve_weights(&self.bias, agent, params),
         );
         if let Some(slot) = self.desired.get_mut(agent) {
             *slot = steered;
@@ -916,7 +960,8 @@ impl Crowd {
             ) else {
                 continue;
             };
-            let steered = desired_for(position, velocity, target, *sums, params);
+            let weights = resolve_weights(&self.bias, agent, params);
+            let steered = desired_for(position, velocity, target, *sums, params, weights);
             if let Some(out) = self.desired.get_mut(agent) {
                 *out = steered;
             }
@@ -993,6 +1038,7 @@ impl Crowd {
             order: &self.order,
             start: &self.start,
             counts: &self.counts,
+            bias: &self.bias,
             dims: self.dims,
             min: self.min,
             cell_size: self.cell_size,
@@ -1022,6 +1068,7 @@ struct ScanView<'a> {
     order: &'a [u32],
     start: &'a [u32],
     counts: &'a [u32],
+    bias: &'a [[f32; 5]],
     dims: [u32; 3],
     min: [f32; 3],
     cell_size: f32,
@@ -1248,6 +1295,20 @@ fn intended(view: &ScanView<'_>, desired: &[[f32; 3]], index: usize) -> [f32; 3]
         .unwrap_or([0.0; 3])
 }
 
+/// The weights one agent steers with: the configured set, scaled by its bias if it has one.
+///
+/// Split out of the three call sites so the scalar tail, the block kernel and the threaded chunks
+/// cannot drift apart — a bias that only applied on one road would be two different crowds.
+fn resolve_weights(bias: &[[f32; 5]], index: usize, params: &CrowdParams) -> [f32; 5] {
+    bias.get(index).map_or(params.weights, |scales| {
+        let mut weights = params.weights;
+        for (weight, scale) in weights.iter_mut().zip(*scales) {
+            *weight *= scale;
+        }
+        weights
+    })
+}
+
 /// Steer one agent into `out`: the whole per-agent step, so both roads call the same code.
 fn steer_agent(
     view: &ScanView<'_>,
@@ -1287,6 +1348,7 @@ fn steer_agent(
             sep: scan.sep,
         },
         params,
+        resolve_weights(view.bias, index, params),
     );
     report.steered += 1;
 }
@@ -1356,6 +1418,7 @@ fn desired_for(
     target: Option<[f32; 3]>,
     sums: NeighbourSums,
     params: &CrowdParams,
+    weights: [f32; 5],
 ) -> [f32; 3] {
     let NeighbourSums {
         count,
@@ -1368,7 +1431,7 @@ fn desired_for(
     let mut steering = accumulate(
         Vec3::ZERO,
         Vec3::new(sep[0], sep[1], sep[2]),
-        params.weights[0],
+        weights[0],
         max_speed,
     );
     if count > 0 {
@@ -1377,11 +1440,11 @@ fn desired_for(
         steering = accumulate(
             steering,
             average - Vec3::new(velocity[0], velocity[1], velocity[2]),
-            params.weights[1],
+            weights[1],
             max_speed,
         );
         let centre = Vec3::new(sum_p[0], sum_p[1], sum_p[2]) / scaled;
-        steering = accumulate(steering, centre - here, params.weights[2], max_speed);
+        steering = accumulate(steering, centre - here, weights[2], max_speed);
     }
     if let Some(target) = target {
         let offset = Vec3::new(target[0], target[1], target[2]) - here;
@@ -1392,10 +1455,10 @@ fn desired_for(
         if distance <= params.arrival {
             let scale = distance / params.arrival;
             let arrival = offset.normalize_or_zero() * (max_speed * scale);
-            steering = accumulate(steering, arrival, params.weights[4], max_speed);
+            steering = accumulate(steering, arrival, weights[4], max_speed);
         } else {
             let seek = offset.normalize_or_zero() * max_speed;
-            steering = accumulate(steering, seek, params.weights[3], max_speed);
+            steering = accumulate(steering, seek, weights[3], max_speed);
         }
     }
     if steering.length_squared() < params.jitter * params.jitter {
@@ -1867,5 +1930,85 @@ mod tests {
         heights.sort_unstable();
         heights.dedup();
         assert!(heights.len() > 4, "the fixture really does span the axis");
+    }
+
+    /// Four agents in a row, no targets, so the only thing that can move them is each other.
+    fn row(count: u32) -> (SpatialGrid, Vec<Agent>) {
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
+        let points = (0..count)
+            .map(|index| {
+                let step = index as f32;
+                ([step * 2.0 - 2.0, 0.0, 0.0], [0.0; 3], None)
+            })
+            .collect();
+        (grid, points)
+    }
+    #[test]
+    fn a_bias_scales_the_configured_weights() {
+        let (grid, points) = row(4);
+        let mut crowd = packed(&grid, &points);
+        let params = params();
+        assert_eq!(crowd.bias(0), None);
+        assert_eq!(crowd.weights_for(0, &params), params.weights);
+        crowd.set_bias(0, [2.0, 0.5, 1.0, 1.0, 1.0]);
+        let weights = crowd.weights_for(0, &params);
+        assert_eq!(weights[0], params.weights[0] * 2.0);
+        assert_eq!(weights[1], params.weights[1] * 0.5);
+        assert_eq!(weights[2], params.weights[2]);
+        // A NaN or wild multiplier clamps to the documented band instead of poisoning a frame.
+        crowd.set_bias(2, [f32::NAN, 99.0, 0.0, 1.0, 1.0]);
+        let clamped = crowd.bias(2).or_die();
+        assert_eq!([clamped[0], clamped[1], clamped[2]], [1.0, 4.0, 0.25]);
+    }
+    #[test]
+    fn a_cohesive_bias_pulls_an_agent_toward_the_crowd() {
+        let (grid, points) = row(4);
+        let params = params();
+        // Agent 0 sits left of the other three, so the crowd is to its right and cohesion points
+        // along +x. Anything that makes cohesion heavier must move it further that way.
+        let mut plain = packed(&grid, &points);
+        let mut cohesive = packed(&grid, &points);
+        let scales: Vec<[f32; 5]> = (0..4).map(|_| [1.0, 1.0, 3.0, 1.0, 1.0]).collect();
+        for (index, bias) in scales.iter().enumerate() {
+            cohesive.set_bias(index, *bias);
+        }
+        let plain_report = plain.steer(&params);
+        let cohesive_report = cohesive.steer(&params);
+        // Same scan, same pairs: the bias changes the weights, not the work.
+        assert_eq!(plain_report.pairs, cohesive_report.pairs);
+        let plain_desired = plain.desired(0).or_die();
+        let cohesive_desired = cohesive.desired(0).or_die();
+        assert!(
+            cohesive_desired[0] > plain_desired[0] + 0.01,
+            "cohesion bias must pull agent 0 toward the crowd: {plain_desired:?} vs {cohesive_desired:?}"
+        );
+    }
+    #[test]
+    fn the_roads_agree_when_agents_carry_biases() {
+        let (grid, points) = fixture(4_000);
+        let mut scalar = packed(&grid, &points);
+        let mut parallel = packed(&grid, &points);
+        // Alternate strong and neutral biases, so a road that ignored the buffer would diverge on
+        // half the crowd rather than on a handful of agents the test might miss.
+        for index in 0..scalar.len() {
+            if index % 2 == 0 {
+                let bias = [1.6, 0.7, 1.4, 0.9, 1.1];
+                scalar.set_bias(index, bias);
+                parallel.set_bias(index, bias);
+            }
+        }
+        scalar.set_sequential(true);
+        parallel.set_sequential(false);
+        let params = params();
+        let scalar_report = scalar.steer_scalar(&params);
+        let parallel_report = parallel.steer_parallel(&params);
+        assert_eq!(scalar_report, parallel_report);
+        for index in 0..scalar.len() {
+            assert_eq!(
+                scalar.desired(index),
+                parallel.desired(index),
+                "agent {index} disagrees between the roads with a bias"
+            );
+        }
     }
 }

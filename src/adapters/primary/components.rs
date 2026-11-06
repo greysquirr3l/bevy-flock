@@ -271,6 +271,11 @@ pub struct NpcBundle {
     pub identity: NpcIdentity,
     /// Personality.
     pub temperament: NpcTemperament,
+    /// Drives: energy, satiety, company, safety.
+    ///
+    /// Part of the bundle rather than an optional extra: a need that starts missing cannot decay,
+    /// and the temperament drive reads it every frame.
+    pub needs: NpcNeeds,
     /// Current velocity.
     pub velocity: NpcVelocity,
     /// Desired velocity.
@@ -294,6 +299,7 @@ impl NpcBundle {
                 appearance_seed: u64::from(id.to_bits()),
             },
             temperament: NpcTemperament(Temperament::balanced()),
+            needs: NpcNeeds(Needs::satisfied()),
             velocity: NpcVelocity(Vec3::ZERO),
             desired: NpcDesiredVelocity(Vec3::ZERO),
             lod: LodTier::Near,
@@ -353,6 +359,7 @@ mod tests {
                     appearance_seed: 7,
                 },
                 temperament: NpcTemperament(Temperament::balanced()),
+                needs: NpcNeeds(Needs::satisfied()),
                 velocity: NpcVelocity(Vec3::ZERO),
                 desired: NpcDesiredVelocity(Vec3::ZERO),
                 lod: LodTier::Near,

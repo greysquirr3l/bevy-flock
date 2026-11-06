@@ -226,6 +226,62 @@ fn bench_kernel(c: &mut Criterion) {
     group.finish();
 }
 
+/// What a personality costs a frame (ADR 0051).
+///
+/// The delta between the two rows is the whole of it: one array lookup, five multiplies and a
+/// wider `desired_for` argument, per agent. The biased row carries a bias on *every* agent, which
+/// is the expensive shape a crowd of individuals produces; a crowd where only the near ring has a
+/// personality pays a fraction of it.
+fn bench_temperament(c: &mut Criterion) {
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
+    let params = CrowdParams::from_steering(&SteeringParams::human_scale());
+    let mut group = c.benchmark_group("crowd_temperament");
+    group.throughput(Throughput::Elements(10_000));
+    let build = |biased: bool| {
+        let mut crowd = Crowd::default();
+        crowd.configure_from_grid(&grid);
+        crowd.begin();
+        for index in 0..10_000_u32 {
+            let step = index as f32;
+            let ring = 1.6 * libm::sqrtf(step);
+            let angle = step * 2.399_963_2;
+            crowd.push(
+                [
+                    libm::cosf(angle) * ring,
+                    libm::sinf(step * 0.7) * 20.0,
+                    libm::sinf(angle) * ring,
+                ],
+                [0.1, 0.0, -0.1],
+                if index % 5 == 0 {
+                    Some([25.0, 8.0, -25.0])
+                } else {
+                    None
+                },
+                true,
+            );
+            if biased {
+                // A spread wide enough to matter: the band a real temperament produces.
+                let swing = (index % 7) as f32 / 7.0;
+                crowd.set_bias(
+                    index as usize,
+                    [0.6 + swing, 0.7 + swing * 0.6, 1.4 - swing, 0.9, 1.1],
+                );
+            }
+        }
+        crowd
+    };
+    for (label, biased) in [("uniform", false), ("every_agent_biased", true)] {
+        let crowd = build(biased);
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                let mut frame = crowd.clone();
+                black_box(frame.steer(&params));
+            });
+        });
+    }
+    group.finish();
+}
+
 /// Reciprocal avoidance on and off, at the two populations the plan names (ADR 0045).
 ///
 /// The number that matters is the delta between the two rows: the pass reuses the cell order
@@ -516,6 +572,7 @@ criterion_group!(
     bench_steering,
     bench_kernel,
     bench_avoidance,
+    bench_temperament,
     bench_perception
 );
 criterion_main!(benches);

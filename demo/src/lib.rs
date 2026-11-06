@@ -16,6 +16,7 @@
 
 pub mod app;
 pub mod assets;
+pub mod behaviour;
 pub mod camera_rig;
 pub mod city;
 pub mod gltf;

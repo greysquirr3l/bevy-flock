@@ -25,6 +25,27 @@ digest  0x269da17db832c10d (coarse) · crowd 0x55c7a27a6dbad0c1
 visitor (1, -38) — the anchor the cognition ladder measures from
 ```
 
+## Personalities, measured
+
+The crowd runs the library's defaults, which means every NPC's temperament scales its own steering
+weights and everyone's needs decay on their own. The run reports what that produced, per archetype,
+in `ashfall.run.json`:
+
+```json
+{"archetype": "guard",    "count": 398, "speed": 1.445, "spacing": 3.74, "separation": 0.918, "alignment": 1.164, "cohesion": 1.118, "company": 0.760}
+{"archetype": "merchant", "count": 421, "speed": 1.474, "spacing": 4.24, "separation": 0.991, "alignment": 1.061, "cohesion": 1.237, "company": 0.738}
+{"archetype": "urchin",   "count": 382, "speed": 1.482, "spacing": 4.07, "separation": 1.062, "alignment": 0.918, "cohesion": 1.122, "company": 0.760}
+{"archetype": "noble",    "count": 402, "speed": 1.435, "spacing": 4.04, "separation": 0.933, "alignment": 1.089, "cohesion": 1.127, "company": 0.759}
+{"archetype": "wanderer", "count": 397, "speed": 1.470, "spacing": 4.07, "separation": 1.056, "alignment": 1.003, "cohesion": 1.051, "company": 0.774}
+```
+
+Read the bias columns as the cause and `speed` and `spacing` as the effect: guards follow the
+group's heading hardest and jostle least, urchins the reverse, merchants cluster, nobles are the
+slowest, and `company` has fallen from 1.0 to about 0.75 because needs decayed for six hundred
+ticks. The demo prints the same numbers as one line of its summary, and
+`demo/tests/playground.rs` asserts the relationships on a live run rather than on the helper.
+
+
 ## What it writes
 
 | Artefact | What it is | Who it is for |
