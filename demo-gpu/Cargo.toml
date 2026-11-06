@@ -66,6 +66,13 @@ expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
+# `panic` covers `panic!` and nothing else. `todo!()` and `unimplemented!()` are restriction lints
+# that no group turns on, so without these two a function nobody finished would pass every gate
+# above. `unreachable!()` is deliberately not denied: it is the failure primitive in
+# `testkit::OrDie` and the way a `match` says "the other arm cannot happen", which is a claim about
+# the code rather than a promise to come back to it.
+todo = "deny"
+unimplemented = "deny"
 needless_pass_by_value = "deny"
 cast_precision_loss = "deny"
 cast_possible_truncation = "deny"

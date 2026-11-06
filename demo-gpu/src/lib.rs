@@ -120,6 +120,15 @@ pub enum GpuError {
     MissingModel(&'static str),
     /// The shot selected nothing at all, so there is nothing to draw.
     EmptyView,
+    /// The frame is larger than the device will allocate.
+    FrameTooLarge {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+        /// The device's limit per side.
+        limit: u32,
+    },
 }
 
 impl std::fmt::Display for GpuError {
@@ -130,6 +139,14 @@ impl std::fmt::Display for GpuError {
             Self::Readback(why) => write!(formatter, "the readback failed: {why}"),
             Self::MissingModel(slug) => write!(formatter, "no loaded mesh for model `{slug}`"),
             Self::EmptyView => write!(formatter, "the shot selected no geometry"),
+            Self::FrameTooLarge {
+                width,
+                height,
+                limit,
+            } => write!(
+                formatter,
+                "this device draws at most {limit} pixels a side, not {width}x{height}"
+            ),
         }
     }
 }
@@ -250,6 +267,135 @@ impl Adapter {
     }
 }
 
+/// The largest frame this crate accepts from a caller, in pixels a side.
+///
+/// This is the bound that keeps the arithmetic below safe, not the bound the device enforces: the
+/// device's own `max_texture_dimension_2d` is smaller (`8_192` in `Limits::default()`) and is
+/// checked when the device is opened, because asking for a bigger texture does not return an
+/// error -- wgpu's default error handler panics, which is not how this crate fails.
+pub const MAX_DIMENSION: u32 = 16_384;
+
+/// Why a frame size was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameError {
+    /// One of the dimensions was zero.
+    Empty {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+    },
+    /// One of the dimensions was above [`MAX_DIMENSION`].
+    TooLarge {
+        /// The width that was asked for.
+        width: u32,
+        /// The height that was asked for.
+        height: u32,
+    },
+}
+
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty { width, height } => write!(
+                formatter,
+                "a frame must be at least 1x1 pixel, not {width}x{height}"
+            ),
+            Self::TooLarge { width, height } => write!(
+                formatter,
+                "a frame may be at most {MAX_DIMENSION} pixels a side, not {width}x{height}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FrameError {}
+
+/// A frame size that is safe to allocate, and the arithmetic that follows from it.
+///
+/// The width arrives from a command line, and three things downstream assume it is sane: the row
+/// pitch is `width * 4`, which overflows `u32` above a billion; the readback buffer is
+/// `padded_row * height` bytes, which a 65535x65535 frame puts past the address space of a 32-bit
+/// target; and the aspect ratio divides one dimension by the other, which a zero height turns into
+/// infinity and a NaN matrix. None of that can happen once the size is a value that had to be
+/// constructed, so the checks live here and every multiplication below is ordinary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameSize {
+    width: u32,
+    height: u32,
+}
+
+impl FrameSize {
+    /// The size the demo draws at when no flag says otherwise.
+    ///
+    /// Written as a literal rather than through [`Self::try_new`] so it can be a `const`: a unit
+    /// test asserts it is inside the limit, which is the check the compiler cannot do here.
+    pub const DEFAULT: Self = Self {
+        width: 600,
+        height: 375,
+    };
+
+    /// Check a width and a height.
+    ///
+    /// # Errors
+    ///
+    /// [`FrameError::Empty`] when either dimension is zero, [`FrameError::TooLarge`] when either is
+    /// above [`MAX_DIMENSION`].
+    pub const fn try_new(width: u32, height: u32) -> Result<Self, FrameError> {
+        if width == 0 || height == 0 {
+            return Err(FrameError::Empty { width, height });
+        }
+        if width > MAX_DIMENSION || height > MAX_DIMENSION {
+            return Err(FrameError::TooLarge { width, height });
+        }
+        Ok(Self { width, height })
+    }
+
+    /// The width in pixels.
+    #[must_use]
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// The height in pixels.
+    #[must_use]
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Both dimensions, for a caller that wants the pair.
+    #[must_use]
+    pub const fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Bytes in one row of RGBA pixels, before the copy alignment pads it.
+    ///
+    /// Cannot overflow: [`MAX_DIMENSION`] times four is 65,536.
+    #[must_use]
+    pub const fn row_bytes(self) -> u32 {
+        self.width * 4
+    }
+
+    /// Bytes in one row as the readback buffer holds it, padded to the copy alignment.
+    #[must_use]
+    pub const fn padded_row_bytes(self) -> u32 {
+        self.row_bytes().div_ceil(COPY_ALIGN) * COPY_ALIGN
+    }
+
+    /// Bytes the readback buffer holds, padding included.
+    #[must_use]
+    pub const fn padded_len(self) -> u64 {
+        self.padded_row_bytes() as u64 * self.height as u64
+    }
+
+    /// The frame's aspect ratio, exactly representable: 16,384 is inside an `f32`'s mantissa.
+    #[must_use]
+    pub fn aspect(self) -> f32 {
+        num::u32_to_f32(self.width) / num::u32_to_f32(self.height)
+    }
+}
+
 /// An offscreen GPU renderer for one scene.
 pub struct GpuRenderer {
     device: wgpu::Device,
@@ -268,8 +414,7 @@ pub struct GpuRenderer {
     batches: Vec<Batch>,
     adapter: Adapter,
     clear: [f32; 3],
-    width: u32,
-    height: u32,
+    frame: FrameSize,
 }
 
 impl GpuRenderer {
@@ -289,8 +434,7 @@ impl GpuRenderer {
         scene: &Scene,
         meshes: &Meshes,
         backend: Backend,
-        width: u32,
-        height: u32,
+        frame: FrameSize,
     ) -> Result<Self, GpuError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: backend.mask(),
@@ -304,7 +448,17 @@ impl GpuRenderer {
         )
         .map_err(|_| GpuError::NoAdapter(backend.name()))?;
         let info = wgpu_adapter.get_info();
-        let (device, queue) = request_device(&wgpu_adapter)?;
+        let (device, queue, limits) = request_device(&wgpu_adapter)?;
+        // Before anything is created from the size: `create_texture` with a dimension over the limit
+        // does not fail, it panics in wgpu's default error handler.
+        let widest = limits.max_texture_dimension_2d;
+        if frame.width() > widest || frame.height() > widest {
+            return Err(GpuError::FrameTooLarge {
+                width: frame.width(),
+                height: frame.height(),
+                limit: widest,
+            });
+        }
         let adapter = Adapter {
             backend: format!("{:?}", info.backend),
             name: info.name,
@@ -448,6 +602,7 @@ impl GpuRenderer {
             cache: None,
         });
 
+        let (width, height) = frame.size();
         let extent = wgpu::Extent3d {
             width,
             height,
@@ -495,8 +650,7 @@ impl GpuRenderer {
             batches: Vec::new(),
             adapter,
             clear: [0.0; 3],
-            width,
-            height,
+            frame,
         })
     }
 
@@ -509,7 +663,12 @@ impl GpuRenderer {
     /// The texture's size in pixels.
     #[must_use]
     pub const fn size(&self) -> (u32, u32) {
-        (self.width, self.height)
+        self.frame.size()
+    }
+    /// The frame size this renderer was built for.
+    #[must_use]
+    pub const fn frame(&self) -> FrameSize {
+        self.frame
     }
 
     /// Candidates the scene offered, before any shot selected from them.
@@ -533,7 +692,7 @@ impl GpuRenderer {
     /// Selection is a sort by model and then by distance, so the instance buffer stays contiguous per
     /// batch and the copy is one `write_buffer` per shot rather than one per body.
     pub fn set_shot(&mut self, shot: &Shot) {
-        let aspect = pixels(self.width) / pixels(self.height);
+        let aspect = self.frame.aspect();
         let uniform = CameraUniform {
             view_projection: shot.camera.view_projection(aspect).to_cols_array_2d(),
             eye: shot.camera.eye.extend(0.0).to_array(),
@@ -732,11 +891,10 @@ impl GpuRenderer {
     ///
     /// [`GpuError::Readback`] when the map fails or a row falls outside the mapped range.
     pub fn read_rgba(&self) -> Result<Vec<u8>, GpuError> {
-        let unpadded = self.width * 4;
-        let row_bytes = unpadded.div_ceil(COPY_ALIGN) * COPY_ALIGN;
+        let row_bytes = self.frame.padded_row_bytes();
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
-            size: u64::from(row_bytes) * u64::from(self.height),
+            size: self.frame.padded_len(),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -757,12 +915,12 @@ impl GpuRenderer {
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(row_bytes),
-                    rows_per_image: Some(self.height),
+                    rows_per_image: Some(self.frame.height()),
                 },
             },
             wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
+                width: self.frame.width(),
+                height: self.frame.height(),
                 depth_or_array_layers: 1,
             },
         );
@@ -784,7 +942,7 @@ impl GpuRenderer {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| GpuError::Readback(format!("{error}")))?;
-        let out = pack_rows(&mapped, self.width, self.height)?;
+        let out = pack_rows(&mapped, self.frame)?;
         drop(mapped);
         buffer.unmap();
         Ok(out)
@@ -814,15 +972,12 @@ impl GpuRenderer {
 ///
 /// [`GpuError::Readback`] when a row falls outside the mapped buffer, which means the copy and the
 /// request disagreed about the size.
-fn pack_rows(mapped: &[u8], width: u32, height: u32) -> Result<Vec<u8>, GpuError> {
-    let unpadded = width * 4;
-    let row_bytes = unpadded.div_ceil(COPY_ALIGN) * COPY_ALIGN;
-    let capacity = usize::try_from(unpadded)
-        .ok()
-        .and_then(|row| usize::try_from(height).ok().map(|rows| row * rows))
-        .unwrap_or(0);
+fn pack_rows(mapped: &[u8], frame: FrameSize) -> Result<Vec<u8>, GpuError> {
+    let unpadded = frame.row_bytes();
+    let row_bytes = frame.padded_row_bytes();
+    let capacity = usize::try_from(u64::from(unpadded) * u64::from(frame.height())).unwrap_or(0);
     let mut out = Vec::with_capacity(capacity);
-    for row in 0..height {
+    for row in 0..frame.height() {
         let start = usize::try_from(row * row_bytes).unwrap_or(usize::MAX);
         let end = start.saturating_add(usize::try_from(unpadded).unwrap_or(usize::MAX));
         match mapped.get(start..end) {
@@ -950,14 +1105,6 @@ const fn rgba_vec(direction: Vec3) -> [f32; 4] {
     [direction.x, direction.y, direction.z, 0.0]
 }
 
-/// A pixel dimension as a float.
-///
-/// `u16` first, because a texture wider than 65,535 pixels cannot be created anyway and the
-/// conversion is then exact: `f32::from` has no lossy cast to argue with.
-fn pixels(value: u32) -> f32 {
-    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
-}
-
 /// A linear channel as sRGB, which is what the target texture holds after the hardware encodes it.
 fn linear_to_srgb(value: f32) -> u8 {
     let clamped = value.clamp(0.0, 1.0);
@@ -980,9 +1127,17 @@ const fn to_byte(value: f32) -> u8 {
 }
 
 /// Ask the adapter for a device with default limits, which is all this pipeline needs.
-fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), GpuError> {
-    futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-        .map_err(|error| GpuError::NoDevice(format!("{error}")))
+fn request_device(
+    adapter: &wgpu::Adapter,
+) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Limits), GpuError> {
+    let limits = wgpu::Limits::default();
+    let descriptor = wgpu::DeviceDescriptor {
+        required_limits: limits.clone(),
+        ..wgpu::DeviceDescriptor::default()
+    };
+    let (device, queue) = futures_lite::future::block_on(adapter.request_device(&descriptor))
+        .map_err(|error| GpuError::NoDevice(format!("{error}")))?;
+    Ok((device, queue, limits))
 }
 
 /// Upload one mesh's vertices and indices.
@@ -1336,7 +1491,7 @@ mod tests {
         for (index, byte) in mapped.iter_mut().skip(row_bytes).take(12).enumerate() {
             *byte = u8::try_from(index).or_die() + 100;
         }
-        let packed = pack_rows(&mapped, width, height).or_die();
+        let packed = pack_rows(&mapped, FrameSize::try_new(width, height).or_die()).or_die();
         assert_eq!(packed.len(), 24);
         let expected: Vec<u8> = (0..12_u8).chain(100..112_u8).collect();
         assert_eq!(packed, expected);
@@ -1347,7 +1502,7 @@ mod tests {
     fn pack_rows_reports_a_row_outside_the_buffer() {
         let row_bytes = usize::try_from(COPY_ALIGN).or_die();
         let short = vec![0_u8; row_bytes];
-        let error = pack_rows(&short, 1, 2).or_die_err();
+        let error = pack_rows(&short, FrameSize::try_new(1, 2).or_die()).or_die_err();
         assert!(matches!(error, GpuError::Readback(_)), "got {error:?}");
     }
 
@@ -1360,7 +1515,7 @@ mod tests {
         for (index, byte) in mapped.iter_mut().take(4).enumerate() {
             *byte = u8::try_from(index).or_die();
         }
-        let packed = pack_rows(&mapped, 1, 1).or_die();
+        let packed = pack_rows(&mapped, FrameSize::try_new(1, 1).or_die()).or_die();
         assert_eq!(packed, vec![0, 1, 2, 3]);
     }
 
@@ -1443,5 +1598,78 @@ mod tests {
     fn the_empty_view_error_says_what_happened() {
         let message = GpuError::EmptyView.to_string();
         assert!(message.contains("no geometry"), "got {message}");
+    }
+
+    /// A frame with no pixels in it divides the aspect ratio by zero and asks for a texture wgpu
+    /// will refuse, so it is refused here, before anything is created.
+    #[test]
+    fn a_zero_frame_is_refused() {
+        for (width, height) in [(0, 1), (1, 0), (0, 0)] {
+            assert!(
+                matches!(
+                    FrameSize::try_new(width, height),
+                    Err(FrameError::Empty { .. })
+                ),
+                "{width}x{height} was accepted"
+            );
+        }
+    }
+    /// The limit is a limit, not a suggestion: one pixel over it is refused, and the message says
+    /// which number was wrong.
+    #[test]
+    fn a_frame_above_the_limit_is_refused() {
+        for (width, height) in [
+            (MAX_DIMENSION + 1, 1),
+            (1, MAX_DIMENSION + 1),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert!(
+                matches!(
+                    FrameSize::try_new(width, height),
+                    Err(FrameError::TooLarge { .. })
+                ),
+                "{width}x{height} was accepted"
+            );
+        }
+        let message = FrameError::TooLarge {
+            width: 20_000,
+            height: 1,
+        }
+        .to_string();
+        assert!(message.contains("at most"), "got {message}");
+        assert!(message.contains("20000x1"), "got {message}");
+    }
+    /// The boundaries themselves are legal, which is the half of a range check that is easy to get
+    /// wrong: an off-by-one here rejects a frame the backend would have drawn.
+    #[test]
+    fn the_limits_themselves_are_accepted() {
+        assert_eq!(FrameSize::try_new(1, 1).or_die().size(), (1, 1));
+        let widest = FrameSize::try_new(MAX_DIMENSION, MAX_DIMENSION).or_die();
+        assert_eq!(widest.size(), (MAX_DIMENSION, MAX_DIMENSION));
+    }
+    /// The arithmetic the checks exist to make safe: at the limit the row pitch is 65,536 bytes and
+    /// the readback buffer is one gibibyte, both computed without wrapping.
+    #[test]
+    fn the_pitch_at_the_limit_does_not_overflow() {
+        let widest = FrameSize::try_new(MAX_DIMENSION, MAX_DIMENSION).or_die();
+        assert_eq!(widest.row_bytes(), 65_536);
+        assert_eq!(widest.padded_row_bytes(), 65_536);
+        assert_eq!(widest.padded_len(), 1_073_741_824);
+        // A width whose pitch is not already a multiple of the copy alignment pads up, and one
+        // narrower than the alignment still occupies a whole padded row.
+        let narrow = FrameSize::try_new(1, 1).or_die();
+        assert_eq!(narrow.row_bytes(), 4);
+        assert_eq!(narrow.padded_row_bytes(), COPY_ALIGN);
+    }
+    /// The default frame is inside the limit, which is the check the compiler cannot do for a
+    /// `const` that is written as a literal.
+    #[test]
+    fn the_default_frame_is_inside_the_limit() {
+        let default = FrameSize::DEFAULT;
+        assert_eq!(
+            FrameSize::try_new(default.width(), default.height()).or_die(),
+            default
+        );
+        assert!((default.aspect() - 1.6).abs() < 1e-6, "600x375 is 16:10");
     }
 }

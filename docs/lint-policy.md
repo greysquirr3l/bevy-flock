@@ -22,6 +22,11 @@ panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
 suspicious = "deny"
+# Restriction lints, allow by default and in no group. `panic` is `panic!` alone, so these two are
+# what stops a `todo!()` from passing every gate. `unreachable!()` stays allowed: it is the failure
+# primitive in `testkit::OrDie`, and a claim about the code rather than a promise to come back.
+todo = "deny"
+unimplemented = "deny"
 
 # Right about the code, wrong about the rule: satisfied at the boundary instead of suppressed.
 needless_pass_by_value = "deny"

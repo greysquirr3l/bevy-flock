@@ -21,7 +21,7 @@ anywhere, including a runner with no driver, and writes a blank image.
 | --- | --- |
 | `--backend auto\|vulkan\|gl\|noop` | which wgpu backend to open |
 | `--view district\|street\|hero\|skyline\|procession\|all` | which shot to draw (default `all`) |
-| `--width N --height N` | frame size in pixels (default 600x375) |
+| `--width N --height N` | frame size in pixels (default 600x375, at least 1 and at most 16384 a side, and no more than the device allows — 8192 with the default wgpu limits) |
 | `--frames N` | frames to time after two warm-up frames (default 20) |
 | `--population N --ticks N --seed N --extent M` | the simulation the frame is drawn from |
 | `--out DIR` | where the PNGs go (default `target/gpu`) |

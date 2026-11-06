@@ -13,7 +13,7 @@
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::render3d::{self, Meshes, Shot};
 use bevy_flock_demo::scene::Scene;
-use bevy_flock_demo_gpu::{Backend, GpuError, GpuRenderer};
+use bevy_flock_demo_gpu::{Backend, FrameSize, GpuError, GpuRenderer};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -27,10 +27,8 @@ struct Options {
     seed: u64,
     /// Layout half-extent, metres.
     extent: f32,
-    /// Frame width, pixels.
-    width: u32,
-    /// Frame height, pixels.
-    height: u32,
+    /// Frame size in pixels, already checked against the renderer's limit.
+    frame: FrameSize,
     /// Frames to time per view, after two warm-up frames.
     frames: u32,
     /// Which backend to open.
@@ -48,8 +46,7 @@ impl Default for Options {
             ticks: 600,
             seed: 7,
             extent: 900.0,
-            width: 600,
-            height: 375,
+            frame: FrameSize::DEFAULT,
             frames: 20,
             backend: Backend::Auto,
             view: None,
@@ -126,6 +123,10 @@ impl Options {
     /// parse.
     fn parse(arguments: impl Iterator<Item = String>) -> Result<Request, Error> {
         let mut options = Self::default();
+        // The two flags are independent, so they are checked once at the end: `--height 0` is as
+        // invalid as `--width 0`, and neither knows about the other until both have been read.
+        let mut width = options.frame.width();
+        let mut height = options.frame.height();
         let mut arguments = arguments;
         while let Some(argument) = arguments.next() {
             let mut value = || {
@@ -138,8 +139,8 @@ impl Options {
                 "--ticks" => options.ticks = parse(&value()?)?,
                 "--seed" => options.seed = parse(&value()?)?,
                 "--extent" => options.extent = parse(&value()?)?,
-                "--width" => options.width = parse(&value()?)?,
-                "--height" => options.height = parse(&value()?)?,
+                "--width" => width = parse(&value()?)?,
+                "--height" => height = parse(&value()?)?,
                 "--frames" => options.frames = parse(&value()?)?,
                 "--view" => options.view = Some(value()?),
                 "--out" => options.out = PathBuf::from(value()?),
@@ -152,6 +153,8 @@ impl Options {
                 other => return Err(Error::Usage(format!("unknown flag `{other}`"))),
             }
         }
+        options.frame =
+            FrameSize::try_new(width, height).map_err(|error| Error::Usage(error.to_string()))?;
         Ok(Request::Run(options))
     }
 }
@@ -187,13 +190,7 @@ fn run(arguments: impl Iterator<Item = String>) -> Result<(), Error> {
         started.elapsed().as_secs_f64()
     );
 
-    let mut renderer = GpuRenderer::open(
-        &scene,
-        &meshes,
-        options.backend,
-        options.width,
-        options.height,
-    )?;
+    let mut renderer = GpuRenderer::open(&scene, &meshes, options.backend, options.frame)?;
     let adapter = renderer.adapter().clone();
     println!(
         "adapter {} {}",
@@ -206,8 +203,8 @@ fn run(arguments: impl Iterator<Item = String>) -> Result<(), Error> {
     );
     println!(
         "scene   {}x{} · {} candidates (bodies, ruins, ground) before a shot selects",
-        options.width,
-        options.height,
+        options.frame.width(),
+        options.frame.height(),
         renderer.candidates()
     );
 
@@ -245,7 +242,7 @@ fn render_view(renderer: &mut GpuRenderer, shot: &Shot, options: &Options) -> Re
     }
     let pixels = renderer.read_rgba()?;
     let path = options.out.join(format!("ashfall-gpu-{}.png", shot.name));
-    std::fs::write(&path, png(&pixels, options.width, options.height))
+    std::fs::write(&path, png(&pixels, options.frame))
         .map_err(|error| Error::Io(format!("{}: {error}", path.display())))?;
     // Pixels that differ from the clear colour are the ones the pass actually drew; counting non-zero
     // bytes would count the fog as a crowd.
@@ -297,10 +294,11 @@ fn median(samples: &mut [f64]) -> f64 {
 /// The demo crate already carries a deflate implementation for the software renderer's own PNGs
 /// ([`bevy_flock_demo::raster::zlib`]); this reuses it rather than pulling in an image crate for one
 /// function.
-fn png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(rgba.len() + height as usize);
-    let stride = (width * 4) as usize;
-    for row in 0..height as usize {
+fn png(rgba: &[u8], frame: FrameSize) -> Vec<u8> {
+    let height = frame.height();
+    let mut raw = Vec::with_capacity(rgba.len() + usize::try_from(height).unwrap_or(0));
+    let stride = usize::try_from(frame.row_bytes()).unwrap_or(usize::MAX);
+    for row in 0..usize::try_from(height).unwrap_or(0) {
         raw.push(0);
         let start = row * stride;
         match rgba.get(start..start + stride) {
@@ -312,7 +310,7 @@ fn png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(raw.len() / 4 + 64);
     out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
     let mut header = Vec::with_capacity(13);
-    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&frame.width().to_be_bytes());
     header.extend_from_slice(&height.to_be_bytes());
     header.extend_from_slice(&[8, 6, 0, 0, 0]);
     chunk(&mut out, *b"IHDR", &header);
@@ -392,8 +390,7 @@ mod tests {
         assert_eq!(options.ticks, 12);
         assert_eq!(options.seed, 9);
         assert!((options.extent - 450.5).abs() < f32::EPSILON);
-        assert_eq!(options.width, 320);
-        assert_eq!(options.height, 200);
+        assert_eq!(options.frame.size(), (320, 200));
         assert_eq!(options.frames, 4);
         assert_eq!(options.view.as_deref(), Some("street"));
         assert_eq!(options.out, PathBuf::from("/tmp/frames"));
@@ -408,8 +405,7 @@ mod tests {
         };
         let default = Options::default();
         assert_eq!(options.population, default.population);
-        assert_eq!(options.width, default.width);
-        assert_eq!(options.height, default.height);
+        assert_eq!(options.frame, default.frame);
         assert_eq!(options.frames, default.frames);
         assert_eq!(options.backend, Backend::Auto);
         assert!(options.view.is_none());
@@ -470,8 +466,9 @@ mod tests {
     #[test]
     fn the_png_header_describes_the_frame() {
         let (width, height) = (3_u32, 2_u32);
+        let frame = FrameSize::try_new(width, height).or_die();
         let pixels = vec![0x7f_u8; usize::try_from(width * height * 4).or_die()];
-        let file = png(&pixels, width, height);
+        let file = png(&pixels, frame);
         assert_eq!(
             file.get(..8),
             Some(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..]),
@@ -491,8 +488,39 @@ mod tests {
     /// A short readback still writes a valid PNG of the rows it has, rather than a truncated file.
     #[test]
     fn a_short_readback_writes_the_rows_it_has() {
-        let file = png(&[1, 2, 3, 4], 2, 2);
+        let file = png(&[1, 2, 3, 4], FrameSize::try_new(2, 2).or_die());
         assert_eq!(file.get(12..16), Some(&b"IHDR"[..]));
         assert_eq!(file.get(file.len() - 8..file.len() - 4), Some(&b"IEND"[..]));
+    }
+
+    /// A zero dimension is caught at the flag, before a device is opened or a file is written.
+    #[test]
+    fn a_zero_frame_is_a_usage_error() {
+        for line in ["--width 0", "--height 0", "--width 0 --height 0"] {
+            let error = usage_error(line);
+            assert!(matches!(error, Error::Usage(_)), "{line}: {error:?}");
+            assert!(error.to_string().contains("at least 1x1"), "{error}");
+        }
+    }
+    /// A frame larger than any adapter can hold is refused with the number that was asked for.
+    #[test]
+    fn a_frame_above_the_limit_is_a_usage_error() {
+        let error = usage_error("--width 20000 --height 40");
+        assert!(matches!(error, Error::Usage(_)), "{error:?}");
+        assert!(error.to_string().contains("at most"), "{error}");
+        assert!(error.to_string().contains("20000x40"), "{error}");
+    }
+    /// The limit is accepted, and the two flags stay order-independent.
+    #[test]
+    fn the_limit_is_accepted_and_the_flags_do_not_care_about_order() {
+        for line in ["--width 16384 --height 1", "--height 1 --width 16384"] {
+            assert!(
+                matches!(
+                    parse_line(line),
+                    Ok(Request::Run(options)) if options.frame.size() == (16_384, 1)
+                ),
+                "{line} was refused"
+            );
+        }
     }
 }

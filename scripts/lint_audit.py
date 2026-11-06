@@ -84,6 +84,10 @@ REQUIRED = (
     ("lints.clippy", "panic", "deny"),
     ("lints.clippy", "indexing_slicing", "deny"),
     ("lints.clippy", "cast_ptr_alignment", "deny"),
+    # Restriction lints that no group turns on: `panic` covers `panic!` and leaves `todo!` and
+    # `unimplemented!` allowed, which is how a half-written function ships.
+    ("lints.clippy", "todo", "deny"),
+    ("lints.clippy", "unimplemented", "deny"),
     ("lints.clippy", "all", "warn"),
     ("lints.clippy", "pedantic", "warn"),
     ("lints.clippy", "nursery", "warn"),
@@ -256,6 +260,9 @@ def check_manifest(root: Path) -> int:
     for relative in MANIFESTS:
         path = root / relative
         if not path.is_file():
+            # Silently skipping is how a rename or a delete removes a crate from the policy without
+            # anyone noticing: the audit would report success over two manifests instead of three.
+            problems.append(f"  {relative}: the manifest that carries the policy is missing")
             continue
         levels = manifest_levels(path.read_text(encoding="utf-8"))
         for table, lint, expected in REQUIRED:
@@ -419,7 +426,11 @@ def write_manifest(
             if extra_allow is not None:
                 lines.append(f'{extra_allow} = "allow"')
         lines.append("")
-    (root / "Cargo.toml").write_text("\n".join(lines), encoding="utf-8")
+    body = "\n".join(lines)
+    for relative in MANIFESTS:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
 
 
 def self_test() -> int:
@@ -560,6 +571,28 @@ def self_test() -> int:
             SANCTIONED.clear()
             if sanctioned:
                 SANCTIONED[key] = "self-test only"
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.clear()
+                SANCTIONED.update(saved)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
+    # A manifest that carries the policy and is not there is a failure. Without this, renaming or
+    # deleting a crate's manifest removes it from the audit and the run still reports success.
+    for label, removed, expected in [
+        ("every manifest present passes", None, 0),
+        ("a missing manifest fails", "demo/Cargo.toml", 1),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root)
+            if removed is not None:
+                (root / removed).unlink()
+            # The real tree's sanctions have no files here, and a stale one is its own failure.
+            saved = dict(SANCTIONED)
+            SANCTIONED.clear()
             try:
                 code = check(root)
             finally:

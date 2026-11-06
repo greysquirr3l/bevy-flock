@@ -141,6 +141,13 @@ expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
+# `panic` covers `panic!` and nothing else. `todo!()` and `unimplemented!()` are restriction lints
+# that no group turns on, so without these two a function nobody finished would pass every gate
+# above. `unreachable!()` is deliberately not denied: it is the failure primitive in
+# `testkit::OrDie` and the way a `match` says "the other arm cannot happen", which is a claim about
+# the code rather than a promise to come back to it.
+todo = "deny"
+unimplemented = "deny"
 # --- Documented deviations -------------------------------------------------------------------
 # Each of these is a deliberate departure from the spine, kept in this one table rather than
 # scattered through the tree as `#[allow]` attributes, and each with the reason it cannot be
