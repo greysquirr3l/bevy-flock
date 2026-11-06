@@ -1137,3 +1137,14 @@ evidence = """`demo-gpu/` is a third crate that renders the Ashfall scene throug
 `docs/playbooks/gpu-demos.md` is the instruction set: which crate may depend on what, how to classify the machine before writing code, the adapter policy, the pipeline recipe, the shader rules that prevent a clipped image, the four correctness gates, the benchmarking traps, and the documentation duties that make a GPU demo finished rather than merely running. It is written to be followed by an agent without re-deriving any of the above. CI gains a `demo-gpu` job that tests the encoder, compiles the benchmark and encodes one frame on the noop device.
 
 The documentation audit found two rot points and fixed them: ADR 0022 had been on disk and missing from the index since it landed, and the release checklist still claimed 23 ADRs. The checklist now states a rule instead of a number."""
+
+[[completed]]
+slug = "terminal-capture-regeneration"
+title = "Regenerate the terminal capture from the client's own session, with the cross-fade on"
+phase = "Reach"
+delivered_in = "ff7066e"
+evidence = """`docs/demo/ashfall-play.png` was the last artefact nothing could reproduce: a pty capture run through an ANSI parser at whatever size the terminal happened to report, made before the impostor cross-fade existed. `demo/examples/frame_capture.rs` replaces it — same crowd, same seed, the client's own `Session` and `Budget`, rendered at 120 by 44 cells and enlarged four times by the new `Image::scaled`. Two runs of the documented command are byte-identical (`5eea90af5fd040c6a6b4206e4f135ce3`).
+
+The band is active and was checked rather than assumed: `--band 8` against `--band 0` differs by 1,152 pixels in this frame, and the triangle count moves with it (809,724 against 809,678) because bodies inside the window draw twice. `Image::scaled` carries a test that a misaligned block would fail, using a gradient whose every row differs.
+
+Both captions now name the command that produces the image, and two claims beside them were false: the impostor switch is hard by default but not hard once `Shot::impostor_band` widens it, and the bevy-archie note said this machine has no display server, no `libvulkan` and no `libxkbcommon` when all three are installed and only the GPU behind them is missing."""
