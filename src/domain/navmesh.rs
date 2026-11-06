@@ -708,10 +708,11 @@ impl NavMesh {
 
     /// String-pull a portal sequence into a route: the classic funnel, with the caller's
     /// position and the destination as degenerate portals at each end.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the funnel is one loop with two mirrored sides; splitting it would duplicate the state"
-    )]
+    ///
+    /// The funnel is a state machine over the portals — an apex and two side indices — so the
+    /// machine lives in [`FunnelSides`] and this function is the route it produces. The two sides
+    /// are mirrors of each other, which is why they are two methods on one type rather than two
+    /// copies of the same loop body.
     fn funnel(
         &self,
         portals: &[(u32, u32)],
@@ -754,79 +755,35 @@ impl NavMesh {
         right_point_positions.push(to);
 
         let mut route: Vec<(Vec3, u32)> = vec![(from, polygon_at(0))];
-        let mut apex = 0_usize;
-        let mut left_index = 0_usize;
-        let mut right_index = 0_usize;
-
+        let mut sides = FunnelSides::default();
         for index in 1..left.len() {
-            let (Some(apex_point), Some(left_point), Some(right_point)) =
-                (left.get(apex), left.get(left_index), right.get(right_index))
-            else {
-                break;
-            };
-            let apex_point = *apex_point;
-            let left_point = *left_point;
-            let right_point = *right_point;
-
-            let Some(&new_right) = right.get(index) else {
-                break;
-            };
-            if cross_2d(apex_point, right_point, new_right) <= 0.0
-                && (right_point == apex_point || cross_2d(apex_point, left_point, new_right) > 0.0)
-            {
-                right_index = index;
-            } else if cross_2d(apex_point, right_point, new_right) <= 0.0 {
+            if let Some(corner) = sides.step_right(index, &left, &right) {
                 // The right side pinched: the left corner becomes the new apex, and both sides
-                // restart at the portal that pinched it. Setting the indices to the new apex
-                // instead of to `index` would leave the funnel reading a portal it just left.
-                let corner = left_point_positions
-                    .get(left_index)
-                    .copied()
-                    .unwrap_or(from);
-                route.push((corner, polygon_at(index)));
-                apex = left_index;
-                left_index = index;
-                right_index = index;
+                // restart at the portal that pinched it. Restarting at the new apex instead of at
+                // `index` would leave the funnel reading a portal it just left.
+                route.push((
+                    left_point_positions.get(corner).copied().unwrap_or(from),
+                    polygon_at(index),
+                ));
                 continue;
             }
-
-            let Some(&new_left) = left.get(index) else {
-                break;
-            };
-            let (Some(apex_point), Some(left_point), Some(right_point)) =
-                (left.get(apex), left.get(left_index), right.get(right_index))
-            else {
-                break;
-            };
-            let apex_point = *apex_point;
-            let left_point = *left_point;
-            let right_point = *right_point;
-            if cross_2d(apex_point, left_point, new_left) >= 0.0 {
-                if left_point == apex_point || cross_2d(apex_point, right_point, new_left) < 0.0 {
-                    left_index = index;
-                } else {
-                    // The mirror of the branch above: the right corner becomes the apex.
-                    let corner = right_point_positions
-                        .get(right_index)
-                        .copied()
-                        .unwrap_or(from);
-                    route.push((corner, polygon_at(index)));
-                    apex = right_index;
-                    left_index = index;
-                    right_index = index;
-                }
+            if let Some(corner) = sides.step_left(index, &left, &right) {
+                route.push((
+                    right_point_positions.get(corner).copied().unwrap_or(from),
+                    polygon_at(index),
+                ));
             }
         }
 
-        let apex_point = left.get(apex).copied().unwrap_or_else(|| flat(from));
+        let apex_point = left.get(sides.apex).copied().unwrap_or_else(|| flat(from));
         let goal = flat(to);
         if let (Some(left_point), Some(right_point)) =
-            (left.get(left_index), right.get(right_index))
+            (left.get(sides.left), right.get(sides.right))
         {
             if cross_2d(apex_point, *left_point, goal) >= 0.0 && left_point != &apex_point {
                 route.push((
                     left_point_positions
-                        .get(left_index)
+                        .get(sides.left)
                         .copied()
                         .unwrap_or(from),
                     polygon_at(left.len()),
@@ -835,7 +792,7 @@ impl NavMesh {
             if cross_2d(apex_point, *right_point, goal) <= 0.0 && right_point != &apex_point {
                 route.push((
                     right_point_positions
-                        .get(right_index)
+                        .get(sides.right)
                         .copied()
                         .unwrap_or(from),
                     polygon_at(right.len()),
@@ -863,6 +820,64 @@ impl NavMesh {
             max.z = max.z.max(point.z);
         }
         Some((min, max))
+    }
+}
+
+/// The funnel's state: the apex and the two side indices, all into the same portal lists.
+///
+/// Both sides start at the caller's position, which is index zero.
+#[derive(Debug, Clone, Copy, Default)]
+struct FunnelSides {
+    /// The portal the funnel is currently taut against.
+    apex: usize,
+    /// The left side's portal.
+    left: usize,
+    /// The right side's portal.
+    right: usize,
+}
+
+impl FunnelSides {
+    /// Fold portal `index` into the right side.
+    ///
+    /// Returns the corner that becomes the new apex when the right side pinched, in which case the
+    /// caller emits a route point and restarts both sides at `index`.
+    fn step_right(&mut self, index: usize, left: &[Vec2], right: &[Vec2]) -> Option<usize> {
+        let apex_point = *left.get(self.apex)?;
+        let left_point = *left.get(self.left)?;
+        let right_point = *right.get(self.right)?;
+        let new_right = *right.get(index)?;
+        if cross_2d(apex_point, right_point, new_right) > 0.0 {
+            return None;
+        }
+        if right_point == apex_point || cross_2d(apex_point, left_point, new_right) > 0.0 {
+            self.right = index;
+            return None;
+        }
+        let corner = self.left;
+        self.apex = corner;
+        self.left = index;
+        self.right = index;
+        Some(corner)
+    }
+
+    /// Fold portal `index` into the left side; the mirror of [`Self::step_right`].
+    fn step_left(&mut self, index: usize, left: &[Vec2], right: &[Vec2]) -> Option<usize> {
+        let apex_point = *left.get(self.apex)?;
+        let left_point = *left.get(self.left)?;
+        let right_point = *right.get(self.right)?;
+        let new_left = *left.get(index)?;
+        if cross_2d(apex_point, left_point, new_left) < 0.0 {
+            return None;
+        }
+        if left_point == apex_point || cross_2d(apex_point, right_point, new_left) < 0.0 {
+            self.left = index;
+            return None;
+        }
+        let corner = self.right;
+        self.apex = corner;
+        self.left = index;
+        self.right = index;
+        Some(corner)
     }
 }
 
@@ -1038,6 +1053,7 @@ impl NavSource for NavMeshSource {
 mod tests {
     use super::*;
     use crate::domain::flow::{FlowTarget, solve};
+    use crate::testkit::{GetOrDie, OrDie, OrDieErr};
 
     /// Two 4 m quads side by side, sharing the edge at x = 4. The second is in area 1.
     fn pair() -> NavMesh {
@@ -1057,7 +1073,7 @@ mod tests {
             NavPolygon::new(0, 4),
             NavPolygon::new(4, 4).in_area(AreaId::new(1)),
         ];
-        NavMesh::from_polygons(vertices, polygons).expect("a valid pair")
+        NavMesh::from_polygons(vertices, polygons).or_die()
     }
 
     /// An L: a 2 m arm and a 4 m arm meeting at a right angle.
@@ -1073,7 +1089,7 @@ mod tests {
             Vec3::new(2.0, 0.0, 2.0),
         ];
         NavMesh::from_polygons(vertices, vec![NavPolygon::new(0, 4), NavPolygon::new(4, 4)])
-            .expect("a valid L")
+            .or_die()
     }
 
     #[test]
@@ -1081,10 +1097,10 @@ mod tests {
         let mesh = pair();
         assert_eq!(mesh.polygon_count(), 2);
         assert_eq!(mesh.neighbours_of(0).len(), 1);
-        assert_eq!(mesh.neighbours_of(0)[0].polygon, 1);
-        assert_eq!(mesh.neighbours_of(1)[0].polygon, 0);
+        assert_eq!(mesh.neighbours_of(0).at(0).polygon, 1);
+        assert_eq!(mesh.neighbours_of(1).at(0).polygon, 0);
         // The shared edge is 4 m long, which is 4 000 mm.
-        assert_eq!(mesh.neighbours_of(0)[0].cost, 4_000);
+        assert_eq!(mesh.neighbours_of(0).at(0).cost, 4_000);
     }
 
     #[test]
@@ -1101,7 +1117,7 @@ mod tests {
         ];
         let mesh =
             NavMesh::from_polygons(vertices, vec![NavPolygon::new(0, 4), NavPolygon::new(4, 4)])
-                .expect("valid mesh");
+                .or_die();
         assert!(mesh.neighbours_of(0).is_empty(), "a corner is not a door");
     }
 
@@ -1114,8 +1130,8 @@ mod tests {
                 Vec3::new(7.0, 0.0, 2.0),
                 AreaMask::all(),
             )
-            .expect("a route exists");
-        let last = route.last().expect("a route has an end");
+            .or_die();
+        let last = route.last().or_die();
         assert!((last.position.x - 7.0).abs() < 0.001, "{route:?}");
         assert!(
             route.len() <= 3,
@@ -1146,7 +1162,7 @@ mod tests {
                 Vec3::new(5.5, 0.0, 1.0),
                 AreaMask::all(),
             )
-            .expect("a route exists");
+            .or_die();
         for point in &route {
             assert!(
                 mesh.polygon_at(point.position).is_some(),
@@ -1155,12 +1171,12 @@ mod tests {
         }
         // Every leg of the route must also stay on the mesh: sample the midpoints.
         for pair in route.windows(2) {
-            let middle = (pair[0].position + pair[1].position) * 0.5;
+            let middle = (pair.at(0).position + pair.at(1).position) * 0.5;
             assert!(
                 mesh.polygon_at(middle).is_some(),
                 "a leg left the mesh: {:?} to {:?}",
-                pair[0].position,
-                pair[1].position
+                pair.at(0).position,
+                pair.at(1).position
             );
         }
     }
@@ -1195,7 +1211,7 @@ mod tests {
             NavPolygon::new(16, 4),
             NavPolygon::new(20, 4),
         ];
-        NavMesh::from_polygons(vertices, polygons).expect("a valid ring")
+        NavMesh::from_polygons(vertices, polygons).or_die()
     }
 
     #[test]
@@ -1207,20 +1223,20 @@ mod tests {
 
         // Neutral: the shortcut through the middle quad wins.
         assert_eq!(
-            mesh.corridor_between(from, to, mask).expect("a route"),
+            mesh.corridor_between(from, to, mask).or_die(),
             vec![0, 2, 4]
         );
-        let direct = mesh.route_cost(from, to, mask).expect("a cost");
+        let direct = mesh.route_cost(from, to, mask).or_die();
         assert_eq!(direct, 4_000, "two 2 m crossings at neutral cost");
 
         // Price the shortcut above the detour and the search takes the long way: four crossings
         // of 2 m each, which is cheaper than two at nine times the price.
         mesh.set_area_cost(AreaId::new(1), 900);
         assert_eq!(
-            mesh.corridor_between(from, to, mask).expect("a route"),
+            mesh.corridor_between(from, to, mask).or_die(),
             vec![0, 1, 3, 5, 4]
         );
-        let detour = mesh.route_cost(from, to, mask).expect("a cost");
+        let detour = mesh.route_cost(from, to, mask).or_die();
         assert_eq!(detour, 8_000);
         assert!(detour < 2 * 2_000 * 9, "the detour did not win on cost");
     }
@@ -1233,7 +1249,7 @@ mod tests {
         // Masking the expensive quad leaves exactly the detour, and a route still exists.
         let masked = AreaMask::all().without(AreaId::new(1));
         assert_eq!(
-            mesh.corridor_between(from, to, masked).expect("a route"),
+            mesh.corridor_between(from, to, masked).or_die(),
             vec![0, 1, 3, 5, 4]
         );
         // Masking both ways through the ring leaves nothing.
@@ -1249,15 +1265,15 @@ mod tests {
             Vec3::new(2.0, 0.0, 0.0),
         ];
         assert!(matches!(
-            NavMesh::from_polygons(collinear, vec![NavPolygon::new(0, 3)]).unwrap_err(),
+            NavMesh::from_polygons(collinear, vec![NavPolygon::new(0, 3)]).or_die_err(),
             NavMeshError::ZeroArea { index: 0 }
         ));
         assert!(matches!(
-            NavMesh::from_polygons(vec![Vec3::ZERO], vec![NavPolygon::new(0, 2)]).unwrap_err(),
+            NavMesh::from_polygons(vec![Vec3::ZERO], vec![NavPolygon::new(0, 2)]).or_die_err(),
             NavMeshError::DegeneratePolygon { index: 0, len: 2 }
         ));
         assert!(matches!(
-            NavMesh::from_polygons(vec![], vec![]).unwrap_err(),
+            NavMesh::from_polygons(vec![], vec![]).or_die_err(),
             NavMeshError::Empty
         ));
     }
@@ -1270,7 +1286,7 @@ mod tests {
             Vec3::new(0.0, 0.0, 1.0),
         ];
         assert!(matches!(
-            NavMesh::from_polygons(vertices, vec![NavPolygon::new(1, 3)]).unwrap_err(),
+            NavMesh::from_polygons(vertices, vec![NavPolygon::new(1, 3)]).or_die_err(),
             NavMeshError::VertexOutOfRange { .. }
         ));
     }
@@ -1288,8 +1304,7 @@ mod tests {
             Vec3::new(0.0, 0.0, 2.0),
         ];
         let indices = [0, 1, 2, 3, 4, 5];
-        let mesh =
-            NavMesh::from_triangles(&vertices, &indices, AreaId::DEFAULT).expect("a valid soup");
+        let mesh = NavMesh::from_triangles(&vertices, &indices, AreaId::DEFAULT).or_die();
         assert_eq!(mesh.polygon_count(), 2);
         assert_eq!(
             mesh.neighbours_of(0).len(),
@@ -1308,8 +1323,8 @@ mod tests {
 
     #[test]
     fn a_baked_source_is_walkable_where_the_mesh_is_and_nowhere_else() {
-        let bounds = NavBounds::new(Vec3::ZERO, 16, 8, 0.5).expect("bounds");
-        let source = NavMeshSource::bake(pair(), bounds).expect("bake");
+        let bounds = NavBounds::new(Vec3::ZERO, 16, 8, 0.5).or_die();
+        let source = NavMeshSource::bake(pair(), bounds).or_die();
         // 8 m by 4 m of mesh at 0.25 m^2 a cell is 128 cells; the seams cost a few.
         let walkable = source.walkable_cells();
         assert!(
@@ -1328,8 +1343,8 @@ mod tests {
 
     #[test]
     fn a_baked_source_solves_a_flow_field_across_the_mesh() {
-        let bounds = NavBounds::new(Vec3::ZERO, 16, 8, 0.5).expect("bounds");
-        let source = NavMeshSource::bake(pair(), bounds).expect("bake");
+        let bounds = NavBounds::new(Vec3::ZERO, 16, 8, 0.5).or_die();
+        let source = NavMeshSource::bake(pair(), bounds).or_die();
         let target = NavCell::new(14, 4);
         let field = solve(&source, FlowTarget::at_cell(&source, target));
         assert!(field.reachable_cells() > 50);
@@ -1373,7 +1388,7 @@ mod tests {
         ];
         let mesh =
             NavMesh::from_polygons(vertices, vec![NavPolygon::new(0, 4), NavPolygon::new(4, 4)])
-                .expect("two islands");
+                .or_die();
         assert!(
             mesh.path(
                 Vec3::new(1.0, 0.0, 1.0),

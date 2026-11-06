@@ -1267,49 +1267,43 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes(slice.try_into().ok()?))
 }
 
+/// One CRC-32 table entry: the polynomial folded over the byte eight times.
+const fn crc_entry(index: u32) -> u32 {
+    let mut value = index;
+    let mut bit = 0;
+    while bit < 8 {
+        value = if value & 1 == 1 {
+            (value >> 1) ^ 0xEDB8_8320
+        } else {
+            value >> 1
+        };
+        bit += 1;
+    }
+    value
+}
+
 /// CRC-32 (IEEE 802.3), the checksum the sections, header and trailer carry.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "the index is masked to 0..=255 and the table has 256 entries"
-)]
+///
+/// The 256-entry table is the same table a `const` would hold, built once through
+/// [`core::array::from_fn`] rather than by writing into a `const` array: a `const` builder has to
+/// index to fill itself, and indexing is denied crate-wide. `OnceLock` costs one atomic load per
+/// save, not per byte.
 fn crc32(bytes: &[u8]) -> u32 {
+    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| core::array::from_fn(|index| crc_entry(index as u32)));
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in bytes {
-        let index = ((crc ^ u32::from(*byte)) & 0xFF) as usize;
-        crc = (crc >> 8) ^ CRC_TABLE[index];
+        let index = usize::from(u8::try_from((crc ^ u32::from(*byte)) & 0xFF).unwrap_or(0));
+        crc = (crc >> 8) ^ table.get(index).copied().unwrap_or_default();
     }
     !crc
 }
-
-/// The standard CRC-32 table, built at compile time so no dependency is needed.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "the index counts 0..256 and the table has 256 entries"
-)]
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0_u32; 256];
-    let mut index = 0;
-    while index < 256 {
-        let mut value = index as u32;
-        let mut bit = 0;
-        while bit < 8 {
-            value = if value & 1 == 1 {
-                (value >> 1) ^ 0xEDB8_8320
-            } else {
-                value >> 1
-            };
-            bit += 1;
-        }
-        table[index] = value;
-        index += 1;
-    }
-    table
-};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::memory::{DecayPolicy, Encounter, EncounterKind};
+    use crate::testkit::OrDie;
 
     const SUBJECT: SubjectId = SubjectId::new(0);
 
@@ -1345,7 +1339,7 @@ mod tests {
 
     fn populated() -> (MemoryStore, MemoryArchive) {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(7)).expect("room");
+        let index = store.enrol(NpcId::unique(7)).or_die();
         store.remember(
             index,
             SUBJECT,
@@ -1356,20 +1350,20 @@ mod tests {
             SubjectId::new(1),
             &Encounter::new(EncounterKind::Helped, Tick::new(120)),
         );
-        let lonely = store.enrol(NpcId::unique(9)).expect("room");
+        let lonely = store.enrol(NpcId::unique(9)).or_die();
         store.remember(
             lonely,
             SUBJECT,
             &Encounter::new(EncounterKind::Spoke, Tick::new(90)),
         );
         let mut archive = MemoryArchive::new(4);
-        let parked = store.enrol(NpcId::unique(3)).expect("room");
+        let parked = store.enrol(NpcId::unique(3)).or_die();
         store.remember(
             parked,
             SUBJECT,
             &Encounter::new(EncounterKind::Robbed, Tick::new(50)),
         );
-        archive.insert(store.release(parked).expect("enrolled"));
+        archive.insert(store.release(parked).or_die());
         (store, archive)
     }
 
@@ -1381,7 +1375,7 @@ mod tests {
         let bytes = snapshot.to_bytes();
         assert_eq!(bytes.len(), snapshot.encoded_len());
 
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         assert_eq!(decoded, snapshot);
 
         let mut fresh = MemoryStore::new(16, 4);
@@ -1394,7 +1388,7 @@ mod tests {
                 &registry,
                 LegacySubjectPolicy::Refuse,
             )
-            .expect("restores");
+            .or_die();
         assert_eq!(report.store_records, 2);
         assert_eq!(report.archive_records, 1);
         assert_eq!(report.slots, 4);
@@ -1406,7 +1400,7 @@ mod tests {
                 .enrolled()
                 .find(|(_, id)| *id == NpcId::unique(npc))
                 .map(|(index, _)| index)
-                .expect("enrolled");
+                .or_die();
             for raw in 0..2_u16 {
                 let subject = SubjectId::new(raw);
                 assert_eq!(
@@ -1440,7 +1434,7 @@ mod tests {
             current.register(SubjectEntry::new(SubjectKey::new(0xCCCC), SubjectKind::Npc));
         assert_eq!(player, SubjectId::new(0));
 
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         let mut fresh = MemoryStore::new(16, 4);
         let mut fresh_archive = MemoryArchive::new(8);
         let report = decoded
@@ -1451,7 +1445,7 @@ mod tests {
                 &current,
                 LegacySubjectPolicy::Refuse,
             )
-            .expect("restores");
+            .or_die();
         assert!(
             report.translated,
             "positions moved, so translation happened"
@@ -1467,10 +1461,8 @@ mod tests {
             .enrolled()
             .find(|(_, id)| *id == NpcId::unique(7))
             .map(|(index, _)| index)
-            .expect("enrolled");
-        let slot = fresh
-            .recall(index, player)
-            .expect("the player is still remembered");
+            .or_die();
+        let slot = fresh.recall(index, player).or_die();
         assert_eq!(
             slot.valence(),
             -65,
@@ -1488,10 +1480,10 @@ mod tests {
         let registry = registry();
         let bytes =
             MemorySnapshot::capture(&store, &archive, Tick::new(200), 0, &registry).to_bytes();
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         let (mapping, translated) = decoded
             .subject_mapping(&registry, LegacySubjectPolicy::Refuse)
-            .expect("mapping");
+            .or_die();
         assert!(!translated);
         assert_eq!(
             mapping,
@@ -1503,7 +1495,7 @@ mod tests {
     fn a_version_one_file_is_refused_by_default() {
         let (store, archive) = populated();
         let bytes = v1_bytes(&store, &archive, Tick::new(200), 3_600);
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("v1 still reads");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         assert!(decoded.registry().is_none());
         let mut fresh = MemoryStore::new(16, 4);
         assert_eq!(
@@ -1525,7 +1517,7 @@ mod tests {
     fn a_version_one_file_loads_on_request_and_says_it_was_not_verified() {
         let (store, archive) = populated();
         let bytes = v1_bytes(&store, &archive, Tick::new(200), 3_600);
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("v1 still reads");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         let mut fresh = MemoryStore::new(16, 4);
         let report = decoded
             .restore(
@@ -1535,7 +1527,7 @@ mod tests {
                 &registry(),
                 LegacySubjectPolicy::AssumeDense,
             )
-            .expect("trusted");
+            .or_die();
         assert!(report.unverified_mapping, "the caller was told");
         assert_eq!(report.slots, 4);
     }
@@ -1543,7 +1535,7 @@ mod tests {
     #[test]
     fn ages_survive_a_clock_that_restarts() {
         let mut store = MemoryStore::new(4, 2);
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SUBJECT,
@@ -1558,7 +1550,7 @@ mod tests {
         );
         let bytes = snapshot.to_bytes();
 
-        let decoded = MemorySnapshot::from_bytes(&bytes).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&bytes).or_die();
         let mut fresh = MemoryStore::new(4, 2);
         let now = Tick::new(5_000_000);
         decoded
@@ -1569,9 +1561,9 @@ mod tests {
                 &registry(),
                 LegacySubjectPolicy::Refuse,
             )
-            .expect("restores");
-        let (fresh_index, _) = fresh.enrolled().next().expect("one row");
-        let slot = fresh.recall(fresh_index, SUBJECT).expect("remembered");
+            .or_die();
+        let (fresh_index, _) = fresh.enrolled().next().or_die();
+        let slot = fresh.recall(fresh_index, SUBJECT).or_die();
         assert_eq!(
             slot.last_seen(),
             Tick::new(5_000_000 - 100),
@@ -1579,10 +1571,7 @@ mod tests {
         );
         assert_eq!(
             DecayPolicy::MINUTE.valence_at(slot, now),
-            DecayPolicy::MINUTE.valence_at(
-                store.recall(index, SUBJECT).expect("original"),
-                Tick::new(1_000)
-            ),
+            DecayPolicy::MINUTE.valence_at(store.recall(index, SUBJECT).or_die(), Tick::new(1_000)),
             "a save and load does not age the grudge"
         );
     }
@@ -1600,10 +1589,10 @@ mod tests {
             snapshot
                 .records
                 .first()
-                .expect("one")
+                .or_die()
                 .slots
                 .first()
-                .expect("one")
+                .or_die()
                 .1
                 .last_age,
             50
@@ -1613,10 +1602,10 @@ mod tests {
             snapshot
                 .records
                 .first()
-                .expect("one")
+                .or_die()
                 .slots
                 .first()
-                .expect("one")
+                .or_die()
                 .1
                 .last_age,
             1_050,
@@ -1626,7 +1615,7 @@ mod tests {
 
     fn store_with_memory() -> MemoryStore {
         let mut store = MemoryStore::new(4, 2);
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SUBJECT,
@@ -1644,7 +1633,7 @@ mod tests {
         let b =
             MemorySnapshot::capture(&store, &archive, Tick::new(200), 3_600, &registry).to_bytes();
         assert_eq!(a, b, "the same world produces the same bytes");
-        let decoded = MemorySnapshot::from_bytes(&a).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&a).or_die();
         let npcs: Vec<u32> = decoded
             .records
             .iter()
@@ -1663,7 +1652,7 @@ mod tests {
             MemorySnapshot::capture(&store(), &MemoryArchive::new(1), Tick::ZERO, 0, &registry());
         let bytes = snapshot.to_bytes();
         assert_eq!(bytes.len(), snapshot.encoded_len());
-        assert_eq!(MemorySnapshot::from_bytes(&bytes).expect("valid"), snapshot);
+        assert_eq!(MemorySnapshot::from_bytes(&bytes).or_die(), snapshot);
     }
 
     #[test]
@@ -1687,12 +1676,12 @@ mod tests {
                 .to_bytes();
         bytes
             .get_mut(4..6)
-            .expect("header")
+            .or_die()
             .copy_from_slice(&9_u16.to_le_bytes());
-        let crc = crc32(bytes.get(0..20).expect("header"));
+        let crc = crc32(bytes.get(0..20).or_die());
         bytes
             .get_mut(20..24)
-            .expect("header")
+            .or_die()
             .copy_from_slice(&crc.to_le_bytes());
         assert_eq!(
             MemorySnapshot::from_bytes(&bytes),
@@ -1706,7 +1695,7 @@ mod tests {
         let bytes = MemorySnapshot::capture(&store, &archive, Tick::new(200), 3_600, &registry())
             .to_bytes();
         for cut in [0, 3, 20, 40, bytes.len() - 6, bytes.len() - 1] {
-            let short = bytes.get(0..cut).expect("prefix");
+            let short = bytes.get(0..cut).or_die();
             assert!(
                 MemorySnapshot::from_bytes(short).is_err(),
                 "a {cut}-byte prefix is not a save"
@@ -1737,7 +1726,7 @@ mod tests {
         let (store, archive) = populated();
         let snapshot = MemorySnapshot::capture(&store, &archive, Tick::new(200), 0, &registry());
         let extended = bytes_with_extra_section(&snapshot, 200, b"a future writer was here");
-        let decoded = MemorySnapshot::from_bytes(&extended).expect("forward compatible");
+        let decoded = MemorySnapshot::from_bytes(&extended).or_die();
         assert_eq!(decoded.records, snapshot.records);
     }
 
@@ -1750,7 +1739,7 @@ mod tests {
             0,
             &registry(),
         );
-        let record = snapshot.records.first().expect("one").clone();
+        let record = snapshot.records.first().or_die().clone();
         snapshot.records.push(record);
         let bytes = snapshot.to_bytes();
         // The writer emits the count from the vector, so the duplicate is inside the
@@ -1767,7 +1756,7 @@ mod tests {
     fn a_store_too_small_refuses_the_file_without_partial_writes() {
         let mut target = MemoryStore::new(4, 4);
         for npc in 0..4 {
-            target.enrol(NpcId::unique(100 + npc)).expect("room");
+            target.enrol(NpcId::unique(100 + npc)).or_die();
         }
         let snapshot = MemorySnapshot::capture(
             &store_with_memory(),
@@ -1795,7 +1784,7 @@ mod tests {
     #[test]
     fn a_subject_beyond_the_store_is_refused() {
         let mut store = MemoryStore::new(4, 4);
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SubjectId::new(3),
@@ -1834,7 +1823,7 @@ mod tests {
             3_600,
             &registry(),
         );
-        let decoded = MemorySnapshot::from_bytes(&snapshot.to_bytes()).expect("valid");
+        let decoded = MemorySnapshot::from_bytes(&snapshot.to_bytes()).or_die();
         assert_eq!(
             decoded.half_life_ticks, 3_600,
             "a save knows how fast it fades"

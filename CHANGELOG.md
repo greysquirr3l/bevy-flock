@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **One lint spine, two documented exceptions.** `[lints]` in `Cargo.toml` now carries the whole
+  policy: `pedantic`, `nursery`, `cargo`, `perf` and `all` as warnings that CI promotes with
+  `-D warnings`, and `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
+  `cast_ptr_alignment` and `suspicious` denied outright — in `tests`, `benches` and `examples` as
+  well as `src`. 468 `.expect(…)`, 34 `.unwrap_err()` and 52 index expressions in tests moved to
+  `bevy_flock::testkit` (`OrDie`, `OrDieErr`, `GetOrDie`, `GetOrDieMut`), which reports a broken
+  fixture as `unreachable!` with the caller's message and location. Every `#[allow]` in the tree is
+  gone except the two in the steering kernels, which are named in `scripts/lint_audit.py` with the
+  reason and a `kernel-bounds-checks` task; CI runs that script and fails on any other override.
+  `docs/lint-policy.md` states what is enforced, what is decided in the manifest and why.
 - **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
   already gathers removes the excess closing speed between each pair, split by priority, so two
   agents walking at each other stop at the separation floor instead of sharing space.
@@ -29,6 +39,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before truncating to `max_results`; it now inserts in order into a bounded result set, which
   costs one comparison per slot and no allocation. 75.7 ms → 35.8 ms on the dense benchmark, and
   `the_bounded_insert_keeps_exactly_the_best_slots` is the parity test against the old behaviour.
+- **The feature extremes build again.** `cargo check --no-default-features --all-targets` failed on
+  main before this: `tests/memory_bridge.rs` imports `domain::memory`, and `Cargo.toml` never
+  declared `required-features = ["memory"]` for it, so the test compiled only in configurations that
+  happened to have the feature on. `fuzz_decoders` now declares it too rather than relying on
+  `#![cfg(feature = "memory")]` to reduce it to an empty binary that reports success.
+  `src/application/crowd.rs` had the matching lint bug: its `#[expect(clippy::indexing_slicing)]`
+  was unfulfilled without `simd` (the kernel that indexes), which `-D warnings` turns into an error,
+  and CI only linted `--all-features`. CI now lints and compiles both extremes with `--all-targets`.
 - **Perception stops scanning the whole world (ADR 0047).** `StimulusBuffer` keeps a conservative
   bounding box, so an observer with nothing nearby returns in O(1); `StimulusIndex` buckets the live
   records into a uniform grid rebuilt once per pass (69 µs for 4,096 records) and `perceive_indexed`

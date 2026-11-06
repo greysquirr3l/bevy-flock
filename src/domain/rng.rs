@@ -224,6 +224,7 @@ const fn splitmix64(state: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::GetOrDieMut;
 
     /// A direct transcription of the reference `pcg32` from pcg-random.org,
     /// written independently of [`RngStream`] so the test cannot pass by sharing
@@ -307,7 +308,7 @@ mod tests {
         let mut rng = RngStream::new(SimSeed::new(0xBEEF), 3);
         let mut buckets = [0_u32; 10];
         for _ in 0..DRAWS {
-            buckets[rng.next_bounded(10) as usize] += 1;
+            *buckets.at_mut(rng.next_bounded(10) as usize) += 1;
         }
         let expected = DRAWS / 10;
         let tolerance = expected / 100;
@@ -410,8 +411,8 @@ mod tests {
         let mut counts = [0_u32; 2];
         for _ in 0..100_000 {
             match rng.choose_weighted(&[0.9, 0.1]) {
-                Some(index) => counts[index] += 1,
-                None => panic!("weights were positive"),
+                Some(index) => *counts.at_mut(index) += 1,
+                None => unreachable!("weights were positive"),
             }
         }
         assert!(counts[0] > counts[1] * 4, "counts were {counts:?}");

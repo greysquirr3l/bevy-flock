@@ -206,10 +206,6 @@ impl Plugin for StimulusPlugin {
 }
 
 /// Publish one pulse per live emitter, then retire the expired records.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn emit_stimuli(
     clock: Res<SimClock>,
     mut stimuli: ResMut<StimulusBufferResource>,
@@ -233,10 +229,6 @@ impl StimulusBufferResource {
 }
 
 /// Give every due observer its list of what is nearby.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn perceive_stimuli(
     clock: Res<SimClock>,
     stimuli: Res<StimulusBufferResource>,
@@ -283,6 +275,7 @@ mod tests {
     use super::*;
     use crate::adapters::primary::components::NpcBundle;
     use crate::domain::ids::NpcId;
+    use crate::testkit::{GetOrDie, OrDie};
 
     fn app() -> App {
         let mut app = App::new();
@@ -323,13 +316,10 @@ mod tests {
             StimulusSource::sight(30.0, 1.0),
         );
         tick(&mut app);
-        let perceived = app
-            .world()
-            .get::<PerceivedStimuli>(observer)
-            .expect("component");
+        let perceived = app.world().get::<PerceivedStimuli>(observer).or_die();
         assert_eq!(perceived.0.len(), 1);
-        assert_eq!(perceived.0[0].kind, StimulusKind::Sight);
-        assert!(perceived.0[0].strength > 0.0);
+        assert_eq!(perceived.0.at(0).kind, StimulusKind::Sight);
+        assert!(perceived.0.at(0).strength > 0.0);
     }
 
     #[test]
@@ -342,10 +332,7 @@ mod tests {
             StimulusSource::sight(30.0, 1.0),
         );
         tick(&mut app);
-        let perceived = app
-            .world()
-            .get::<PerceivedStimuli>(observer)
-            .expect("component");
+        let perceived = app.world().get::<PerceivedStimuli>(observer).or_die();
         assert!(perceived.0.is_empty());
     }
 
@@ -362,7 +349,7 @@ mod tests {
         assert_eq!(
             app.world()
                 .get::<PerceivedStimuli>(observer)
-                .expect("component")
+                .or_die()
                 .0
                 .len(),
             1
@@ -376,7 +363,7 @@ mod tests {
         assert!(
             app.world()
                 .get::<PerceivedStimuli>(observer)
-                .expect("component")
+                .or_die()
                 .0
                 .is_empty(),
             "a sound with a two-tick life cannot outlast five"
@@ -391,7 +378,7 @@ mod tests {
         let seen = app
             .world()
             .get::<PerceivedStimuli>(observer)
-            .expect("component")
+            .or_die()
             .0
             .len();
         assert_eq!(

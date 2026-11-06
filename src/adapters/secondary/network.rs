@@ -261,6 +261,7 @@ pub fn collect_interest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{GetOrDie, OrDie};
     use bevy_app::{App, Update};
 
     fn app(interest: InterestSet) -> App {
@@ -283,7 +284,7 @@ mod tests {
         let mut bytes = Vec::new();
         state.encode(&mut bytes);
         assert_eq!(bytes.len(), NpcNetState::BYTES);
-        let (decoded, used) = NpcNetState::decode(&bytes).expect("decode");
+        let (decoded, used) = NpcNetState::decode(&bytes).or_die();
         assert_eq!(used, NpcNetState::BYTES);
         assert_eq!(decoded, state);
         assert!((decoded.position() - Vec3::new(12.34, 0.0, -56.78)).length() < 0.02);
@@ -319,7 +320,7 @@ mod tests {
         app.update();
         let set = app.world().resource::<ReplicationSet>();
         assert_eq!(set.len(), 1);
-        assert_eq!(set.states()[0].identity(), NpcId::unique(1));
+        assert_eq!(set.states().at(0).identity(), NpcId::unique(1));
         assert_eq!(set.wire_bytes(), NpcNetState::BYTES);
     }
 

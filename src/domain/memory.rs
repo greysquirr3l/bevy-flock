@@ -1091,6 +1091,7 @@ pub struct AgingReport {
 
 #[cfg(test)]
 mod tests {
+    use crate::testkit::{GetOrDie, OrDie};
 
     #[test]
     fn an_absent_npc_is_reclaimed_and_its_slot_reused() {
@@ -1099,7 +1100,7 @@ mod tests {
         // can reclaim it, and if it cannot, this is a leak with a half-life.
         let mut store = MemoryStore::new(8, 4);
         let absent = NpcId::unique(1);
-        let index = store.enrol(absent).expect("room for one");
+        let index = store.enrol(absent).or_die();
         let subject = SubjectId::new(0);
         store.remember(
             index,
@@ -1123,7 +1124,7 @@ mod tests {
         // And the slot is genuinely reusable, which is what makes this a fix rather than
         // a smaller leak.
         let newcomer = NpcId::unique(2);
-        let second = store.enrol(newcomer).expect("the row came back");
+        let second = store.enrol(newcomer).or_die();
         assert!(store.remember(
             second,
             subject,
@@ -1136,7 +1137,7 @@ mod tests {
         // An hour away, anchored: the record survives, the feeling does not.
         let mut store = MemoryStore::new(8, 4);
         let anchored = NpcId::unique(7);
-        let index = store.enrol(anchored).expect("room for one");
+        let index = store.enrol(anchored).or_die();
         let subject = SubjectId::new(1);
         store.remember(
             index,
@@ -1159,7 +1160,7 @@ mod tests {
             decayed.is_none_or(|(valence, familiarity)| familiarity == 0 && valence == 0),
             "after a hundred half-lives nothing is felt: {decayed:?}"
         );
-        let raw = store.recall(index, subject).expect("the record survives");
+        let raw = store.recall(index, subject).or_die();
         assert!(raw.is_grudge(), "and it is still a grudge");
         assert_eq!(raw.last_seen(), Tick::new(0), "the date is unchanged");
         assert!(
@@ -1176,9 +1177,9 @@ mod tests {
         let policy = AgingPolicy::every(60);
         let mut tick = 0_u64;
         for round in 0..5_000_u64 {
-            let npc = NpcId::unique(u32::try_from(round).expect("in range"));
+            let npc = NpcId::unique(u32::try_from(round).or_die());
             let Some(index) = store.enrol(npc) else {
-                panic!("enrol refused at round {round}: {} rows held", store.len());
+                unreachable!("enrol refused at round {round}: {} rows held", store.len());
             };
             store.remember(
                 index,
@@ -1255,16 +1256,14 @@ mod tests {
     #[test]
     fn enrolling_returns_a_reusable_row_and_fails_when_full() {
         let mut store = MemoryStore::new(2, 2);
-        let first = store.enrol(NpcId::unique(1)).expect("room");
-        let second = store.enrol(NpcId::unique(2)).expect("room");
+        let first = store.enrol(NpcId::unique(1)).or_die();
+        let second = store.enrol(NpcId::unique(2)).or_die();
         assert!(
             store.enrol(NpcId::unique(3)).is_none(),
             "capacity is a bound"
         );
         store.release(first);
-        let third = store
-            .enrol(NpcId::unique(4))
-            .expect("released row is reusable");
+        let third = store.enrol(NpcId::unique(4)).or_die();
         assert_eq!(
             third, first,
             "the free list is LIFO, so reuse is deterministic"
@@ -1276,14 +1275,14 @@ mod tests {
     #[test]
     fn remembering_blends_history_with_news() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         assert!(store.remember(
             index,
             SUBJECT,
             &Encounter::new(EncounterKind::Helped, Tick::ZERO)
         ));
 
-        let slot = store.recall(index, SUBJECT).expect("remembered");
+        let slot = store.recall(index, SUBJECT).or_die();
         assert_eq!(slot.valence(), 40, "160 blended into nothing is 40");
         assert_eq!(slot.encounters(), 1);
         assert!(slot.has(EncounterKind::Helped));
@@ -1294,7 +1293,7 @@ mod tests {
             SUBJECT,
             &Encounter::new(EncounterKind::Attacked, Tick::new(10))
         ));
-        let slot = store.recall(index, SUBJECT).expect("remembered");
+        let slot = store.recall(index, SUBJECT).or_die();
         // 40 * 3 + (-260) = -140, divided by 4 = -35.
         assert_eq!(
             slot.valence(),
@@ -1308,7 +1307,7 @@ mod tests {
     #[test]
     fn counts_saturate_instead_of_wrapping() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         for _ in 0..70_000 {
             store.remember(
                 index,
@@ -1316,7 +1315,7 @@ mod tests {
                 &Encounter::new(EncounterKind::Spoke, Tick::ZERO),
             );
         }
-        let slot = store.recall(index, SUBJECT).expect("remembered");
+        let slot = store.recall(index, SUBJECT).or_die();
         assert_eq!(slot.encounters(), u16::MAX);
         assert_eq!(slot.familiarity(), u16::MAX);
     }
@@ -1324,13 +1323,13 @@ mod tests {
     #[test]
     fn decay_halves_per_period_and_reads_lazily() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SUBJECT,
             &Encounter::new(EncounterKind::Attacked, Tick::ZERO),
         );
-        let slot = store.recall(index, SUBJECT).expect("remembered");
+        let slot = store.recall(index, SUBJECT).or_die();
         let decay = DecayPolicy {
             half_life_ticks: 100,
         };
@@ -1349,7 +1348,7 @@ mod tests {
     #[test]
     fn faded_memory_recalls_as_absent() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SUBJECT,
@@ -1374,7 +1373,7 @@ mod tests {
     #[test]
     fn an_unknown_index_or_subject_is_refused_not_written() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         assert!(!store.remember(
             index,
             SubjectId::new(9),
@@ -1393,13 +1392,13 @@ mod tests {
     #[test]
     fn release_returns_only_what_was_remembered() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(7)).expect("room");
+        let index = store.enrol(NpcId::unique(7)).or_die();
         store.remember(
             index,
             SUBJECT,
             &Encounter::new(EncounterKind::Robbed, Tick::new(5)),
         );
-        let memories = store.release(index).expect("enrolled");
+        let memories = store.release(index).or_die();
         assert_eq!(memories.npc, NpcId::unique(7));
         assert_eq!(memories.slots.len(), 1);
         assert_eq!(
@@ -1413,8 +1412,8 @@ mod tests {
     #[test]
     fn sweep_frees_only_what_has_faded() {
         let mut store = store();
-        let stale = store.enrol(NpcId::unique(1)).expect("room");
-        let fresh = store.enrol(NpcId::unique(2)).expect("room");
+        let stale = store.enrol(NpcId::unique(1)).or_die();
+        let fresh = store.enrol(NpcId::unique(2)).or_die();
         store.remember(
             stale,
             SUBJECT,
@@ -1453,7 +1452,7 @@ mod tests {
         };
         assert!(archive.insert(record(1, 10)).is_none());
         assert!(archive.insert(record(2, 50)).is_none());
-        let evicted = archive.insert(record(3, 30)).expect("capacity reached");
+        let evicted = archive.insert(record(3, 30)).or_die();
         assert_eq!(evicted.npc, NpcId::unique(1), "the faintest memory goes");
         assert!(archive.contains(NpcId::unique(2)));
         assert!(archive.contains(NpcId::unique(3)));
@@ -1463,23 +1462,21 @@ mod tests {
     #[test]
     fn archive_restore_round_trips_a_grudge() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(5)).expect("room");
+        let index = store.enrol(NpcId::unique(5)).or_die();
         store.remember(
             index,
             SUBJECT,
             &Encounter::new(EncounterKind::Attacked, Tick::new(40)),
         );
         let mut archive = MemoryArchive::new(4);
-        let stored = store.release(index).expect("enrolled");
+        let stored = store.release(index).or_die();
         let evicted = archive.insert(stored);
         assert!(evicted.is_none(), "an empty archive evicts nobody");
         assert!(archive.contains(NpcId::unique(5)));
 
-        let (restored, memories) = archive
-            .restore(NpcId::unique(5), &mut store)
-            .expect("parked");
+        let (restored, memories) = archive.restore(NpcId::unique(5), &mut store).or_die();
         assert_eq!(memories.slots.len(), 1);
-        let slot = store.recall(restored, SUBJECT).expect("memory is back");
+        let slot = store.recall(restored, SUBJECT).or_die();
         assert_eq!(slot.encounters(), 1);
         assert_eq!(slot.valence(), -65, "the grudge came back at full strength");
         assert!(slot.is_grudge());
@@ -1504,18 +1501,18 @@ mod tests {
         let mut left_rows = Vec::new();
         let mut right_rows = Vec::new();
         for npc in 0..4 {
-            let a = left.enrol(NpcId::unique(npc)).expect("room");
-            let b = right.enrol(NpcId::unique(npc)).expect("room");
+            let a = left.enrol(NpcId::unique(npc)).or_die();
+            let b = right.enrol(NpcId::unique(npc)).or_die();
             assert_eq!(a, b, "enrolment order is deterministic");
             left_rows.push(a);
             right_rows.push(b);
         }
         for step in 0..64_u32 {
             let position = (step % 4) as usize;
-            let kind = EncounterKind::ALL[position % EncounterKind::ALL.len()];
+            let kind = EncounterKind::ALL.at(position % EncounterKind::ALL.len());
             let encounter = Encounter::new(kind, Tick::new(u64::from(step)));
-            assert!(left.remember(left_rows[position], SUBJECT, &encounter));
-            assert!(right.remember(right_rows[position], SUBJECT, &encounter));
+            assert!(left.remember(left_rows.at(position), SUBJECT, &encounter));
+            assert!(right.remember(right_rows.at(position), SUBJECT, &encounter));
         }
         let decay = DecayPolicy { half_life_ticks: 5 };
         for raw in 0..4 {
@@ -1585,7 +1582,7 @@ mod tests {
     #[test]
     fn the_strongest_recall_is_the_familiar_one_and_not_the_merely_recent_one() {
         let mut store = MemoryStore::new(4, 8);
-        let index = store.enrol(NpcId::unique(1)).expect("row");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         let stranger = SubjectId::new(0);
         let friend = SubjectId::new(3);
         for _ in 0..4 {
@@ -1605,7 +1602,7 @@ mod tests {
         let now = Tick::new(20);
         let (subject, valence, familiarity, _flags) = store
             .strongest_recall(index, now, DecayPolicy::MINUTE)
-            .expect("something is remembered");
+            .or_die();
         assert_eq!(subject, friend);
         assert!(
             familiarity > 30,
@@ -1636,7 +1633,7 @@ mod tests {
     #[test]
     fn remembering_another_subject_does_not_touch_the_first() {
         let mut store = store();
-        let index = store.enrol(NpcId::unique(1)).expect("room");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         store.remember(
             index,
             SUBJECT,

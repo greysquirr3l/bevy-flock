@@ -12,11 +12,8 @@
 //! | 3. Determinism | manifest iterator | measured (unit test) |
 //! | 8. 100k with 5,000 manifested, frame < 8 ms | band plugin, folding | **open** |
 //! | 9. Folded NPC matches no query | folding | **open** |
-#![expect(
-    clippy::expect_used,
-    reason = "a fixture that cannot build its world should fail loudly"
-)]
 
+use bevy_flock::testkit::OrDie;
 use std::hint::black_box;
 
 use bevy_app::prelude::*;
@@ -36,7 +33,7 @@ struct FieldRes(AmbientField);
 
 /// A field holding `people` spread evenly, at four-metre spacing.
 fn field(side: u32, people_per_cell: u32) -> AmbientField {
-    let mut field = AmbientField::new(side, side, 4.0, 0x5EED).expect("a valid field");
+    let mut field = AmbientField::new(side, side, 4.0, 0x5EED).or_die();
     for y in 0..side {
         for x in 0..side {
             if let Some(cell) = field.cell_mut(CellId::new(x, y)) {
@@ -70,7 +67,7 @@ fn bench_advection(c: &mut Criterion) {
     }
 
     // A sparse city: most cells empty, which is the case real worlds present.
-    let mut sparse = AmbientField::new(200, 200, 4.0, 3).expect("a valid field");
+    let mut sparse = AmbientField::new(200, 200, 4.0, 3).or_die();
     for i in 0..2_000_u32 {
         let x = (i * 37) % 200;
         let y = (i * 53) % 200;
@@ -118,7 +115,7 @@ fn bench_band(c: &mut Criterion) {
     for manifested in [1_000_u32, 5_000] {
         let mut app = App::new();
         let config = FlockConfig {
-            population: PopulationSize::try_new(manifested as usize).expect("a legal population"),
+            population: PopulationSize::try_new(manifested as usize).or_die(),
             ..FlockConfig::preset(CrowdPreset::CityAmbient)
         };
         app.add_plugins(FlockPlugin::new(config));

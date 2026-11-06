@@ -184,13 +184,14 @@ mod tests {
     use crate::adapters::primary::observability::Diagnostics;
     use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
     use crate::application::director::{Beat, ScriptedDirector};
+    use crate::testkit::OrDie;
     use bevy_app::App;
     use bevy_math::Vec3;
 
     fn app_with_script(beats: Vec<Beat>) -> App {
         let mut app = App::new();
         app.add_plugins(FlockPlugin::new(FlockConfig::default()));
-        let script = ScriptedDirector::new(beats).expect("script");
+        let script = ScriptedDirector::new(beats).or_die();
         app.insert_resource(CrowdDirector::new(Box::new(script), DEFAULT_TICKS_PER_HOUR));
         app
     }

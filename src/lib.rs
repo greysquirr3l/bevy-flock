@@ -70,16 +70,6 @@
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
-#![cfg_attr(
-    test,
-    expect(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::indexing_slicing,
-        reason = "test code asserts its own fixtures; library code does not"
-    )
-)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod adapters;
@@ -89,6 +79,9 @@ pub mod boids;
 pub mod domain;
 pub mod error;
 pub mod prelude;
+/// Test-only helpers for the crate's own fixtures. Not part of the simulation API.
+#[doc(hidden)]
+pub mod testkit;
 
 pub use adapters::primary::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockStats,

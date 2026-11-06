@@ -350,12 +350,13 @@ mod tests {
     use super::*;
     use crate::behavior::bark::BarkCategory;
     use crate::behavior::provider::DialogContext;
+    use crate::testkit::OrDie;
     use bevy_app::{App, Update};
 
     fn app() -> App {
         let mut app = App::new();
         app.insert_resource(SimClock::default())
-            .insert_resource(Barks::starter().expect("barks"))
+            .insert_resource(Barks::starter().or_die())
             .init_resource::<DialogOutbox>()
             .insert_resource(DialogHub::default())
             .add_systems(Update, (produce_barks, tick_dialog));
@@ -378,7 +379,7 @@ mod tests {
         app.update();
         let barks = app.world().resource::<Barks>();
         assert_eq!(barks.queue().len(), 1);
-        let event = barks.queue().events().front().copied().expect("event");
+        let event = barks.queue().events().front().copied().or_die();
         assert_eq!(event.npc, NpcId::unique(1));
         assert!(barks.table().text(event.line).is_some());
     }
@@ -458,7 +459,7 @@ mod tests {
         app.update();
         let outbox = app.world().resource::<DialogOutbox>();
         assert_eq!(outbox.len(), 1);
-        let line = outbox.lines().front().cloned().expect("line");
+        let line = outbox.lines().front().cloned().or_die();
         assert_eq!(line.source, ReplySource::Fallback);
         assert_eq!(line.npc, NpcId::unique(3));
         assert!(!line.text.is_empty());

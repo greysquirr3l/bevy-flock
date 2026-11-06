@@ -509,10 +509,6 @@ impl Plugin for FlockPlugin {
 ///
 /// Budgeted rather than all at once: a game asking for 100,000 NPCs gets them
 /// over 25 frames at the default budget instead of one 400 ms hitch.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn drain_spawn_queue(
     config: Res<FlockConfig>,
     mut queue: ResMut<SpawnQueue>,
@@ -614,6 +610,7 @@ pub fn recycled_mode(slots: u32) -> Result<PopulationMode, crate::error::Populat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     fn app_with(config: FlockConfig) -> App {
         let mut app = App::new();
@@ -640,7 +637,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(BoidsPlugin::default());
         app.add_plugins(FlockPlugin::new(FlockConfig {
-            population: PopulationSize::try_new(4).expect("4 is valid"),
+            population: PopulationSize::try_new(4).or_die(),
             spawn_budget: 64,
             ..FlockConfig::default()
         }));
@@ -655,7 +652,7 @@ mod tests {
     #[test]
     fn single_npc_population_works() {
         let mut app = app_with(FlockConfig {
-            population: PopulationSize::try_new(1).expect("1 is valid"),
+            population: PopulationSize::try_new(1).or_die(),
             ..FlockConfig::default()
         });
         app.update();
@@ -670,7 +667,7 @@ mod tests {
     #[test]
     fn spawn_budget_spreads_work_across_frames() {
         let mut app = app_with(FlockConfig {
-            population: PopulationSize::try_new(1_000).expect("valid"),
+            population: PopulationSize::try_new(1_000).or_die(),
             spawn_budget: 100,
             ..FlockConfig::default()
         });
@@ -688,7 +685,7 @@ mod tests {
     fn identical_seeds_generate_identical_individuals() {
         fn temperaments() -> Vec<[f32; 3]> {
             let mut app = app_with(FlockConfig {
-                population: PopulationSize::try_new(20).expect("valid"),
+                population: PopulationSize::try_new(20).or_die(),
                 ..FlockConfig::default()
             });
             app.update();
@@ -716,9 +713,9 @@ mod tests {
     #[test]
     fn recycled_requests_reuse_slot_identities() {
         let mut queue = SpawnQueue::default();
-        let slots = SlotCount::try_new(4).expect("4 is non-zero");
+        let slots = SlotCount::try_new(4).or_die();
         queue.push(
-            FlockRequest::new(PopulationSize::try_new(8).expect("valid"))
+            FlockRequest::new(PopulationSize::try_new(8).or_die())
                 .with_mode(PopulationMode::Recycled(slots)),
         );
         let ids: Vec<u32> = (0..8)
@@ -731,9 +728,7 @@ mod tests {
     #[test]
     fn pending_counts_shrink_as_the_queue_drains() {
         let mut queue = SpawnQueue::default();
-        queue.push(FlockRequest::new(
-            PopulationSize::try_new(5).expect("valid"),
-        ));
+        queue.push(FlockRequest::new(PopulationSize::try_new(5).or_die()));
         assert_eq!(queue.pending(), 5);
         queue.pop();
         assert_eq!(queue.pending(), 4);

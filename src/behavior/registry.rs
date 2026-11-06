@@ -384,6 +384,7 @@ pub struct NpcLogicContext<'a> {
 mod tests {
     use super::*;
     use crate::behavior::blackboard::Blackboard;
+    use crate::testkit::{OrDie, OrDieErr};
 
     struct Greet;
 
@@ -443,8 +444,8 @@ mod tests {
     #[test]
     fn registers_leaves_and_assigns_stable_ids() {
         let mut registry = FlockRegistry::new();
-        let greet = registry.register_leaf("greet", Greet).expect("fresh name");
-        let shout = registry.register_leaf("shout", Shouty).expect("fresh name");
+        let greet = registry.register_leaf("greet", Greet).or_die();
+        let shout = registry.register_leaf("shout", Shouty).or_die();
         assert_eq!(greet, 0);
         assert_eq!(shout, 1);
         assert_eq!(registry.leaf_id("greet"), Some(greet));
@@ -454,8 +455,8 @@ mod tests {
     #[test]
     fn duplicate_leaf_names_are_rejected_with_the_name_in_the_error() {
         let mut registry = FlockRegistry::new();
-        registry.register_leaf("greet", Greet).expect("first");
-        let error = registry.register_leaf("greet", Greet).expect_err("second");
+        registry.register_leaf("greet", Greet).or_die();
+        let error = registry.register_leaf("greet", Greet).or_die_err();
         assert!(error.to_string().contains("greet"), "{error}");
         assert_eq!(
             error,
@@ -471,7 +472,7 @@ mod tests {
         let mut registry = FlockRegistry::new();
         registry
             .register_group_director("hold", AlwaysHold)
-            .expect("first");
+            .or_die();
         assert!(
             registry
                 .register_group_director("hold", AlwaysHold)
@@ -479,7 +480,7 @@ mod tests {
         );
         registry
             .register_world_director("festival", Festival)
-            .expect("first");
+            .or_die();
         assert!(
             registry
                 .register_world_director("festival", Festival)
@@ -492,7 +493,7 @@ mod tests {
         let mut registry = FlockRegistry::new();
         registry
             .register_world_director("festival", Festival)
-            .expect("fresh");
+            .or_die();
         let board = Blackboard::new();
         let ctx = DirectorContext {
             tick: Tick::ZERO,
@@ -509,7 +510,7 @@ mod tests {
     #[test]
     fn declared_cost_sums_the_hints() {
         let mut registry = FlockRegistry::new();
-        let shout = registry.register_leaf("shout", Shouty).expect("fresh");
+        let shout = registry.register_leaf("shout", Shouty).or_die();
         assert_eq!(registry.declared_cost(), VirtualCost::new(42));
         assert_eq!(registry.leaf_cost(shout), VirtualCost::new(42));
     }
@@ -523,7 +524,7 @@ mod tests {
     #[test]
     fn a_leaf_without_a_declaration_gets_the_default_not_free_ride() {
         let mut registry = FlockRegistry::new();
-        let greet = registry.register_leaf("greet", Greet).expect("fresh");
+        let greet = registry.register_leaf("greet", Greet).or_die();
         assert_eq!(registry.leaf_cost(greet), VirtualCost::DEFAULT);
         assert!(VirtualCost::DEFAULT > VirtualCost::ZERO);
     }
@@ -532,9 +533,9 @@ mod tests {
     fn tree_cost_counts_only_the_leaves_the_tree_uses() {
         use crate::behavior::tree::{action, sequence};
         let mut registry = FlockRegistry::new();
-        registry.register_leaf("greet", Greet).expect("fresh");
-        let shout = registry.register_leaf("shout", Shouty).expect("fresh");
-        let tree = BehaviorTree::try_from_spec(sequence(vec![action(shout)])).expect("valid");
+        registry.register_leaf("greet", Greet).or_die();
+        let shout = registry.register_leaf("shout", Shouty).or_die();
+        let tree = BehaviorTree::try_from_spec(sequence(vec![action(shout)])).or_die();
         assert_eq!(registry.tree_cost(&tree), VirtualCost::new(42));
         assert!(registry.tree_cost(&tree) < registry.declared_cost());
     }
@@ -542,7 +543,7 @@ mod tests {
     #[test]
     fn dispatch_reaches_the_registered_leaf() {
         let mut registry = FlockRegistry::new();
-        let leaf = registry.register_leaf("greet", Greet).expect("fresh");
+        let leaf = registry.register_leaf("greet", Greet).or_die();
         let mut board = Blackboard::new();
         let mut ctx = LeafContext {
             blackboard: &mut board,

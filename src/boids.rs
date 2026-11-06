@@ -309,10 +309,6 @@ pub fn rebuild_spatial_grid(
 /// This is the path ADR 0026 records. The model is unchanged — the same weights, the same
 /// priority truncation, the same arrival curve — but the loop is inverted, and the distance sort
 /// and the per-agent `Vec<Neighbour>` are gone.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn steer_flock(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
@@ -380,10 +376,6 @@ pub fn steer_flock(
 ///
 /// Not in the schedule: it materialises a sorted `Vec<Neighbour>` per agent, which is the cost
 /// [`steer_flock`] exists to remove.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn steer_flock_reference(
     grid: Res<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
@@ -414,10 +406,6 @@ pub fn steer_flock_reference(
 /// Reads [`NpcDesiredVelocity`]; writes [`NpcVelocity`] and `Transform`. The
 /// acceleration limit is what stops a crowd from snapping direction and reading
 /// as a particle system.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by construction"
-)]
 pub fn integrate_flock(
     clock: Option<Res<SimClock>>,
     config: Res<BoidsConfig>,
@@ -441,6 +429,7 @@ mod tests {
     use super::*;
     use crate::adapters::primary::components::NpcBundle;
     use crate::domain::ids::NpcId;
+    use crate::testkit::OrDie;
 
     fn app() -> App {
         let mut app = App::new();
@@ -475,23 +464,15 @@ mod tests {
             .id();
         app.world_mut()
             .get_mut::<Transform>(right)
-            .expect("transform exists")
+            .or_die()
             .translation = Vec3::new(0.1, 0.0, 0.0);
 
         for _ in 0..120 {
             app.update();
         }
 
-        let left_position = app
-            .world()
-            .get::<Transform>(left)
-            .expect("transform exists")
-            .translation;
-        let right_position = app
-            .world()
-            .get::<Transform>(right)
-            .expect("transform exists")
-            .translation;
+        let left_position = app.world().get::<Transform>(left).or_die().translation;
+        let right_position = app.world().get::<Transform>(right).or_die().translation;
         assert!(
             left_position.distance(right_position) > 0.4,
             "agents did not separate: {left_position} vs {right_position}"
@@ -508,10 +489,7 @@ mod tests {
             .insert(LodTier::Ambient)
             .id();
         app.update();
-        let desired = app
-            .world()
-            .get::<NpcDesiredVelocity>(entity)
-            .expect("desired velocity exists");
+        let desired = app.world().get::<NpcDesiredVelocity>(entity).or_die();
         assert_eq!(desired.0, Vec3::ZERO);
     }
 
@@ -524,11 +502,7 @@ mod tests {
             .insert(NpcTarget(Vec3::new(100.0, 0.0, 0.0)))
             .id();
         app.update();
-        let velocity = app
-            .world()
-            .get::<NpcVelocity>(entity)
-            .expect("velocity exists")
-            .0;
+        let velocity = app.world().get::<NpcVelocity>(entity).or_die().0;
         let config = *app.world().resource::<BoidsConfig>();
         let limit = config.max_acceleration() * TicksPerSecond::SIXTY.delta_seconds();
         assert!(
@@ -545,7 +519,7 @@ mod tests {
         params.weights.separation = 0.0;
         let config = BoidsConfig::default()
             .with_params(params)
-            .expect("valid params")
+            .or_die()
             .with_avoidance(avoidance);
         let mut app = App::new();
         app.add_plugins(BoidsPlugin::new(config));
@@ -564,28 +538,12 @@ mod tests {
         let mut closest = f32::MAX;
         for _ in 0..360 {
             app.update();
-            let left = app
-                .world()
-                .get::<Transform>(left)
-                .expect("transform")
-                .translation;
-            let right = app
-                .world()
-                .get::<Transform>(right)
-                .expect("transform")
-                .translation;
+            let left = app.world().get::<Transform>(left).or_die().translation;
+            let right = app.world().get::<Transform>(right).or_die().translation;
             closest = closest.min(left.distance(right));
         }
-        let left = app
-            .world()
-            .get::<Transform>(left)
-            .expect("transform")
-            .translation;
-        let right = app
-            .world()
-            .get::<Transform>(right)
-            .expect("transform")
-            .translation;
+        let left = app.world().get::<Transform>(left).or_die().translation;
+        let right = app.world().get::<Transform>(right).or_die().translation;
         (closest, left.x < right.x)
     }
 
@@ -612,7 +570,7 @@ mod tests {
         params.weights.separation = 0.0;
         let config = BoidsConfig::default()
             .with_params(params)
-            .expect("valid params")
+            .or_die()
             .with_avoidance(Some(AvoidanceParams::new()));
         let mut app = App::new();
         app.add_plugins(BoidsPlugin::new(config));
@@ -631,18 +589,8 @@ mod tests {
             .insert(NpcAvoidancePriority::new(1.0))
             .id();
         app.update();
-        let cart = app
-            .world()
-            .get::<NpcDesiredVelocity>(cart)
-            .expect("desired")
-            .0
-            .x;
-        let person = app
-            .world()
-            .get::<NpcDesiredVelocity>(person)
-            .expect("desired")
-            .0
-            .x;
+        let cart = app.world().get::<NpcDesiredVelocity>(cart).or_die().0.x;
+        let person = app.world().get::<NpcDesiredVelocity>(person).or_die().0.x;
         assert!(
             cart > -person,
             "the cart must keep more of its speed than the pedestrian: cart {cart}, person {person}"

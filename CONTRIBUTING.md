@@ -22,10 +22,14 @@ in the same commit as the manifest change. The reason is `docs/performance.md`:
 the timings published there are only reproducible against an exact dependency
 graph, so a silent resolution bump would quietly invalidate them.
 
-The lint profile (all + pedantic + nursery + cargo + perf) and its documented
-exceptions live in `Cargo.toml`. Do not add `#[allow]`; if a lint is genuinely
-wrong for this domain, argue for it in the `[lints.clippy]` table with a comment
-that explains why, so the exception is reviewable in one place.
+The lint profile (all + pedantic + nursery + cargo + perf, with `unwrap_used`,
+`expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and `suspicious`
+denied) lives in `Cargo.toml`, and `docs/lint-policy.md` says what each exception
+is for. Do not add `#[allow]`: a denied lint that reappears in a file is caught by
+`scripts/lint_audit.py`, which runs in CI and fails on any override that is not on
+its sanctioned list. If a lint is genuinely wrong for this domain, argue for it in
+the `[lints.clippy]` table with a comment that explains why, so the exception is
+reviewable in one place.
 
 ## The six rules
 

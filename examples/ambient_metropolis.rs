@@ -13,18 +13,6 @@
 
 // An example's job is to be read: it prints, it unwraps, and it keeps its setup next to
 // the thing it demonstrates rather than hoisting every constant to the top.
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::print_stdout,
-    clippy::print_stderr,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::missing_docs_in_private_items,
-    clippy::items_after_statements,
-    clippy::float_cmp
-)]
 use bevy_app::App;
 use bevy_flock::adapters::primary::dialogue::{Barks, NpcBarks};
 use bevy_flock::adapters::primary::observability::Diagnostics;
@@ -33,11 +21,12 @@ use bevy_flock::adapters::primary::render::RenderPlan;
 use bevy_flock::adapters::primary::world_director::{AmbientMood, CrowdDirector};
 use bevy_flock::behavior::bark::{BarkCategory, BarkRequest};
 use bevy_flock::prelude::*;
+use bevy_flock::testkit::OrDie;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
 fn main() {
-    let population = PopulationSize::try_new(600).expect("600 is valid");
+    let population = PopulationSize::try_new(600).or_die();
     let config = FlockConfig::default().with_population(population);
 
     let mut app = App::new();

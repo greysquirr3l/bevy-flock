@@ -8,15 +8,11 @@
 //! A scheduler that spent the whole frame deciding who thinks would be worse than no
 //! scheduler at all, so the planner is measured on its own.
 
-#![expect(
-    clippy::expect_used,
-    reason = "the fixture asserts the tree it just built"
-)]
-
 use bevy_flock::adapters::primary::cognition::ThinkSchedule;
 use bevy_flock::application::schedule::ThinkScheduler;
 use bevy_flock::domain::cost::VirtualCost;
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -112,7 +108,7 @@ fn world(count: u32, brains: bool) -> bevy_app::App {
             bevy_flock::behavior::tree::BehaviorTree::try_from_spec(
                 bevy_flock::behavior::tree::NodeSpec::Action(0),
             )
-            .expect("a leaf is a tree"),
+            .or_die(),
         );
         for id in 0..count {
             app.world_mut().spawn((

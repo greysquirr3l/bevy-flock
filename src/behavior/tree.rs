@@ -286,11 +286,6 @@ impl BehaviorTree {
     /// Returns [`TreeError::EmptyComposite`] for a composite with no children,
     /// [`TreeError::TooDeep`] beyond [`BehaviorTree::MAX_DEPTH`], and
     /// [`TreeError::TooManyChildren`] beyond [`BehaviorTree::MAX_CHILDREN`].
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "the spec is handed over rather than borrowed: a caller that has \
-                  finished describing a tree should not keep it alive"
-    )]
     pub fn try_from_spec(spec: NodeSpec) -> Result<Self, TreeError> {
         let mut builder = Builder {
             nodes: Vec::new(),
@@ -1009,10 +1004,11 @@ where
 mod tests {
     use super::*;
     use crate::behavior::blackboard::Value;
+    use crate::testkit::OrDie;
 
     /// Compile a tree for testing; a failure here is a broken fixture.
     fn tree(spec: NodeSpec) -> BehaviorTree {
-        BehaviorTree::try_from_spec(spec).expect("test tree is valid")
+        BehaviorTree::try_from_spec(spec).or_die()
     }
 
     /// Leaves: 0 = succeed, 1 = fail, 2 = run forever, 3 = run twice then
@@ -1508,7 +1504,7 @@ mod tests {
                 ]),
             ])",
         )
-        .expect("valid authored tree");
+        .or_die();
         let built = selector(vec![
             condition(3),
             sequence(vec![
@@ -1541,7 +1537,9 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn malformed_authored_trees_report_a_position() {
-        let error = NodeSpec::from_ron("Selector([Action(0)").expect_err("unbalanced");
+        use crate::testkit::OrDieErr;
+
+        let error = NodeSpec::from_ron("Selector([Action(0)").or_die_err();
         assert!(
             matches!(error, TreeError::MalformedSource { .. }),
             "{error:?}"

@@ -90,9 +90,7 @@ impl ObstacleFootprint {
         if high_x < 0.0 || high_z < 0.0 || low_x > last_x || low_z > last_z {
             return None;
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let (min_x, min_z) = (clamp_x(low_x) as u16, clamp_z(low_z) as u16);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let (max_x, max_z) = (clamp_x(high_x) as u16, clamp_z(high_z) as u16);
         let min = NavCell::new(min_x.min(max_x), min_z.min(max_z));
         let max = NavCell::new(min_x.max(max_x), min_z.max(max_z));
@@ -392,7 +390,6 @@ fn erode(walkable: &[bool], bounds: NavBounds, radius: u16) -> Vec<bool> {
                     if nx < 0 || nz < 0 || nx >= width as i32 || nz >= height as i32 {
                         continue;
                     }
-                    #[allow(clippy::cast_sign_loss)]
                     let index = nz as usize * width + nx as usize;
                     if let Some(cell) = out.get_mut(index) {
                         *cell = false;
@@ -409,23 +406,21 @@ mod tests {
     use super::*;
     use crate::domain::flow::{FlowTarget, solve};
     use crate::domain::nav::NavSource;
+    use crate::testkit::OrDie;
 
     fn config() -> ObstacleNavConfig {
-        ObstacleNavConfig::try_new(Vec3::ZERO, 40, 40, 1.0).expect("bounds")
+        ObstacleNavConfig::try_new(Vec3::ZERO, 40, 40, 1.0).or_die()
     }
 
     /// A wall down the middle of the grid with a gap at one end: the corridor case.
     fn wall_with_gap() -> Vec<ObstacleFootprint> {
-        vec![
-            ObstacleFootprint::new(Vec3::new(19.0, 0.0, 0.0), Vec3::new(21.0, 0.0, 30.0))
-                .expect("wall"),
-        ]
+        vec![ObstacleFootprint::new(Vec3::new(19.0, 0.0, 0.0), Vec3::new(21.0, 0.0, 30.0)).or_die()]
     }
 
     #[test]
     fn footprints_normalise_and_reject_degenerate_input() {
-        let forward = ObstacleFootprint::new(Vec3::ZERO, Vec3::new(2.0, 1.0, 3.0)).expect("box");
-        let backward = ObstacleFootprint::new(Vec3::new(2.0, 1.0, 3.0), Vec3::ZERO).expect("box");
+        let forward = ObstacleFootprint::new(Vec3::ZERO, Vec3::new(2.0, 1.0, 3.0)).or_die();
+        let backward = ObstacleFootprint::new(Vec3::new(2.0, 1.0, 3.0), Vec3::ZERO).or_die();
         assert_eq!(forward, backward);
         assert!(ObstacleFootprint::new(Vec3::ZERO, Vec3::new(0.0, 1.0, 3.0)).is_none());
     }
@@ -433,9 +428,9 @@ mod tests {
     #[test]
     fn a_footprint_maps_to_the_cells_it_covers() {
         let bounds = config().bounds;
-        let footprint = ObstacleFootprint::new(Vec3::new(1.0, 0.0, 2.0), Vec3::new(3.0, 0.0, 5.0))
-            .expect("box");
-        let (min, max) = footprint.cells(&bounds).expect("cells");
+        let footprint =
+            ObstacleFootprint::new(Vec3::new(1.0, 0.0, 2.0), Vec3::new(3.0, 0.0, 5.0)).or_die();
+        let (min, max) = footprint.cells(&bounds).or_die();
         assert_eq!((min.x, min.y, max.x, max.y), (1, 2, 2, 4));
     }
 
@@ -448,7 +443,7 @@ mod tests {
         assert_eq!(steps, 1, "a wall inside one budget is one step");
         assert_eq!(nav.version(), NavVersion::FIRST);
         assert_eq!(nav.rebuilds(), 1);
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         assert!(!source.is_walkable(NavCell::new(20, 10)), "the wall blocks");
         assert!(
             source.is_walkable(NavCell::new(20, 35)),
@@ -476,8 +471,7 @@ mod tests {
         let mut nav = ObstacleNav::new(config());
         let mut obstacles = wall_with_gap();
         obstacles.push(
-            ObstacleFootprint::new(Vec3::new(2.0, 0.0, 2.0), Vec3::new(4.0, 0.0, 4.0))
-                .expect("crate"),
+            ObstacleFootprint::new(Vec3::new(2.0, 0.0, 2.0), Vec3::new(4.0, 0.0, 4.0)).or_die(),
         );
         nav.request(&obstacles);
         nav.finish();
@@ -490,18 +484,16 @@ mod tests {
         let mut nav = ObstacleNav::new(config().with_budget(64));
         nav.request(&[]);
         nav.finish();
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         let open = solve(source, FlowTarget::at_cell(source, NavCell::new(35, 20)));
-        let open_cost = open.cost_at(NavCell::new(5, 20)).expect("open route");
+        let open_cost = open.cost_at(NavCell::new(5, 20)).or_die();
 
         nav.request(&wall_with_gap());
         nav.finish();
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         assert!(!source.is_walkable(NavCell::new(20, 10)), "the wall blocks");
         let field = solve(source, FlowTarget::at_cell(source, NavCell::new(35, 20)));
-        let detour = field
-            .cost_at(NavCell::new(5, 20))
-            .expect("the route through the gap survives the wall");
+        let detour = field.cost_at(NavCell::new(5, 20)).or_die();
         assert!(
             detour > open_cost,
             "the detour must cost more than the straight line: {detour} vs {open_cost}"
@@ -513,14 +505,14 @@ mod tests {
         let mut nav = ObstacleNav::new(config().with_budget(32));
         nav.request(&wall_with_gap());
         nav.finish();
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         // The gap is at the far end, so the straight line is blocked but a route exists.
         assert!(!source.is_walkable(NavCell::new(20, 10)));
         let _ = solve(source, FlowTarget::at_cell(source, NavCell::new(35, 20)));
 
         nav.request(&[]);
         nav.finish();
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         assert!(source.is_walkable(NavCell::new(20, 10)), "the wall is gone");
         let field = solve(source, FlowTarget::at_cell(source, NavCell::new(35, 20)));
         assert!(
@@ -540,7 +532,7 @@ mod tests {
         for _ in 0..10 {
             let progress = nav.step();
             assert!(progress.is_staging());
-            let source = nav.source().expect("the old source stays readable");
+            let source = nav.source().or_die();
             assert!(
                 source.is_walkable(NavCell::new(20, 10)),
                 "a staged wall must not be visible"
@@ -549,11 +541,7 @@ mod tests {
         }
         let steps = nav.finish();
         assert!(steps > 1, "the rebuild really was staged");
-        assert!(
-            !nav.source()
-                .expect("published")
-                .is_walkable(NavCell::new(20, 10))
-        );
+        assert!(!nav.source().or_die().is_walkable(NavCell::new(20, 10)));
         assert_eq!(nav.version(), before.next());
     }
 
@@ -562,7 +550,7 @@ mod tests {
         let mut nav = ObstacleNav::new(config().with_erosion(2));
         nav.request(&wall_with_gap());
         nav.finish();
-        let source = nav.source().expect("published");
+        let source = nav.source().or_die();
         assert!(!source.is_walkable(NavCell::new(20, 10)), "still blocked");
         assert!(
             !source.is_walkable(NavCell::new(22, 10)),
@@ -579,11 +567,9 @@ mod tests {
             let steps = nav.finish();
             let cells: Vec<bool> = (0..40 * 40)
                 .map(|index| {
-                    let x = u16::try_from(index % 40).expect("x");
-                    let z = u16::try_from(index / 40).expect("z");
-                    nav.source()
-                        .expect("published")
-                        .is_walkable(NavCell::new(x, z))
+                    let x = u16::try_from(index % 40).or_die();
+                    let z = u16::try_from(index / 40).or_die();
+                    nav.source().or_die().is_walkable(NavCell::new(x, z))
                 })
                 .collect();
             (steps, cells)

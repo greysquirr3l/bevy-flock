@@ -263,7 +263,7 @@ pub fn register(app: &mut App, config: MemoryConfig, capacity: u32, subjects: u1
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use crate::testkit::OrDie;
 
     use super::*;
     use crate::behavior::blackboard::Blackboard;
@@ -277,7 +277,7 @@ mod tests {
         let mut app = App::new();
         let mut store = MemoryStore::new(8, 4);
         // One NPC already remembers player 0 warmly; the rest are strangers.
-        let index = store.enrol(NpcId::unique(1)).expect("row");
+        let index = store.enrol(NpcId::unique(1)).or_die();
         for _ in 0..30 {
             store.remember(
                 index,
@@ -362,11 +362,7 @@ mod tests {
         // is what tells the bridge the row exists.
         let entity = spawn_enrolled(&mut app, 1, MemoryIndex::new(0), Some(1.0));
         app.update();
-        let board = app
-            .world()
-            .entity(entity)
-            .get::<NpcBlackboard>()
-            .expect("board");
+        let board = app.world().entity(entity).get::<NpcBlackboard>().or_die();
         // Thirty conversations at eight familiarity each, with no decay elapsed.
         assert_eq!(
             board.0.get(KEY_MEMORY_FAMILIARITY),
@@ -387,11 +383,7 @@ mod tests {
         let mut app = app(MemoryConfig::default());
         let entity = spawn_npc(&mut app, 99, Some(1.0));
         app.update();
-        let board = app
-            .world()
-            .entity(entity)
-            .get::<NpcBlackboard>()
-            .expect("board");
+        let board = app.world().entity(entity).get::<NpcBlackboard>().or_die();
         assert_eq!(board.0.get(KEY_MEMORY_FAMILIARITY), None);
     }
 
@@ -404,7 +396,7 @@ mod tests {
             app.world()
                 .entity(entity)
                 .get::<NpcBlackboard>()
-                .expect("board")
+                .or_die()
                 .0
                 .get(KEY_MEMORY_FAMILIARITY)
                 .is_some()
@@ -414,15 +406,11 @@ mod tests {
         {
             let world = app.world_mut();
             let mut entity_mut = world.entity_mut(entity);
-            let mut board = entity_mut.get_mut::<NpcBlackboard>().expect("board");
+            let mut board = entity_mut.get_mut::<NpcBlackboard>().or_die();
             let _ = board.0.remove(KEY_PLAYER_SEEN);
         }
         app.update();
-        let board = app
-            .world()
-            .entity(entity)
-            .get::<NpcBlackboard>()
-            .expect("board");
+        let board = app.world().entity(entity).get::<NpcBlackboard>().or_die();
         assert_eq!(board.0.get(KEY_MEMORY_FAMILIARITY), None);
         assert!(app.world().resource::<MemoryBridgeStats>().cleared >= 1);
     }

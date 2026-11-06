@@ -5,13 +5,9 @@
 //! works, ten thousand works, recycled pools reuse identities, and the same seed
 //! produces the same people.
 
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
-
 use bevy_app::App;
 use bevy_flock::prelude::*;
+use bevy_flock::testkit::OrDie;
 
 fn app_with(population: usize, mode: PopulationMode) -> App {
     let mut app = App::new();
@@ -75,7 +71,7 @@ fn the_same_seed_produces_the_same_crowd() {
 
 #[test]
 fn recycled_pool_reuses_slot_identities() {
-    let mode = PopulationMode::Recycled(SlotCount::try_new(64).expect("64 is non-zero"));
+    let mode = PopulationMode::Recycled(SlotCount::try_new(64).or_die());
     let app = app_with(64, mode);
     assert_eq!(app.flock_stats().population(), 64);
 

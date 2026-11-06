@@ -96,7 +96,6 @@ impl SpatialGridConfig {
             min,
             max,
             cell_size,
-            #[allow(clippy::cast_possible_truncation)]
             max_cells: DEFAULT_MAX_CELLS as u32,
         })
     }
@@ -131,7 +130,6 @@ impl Default for SpatialGridConfig {
             min: Vec3::splat(-500.0),
             max: Vec3::splat(500.0),
             cell_size: 4.0,
-            #[allow(clippy::cast_possible_truncation)]
             max_cells: DEFAULT_MAX_CELLS as u32,
         }
     }
@@ -412,7 +410,8 @@ impl SpatialGrid {
         for z in bounds.min_z..=bounds.max_z {
             for y in bounds.min_y..=bounds.max_y {
                 for x in bounds.min_x..=bounds.max_x {
-                    let cell = ((z * self.dims[1] as i64 + y) * self.dims[0] as i64 + x) as u32;
+                    let cell =
+                        ((z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x) as u32;
                     for index in self.cell_window(cell) {
                         let Some(entry) = self.entries.get(*index as usize) else {
                             continue;
@@ -459,13 +458,14 @@ impl SpatialGrid {
                         if x < 0
                             || y < 0
                             || z < 0
-                            || x >= self.dims[0] as i64
-                            || y >= self.dims[1] as i64
-                            || z >= self.dims[2] as i64
+                            || x >= i64::from(self.dims[0])
+                            || y >= i64::from(self.dims[1])
+                            || z >= i64::from(self.dims[2])
                         {
                             continue;
                         }
-                        let cell = ((z * self.dims[1] as i64 + y) * self.dims[0] as i64 + x) as u32;
+                        let cell = ((z * i64::from(self.dims[1]) + y) * i64::from(self.dims[0]) + x)
+                            as u32;
                         for index in self.cell_window(cell) {
                             let Some(entry) = self.entries.get(*index as usize) else {
                                 continue;
@@ -504,7 +504,7 @@ impl SpatialGrid {
         let cy = local.y.floor() as i64;
         let cz = local.z.floor() as i64;
         let clamp_axis = |value: i64, axis: usize| {
-            let max = self.dims.get(axis).copied().unwrap_or(1) as i64 - 1;
+            let max = i64::from(self.dims.get(axis).copied().unwrap_or(1)) - 1;
             value.clamp(0, max)
         };
         CellBounds {
@@ -546,14 +546,15 @@ fn clamp_axis(value: f32, cells: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     #[test]
     fn a_larger_budget_keeps_a_finer_cell() {
         // ADR 0031: the default budget coarsens a 1 km volume to 13.5 m because 9 m needs 1.4M
         // cells. Raising the budget is what lets the finer cell survive.
-        let coarse = SpatialGridConfig::try_new(Vec3::splat(-500.0), Vec3::splat(500.0), 9.0)
-            .expect("valid volume");
-        let grid = SpatialGrid::new(coarse).expect("grid");
+        let coarse =
+            SpatialGridConfig::try_new(Vec3::splat(-500.0), Vec3::splat(500.0), 9.0).or_die();
+        let grid = SpatialGrid::new(coarse).or_die();
         assert!(
             (grid.effective_cell_size() - 13.5).abs() < 0.01,
             "the default budget should coarsen 9 m to 13.5 m, got {}",
@@ -561,7 +562,7 @@ mod tests {
         );
 
         let fine = coarse.with_cell_budget(1 << 21);
-        let grid = SpatialGrid::new(fine).expect("grid");
+        let grid = SpatialGrid::new(fine).or_die();
         assert!(
             (grid.effective_cell_size() - 9.0).abs() < 0.01,
             "2^21 cells should keep 9 m, got {}",
@@ -572,7 +573,7 @@ mod tests {
     #[test]
     fn a_small_budget_coarsens_instead_of_failing() {
         let config = SpatialGridConfig::default().with_cell_budget(64);
-        let grid = SpatialGrid::new(config).expect("grid");
+        let grid = SpatialGrid::new(config).or_die();
         let dims = grid.dims();
         assert!(u64::from(dims[0]) * u64::from(dims[1]) * u64::from(dims[2]) <= 64);
     }
@@ -581,7 +582,7 @@ mod tests {
     use crate::domain::rng::RngStream;
 
     fn grid() -> SpatialGrid {
-        SpatialGrid::new(SpatialGridConfig::default()).expect("default config is valid")
+        SpatialGrid::new(SpatialGridConfig::default()).or_die()
     }
 
     fn brute_force(entries: &[GridEntry], centre: Vec3, radius: f32) -> Vec<Neighbour> {
@@ -761,9 +762,9 @@ mod tests {
         // The regression that made the first version unusable: a 10 km cube with
         // 2 m cells is 125 billion cells. The grid must coarsen to fit its budget
         // rather than trying to allocate the volume.
-        let config = SpatialGridConfig::try_new(Vec3::splat(-5_000.0), Vec3::splat(5_000.0), 2.0)
-            .expect("valid");
-        let grid = SpatialGrid::new(config).expect("coarsening produces a valid grid");
+        let config =
+            SpatialGridConfig::try_new(Vec3::splat(-5_000.0), Vec3::splat(5_000.0), 2.0).or_die();
+        let grid = SpatialGrid::new(config).or_die();
         assert!(grid.cell_count() as u64 <= DEFAULT_MAX_CELLS);
         assert!(
             grid.effective_cell_size() > config.cell_size,

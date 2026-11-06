@@ -194,6 +194,7 @@ mod tests {
     use super::*;
     use crate::adapters::primary::components::Npc;
     use crate::adapters::primary::plugin::{FlockConfig, FlockPlugin};
+    use crate::testkit::OrDie;
     use bevy_app::{App, Update};
 
     fn app() -> App {
@@ -213,11 +214,11 @@ mod tests {
             .world_mut()
             .resource_mut::<Groups>()
             .create(leader, Formation::Ring)
-            .expect("group");
+            .or_die();
         app.world_mut()
             .resource_mut::<Groups>()
             .join(group, member)
-            .expect("join");
+            .or_die();
 
         let leader_entity = app
             .world_mut()
@@ -261,11 +262,11 @@ mod tests {
             .world_mut()
             .resource_mut::<Groups>()
             .create(leader, Formation::Ring)
-            .expect("group");
+            .or_die();
         app.world_mut()
             .resource_mut::<Groups>()
             .join(group, member)
-            .expect("join");
+            .or_die();
         let leader_entity = app
             .world_mut()
             .spawn((Npc(leader), GroupMember(group), GroupLeader(group)))
@@ -293,11 +294,11 @@ mod tests {
             .world_mut()
             .resource_mut::<Groups>()
             .create(leader, Formation::Free)
-            .expect("group");
+            .or_die();
         app.world_mut()
             .resource_mut::<Groups>()
             .join(group, member)
-            .expect("join");
+            .or_die();
         app.add_systems(Update, assign_formation_slots);
         let _leader_entity = app
             .world_mut()

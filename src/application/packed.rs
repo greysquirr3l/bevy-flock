@@ -15,15 +15,15 @@
 //! keeping the kernel pure is what makes it testable without a world and benchmarkable at
 //! a population no ECS would survive.
 
+// 44 of this module's index expressions trip `indexing_slicing`. Every one is bounded by a length
+// check made earlier in the same function (`pack.len()`, `bucket_ranges.len() - 1`), and converting
+// them would put an unreachable arm inside every inner loop of the kernel — the one place where the
+// compiler's proof of the bound is worth more than the lint. The removal is `kernel-bounds-checks`
+// in `plan.toml`, and it has to come with a re-run of `benches/crowd.rs`.
 #![expect(
     clippy::indexing_slicing,
-    reason = "every index is bounded by the pack's own length checks in the same function"
-)]
-#![expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    reason = "grid coordinates and agent counts are bounded far below 2^53 and validated"
+    reason = "44 sites, each bounded by a length check in the same function; removing them is a \
+              measured kernel change, tracked in plan.toml"
 )]
 
 use core::f32::consts::TAU;
@@ -718,6 +718,7 @@ pub fn scatter(count: usize, extent: f32, params: &mut Pack) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
 
     fn params() -> SteerParams {
         SteerParams {
@@ -735,8 +736,8 @@ mod tests {
         pack.push([10.5, 10.0], [0.0, 0.0]);
         let report = pack.steer(&params());
         assert_eq!(report.steered, 2);
-        let left = pack.desired(0).expect("index 0");
-        let right = pack.desired(1).expect("index 1");
+        let left = pack.desired(0).or_die();
+        let right = pack.desired(1).or_die();
         // Coincident-with-separation: the pair must move away from each other along x.
         assert!(
             left[0] < 0.0,
@@ -756,7 +757,7 @@ mod tests {
         }
         pack.push([10.0, 11.0], [0.0, 1.0]);
         pack.steer(&params());
-        let straggler = pack.desired(3).expect("index 3");
+        let straggler = pack.desired(3).or_die();
         assert!(
             straggler[0] > 0.0,
             "alignment should add eastward speed: {straggler:?}"
@@ -799,8 +800,8 @@ mod tests {
                 if i == j {
                     continue;
                 }
-                let a = pack.position(i).expect("in range");
-                let b = pack.position(j).expect("in range");
+                let a = pack.position(i).or_die();
+                let b = pack.position(j).or_die();
                 if (a[0] - b[0]).hypot(a[1] - b[1]) <= 8.0 {
                     brute += 1;
                 }
@@ -816,7 +817,7 @@ mod tests {
         pack.steer(&params());
         // Force a fast desired velocity by hand through the public path.
         pack.integrate(3.0);
-        let velocity = pack.velocity(0).expect("index 0");
+        let velocity = pack.velocity(0).or_die();
         let speed = velocity[0].hypot(velocity[1]);
         assert!(speed <= 3.0 + 1e-3, "speed {speed} exceeded the limit");
     }

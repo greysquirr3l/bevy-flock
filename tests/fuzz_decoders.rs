@@ -13,19 +13,7 @@
 //! The assertion is always the same: `Err`, or a value that survives re-encoding. A panic
 //! fails the test by unwinding; a hang fails it by timeout. Nothing here checks *which*
 //! error, because a decoder is allowed to be conservative.
-#![expect(
-    clippy::expect_used,
-    reason = "the fixtures are built here and cannot be absent"
-)]
 #![cfg(feature = "memory")]
-// This file is about corrupting bytes at chosen offsets; every index below is bounded by
-// the fixture's length by construction, and the panic-on-slice lint would force a
-// `get(..).expect()` at each site for no extra safety.
-#![allow(
-    clippy::indexing_slicing,
-    clippy::redundant_clone,
-    reason = "the corruption loop indexes a buffer whose length it just measured"
-)]
 
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{Encounter, EncounterKind, MemoryArchive, MemoryStore};
@@ -33,6 +21,7 @@ use bevy_flock::domain::saves::{
     MemorySnapshot, SubjectEntry, SubjectKey, SubjectKind, SubjectRegistry,
 };
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 
 /// A small but structurally complete archive: registry, rows, trailer.
 fn fixture() -> Vec<u8> {
@@ -46,13 +35,13 @@ fn fixture() -> Vec<u8> {
     }
     let mut store = MemoryStore::new(32, 8);
     for npc in 0..12_u32 {
-        let index = store.enrol(NpcId::unique(npc)).expect("a row");
+        let index = store.enrol(NpcId::unique(npc)).or_die();
         for subject in 0..3_u16 {
             let _ = store.remember(
                 index,
                 bevy_flock::domain::memory::SubjectId::new(subject),
                 &Encounter::new(EncounterKind::Spoke, Tick::new(u64::from(npc)))
-                    .with_valence(120 - i16::try_from(npc).expect("small")),
+                    .with_valence(120 - i16::try_from(npc).or_die()),
             );
         }
     }
@@ -82,7 +71,10 @@ fn every_truncation_is_an_error_not_a_panic() {
     let bytes = fixture();
     let mut accepted = 0;
     for cut in 0..bytes.len() {
-        if must_not_panic(&bytes[..cut]) {
+        let Some(prefix) = bytes.get(..cut) else {
+            unreachable!("the loop bound is the buffer's own length");
+        };
+        if must_not_panic(prefix) {
             accepted += 1;
         }
     }
@@ -99,7 +91,9 @@ fn single_bit_flips_never_panic_and_usually_fail_the_checksum() {
     for position in (0..bytes.len()).step_by(3) {
         for bit in [0_u8, 3, 7] {
             let mut mutated = bytes.clone();
-            mutated[position] ^= 1 << bit;
+            if let Some(byte) = mutated.get_mut(position) {
+                *byte ^= 1 << bit;
+            }
             if must_not_panic(&mutated) {
                 decoded += 1;
             }
@@ -118,11 +112,15 @@ fn a_valid_body_with_a_lying_header_fails_closed() {
     let bytes = fixture();
     // The magic is the first four bytes; anything else must not be mistaken for a save.
     let mut wrong_magic = bytes.clone();
-    wrong_magic[0] ^= 0xFF;
+    if let Some(first) = wrong_magic.first_mut() {
+        *first ^= 0xFF;
+    }
     assert!(!must_not_panic(&wrong_magic));
     // The version is next; a future version must be refused rather than misread.
-    let mut wrong_version = bytes.clone();
-    wrong_version[4] = wrong_version[4].wrapping_add(9);
+    let mut wrong_version = bytes;
+    if let Some(version) = wrong_version.get_mut(4) {
+        *version = version.wrapping_add(9);
+    }
     assert!(!must_not_panic(&wrong_version));
 }
 
@@ -131,13 +129,13 @@ fn random_bytes_are_rejected_quickly() {
     // Deterministic pseudo-random noise, so a failure is reproducible.
     let mut state = 0x5EED_1234_ABCD_0001_u64;
     for _ in 0..512 {
-        let len = usize::try_from(state % 96).expect("small");
+        let len = usize::try_from(state % 96).or_die();
         let mut bytes = Vec::with_capacity(len);
         for _ in 0..len {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            bytes.push(u8::try_from(state & 0xFF).expect("a byte"));
+            bytes.push(u8::try_from(state & 0xFF).or_die());
         }
         assert!(!must_not_panic(&bytes), "noise decoded as a save");
     }

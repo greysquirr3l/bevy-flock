@@ -134,7 +134,6 @@ impl Stimulus {
             return 0.0;
         }
         let distance_falloff = 1.0 - (distance / self.radius);
-        #[allow(clippy::cast_precision_loss)]
         let age_falloff = 1.0 - (self.age(now) as f32 / self.ttl.max(1) as f32);
         (self.intensity * distance_falloff * age_falloff).clamp(0.0, 1.0)
     }
@@ -400,6 +399,73 @@ pub struct Perceived {
 ///
 /// # Panics
 ///
+/// Test one record against one observer and keep it if it wins a slot.
+///
+/// A macro rather than a function, so the linear and the indexed path share *one* predicate set
+/// without a call between them: this runs once per record per observer, two million times in the
+/// dense benchmark, and as a function it measured 30% slower because the optimiser declined to
+/// inline it at that size. A macro cannot drift the way a copy can, and it needs no
+/// `#[inline(always)]` to be free.
+///
+/// Every predicate lives here and only here: an index decides which records reach it, never what
+/// it answers.
+macro_rules! consider {
+    ($stimulus:expr, $observer:expr, $forward:expr, $now:expr, $query:expr, $occluder:expr, $found:expr) => {{
+        'record: {
+
+        if !$stimulus.is_live($now) || $query.max_results == 0 {
+                break 'record;
+        }
+        let limit = match $stimulus.kind {
+            StimulusKind::Sight => $query.sight_radius.min($stimulus.radius),
+            _ => $query.hearing_radius.min($stimulus.radius),
+        };
+        // Squared first: most records in a full buffer are out of range, and a comparison saves the
+        // square root for the ones that are not.
+        let distance_squared = ($stimulus.position - $observer).length_squared();
+        if distance_squared > limit * limit {
+                break 'record;
+        }
+        let distance = distance_squared.sqrt();
+        if $stimulus.kind.uses_field_of_view() && $query.field_of_view > -1.0 {
+            // The cone test without a normalize: comparing the dot against `cos * |offset|` is the
+            // same predicate, and saves a square root and a divide per record per $observer.
+            let offset = $stimulus.position - $observer;
+            if $forward.dot(offset) < $query.field_of_view * distance {
+                    break 'record;
+            }
+        }
+        if $stimulus.kind.is_occluded() && $occluder.blocks($observer, $stimulus.position) {
+                break 'record;
+        }
+        let strength = $stimulus.strength_at_distance(distance, $now);
+        if strength <= 0.0 {
+                break 'record;
+        }
+        let candidate = Perceived {
+            kind: $stimulus.kind,
+            position: $stimulus.position,
+            distance,
+            strength,
+        };
+        // Bounded insertion rather than collect-then-sort: `max_results` is six by default, and a
+        // dense buffer can put thousands of records inside the hearing radius. Keeping the best few
+        // as we go costs one comparison per slot and no allocation, where sorting everything cost a
+        // sort per $observer and a growth of the result vector the caller never sees.
+        let slot = $found.partition_point(|existing| ranks(existing, &candidate) == Ordering::Less);
+        if slot >= $query.max_results {
+                break 'record;
+        }
+        if $found.len() == $query.max_results {
+            $found.pop();
+        }
+        $found.insert(slot, candidate);
+        }
+    }};
+}
+
+/// # Panics
+///
 /// Never: the result is bounded by `query.max_results` and every slot is written through a
 /// checked path.
 #[must_use]
@@ -417,8 +483,8 @@ pub fn perceive(
     }
     let forward = forward.normalize_or_zero();
     for stimulus in buffer.iter() {
-        consider(
-            stimulus, observer, forward, now, query, occluder, &mut found,
+        consider!(
+            stimulus, observer, forward, now, query, occluder, &mut found
         );
     }
     found
@@ -451,8 +517,8 @@ pub fn perceive_indexed(
     let mut found = SmallVec::<[Perceived; 8]>::new();
     let forward = forward.normalize_or_zero();
     index.for_each_candidate(observer, query.max_limit(), |stimulus| {
-        consider(
-            stimulus, observer, forward, now, query, occluder, &mut found,
+        consider!(
+            stimulus, observer, forward, now, query, occluder, &mut found
         );
     });
     found
@@ -796,78 +862,6 @@ fn buffer_reaches(buffer: &StimulusBuffer, observer: Vec3, reach: f32) -> bool {
         .abs_diff_eq(observer, 1.0e-4)
 }
 
-/// Test one record against one observer and keep it if it wins a slot.
-///
-/// `#[inline(always)]`: this runs once per record per observer — two million times in the dense
-/// benchmark — and the extraction that let the linear and indexed paths share it cost 30% at those
-/// counts while it was a real call.
-///
-/// Every predicate lives here and only here, so the linear and indexed paths cannot drift apart:
-/// an index decides which records reach this function, never what it answers.
-#[expect(
-    clippy::inline_always,
-    reason = "two million calls per pass: measured 30% slower without forced inlining, and the \
-              body is the shared predicate set the indexed path must not duplicate"
-)]
-#[inline(always)]
-fn consider(
-    stimulus: &Stimulus,
-    observer: Vec3,
-    forward: Vec3,
-    now: Tick,
-    query: &PerceptionQuery,
-    occluder: &dyn Occluder,
-    found: &mut SmallVec<[Perceived; 8]>,
-) {
-    if !stimulus.is_live(now) || query.max_results == 0 {
-        return;
-    }
-    let limit = match stimulus.kind {
-        StimulusKind::Sight => query.sight_radius.min(stimulus.radius),
-        _ => query.hearing_radius.min(stimulus.radius),
-    };
-    // Squared first: most records in a full buffer are out of range, and a comparison saves the
-    // square root for the ones that are not.
-    let distance_squared = (stimulus.position - observer).length_squared();
-    if distance_squared > limit * limit {
-        return;
-    }
-    let distance = distance_squared.sqrt();
-    if stimulus.kind.uses_field_of_view() && query.field_of_view > -1.0 {
-        // The cone test without a normalize: comparing the dot against `cos * |offset|` is the
-        // same predicate, and saves a square root and a divide per record per observer.
-        let offset = stimulus.position - observer;
-        if forward.dot(offset) < query.field_of_view * distance {
-            return;
-        }
-    }
-    if stimulus.kind.is_occluded() && occluder.blocks(observer, stimulus.position) {
-        return;
-    }
-    let strength = stimulus.strength_at_distance(distance, now);
-    if strength <= 0.0 {
-        return;
-    }
-    let candidate = Perceived {
-        kind: stimulus.kind,
-        position: stimulus.position,
-        distance,
-        strength,
-    };
-    // Bounded insertion rather than collect-then-sort: `max_results` is six by default, and a
-    // dense buffer can put thousands of records inside the hearing radius. Keeping the best few
-    // as we go costs one comparison per slot and no allocation, where sorting everything cost a
-    // sort per observer and a growth of the result vector the caller never sees.
-    let slot = found.partition_point(|existing| ranks(existing, &candidate) == Ordering::Less);
-    if slot >= query.max_results {
-        return;
-    }
-    if found.len() == query.max_results {
-        found.pop();
-    }
-    found.insert(slot, candidate);
-}
-
 /// The order an observer notices things in: strongest first, then nearest, then by kind and
 /// position.
 ///
@@ -888,13 +882,14 @@ fn ranks(a: &Perceived, b: &Perceived) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{GetOrDie, OrDie};
 
     fn at(x: f32, z: f32) -> Vec3 {
         Vec3::new(x, 0.0, z)
     }
 
     fn buffer(count: usize) -> StimulusBuffer {
-        StimulusBuffer::new(count).expect("buffer")
+        StimulusBuffer::new(count).or_die()
     }
 
     /// A wall at `x = 5` that only blocks sight.
@@ -949,8 +944,8 @@ mod tests {
             &OpenAir,
         );
         assert_eq!(heard.len(), 1);
-        assert_eq!(heard[0].kind, StimulusKind::Sound);
-        assert!(heard[0].strength > 0.0 && heard[0].strength < 1.0);
+        assert_eq!(heard.at(0).kind, StimulusKind::Sound);
+        assert!(heard.at(0).strength > 0.0 && heard.at(0).strength < 1.0);
     }
 
     #[test]
@@ -970,7 +965,7 @@ mod tests {
             Stimulus::new(StimulusKind::Sight, at(0.0, 5.0), 30.0, 1.0, Tick::ZERO).with_ttl(10),
         );
         let later = Tick::new(11);
-        assert!(!buffer.iter().next().expect("record").is_live(later));
+        assert!(!buffer.iter().next().or_die().is_live(later));
         let seen = perceive(
             &buffer,
             Vec3::ZERO,
@@ -1010,7 +1005,7 @@ mod tests {
             &HalfWall,
         );
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].kind, StimulusKind::Sound);
+        assert_eq!(seen.at(0).kind, StimulusKind::Sound);
     }
 
     #[test]
@@ -1040,8 +1035,8 @@ mod tests {
         let query = PerceptionQuery::new().with_max_results(2);
         let seen = perceive(&buffer, Vec3::ZERO, Vec3::Z, Tick::ZERO, &query, &OpenAir);
         assert_eq!(seen.len(), 2);
-        assert_eq!(seen[0].distance, 5.0);
-        assert_eq!(seen[1].distance, 15.0);
+        assert_eq!(seen.at(0).distance, 5.0);
+        assert_eq!(seen.at(1).distance, 15.0);
     }
 
     #[test]
@@ -1075,7 +1070,7 @@ mod tests {
             .collect();
         all.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.total_cmp(&b.1)));
         for (index, perceived) in seen.iter().enumerate() {
-            let (strength, _) = all.get(index).copied().expect("enough records");
+            let (strength, _) = all.get(index).copied().or_die();
             assert!(
                 (perceived.strength - strength).abs() < 1e-6,
                 "slot {index}: kept {} but the reference has {strength}",
@@ -1124,7 +1119,6 @@ mod tests {
     fn perception_is_deterministic() {
         let mut buffer = buffer(16);
         for index in 0..16 {
-            #[allow(clippy::cast_precision_loss)]
             let x = index as f32 * 0.5;
             buffer.push(Stimulus::new(
                 StimulusKind::Sight,
@@ -1170,7 +1164,6 @@ mod tests {
             };
             let radius = 2.0 + lcg(&mut state) * 40.0;
             let intensity = 0.2 + lcg(&mut state) * 0.8;
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let emitted = Tick::new((lcg(&mut state) * 5.0) as u64);
             buffer.push(Stimulus::new(kind, at(x, z), radius, intensity, emitted));
         }
@@ -1229,9 +1222,9 @@ mod tests {
     fn the_index_agrees_when_records_were_pushed_in_another_order() {
         // Two buffers with the same records published in different orders must agree, and both
         // must agree with the linear path. This is what makes the total order load-bearing.
-        let forward = StimulusBuffer::new(64).expect("buffer");
+        let forward = StimulusBuffer::new(64).or_die();
         let mut forwards = forward;
-        let mut backwards = StimulusBuffer::new(64).expect("buffer");
+        let mut backwards = StimulusBuffer::new(64).or_die();
         let records: std::vec::Vec<Stimulus> = (0..40_u8)
             .map(|index| {
                 let x = f32::from(index) * 1.5 - 30.0;

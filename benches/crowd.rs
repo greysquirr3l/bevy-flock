@@ -12,11 +12,7 @@
 //! Everything runs headless (`App::new()` with no plugins beyond ours), so the
 //! numbers describe the simulation and not the GPU.
 
-#![expect(
-    clippy::expect_used,
-    reason = "benchmark setup asserts its own fixtures"
-)]
-
+use bevy_flock::testkit::OrDie;
 use std::hint::black_box;
 
 use bevy_app::App;
@@ -58,7 +54,7 @@ fn crowd_on(size: usize, road: Option<SteeringRoad>) -> App {
 
 fn random_grid(size: usize) -> SpatialGrid {
     let mut rng = RngStream::new(SimSeed::new(7), 7);
-    let mut grid = SpatialGrid::new(SpatialGridConfig::default()).expect("default config is valid");
+    let mut grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     for index in 0..size {
         grid.insert(GridEntry {
             id: NpcId::unique(index as u32),
@@ -186,7 +182,7 @@ fn bench_steering(c: &mut Criterion) {
 /// The kernel on its own, planar and volumetric, so ADR 0029's scalar/SIMD comparison is measured
 /// on the same crowd rather than inferred from two different harnesses.
 fn bench_kernel(c: &mut Criterion) {
-    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     let params = CrowdParams::from_steering(&SteeringParams::human_scale());
     let mut group = c.benchmark_group("crowd_kernel");
     group.throughput(Throughput::Elements(10_000));
@@ -237,7 +233,7 @@ fn bench_kernel(c: &mut Criterion) {
 /// second spatial query. Ten samples at both sizes, because criterion refuses fewer.
 fn bench_avoidance(c: &mut Criterion) {
     let mut group = c.benchmark_group("crowd_avoidance");
-    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     let params = CrowdParams::from_steering(&SteeringParams::human_scale());
     let avoidance = AvoidanceParams::new();
     for size in [10_000_usize, 100_000] {
@@ -246,7 +242,7 @@ fn bench_avoidance(c: &mut Criterion) {
         let mut crowd = Crowd::default();
         crowd.configure_from_grid(&grid);
         crowd.begin();
-        for index in 0..u32::try_from(size).expect("bench sizes fit in u32") {
+        for index in 0..u32::try_from(size).or_die() {
             let step = index as f32;
             let ring = 1.6 * libm::sqrtf(step);
             let angle = step * 2.399_963_2;
@@ -291,26 +287,30 @@ fn bench_avoidance(c: &mut Criterion) {
 /// Audiences are read-only, so this measures the pass a game would pay at a mid-band cadence:
 /// 512 observers against a full 4,096-record buffer in two densities, the same through the bucket
 /// index, the index rebuild itself, and a 64x64 obstacle rebuild with 32 obstacles.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one function per measured area keeps the report readable; splitting it would \
-              duplicate the fixture"
-)]
-fn bench_perception(c: &mut Criterion) {
-    use bevy_flock::domain::obstacle_nav::{ObstacleFootprint, ObstacleNav, ObstacleNavConfig};
+/// The fixtures every perception case shares: two densities of the same 4,096 records, an index
+/// over each, and the query.
+struct PerceptionFixtures {
+    /// Records clustered inside 40 m.
+    buffer: bevy_flock::domain::stimulus::StimulusBuffer,
+    /// The same records spread over 400 m.
+    spread: bevy_flock::domain::stimulus::StimulusBuffer,
+    /// The index over `buffer`.
+    index: bevy_flock::domain::stimulus::StimulusIndex,
+    /// The index over `spread`.
+    spread_index: bevy_flock::domain::stimulus::StimulusIndex,
+    /// The query both paths run.
+    query: bevy_flock::domain::stimulus::PerceptionQuery,
+}
+
+fn perception_fixtures() -> PerceptionFixtures {
     use bevy_flock::domain::stimulus::{
-        OpenAir, PerceptionQuery, Stimulus, StimulusBuffer, StimulusIndex, StimulusKind, perceive,
-        perceive_indexed,
+        PerceptionQuery, Stimulus, StimulusBuffer, StimulusIndex, StimulusKind,
     };
     use bevy_flock::domain::tick::Tick;
     use bevy_math::Vec3;
 
-    let mut group = c.benchmark_group("perception");
-    group.sample_size(20);
-
-    let mut buffer = StimulusBuffer::new(4_096).expect("buffer");
+    let mut buffer = StimulusBuffer::new(4_096).or_die();
     for index in 0..4_096_u32 {
-        #[allow(clippy::cast_precision_loss)]
         let angle = index as f32 * 0.37;
         let radius = 2.0 + (index % 40) as f32;
         buffer.push(Stimulus::new(
@@ -327,25 +327,47 @@ fn bench_perception(c: &mut Criterion) {
     }
     // The same records over 400 m instead of 40: almost nothing is in range, and a linear scan
     // cannot tell. This is the measurement that says the cost is spatial-blind.
-    let mut spread = StimulusBuffer::new(4_096).expect("buffer");
+    let mut spread = StimulusBuffer::new(4_096).or_die();
     for record in buffer.iter() {
         spread.push(Stimulus {
             position: record.position * 10.0,
             ..*record
         });
     }
-    let query = PerceptionQuery::new();
-
     let mut index = StimulusIndex::new();
     index.rebuild(&buffer, Tick::ZERO, 22.5);
     let mut spread_index = StimulusIndex::new();
     spread_index.rebuild(&spread, Tick::ZERO, 22.5);
+    PerceptionFixtures {
+        buffer,
+        spread,
+        index,
+        spread_index,
+        query: PerceptionQuery::new(),
+    }
+}
 
+fn bench_perception(c: &mut Criterion) {
+    use bevy_flock::domain::obstacle_nav::{ObstacleFootprint, ObstacleNav, ObstacleNavConfig};
+    use bevy_flock::domain::stimulus::{
+        OpenAir, StimulusBuffer, StimulusIndex, perceive, perceive_indexed,
+    };
+    use bevy_flock::domain::tick::Tick;
+    use bevy_math::Vec3;
+
+    let PerceptionFixtures {
+        buffer,
+        spread,
+        index,
+        spread_index,
+        query,
+    } = perception_fixtures();
+    let mut group = c.benchmark_group("perception");
+    group.sample_size(20);
     let observers = |b: &mut criterion::Bencher, buffer: &StimulusBuffer| {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                #[allow(clippy::cast_precision_loss)]
                 let angle = observer_index as f32 * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive(buffer, observer, Vec3::X, Tick::ZERO, &query, &OpenAir).len();
@@ -361,7 +383,6 @@ fn bench_perception(c: &mut Criterion) {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                #[allow(clippy::cast_precision_loss)]
                 let angle = observer_index as f32 * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive_indexed(
@@ -382,7 +403,6 @@ fn bench_perception(c: &mut Criterion) {
         b.iter(|| {
             let mut seen = 0_usize;
             for observer_index in 0..512_u32 {
-                #[allow(clippy::cast_precision_loss)]
                 let angle = observer_index as f32 * 0.11;
                 let observer = Vec3::new(libm::cosf(angle) * 8.0, 0.0, libm::sinf(angle) * 8.0);
                 seen += perceive_indexed(
@@ -408,16 +428,13 @@ fn bench_perception(c: &mut Criterion) {
     });
 
     let config = ObstacleNavConfig::try_new(Vec3::ZERO, 64, 64, 1.0)
-        .expect("bounds")
+        .or_die()
         .with_budget(1_000_000);
     let obstacles: Vec<ObstacleFootprint> = (0..32)
         .map(|index| {
-            #[allow(clippy::cast_precision_loss)]
             let x = 2.0 + (index % 8) as f32 * 7.5;
-            #[allow(clippy::cast_precision_loss)]
             let z = 2.0 + (index / 8) as f32 * 15.0;
-            ObstacleFootprint::new(Vec3::new(x, 0.0, z), Vec3::new(x + 3.0, 2.0, z + 6.0))
-                .expect("footprint")
+            ObstacleFootprint::new(Vec3::new(x, 0.0, z), Vec3::new(x + 3.0, 2.0, z + 6.0)).or_die()
         })
         .collect();
     group.bench_function("obstacle_rebuild_64x64_32_obstacles", |b| {
@@ -474,7 +491,7 @@ fn crowd_with_cell(size: usize, cell: f32, budget: u32) -> App {
         bevy_math::Vec3::splat(500.0),
         cell,
     )
-    .expect("the benchmark's volume is valid");
+    .or_die();
     let config = FlockConfig {
         population: PopulationSize::clamped(size),
         spawn_budget: 1_000_000,

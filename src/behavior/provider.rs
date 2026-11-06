@@ -330,6 +330,7 @@ impl ProviderQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{GetOrDieRef, OrDie};
 
     /// A provider that answers after a fixed number of polls.
     struct DelayedProvider {
@@ -377,7 +378,7 @@ mod tests {
     }
 
     fn fallback() -> TemplateProvider {
-        TemplateProvider::new(BarkTable::starter().expect("table"), 7)
+        TemplateProvider::new(BarkTable::starter().or_die(), 7)
     }
 
     fn prompt(npc: u32, _at: u64, deadline: u64) -> DialogPrompt {
@@ -398,7 +399,7 @@ mod tests {
         provider.submit(prompt(1, 0, 30));
         let replies = queue.tick(&mut provider, &mut fallback, Tick::new(1));
         assert_eq!(replies.len(), 1);
-        assert_eq!(replies[0].source, ReplySource::Provider);
+        assert_eq!(replies.at_ref(0).source, ReplySource::Provider);
         assert_eq!(queue.answered(), 1);
         assert_eq!(queue.fell_back(), 0);
     }
@@ -419,8 +420,8 @@ mod tests {
         // At the deadline the fallback speaks.
         let replies = queue.tick(&mut provider, &mut fallback, Tick::new(5));
         assert_eq!(replies.len(), 1);
-        assert_eq!(replies[0].source, ReplySource::Fallback);
-        assert!(!replies[0].text.is_empty());
+        assert_eq!(replies.at_ref(0).source, ReplySource::Fallback);
+        assert!(!replies.at_ref(0).text.is_empty());
         assert_eq!(queue.fell_back(), 1);
         assert_eq!(queue.inflight(), 0);
     }
@@ -468,13 +469,13 @@ mod tests {
             let mut fallback = fallback_with(seed);
             assert!(queue.submit(prompt(4, 0, 1), Tick::ZERO));
             let replies = queue.tick(&mut provider, &mut fallback, Tick::new(1));
-            replies[0].text.clone()
+            replies.at_ref(0).text.clone()
         };
         assert_eq!(reply(11), reply(11));
     }
 
     fn fallback_with(seed: u64) -> TemplateProvider {
-        TemplateProvider::new(BarkTable::starter().expect("table"), seed)
+        TemplateProvider::new(BarkTable::starter().or_die(), seed)
     }
 
     #[test]

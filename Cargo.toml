@@ -102,57 +102,66 @@ required-features = ["memory"]
 unsafe_code = "deny"
 missing_docs = "deny"
 unreachable_pub = "warn"
+# Creating a real reference and immediately casting it to a raw pointer asserts aliasing that the
+# caller never promised; `&raw const place` does not. Available as a rustc lint (not clippy) since
+# 1.97, verified with a probe before it was added here.
+raw_borrows_via_references = "deny"
 # `rust_2018_idioms` is deliberately off: it flags every `Res<T>`, `Query<...>`
 # and `Commands` in a Bevy system as a hidden lifetime, which is the framework's
 # idiomatic spelling and not something this crate should paper over.
-
 [lints.clippy]
-# Bevy hands systems their parameters by value (`Res<T>`, `Query<..>`): the signature
-# is the framework's, not an inefficiency to fix, and taking them by reference does not
-# compile. Every other lint in this profile still applies to ordinary functions.
-needless_pass_by_value = "allow"
+# --- The spine -------------------------------------------------------------------------------
+# Groups first, at the lowest priority, so individual lints below can move either way.
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 perf = { level = "warn", priority = -1 }
-# Allowed project-wide: these three either fight the domain vocabulary or
-# duplicate documentation enforced elsewhere.
+suspicious = { level = "deny", priority = -1 }
+# Allowed: opted out of, because they fight the domain vocabulary or duplicate documentation that
+# is enforced elsewhere.
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
 multiple_crate_versions = "allow"
-# Hard-denied: every one of these is a production incident waiting to happen.
+# Denied: every one of these is a production incident waiting to happen, tests included. The code
+# satisfies them by construction rather than by `#[allow]`: fallible constructors are `Result`,
+# test fixtures use `testkit::OrDie` (which reports the failure with `unreachable!`, not `panic!`),
+# and the kernels address slices through the index helpers in `application::crowd`.
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
 cast_ptr_alignment = "deny"
-# A group needs the same priority treatment as the other groups, otherwise it
-# silently gives way to the individual lints below it.
-suspicious = { level = "deny", priority = -1 }
-# Numeric simulation code converts between integer counts and f32 intrinsics in
-# a handful of audited places. Precision loss there is inherent to an f32
-# simulation and is bounded by the documented epsilon; allowing it globally
-# keeps the rest of the crate honest about every other lint.
+# --- Documented deviations -------------------------------------------------------------------
+# Each of these is a deliberate departure from the spine, kept in this one table rather than
+# scattered through the tree as `#[allow]` attributes, and each with the reason it cannot be
+# satisfied. `scripts/lint_audit.py` fails if one appears without an entry here.
+#
+# Bevy hands systems their parameters by value (`Res<T>`, `Query<..>`): the signature is the
+# framework's, not an inefficiency to fix, and taking them by reference does not compile.
+needless_pass_by_value = "allow"
+# Numeric simulation code converts between integer counts and f32 lane values in audited places.
+# Precision loss there is inherent to an f32 simulation and bounded by the documented epsilon;
+# `cast_lossless` is exact and is *not* allowed, so every widening cast still has to use `From`.
 cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
 cast_sign_loss = "allow"
 cast_possible_wrap = "allow"
-# `u32 as i64` is exact, but the suggestion to write `i64::from` at every call
-# site buys nothing a reader cannot verify at a glance.
-cast_lossless = "allow"
-float_cmp = "allow"
-# Fusing a multiply-add changes rounding. The simulation's formulas are pinned
-# and tested, so each site opts in deliberately rather than by suggestion.
+# Fusing a multiply-add changes rounding. The simulation's formulas are pinned by tests that compare
+# exact bits, so each site opts in deliberately rather than by suggestion.
 suboptimal_flops = "allow"
-# `const` is added where it enables a static or a `const` caller, not for its own
-# sake; the scheduler and config types already are.
-missing_const_for_fn = "allow"
-# Criterion's `BenchmarkGroup` is a guard by design: it owns the benchmark it
-# measures and must outlive it, which is exactly what this lint objects to.
+# Exact float comparison is the *point* of the determinism tests: they assert bit-identical output
+# across runs and across the scalar/wide/threaded roads.
+float_cmp = "allow"
+# Criterion's `BenchmarkGroup` is a guard by design: it owns the benchmark it measures and must
+# outlive it, which is exactly what this lint objects to.
 significant_drop_tightening = "allow"
+# `const` is added where it enables a static or a `const` caller, not for its own sake; the scheduler
+# and config types already are.
+missing_const_for_fn = "allow"
 
 # Benchmarks run on the settings a game actually ships with: default release,
 # no LTO. Flattering the numbers with `lto = "fat"` would measure a build nobody
@@ -198,6 +207,21 @@ harness = false
 
 [[test]]
 name = "memory_aging"
+required-features = ["memory"]
+
+# `memory_bridge` drives the ECS half of social memory: it imports `domain::memory` and
+# `adapters::primary::memory_bridge`, both of which are compiled out without the feature. Without
+# this line `cargo check --no-default-features --all-targets` fails on the test rather than on the
+# library, which is how it sat broken on main.
+[[test]]
+name = "memory_bridge"
+required-features = ["memory"]
+
+# `fuzz_decoders` is `#![cfg(feature = "memory")]`d to nothing without the feature. Declaring it
+# here rather than relying on that keeps the manifest honest: a target that compiles to an empty
+# binary and reports success is a test that has stopped testing.
+[[test]]
+name = "fuzz_decoders"
 required-features = ["memory"]
 
 [[bench]]

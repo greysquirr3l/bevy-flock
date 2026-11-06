@@ -531,7 +531,6 @@ impl FlowCache {
     /// # Errors
     ///
     /// As [`FlowCache::new`] at construction; lookups themselves cannot fail.
-    #[allow(clippy::indexing_slicing)] // `position` came from `iter().position`.
     pub fn field_for(
         &mut self,
         source: &dyn NavSource,
@@ -542,38 +541,45 @@ impl FlowCache {
             cell: target.cell,
             version: source.version(),
         };
-        if let Some(position) = self.entries.iter().position(|entry| entry.key == key) {
+        // Every mutation happens first and exactly one borrow is taken at the end. Returning a
+        // reference derived from `&mut self` and then touching the cache again in the same body
+        // does not borrow-check, even on a path that returns: the returned reference is good for
+        // the whole `&mut self` lifetime.
+        let hit = self.entries.iter().position(|entry| entry.key == key);
+        let (lookup, position) = if let Some(position) = hit {
             self.hits += 1;
             let clock = self.clock;
             if let Some(entry) = self.entries.get_mut(position) {
                 entry.stamp = clock;
             }
-            // The borrow ends here; the index is re-resolved below.
-            let field = &self.entries[position].field;
-            return (FlowLookup::Hit, field);
-        }
-        self.misses += 1;
-        let field = solve(source, target);
-        if self.entries.len() >= self.capacity {
-            // Evict the least recently used entry: the oldest stamp.
-            if let Some((oldest, _)) = self
-                .entries
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, entry)| entry.stamp)
-            {
-                self.entries.swap_remove(oldest);
-                self.evictions += 1;
+            (FlowLookup::Hit, position)
+        } else {
+            self.misses += 1;
+            let field = solve(source, target);
+            if self.entries.len() >= self.capacity {
+                // Evict the least recently used entry: the oldest stamp.
+                if let Some((oldest, _)) = self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, entry)| entry.stamp)
+                {
+                    self.entries.swap_remove(oldest);
+                    self.evictions += 1;
+                }
             }
-        }
-        let clock = self.clock;
-        self.entries.push(CacheEntry {
-            key,
-            stamp: clock,
-            field,
-        });
-        let position = self.entries.len() - 1;
-        (FlowLookup::Rebuilt, &self.entries[position].field)
+            let clock = self.clock;
+            self.entries.push(CacheEntry {
+                key,
+                stamp: clock,
+                field,
+            });
+            (FlowLookup::Rebuilt, self.entries.len().saturating_sub(1))
+        };
+        let Some(entry) = self.entries.get(position) else {
+            unreachable!("the cache entry was either found or just pushed");
+        };
+        (lookup, &entry.field)
     }
 }
 
@@ -589,18 +595,19 @@ pub enum FlowCacheError {
 mod tests {
     use super::*;
     use crate::domain::nav::{GridNavSource, NavBounds};
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn corridor() -> GridNavSource {
         // 32 x 8, wall along row 4 with a gap at x = 24, so a field has to bend.
-        let mut grid = GridNavSource::open(Vec3::ZERO, 32, 8, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 32, 8, 1.0).or_die();
         grid.add_obstacle(NavCell::new(0, 4), NavCell::new(23, 4))
-            .expect("wall");
+            .or_die();
         grid
     }
 
     #[test]
     fn a_straight_run_points_at_the_target() {
-        let grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(12, 8));
         let field = solve(&grid, target);
         let here = grid.center_of(NavCell::new(2, 8));
@@ -621,7 +628,7 @@ mod tests {
 
     #[test]
     fn inside_the_target_cell_the_agent_seeks_the_point() {
-        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die();
         let target = FlowTarget {
             cell: NavCell::new(4, 4),
             point: grid.center_of(NavCell::new(4, 4)),
@@ -637,12 +644,12 @@ mod tests {
 
     #[test]
     fn unreachable_cells_have_no_direction() {
-        let mut grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die();
         // Wall off a corner entirely.
         grid.add_obstacle(NavCell::new(6, 0), NavCell::new(6, 7))
-            .expect("wall");
+            .or_die();
         grid.add_obstacle(NavCell::new(0, 6), NavCell::new(7, 6))
-            .expect("wall");
+            .or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(2, 2));
         let field = solve(&grid, target);
         let trapped = NavCell::new(7, 7);
@@ -683,7 +690,7 @@ mod tests {
     #[test]
     fn the_cache_hits_then_rebuilds_only_when_the_target_changes() {
         let grid = corridor();
-        let mut cache = FlowCache::new(2).expect("capacity");
+        let mut cache = FlowCache::new(2).or_die();
         let a = FlowTarget::at_cell(&grid, NavCell::new(30, 2));
         assert_eq!(cache.field_for(&grid, a).0, FlowLookup::Rebuilt);
         assert_eq!(cache.field_for(&grid, a).0, FlowLookup::Hit);
@@ -694,7 +701,7 @@ mod tests {
     #[test]
     fn ten_thousand_rebuilds_stay_inside_the_budget() {
         let grid = corridor();
-        let mut cache = FlowCache::new(4).expect("capacity");
+        let mut cache = FlowCache::new(4).or_die();
         let cell_count = grid.bounds().cell_count();
         let budget = 4 * (cell_count * 12 + FLOW_FIELD_OVERHEAD_BYTES);
         for step in 0..10_000_u32 {
@@ -714,23 +721,23 @@ mod tests {
     #[test]
     fn a_rebuild_drops_fields_built_against_the_old_layout() {
         let mut grid = corridor();
-        let mut cache = FlowCache::new(4).expect("capacity");
+        let mut cache = FlowCache::new(4).or_die();
         let target = FlowTarget::at_cell(&grid, NavCell::new(30, 2));
         let _ = cache.field_for(&grid, target);
         grid.add_obstacle(NavCell::new(10, 0), NavCell::new(10, 3))
-            .expect("new wall");
+            .or_die();
         assert_eq!(cache.invalidate_stale(grid.version()), 1);
         assert!(cache.is_empty());
     }
 
     #[test]
     fn a_cache_needs_room_for_one_field() {
-        assert_eq!(FlowCache::new(0).unwrap_err(), FlowCacheError::ZeroCapacity);
+        assert_eq!(FlowCache::new(0).or_die_err(), FlowCacheError::ZeroCapacity);
     }
 
     #[test]
     fn the_memory_report_adds_up() {
-        let grid = GridNavSource::open(Vec3::ZERO, 64, 64, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 64, 64, 1.0).or_die();
         let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(32, 32)));
         let expected = FLOW_FIELD_OVERHEAD_BYTES + 64 * 64 * 4 + 64 * 64 * 8;
         assert_eq!(field.bytes(), expected);
@@ -739,8 +746,8 @@ mod tests {
 
     #[test]
     fn bounds_are_carried_through() {
-        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 2.0).expect("bounds");
-        let grid = GridNavSource::from_bitmap(bounds, vec![true; 16]).expect("grid");
+        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 2.0).or_die();
+        let grid = GridNavSource::from_bitmap(bounds, vec![true; 16]).or_die();
         let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(0, 0)));
         assert_eq!(field.bounds(), bounds);
     }

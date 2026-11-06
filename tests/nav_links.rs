@@ -5,23 +5,19 @@
 //! that can tell a shortcut from a detour: without the link the only way round is the gap,
 //! with it there is a ladder through the wall.
 
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
-
 use bevy_flock::domain::flow::{FlowTarget, solve};
 use bevy_flock::domain::links::{LinkTag, NavLink};
 use bevy_flock::domain::nav::{GridNavSource, NavCell, NavSource};
+use bevy_flock::testkit::OrDie;
 use bevy_math::Vec3;
 
 const LADDER: LinkTag = LinkTag::new(1);
 
 /// A room split by a wall at x = 8, with a gap at the top row.
 fn room() -> GridNavSource {
-    let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).expect("valid grid");
+    let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).or_die();
     grid.add_obstacle(NavCell::new(8, 4), NavCell::new(8, 15))
-        .expect("wall");
+        .or_die();
     grid
 }
 
@@ -30,9 +26,7 @@ fn a_link_found_nothing_beats_the_long_way_round() {
     let grid = room();
     // Start left of the wall, target right of it, both level with the blocked part.
     let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(13, 10)));
-    let around = field
-        .cost_at(NavCell::new(3, 10))
-        .expect("the cell is inside the grid");
+    let around = field.cost_at(NavCell::new(3, 10)).or_die();
 
     // A ladder straight through the wall at the same rows.
     let mut linked = room();
@@ -43,11 +37,9 @@ fn a_link_found_nothing_beats_the_long_way_round() {
             20,
             LADDER,
         ))
-        .expect("valid link");
+        .or_die();
     let field = solve(&linked, FlowTarget::at_cell(&linked, NavCell::new(13, 10)));
-    let through = field
-        .cost_at(NavCell::new(3, 10))
-        .expect("the cell is inside the grid");
+    let through = field.cost_at(NavCell::new(3, 10)).or_die();
 
     assert!(
         through < around,
@@ -65,15 +57,13 @@ fn the_field_reports_the_tag_of_the_link_it_used() {
         20,
         LADDER,
     ))
-    .expect("valid link");
+    .or_die();
     let field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(13, 10)));
 
     assert!(field.has_links(), "a field over a linked source has links");
     // The tag is reported where the agent must stand to take the link, not where it lands:
     // that is the cell a tree branches on and the cell an animation has to play at.
-    let climb = field
-        .link_tag_at(NavCell::new(7, 10))
-        .expect("the cell that takes the ladder is not tagged");
+    let climb = field.link_tag_at(NavCell::new(7, 10)).or_die();
     assert_eq!(climb, LADDER);
     assert_eq!(
         field.link_tag_at(NavCell::new(9, 10)),
@@ -99,7 +89,7 @@ fn a_field_over_a_source_without_links_pays_nothing() {
             20,
             LADDER,
         ))
-        .expect("valid link");
+        .or_die();
     let linked_field = solve(&linked, FlowTarget::at_cell(&linked, NavCell::new(13, 10)));
     // Two bytes per cell, and not a byte more.
     assert_eq!(
@@ -119,7 +109,7 @@ fn a_link_that_costs_too_much_is_ignored_by_the_search() {
         5_000,
         LADDER,
     ))
-    .expect("valid link");
+    .or_die();
     let linked_field = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(13, 10)));
     let plain = room();
     let plain_field = solve(&plain, FlowTarget::at_cell(&plain, NavCell::new(13, 10)));
@@ -140,7 +130,7 @@ fn adding_a_link_invalidates_a_cached_field() {
         20,
         LADDER,
     ))
-    .expect("valid link");
+    .or_die();
     assert_ne!(grid.version(), before, "the version did not move");
 }
 
@@ -153,7 +143,7 @@ fn a_two_way_link_shortens_the_route_in_both_directions() {
         20,
         LADDER,
     ))
-    .expect("valid link");
+    .or_die();
     let rightward = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(13, 10)));
     let leftward = solve(&grid, FlowTarget::at_cell(&grid, NavCell::new(2, 10)));
     assert!(rightward.cost_at(NavCell::new(2, 10)).unwrap_or(u32::MAX) < 300);

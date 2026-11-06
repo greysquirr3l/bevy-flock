@@ -8,20 +8,14 @@
 //! Two numbers matter: the full solve (what a game sees when a new goal appears) and
 //! the cached lookup (what a game sees every frame after).
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_precision_loss,
-    clippy::missing_docs_in_private_items
-)]
-
 use bevy_flock::domain::flow::{FlowCache, FlowLookup, FlowTarget, solve};
 use bevy_flock::domain::nav::{GridNavSource, NavCell};
+use bevy_flock::testkit::OrDie;
 use bevy_math::Vec3;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn grid(size: u16) -> GridNavSource {
-    GridNavSource::open(Vec3::ZERO, size, size, 1.0).expect("grid")
+    GridNavSource::open(Vec3::ZERO, size, size, 1.0).or_die()
 }
 
 fn bench_solve(c: &mut Criterion) {
@@ -44,7 +38,7 @@ fn bench_cache(c: &mut Criterion) {
     let mut group = c.benchmark_group("flow");
     let size = 128_u16;
     let source = grid(size);
-    let mut cache = FlowCache::new(4).expect("capacity");
+    let mut cache = FlowCache::new(4).or_die();
     // Warm the cache with the destination every frame asks about.
     let target = FlowTarget::at_cell(&source, NavCell::new(size - 1, size - 1));
     let _ = cache.field_for(&source, target);
@@ -68,9 +62,9 @@ fn bench_sample(c: &mut Criterion) {
     let positions: Vec<Vec3> = (0..1_000_u32)
         .map(|index| {
             Vec3::new(
-                (index % size as u32) as f32 + 0.5,
+                (index % u32::from(size)) as f32 + 0.5,
                 0.0,
-                (index / size as u32) as f32 + 0.5,
+                (index / u32::from(size)) as f32 + 0.5,
             )
         })
         .collect();

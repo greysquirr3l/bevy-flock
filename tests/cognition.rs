@@ -4,11 +4,8 @@
 //! system gets tested. These start from [`FlockPlugin`], so they fail if the systems are
 //! not registered, not ordered, or not in the schedule the plugin installs — the three
 //! mistakes a unit test cannot see.
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
 
+use bevy_flock::testkit::OrDie;
 use std::sync::Arc;
 
 use bevy_app::prelude::*;
@@ -36,7 +33,7 @@ fn app() -> App {
 }
 
 fn tree() -> Arc<BehaviorTree> {
-    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).expect("a leaf is a tree"))
+    Arc::new(BehaviorTree::try_from_spec(NodeSpec::Action(0)).or_die())
 }
 
 fn spawn_brain(app: &mut App, id: u32, x: f32, cost: VirtualCost) -> Entity {
@@ -64,7 +61,7 @@ fn tier_of(app: &App, entity: Entity) -> CognitionTier {
     app.world()
         .get::<NpcTier>(entity)
         .map(|tier| tier.0)
-        .expect("the NPC has a tier")
+        .or_die()
 }
 
 #[test]

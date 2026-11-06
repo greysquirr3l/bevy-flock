@@ -200,6 +200,7 @@ pub fn rebuild_obstacle_nav(
 mod tests {
     use super::*;
     use crate::domain::nav::{NavCell, NavSource};
+    use crate::testkit::OrDie;
 
     fn app(settings: ObstacleNavSettings) -> App {
         let mut app = App::new();
@@ -209,19 +210,18 @@ mod tests {
 
     fn settings() -> ObstacleNavSettings {
         ObstacleNavSettings::new(Vec3::ZERO, 32, 32, 1.0)
-            .expect("grid")
+            .or_die()
             .with_budget(4_096)
     }
 
     #[test]
     fn a_spawned_obstacle_is_rasterised_and_published() {
         let mut app = app(settings());
-        app.world_mut().spawn(
-            NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0)).expect("wall"),
-        );
+        app.world_mut()
+            .spawn(NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0)).or_die());
         app.update();
         let state = app.world().resource::<ObstacleNavState>();
-        let source = state.source().expect("published on the first frame");
+        let source = state.source().or_die();
         assert!(!source.is_walkable(NavCell::new(9, 4)));
         assert!(source.is_walkable(NavCell::new(4, 4)));
         assert_eq!(state.version(), NavVersion::FIRST);
@@ -230,9 +230,8 @@ mod tests {
     #[test]
     fn an_unchanged_set_does_not_rebuild_next_frame() {
         let mut app = app(settings());
-        app.world_mut().spawn(
-            NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0)).expect("wall"),
-        );
+        app.world_mut()
+            .spawn(NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0)).or_die());
         app.update();
         let version = app.world().resource::<ObstacleNavState>().version();
         app.update();
@@ -246,37 +245,28 @@ mod tests {
         let mut app = app(settings());
         let wall = app
             .world_mut()
-            .spawn(
-                NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0))
-                    .expect("wall"),
-            )
+            .spawn(NavObstacle::new(Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 2.0, 32.0)).or_die())
             .id();
         app.update();
         assert!(
             !app.world()
                 .resource::<ObstacleNavState>()
                 .source()
-                .expect("published")
+                .or_die()
                 .is_walkable(NavCell::new(9, 4))
         );
         app.world_mut().despawn(wall);
         app.update();
         let state = app.world().resource::<ObstacleNavState>();
-        assert!(
-            state
-                .source()
-                .expect("published")
-                .is_walkable(NavCell::new(9, 4))
-        );
+        assert!(state.source().or_die().is_walkable(NavCell::new(9, 4)));
         assert_eq!(state.version(), NavVersion::FIRST.next());
     }
 
     #[test]
     fn a_tiny_budget_spreads_the_rebuild_over_frames() {
         let mut app = app(settings().with_budget(16));
-        app.world_mut().spawn(
-            NavObstacle::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(32.0, 2.0, 32.0)).expect("field"),
-        );
+        app.world_mut()
+            .spawn(NavObstacle::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(32.0, 2.0, 32.0)).or_die());
         app.update();
         let state = app.world().resource::<ObstacleNavState>();
         assert!(state.is_staging(), "1,024 cells cannot be done in 16");

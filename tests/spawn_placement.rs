@@ -5,14 +5,11 @@
 //! spiral. Each one is checked through the plugin — add it, ask for a crowd, update — plus the
 //! properties that make a spawner trustworthy: determinism from the seed, positions inside the
 //! simulated volume, and no silent stacking under the default.
-#![expect(
-    clippy::expect_used,
-    reason = "integration tests assert their own fixtures"
-)]
 
 use bevy_app::App;
 use bevy_flock::error::ConfigError;
 use bevy_flock::prelude::*;
+use bevy_flock::testkit::OrDie;
 
 fn app_with(population: usize, placement: Placement) -> App {
     let mut app = App::new();
@@ -21,9 +18,7 @@ fn app_with(population: usize, placement: Placement) -> App {
         spawn_budget: 1_000_000,
         ..FlockConfig::preset(CrowdPreset::QuietVillage)
     };
-    let config = config
-        .with_placement(placement)
-        .expect("the fixture placement fits the default volume");
+    let config = config.with_placement(placement).or_die();
     app.add_plugins(FlockPlugin::new(config));
     app.update();
     app

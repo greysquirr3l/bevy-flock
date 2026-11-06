@@ -140,6 +140,7 @@ pub fn export_velocities(mut bridge: ResMut<PhysicsBridge>, npcs: Query<(&Npc, &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::OrDie;
     use bevy_app::{App, Update};
     use bevy_transform::prelude::Transform;
     use std::sync::{Arc, Mutex};
@@ -204,8 +205,8 @@ mod tests {
             ));
         }
         app.update();
-        assert_eq!(*flushes.lock().expect("flushes"), 1);
-        assert_eq!(pushes.lock().expect("pushes").len(), 3);
+        assert_eq!(*flushes.lock().or_die(), 1);
+        assert_eq!(pushes.lock().or_die().len(), 3);
         assert_eq!(app.world().resource::<PhysicsBridge>().pushed(), 3);
     }
 

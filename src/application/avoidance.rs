@@ -136,6 +136,39 @@ pub struct AvoidReport {
     pub adjusted: u32,
 }
 
+/// One agent as a pair solve needs it: where it is, where it is going, and how much room the others
+/// give it.
+///
+/// The three travel together — they are one agent's state — so a pair solve takes two of these
+/// rather than six loose numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AvoidBody {
+    /// Position in metres.
+    pub position: [f32; 3],
+    /// Intended velocity, metres per second.
+    pub velocity: [f32; 3],
+    /// Priority; 1.0 is the default and the higher priority takes less of the correction.
+    pub priority: f32,
+}
+
+impl AvoidBody {
+    /// A body at `position` moving at `velocity`, with default priority.
+    #[must_use]
+    pub const fn new(position: [f32; 3], velocity: [f32; 3]) -> Self {
+        Self {
+            position,
+            velocity,
+            priority: 1.0,
+        }
+    }
+
+    /// The same body at `priority`.
+    #[must_use]
+    pub const fn with_priority(self, priority: f32) -> Self {
+        Self { priority, ..self }
+    }
+}
+
 /// Add one neighbour's contribution to `correction`.
 ///
 /// Returns `true` when the pair was closing and the correction grew: the caller counts those,
@@ -144,21 +177,22 @@ pub struct AvoidReport {
 /// The whole solve for a pair: if the agent is not closing on the neighbour, or the closest
 /// approach is beyond the horizon, nothing happens. Otherwise the excess closing speed is
 /// removed along the line between them, split by priority, floored at zero.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "a pair solve needs both agents' position, velocity and priority; grouping them \
-              would allocate or obscure that this is one pass over a neighbour list"
-)]
 pub fn solve_pair(
     params: &AvoidanceParams,
-    position: [f32; 3],
-    velocity: [f32; 3],
-    priority: f32,
-    other_position: [f32; 3],
-    other_velocity: [f32; 3],
-    other_priority: f32,
+    body: AvoidBody,
+    other: AvoidBody,
     correction: &mut [f32; 3],
 ) -> bool {
+    let AvoidBody {
+        position,
+        velocity,
+        priority,
+    } = body;
+    let AvoidBody {
+        position: other_position,
+        velocity: other_velocity,
+        priority: other_priority,
+    } = other;
     let dx = other_position[0] - position[0];
     let dy = other_position[1] - position[1];
     let dz = other_position[2] - position[2];
@@ -239,9 +273,12 @@ pub fn apply(params: &AvoidanceParams, desired: [f32; 3], correction: [f32; 3]) 
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::unwrap_used)]
     use super::*;
 
+    /// The three numbers a pair solve needs, in the order the tests read them.
+    fn walk(position: [f32; 3], velocity: [f32; 3], priority: f32) -> AvoidBody {
+        AvoidBody::new(position, velocity).with_priority(priority)
+    }
     fn params() -> AvoidanceParams {
         AvoidanceParams::new()
             .with_separation(0.7)
@@ -264,22 +301,14 @@ mod tests {
             let mut correction_b = [0.0_f32; 3];
             solve_pair(
                 &params,
-                a,
-                velocity_a,
-                priority_a,
-                b,
-                velocity_b,
-                priority_b,
+                walk(a, velocity_a, priority_a),
+                walk(b, velocity_b, priority_b),
                 &mut correction_a,
             );
             solve_pair(
                 &params,
-                b,
-                velocity_b,
-                priority_b,
-                a,
-                velocity_a,
-                priority_a,
+                walk(b, velocity_b, priority_b),
+                walk(a, velocity_a, priority_a),
                 &mut correction_b,
             );
             if correction_a != [0.0; 3] && correction_b != [0.0; 3] {
@@ -317,22 +346,14 @@ mod tests {
         let mut second = [0.0_f32; 3];
         assert!(solve_pair(
             &params,
-            a,
-            [1.0, 0.0, 0.0],
-            1.0,
-            b,
-            [-1.0, 0.0, 0.0],
-            1.0,
+            walk(a, [1.0, 0.0, 0.0], 1.0),
+            walk(b, [-1.0, 0.0, 0.0], 1.0),
             &mut first
         ));
         assert!(solve_pair(
             &params,
-            a,
-            [1.0, 0.0, 0.0],
-            1.0,
-            b,
-            [-1.0, 0.0, 0.0],
-            1.0,
+            walk(a, [1.0, 0.0, 0.0], 1.0),
+            walk(b, [-1.0, 0.0, 0.0], 1.0),
             &mut second
         ));
         assert_eq!(first, second);
@@ -350,22 +371,14 @@ mod tests {
         let mut high = [0.0_f32; 3];
         solve_pair(
             &params,
-            [0.0; 3],
-            [2.0, 0.0, 0.0],
-            0.5,
-            [1.0, 0.0, 0.0],
-            [0.0; 3],
-            4.0,
+            walk([0.0; 3], [2.0, 0.0, 0.0], 0.5),
+            walk([1.0, 0.0, 0.0], [0.0; 3], 4.0),
             &mut low,
         );
         solve_pair(
             &params,
-            [0.0; 3],
-            [2.0, 0.0, 0.0],
-            4.0,
-            [1.0, 0.0, 0.0],
-            [0.0; 3],
-            0.5,
+            walk([0.0; 3], [2.0, 0.0, 0.0], 4.0),
+            walk([1.0, 0.0, 0.0], [0.0; 3], 0.5),
             &mut high,
         );
         assert!(low[0].abs() > high[0].abs(), "low {low:?} high {high:?}");
@@ -377,12 +390,8 @@ mod tests {
         let mut correction = [0.0_f32; 3];
         assert!(!solve_pair(
             &params,
-            [0.0; 3],
-            [-2.0, 0.0, 0.0],
-            1.0,
-            [1.0, 0.0, 0.0],
-            [2.0, 0.0, 0.0],
-            1.0,
+            walk([0.0; 3], [-2.0, 0.0, 0.0], 1.0),
+            walk([1.0, 0.0, 0.0], [2.0, 0.0, 0.0], 1.0),
             &mut correction
         ));
         assert_eq!(correction, [0.0; 3]);
@@ -394,12 +403,8 @@ mod tests {
         let mut correction = [0.0_f32; 3];
         assert!(!solve_pair(
             &params,
-            [0.0; 3],
-            [0.0, 0.0, 0.0],
-            1.0,
-            [50.0, 0.0, 0.0],
-            [-4.0, 0.0, 0.0],
-            1.0,
+            walk([0.0; 3], [0.0, 0.0, 0.0], 1.0),
+            walk([50.0, 0.0, 0.0], [-4.0, 0.0, 0.0], 1.0),
             &mut correction
         ));
     }
@@ -418,12 +423,8 @@ mod tests {
         let mut correction = [0.0_f32; 3];
         assert!(solve_pair(
             &params,
-            [0.0; 3],
-            [0.0; 3],
-            1.0,
-            [0.2, 0.0, 0.0],
-            [0.0; 3],
-            1.0,
+            walk([0.0; 3], [0.0; 3], 1.0),
+            walk([0.2, 0.0, 0.0], [0.0; 3], 1.0),
             &mut correction
         ));
         // Half of 0.6 m of overlap over 0.8 s is 0.375 m/s, not 0.3 m of instant correction.

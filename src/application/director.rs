@@ -608,6 +608,7 @@ impl DirectorBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn inputs(tick: u64) -> DirectorInputs {
         DirectorInputs {
@@ -686,7 +687,7 @@ mod tests {
                 },
             },
         ];
-        let mut director = ScriptedDirector::new(beats).expect("script");
+        let mut director = ScriptedDirector::new(beats).or_die();
         let mut board = DirectorBoard::new();
         let _ = board.decide(&mut director, &inputs(5));
         assert_eq!(director.fired(), 0);
@@ -711,7 +712,7 @@ mod tests {
             },
         ];
         assert!(matches!(
-            ScriptedDirector::new(beats).unwrap_err(),
+            ScriptedDirector::new(beats).or_die_err(),
             DirectorError::OutOfOrder { .. }
         ));
     }
@@ -796,7 +797,7 @@ mod tests {
                     },
                 })
                 .collect();
-            let mut director = ScriptedDirector::new(beats).expect("script");
+            let mut director = ScriptedDirector::new(beats).or_die();
             let mut board = DirectorBoard::new();
             for tick in 0..60 {
                 let _ = board.decide(&mut director, &inputs(tick));

@@ -19,18 +19,6 @@
 
 // An example's job is to be read: it prints, it unwraps, and it keeps its setup next to
 // the thing it demonstrates rather than hoisting every constant to the top.
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::print_stdout,
-    clippy::print_stderr,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::missing_docs_in_private_items,
-    clippy::items_after_statements,
-    clippy::float_cmp
-)]
 use bevy_flock::application::director::{
     Director, DirectorBoard, DirectorCommand, DirectorCommands, DirectorInputs,
 };

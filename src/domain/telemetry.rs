@@ -158,6 +158,7 @@ mod tests {
     use crate::domain::memory::{Encounter, EncounterKind};
     use crate::domain::saves::{SubjectEntry, SubjectKey, SubjectKind};
     use crate::domain::tick::Tick;
+    use crate::testkit::OrDie;
 
     fn registry(len: u16) -> SubjectRegistry {
         (0..len)
@@ -170,9 +171,9 @@ mod tests {
         let mut store = MemoryStore::new(1_000, 8);
         let registry = registry(8);
         for npc in 0..100_u32 {
-            store.enrol(NpcId::unique(npc)).expect("room");
+            store.enrol(NpcId::unique(npc)).or_die();
         }
-        let index = store.enrolled().next().expect("one row").0;
+        let index = store.enrolled().next().or_die().0;
         store.remember(
             index,
             SubjectId::new(0),
@@ -196,7 +197,7 @@ mod tests {
         let mut store = MemoryStore::new(100, 8);
         let full = registry(8);
         for npc in 0..10_u32 {
-            let index = store.enrol(NpcId::unique(npc)).expect("room");
+            let index = store.enrol(NpcId::unique(npc)).or_die();
             store.remember(
                 index,
                 SubjectId::new(7),
@@ -227,7 +228,7 @@ mod tests {
         let mut store = MemoryStore::new(10, 4);
         let registry = registry(4);
         for npc in 0..3_u32 {
-            let index = store.enrol(NpcId::unique(npc)).expect("room");
+            let index = store.enrol(NpcId::unique(npc)).or_die();
             store.remember(
                 index,
                 SubjectId::new(1),

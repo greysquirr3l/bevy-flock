@@ -11,7 +11,7 @@
 // the crate, and `GlobalAlloc` is unsafe by definition. The unsafe code is four
 // one-line forwards to the system allocator; the crate itself still denies unsafe.
 #![allow(unsafe_code)]
-#![expect(clippy::expect_used, reason = "test setup asserts its own fixtures")]
+use bevy_flock::testkit::OrDie;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
@@ -85,13 +85,13 @@ fn thousand_node_tree() -> BehaviorTree {
             sequence(steps)
         })
         .collect();
-    BehaviorTree::try_from_spec(selector(branches)).expect("valid tree")
+    BehaviorTree::try_from_spec(selector(branches)).or_die()
 }
 
 #[test]
 fn ticking_a_thousand_node_tree_ten_thousand_times_allocates_nothing() {
     let mut registry = FlockRegistry::new();
-    let _leaves = registry.register_standard_leaves().expect("fresh registry");
+    let _leaves = registry.register_standard_leaves().or_die();
     let tree = Arc::new(thousand_node_tree());
     let mut brain = NpcBrain::new(Arc::clone(&tree), VirtualCost::new(500));
     let mut board = Blackboard::new();

@@ -988,3 +988,27 @@ slug         = "stimulus-spatial-index"
 phase        = "Scale"
 delivered_in = "17a15cb"
 evidence     = "ADR 0047's index section plus src/domain/stimulus.rs: StimulusBuffer keeps a conservative bounding box (maintained on push, recomputed on retain_live) so an observer with nothing nearby returns in O(1), and StimulusIndex is a uniform bucket grid rebuilt once per pass into CSR offsets (69 us for 4,096 records), filled in ring order with a separate cursor array. perceive_indexed reads only the observer's window and delegates to perceive when the window contains every record, which is what makes it never slower than the linear scan: measured 36.4 ms vs 36.4 ms on a dense 40 m world, and 4.0 ms vs 9.6 ms on the same records spread over 400 m (2.4x). Bit-identical output is argued from a candidate superset (window sized from the query's max reach, so centre-only insertion is safe for a long-radius shout), no duplicates (one cell per record) and a total-order selection (ranks over exactly the fields Perceived carries); the_index_agrees_with_the_linear_scan compares 400 randomised observers against both paths element for element, the_index_agrees_when_records_were_pushed_in_another_order does the same for reversed publish order, and the_index_visits_far_fewer_candidates_when_the_world_is_spread asserts the pruning on a count rather than a clock. The parity test caught a real defect in the CSR fill on its first run (writing through starts destroyed the offsets it needed). The ECS pass uses the index by default."
+
+[[phases.tasks]]
+slug = "kernel-bounds-checks"
+title = "Remove the last two indexing expectations from the kernels"
+goal = "Every file-level lint expectation in the crate is gone except two: `src/application/packed.rs` (44 index expressions) and the wide kernel in `src/application/crowd.rs` (24). Both are bounded by a length check made earlier in the same function, and both are in the hottest loops the crate has. Convert them to slice iteration or `get`-based access without costing throughput, so the strict lint spine covers the kernels too."
+kind = "infrastructure"
+hints = [
+  "Most sites are `for i in 0..len { a[i] = f(b[i]) }` over parallel vectors: `a.iter_mut().zip(&b)` removes the index and often improves alias analysis, which is why this is a measurement, not a formality.",
+  "The lane arrays in the wide kernel index by lane and by bucket; a four-element array can be destructured into scalars or walked with `iter`/`iter_mut` zipped across lanes.",
+  "Keep the scalar, wide and threaded roads at parity: `a_parallel_frame_matches_the_scalar_one` and the wide-vs-scalar test already hold them to each other.",
+  "Re-run `cargo bench --bench crowd` before and after and record both in `docs/performance.md`; a regression is a failure of this task, not a note.",
+]
+test_hints = [
+  "`cargo clippy --all-targets --all-features -- -D warnings` passes with no `clippy::indexing_slicing` expectation anywhere in the crate, and `scripts/lint_audit.py` reports zero overrides for it.",
+  "The parity tests still pass, and `tests/crowd_no_alloc.rs` still counts zero allocations per frame.",
+]
+must_haves = [
+  "No `#[expect(clippy::indexing_slicing)]` in `src/`.",
+  "`docs/performance.md` records the kernel numbers before and after with the machine and flags.",
+]
+evaluation_criteria = [
+  "Steering throughput is within noise of the recorded baseline at 10,000 and 100,000.",
+  "The full suite passes in both feature extremes.",
+]

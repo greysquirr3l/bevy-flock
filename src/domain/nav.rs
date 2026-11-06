@@ -334,8 +334,8 @@ impl GridNavSource {
         if radius_cells == 0 {
             return self.clone();
         }
-        let width = self.bounds.width as i32;
-        let height = self.bounds.height as i32;
+        let width = i32::from(self.bounds.width);
+        let height = i32::from(self.bounds.height);
         let radius = i32::from(radius_cells);
         let mut walkable = self.walkable.clone();
         for y in 0..height {
@@ -518,17 +518,16 @@ impl NavSource for GridNavSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     fn grid() -> GridNavSource {
-        GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("valid grid")
+        GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die()
     }
 
     #[test]
     fn cells_convert_both_ways() {
         let grid = grid();
-        let cell = grid
-            .cell_of(Vec3::new(2.5, 0.0, 3.5))
-            .expect("inside the grid");
+        let cell = grid.cell_of(Vec3::new(2.5, 0.0, 3.5)).or_die();
         assert_eq!(cell, NavCell::new(2, 3));
         let centre = grid.center_of(cell);
         assert_eq!(grid.cell_of(centre), Some(cell));
@@ -547,7 +546,7 @@ mod tests {
         let mut grid = grid();
         let before = grid.version();
         grid.add_obstacle(NavCell::new(2, 2), NavCell::new(3, 3))
-            .expect("valid rectangle");
+            .or_die();
         assert_ne!(grid.version(), before);
         assert!(!grid.is_walkable(NavCell::new(2, 2)));
         assert!(grid.is_walkable(NavCell::new(4, 2)));
@@ -558,7 +557,7 @@ mod tests {
         let mut grid = grid();
         let error = grid
             .add_obstacle(NavCell::new(4, 4), NavCell::new(2, 2))
-            .unwrap_err();
+            .or_die_err();
         assert!(matches!(error, NavError::BadObstacle { .. }));
     }
 
@@ -568,9 +567,9 @@ mod tests {
         // Two walls meeting at a corner: (1,0) and (0,1) blocked, so (0,0) to (1,1)
         // must be refused even though both endpoints are walkable.
         grid.add_obstacle(NavCell::new(1, 0), NavCell::new(1, 0))
-            .expect("single cell");
+            .or_die();
         grid.add_obstacle(NavCell::new(0, 1), NavCell::new(0, 1))
-            .expect("single cell");
+            .or_die();
         assert!(!grid.is_walkable(NavCell::new(1, 0)));
         let mut out = SmallVec::new();
         grid.neighbours(NavCell::new(0, 0), &mut out);
@@ -584,9 +583,9 @@ mod tests {
     fn erosion_keeps_a_radius_of_clearance() {
         // A 16-wide grid so the borders do not dominate the result: the grid edge is a
         // wall, which is what keeps a crowd from walking off the map.
-        let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).expect("grid");
+        let mut grid = GridNavSource::open(Vec3::ZERO, 16, 16, 1.0).or_die();
         grid.add_obstacle(NavCell::new(8, 0), NavCell::new(8, 15))
-            .expect("wall");
+            .or_die();
         let eroded = grid.eroded(1);
         // The cell next to the wall is no longer walkable once a body needs clearance.
         assert!(grid.is_walkable(NavCell::new(7, 8)));
@@ -597,8 +596,8 @@ mod tests {
 
     #[test]
     fn a_bitmap_of_the_wrong_size_is_refused() {
-        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 1.0).expect("bounds");
-        let error = GridNavSource::from_bitmap(bounds, vec![true; 15]).unwrap_err();
+        let bounds = NavBounds::new(Vec3::ZERO, 4, 4, 1.0).or_die();
+        let error = GridNavSource::from_bitmap(bounds, vec![true; 15]).or_die_err();
         assert!(matches!(
             error,
             NavError::BitmapLength {
@@ -611,11 +610,11 @@ mod tests {
     #[test]
     fn empty_bounds_and_zero_cell_size_are_refused() {
         assert_eq!(
-            NavBounds::new(Vec3::ZERO, 0, 4, 1.0).unwrap_err(),
+            NavBounds::new(Vec3::ZERO, 0, 4, 1.0).or_die_err(),
             NavError::Empty
         );
         assert!(matches!(
-            NavBounds::new(Vec3::ZERO, 4, 4, 0.0).unwrap_err(),
+            NavBounds::new(Vec3::ZERO, 4, 4, 0.0).or_die_err(),
             NavError::ZeroCellSize { .. }
         ));
     }
@@ -689,7 +688,7 @@ mod tests {
     #[test]
     fn a_custom_nav_source_can_be_solved_over() {
         let ring = Ring {
-            bounds: NavBounds::new(Vec3::ZERO, 32, 32, 1.0).expect("bounds"),
+            bounds: NavBounds::new(Vec3::ZERO, 32, 32, 1.0).or_die(),
             inner: 4.0,
             outer: 12.0,
             centre: Vec3::new(16.0, 0.0, 16.0),

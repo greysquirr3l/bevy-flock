@@ -475,6 +475,7 @@ mod tests {
     use super::*;
     use crate::domain::ids::NpcId;
     use crate::domain::tick::Tick;
+    use crate::testkit::OrDie;
 
     fn with_board() -> Blackboard {
         Blackboard::new()
@@ -586,7 +587,7 @@ mod tests {
     #[test]
     fn the_catalogue_registers_once_and_is_stable() {
         let mut registry = FlockRegistry::new();
-        let leaves = registry.register_standard_leaves().expect("fresh registry");
+        let leaves = registry.register_standard_leaves().or_die();
         assert_eq!(leaves.idle, 0);
         assert_eq!(leaves.wander, 1);
         assert_eq!(leaves.is_lonely, 15);
@@ -602,7 +603,7 @@ mod tests {
         // A sanity guard on the table rather than on exact numbers: predicates
         // must be cheapest, social and commercial leaves the most expensive.
         let mut registry = FlockRegistry::new();
-        let leaves = registry.register_standard_leaves().expect("fresh");
+        let leaves = registry.register_standard_leaves().or_die();
         let cost = |id| registry.leaf_cost(id);
         assert!(
             cost(leaves.is_tired) <= cost(leaves.idle),

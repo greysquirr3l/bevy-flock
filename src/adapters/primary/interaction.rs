@@ -441,16 +441,18 @@ pub fn resolve_interactions(
         };
         let valence = mood.map_or(0.0, |mood| mood.0.valence);
         unravel_one(
-            &mut store,
-            row.0,
+            Recording {
+                store: &mut store,
+                row: row.0,
+                log: &mut log,
+                board: &mut board,
+            },
             npc.0,
             valence,
             request,
             now,
             config.revisit,
             InteractionConfig::decay(),
-            &mut log,
-            &mut board,
         );
     }
 }
@@ -463,23 +465,37 @@ impl InteractionConfig {
     }
 }
 
-/// Record one interaction and write its reaction onto the actor's blackboard.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one call site, and every argument is a fact the answer depends on"
-)]
-fn unravel_one(
-    store: &mut MemoryStore,
+/// The durable state one interaction is recorded against.
+///
+/// Every field is borrowed, so the struct is a view rather than a copy: it exists to keep the
+/// resolver's signature about the *decision* and the state about the *store*.
+struct Recording<'a> {
+    /// The social-memory store the interaction is recorded in.
+    store: &'a mut MemoryStore,
+    /// The store row belonging to the actor.
     row: MemoryIndex,
+    /// Everything the pass has written so far, including the revisit window.
+    log: &'a mut InteractionLog,
+    /// The actor's cognition blackboard, which receives the reaction.
+    board: &'a mut NpcBlackboard,
+}
+
+/// Record one interaction and write its reaction onto the actor's blackboard.
+fn unravel_one(
+    recording: Recording<'_>,
     actor: NpcId,
     mood: f32,
     request: InteractionRequest,
     now: Tick,
     window: u32,
     decay: DecayPolicy,
-    log: &mut InteractionLog,
-    board: &mut NpcBlackboard,
 ) {
+    let Recording {
+        store,
+        row,
+        log,
+        board,
+    } = recording;
     let repeated = log.revisit(actor, request.subject, now, window);
     if repeated {
         log.note_repeat();
@@ -634,9 +650,9 @@ pub fn submit(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::unwrap_used)]
     use super::*;
     use crate::adapters::primary::cognition::NpcBlackboard;
+    use crate::testkit::{GetOrDie, OrDie};
     use bevy_app::prelude::App;
     use bevy_transform::prelude::Transform;
 
@@ -665,7 +681,7 @@ mod tests {
             let mut store = app.world_mut().resource_mut::<MemoryStore>();
             let npc = NpcId::unique(id);
             // Enrol explicitly so the row number in the test is the row the store uses.
-            let index = store.enrol(npc).expect("a row");
+            let index = store.enrol(npc).or_die();
             assert_eq!(index.get(), row);
             let _ = subjects;
         }
@@ -686,7 +702,7 @@ mod tests {
         app.update();
         let log = app.world().resource::<InteractionLog>();
         assert_eq!(log.resolved().len(), 1);
-        assert_eq!(log.resolved()[0].reaction, Reaction::Neutral);
+        assert_eq!(log.resolved().at(0).reaction, Reaction::Neutral);
         assert_eq!(log.deferred(), 0);
     }
 
@@ -764,12 +780,12 @@ mod tests {
             .resolved()
             .iter()
             .find(|outcome| outcome.actor == friend)
-            .expect("the friend answered");
+            .or_die();
         let cold = log
             .resolved()
             .iter()
             .find(|outcome| outcome.actor == enemy)
-            .expect("the enemy answered");
+            .or_die();
         assert_eq!(warm.reaction, Reaction::Warm);
         assert_eq!(cold.reaction, Reaction::Hostile);
     }
@@ -791,7 +807,7 @@ mod tests {
         }
         let log = app.world().resource::<InteractionLog>();
         assert_eq!(log.repeated(), 1, "the third hello is a repeat");
-        assert_eq!(log.resolved()[0].reaction, Reaction::Wary);
+        assert_eq!(log.resolved().at(0).reaction, Reaction::Wary);
     }
 
     #[test]
@@ -882,7 +898,7 @@ mod tests {
             64,
         );
         app.update();
-        let board = app.world().get::<NpcBlackboard>(actor).expect("board");
+        let board = app.world().get::<NpcBlackboard>(actor).or_die();
         assert!(matches!(
             board.0.get(KEY_INTERACTION_REACTION),
             Some(Value::Int(_))

@@ -273,6 +273,7 @@ impl LinkTable {
 mod tests {
     use super::*;
     use crate::domain::nav::GridNavSource;
+    use crate::testkit::{GetOrDie, OrDie, OrDieErr};
 
     fn cell(x: u16, y: u16) -> NavCell {
         NavCell::new(x, y)
@@ -283,13 +284,13 @@ mod tests {
         let mut table = LinkTable::new();
         table
             .add(NavLink::new(cell(2, 2), cell(2, 6), 150, LinkTag::new(1)))
-            .expect("valid link");
+            .or_die();
         let mut out = SmallVec::new();
         table.leaving_into(cell(2, 2), &mut out);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].0, cell(2, 6));
-        assert_eq!(out[0].1, 150);
-        assert_eq!(out[0].2, LinkTag::new(1));
+        assert_eq!(out.at(0).0, cell(2, 6));
+        assert_eq!(out.at(0).1, 150);
+        assert_eq!(out.at(0).2, LinkTag::new(1));
     }
 
     #[test]
@@ -297,11 +298,11 @@ mod tests {
         let mut table = LinkTable::new();
         table
             .add(NavLink::new(cell(1, 1), cell(5, 2), 20, UNTAGGED))
-            .expect("valid link");
+            .or_die();
         let mut out = SmallVec::new();
         table.arriving_into(cell(5, 2), &mut out);
         assert_eq!(out.len(), 1, "the backward index is missing the edge");
-        assert_eq!(out[0].0, cell(1, 1));
+        assert_eq!(out.at(0).0, cell(1, 1));
         table.arriving_into(cell(1, 1), &mut out);
         assert!(out.is_empty(), "a one-way link cannot be walked back");
     }
@@ -311,7 +312,7 @@ mod tests {
         let mut table = LinkTable::new();
         table
             .add(NavLink::two_way(cell(1, 1), cell(5, 5), 20, UNTAGGED))
-            .expect("valid link");
+            .or_die();
         let mut out = SmallVec::new();
         table.leaving_into(cell(1, 1), &mut out);
         assert_eq!(out.len(), 1);
@@ -328,13 +329,13 @@ mod tests {
         assert!(matches!(
             table
                 .add(NavLink::new(cell(1, 1), cell(1, 1), 10, UNTAGGED))
-                .unwrap_err(),
+                .or_die_err(),
             NavError::BadLink { .. }
         ));
         assert!(matches!(
             table
                 .add(NavLink::new(cell(1, 1), cell(2, 1), 0, UNTAGGED))
-                .unwrap_err(),
+                .or_die_err(),
             NavError::BadLink { .. }
         ));
     }
@@ -343,9 +344,9 @@ mod tests {
     fn a_duplicate_link_is_refused() {
         let mut table = LinkTable::new();
         let link = NavLink::new(cell(0, 0), cell(0, 4), 10, UNTAGGED);
-        table.add(link).expect("first");
+        table.add(link).or_die();
         assert!(matches!(
-            table.add(link).unwrap_err(),
+            table.add(link).or_die_err(),
             NavError::BadLink { .. }
         ));
     }
@@ -360,19 +361,19 @@ mod tests {
         let build = |order: [usize; 3]| {
             let mut table = LinkTable::new();
             for index in order {
-                table.add(links[index]).expect("valid");
+                table.add(links.at(index)).or_die();
             }
             table.iter().copied().collect::<Vec<_>>()
         };
         assert_eq!(build([0, 1, 2]), build([2, 1, 0]));
         let sorted = build([1, 0, 2]);
-        assert_eq!(sorted[0].from, cell(1, 1));
-        assert_eq!(sorted[1].from, cell(1, 1));
+        assert_eq!(sorted.at(0).from, cell(1, 1));
+        assert_eq!(sorted.at(1).from, cell(1, 1));
         assert!(
-            (sorted[1].to.y, sorted[1].to.x) > (sorted[0].to.y, sorted[0].to.x),
+            (sorted.at(1).to.y, sorted.at(1).to.x) > (sorted.at(0).to.y, sorted.at(0).to.x),
             "destinations unsorted: {:?} then {:?}",
-            sorted[0].to,
-            sorted[1].to
+            sorted.at(0).to,
+            sorted.at(1).to
         );
     }
 
@@ -381,19 +382,19 @@ mod tests {
         let mut table = LinkTable::new();
         table
             .add(NavLink::new(cell(0, 0), cell(0, 2), 10, LinkTag::new(3)))
-            .expect("valid");
+            .or_die();
         table
             .add(NavLink::new(cell(0, 0), cell(2, 0), 10, LinkTag::new(1)))
-            .expect("valid");
+            .or_die();
         table
             .add(NavLink::new(cell(1, 0), cell(1, 2), 10, LinkTag::new(3)))
-            .expect("valid");
+            .or_die();
         assert_eq!(table.tags(), vec![LinkTag::new(1), LinkTag::new(3)]);
     }
 
     #[test]
     fn a_landing_point_is_the_cell_centre() {
-        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).expect("grid");
+        let grid = GridNavSource::open(Vec3::ZERO, 8, 8, 1.0).or_die();
         let link = NavLink::new(cell(1, 1), cell(3, 4), 10, UNTAGGED);
         assert_eq!(
             LinkTable::landing_point(&link, &grid),

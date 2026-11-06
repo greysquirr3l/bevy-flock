@@ -5,13 +5,6 @@
 //! ([`NpcNetState::BYTES`]) and the first is a cap; this benchmark measures the work
 //! between them, so a busy market cannot quietly become a latency spike.
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_precision_loss,
-    clippy::missing_docs_in_private_items
-)]
-
 use bevy_flock::adapters::secondary::network::{InterestSet, NpcNetState};
 use bevy_flock::domain::ids::NpcId;
 use bevy_math::Vec3;

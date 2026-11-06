@@ -456,6 +456,7 @@ pub fn collect_debug_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{GetOrDieRef, OrDie};
     use bevy_app::{App, Update};
 
     fn app() -> App {
@@ -564,7 +565,7 @@ mod tests {
             crate::behavior::tree::BehaviorTree::try_from_spec(
                 crate::behavior::tree::NodeSpec::Action(0),
             )
-            .expect("a leaf is a tree"),
+            .or_die(),
         );
         let entity = app
             .world_mut()
@@ -583,13 +584,13 @@ mod tests {
             let mut entity_mut = world.entity_mut(entity);
             let mut board = entity_mut
                 .get_mut::<crate::adapters::primary::cognition::NpcBlackboard>()
-                .expect("board");
+                .or_die();
             let _ = board.0.set(
                 crate::adapters::primary::perception::KEY_PLAYER_SEEN,
                 crate::behavior::blackboard::Value::Bool(true),
             );
         }
-        let text = explain_npc(app.world_mut(), entity).expect("an NPC can be explained");
+        let text = explain_npc(app.world_mut(), entity).or_die();
         assert!(text.contains("npc"), "{text}");
         assert!(text.contains("declared think cost"), "{text}");
         assert!(
@@ -648,8 +649,8 @@ mod tests {
         app.update();
         let overlay = app.world().resource::<DebugOverlay>();
         assert_eq!(overlay.labels.len(), 2);
-        assert_eq!(overlay.labels[0].position.x, 1.0);
-        assert_eq!(overlay.labels[1].position.x, 5.0);
+        assert_eq!(overlay.labels.at_ref(0).position.x, 1.0);
+        assert_eq!(overlay.labels.at_ref(1).position.x, 5.0);
     }
 
     #[test]

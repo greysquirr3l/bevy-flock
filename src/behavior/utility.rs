@@ -596,6 +596,7 @@ pub enum UtilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{OrDie, OrDieErr};
 
     const KEY_FEAR: BlackboardKey = BlackboardKey::new(101);
     const KEY_GRUDGE: BlackboardKey = BlackboardKey::new(102);
@@ -611,20 +612,20 @@ mod tests {
 
     fn table() -> UtilityTable {
         let mut chat = UtilitySet::new();
-        chat.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+        chat.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         chat.push(Consideration::keyed(KEY_FEAR).with_curve(Curve::Linear {
             slope: -1.0,
             intercept: 1.0,
         }))
-        .expect("push");
+        .or_die();
         let mut eat = UtilitySet::new();
         eat.push(Consideration::keyed(KEY_HUNGER).with_curve(Curve::Step { threshold: 0.5 }))
-            .expect("push");
+            .or_die();
         let mut table = UtilityTable::new(vec![
             UtilityEntry::new(BehaviorId::new(1), "chat", chat),
             UtilityEntry::new(BehaviorId::new(2), "eat", eat),
         ])
-        .expect("table");
+        .or_die();
         table.inhibit(Inhibition {
             target: BehaviorId::new(1),
             when: Input::Key(KEY_FEAR),
@@ -658,20 +659,20 @@ mod tests {
     #[test]
     fn multiplication_gates_a_behaviour_off() {
         let mut set = UtilitySet::new();
-        set.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+        set.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         set.push(Consideration::keyed(KEY_FEAR).with_weight(0.0))
-            .expect("push");
+            .or_die();
         assert_eq!(set.score(&board(0.0, 1.0, 0.0)), 0.0);
     }
 
     #[test]
     fn compensation_keeps_a_many_consideration_behaviour_competitive() {
         let mut two = UtilitySet::new();
-        two.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
-        two.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+        two.push(Consideration::keyed(KEY_GRUDGE)).or_die();
+        two.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         let mut five = UtilitySet::new();
         for _ in 0..5 {
-            five.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+            five.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         }
         let blackboard = board(0.0, 0.8, 0.0);
         assert!(
@@ -685,16 +686,16 @@ mod tests {
     #[test]
     fn the_highest_score_wins_and_ties_go_to_registration_order() {
         let mut a = UtilitySet::new();
-        a.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+        a.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         let mut b = UtilitySet::new();
-        b.push(Consideration::keyed(KEY_HUNGER)).expect("push");
+        b.push(Consideration::keyed(KEY_HUNGER)).or_die();
         let table = UtilityTable::new(vec![
             UtilityEntry::new(BehaviorId::new(1), "first", a),
             UtilityEntry::new(BehaviorId::new(2), "second", b),
         ])
-        .expect("table");
+        .or_die();
         let blackboard = board(0.0, 0.6, 0.6);
-        let selection = table.select(&blackboard).expect("a winner");
+        let selection = table.select(&blackboard).or_die();
         assert_eq!(selection.id, BehaviorId::new(1));
         assert_eq!(
             selection.runner_up.map(|(id, _)| id),
@@ -705,9 +706,9 @@ mod tests {
     #[test]
     fn inhibition_cancels_rather_than_competes() {
         let table = table();
-        let calm = table.select(&board(0.0, 0.9, 0.1)).expect("a winner");
+        let calm = table.select(&board(0.0, 0.9, 0.1)).or_die();
         assert_eq!(calm.id, BehaviorId::new(1));
-        let afraid = table.select(&board(0.95, 0.9, 0.1)).expect("a winner");
+        let afraid = table.select(&board(0.95, 0.9, 0.1)).or_die();
         assert_eq!(afraid.id, BehaviorId::new(2), "fear did not cancel chat");
         let explanation = table.explain(&board(0.95, 0.9, 0.1));
         assert!(
@@ -721,9 +722,9 @@ mod tests {
     #[test]
     fn when_everything_is_inhibited_nothing_is_chosen() {
         let mut set = UtilitySet::new();
-        set.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
-        let mut table = UtilityTable::new(vec![UtilityEntry::new(BehaviorId::new(1), "chat", set)])
-            .expect("table");
+        set.push(Consideration::keyed(KEY_GRUDGE)).or_die();
+        let mut table =
+            UtilityTable::new(vec![UtilityEntry::new(BehaviorId::new(1), "chat", set)]).or_die();
         table.inhibit(Inhibition {
             target: BehaviorId::new(1),
             when: Input::Constant(1.0),
@@ -757,7 +758,7 @@ mod tests {
             UtilityEntry::new(BehaviorId::new(1), "b", set),
         ];
         assert!(matches!(
-            UtilityTable::new(entries).unwrap_err(),
+            UtilityTable::new(entries).or_die_err(),
             UtilityError::DuplicateBehavior { .. }
         ));
     }
@@ -766,10 +767,10 @@ mod tests {
     fn a_set_cannot_grow_past_its_capacity() {
         let mut set = UtilitySet::new();
         for _ in 0..MAX_CONSIDERATIONS {
-            set.push(Consideration::keyed(KEY_GRUDGE)).expect("push");
+            set.push(Consideration::keyed(KEY_GRUDGE)).or_die();
         }
         assert!(matches!(
-            set.push(Consideration::keyed(KEY_GRUDGE)).unwrap_err(),
+            set.push(Consideration::keyed(KEY_GRUDGE)).or_die_err(),
             UtilityError::TooManyConsiderations { .. }
         ));
     }

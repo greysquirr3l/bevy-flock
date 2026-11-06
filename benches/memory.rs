@@ -13,10 +13,7 @@
 //!
 //! Measured over 16,384 enrolled NPCs with four subjects: the shape of a busy
 //! tavern district rather than a whole city.
-#![expect(
-    clippy::expect_used,
-    reason = "benchmark setup asserts its own fixtures"
-)]
+use bevy_flock::testkit::OrDie;
 use std::hint::black_box;
 
 use bevy_flock::domain::memory::{
@@ -36,11 +33,7 @@ struct Fixture {
 fn fixture() -> Fixture {
     let mut store = MemoryStore::new(ROWS, SUBJECTS);
     let rows = (0..ROWS)
-        .map(|npc| {
-            store
-                .enrol(NpcId::unique(npc))
-                .expect("capacity matches the fixture")
-        })
+        .map(|npc| store.enrol(NpcId::unique(npc)).or_die())
         .collect();
     Fixture { store, rows }
 }
@@ -170,7 +163,7 @@ fn bench_stride(c: &mut Criterion) {
     for subjects in [16_u16, 64] {
         let mut store = MemoryStore::new(4_096, subjects);
         for npc in 0..4_096_u32 {
-            store.enrol(NpcId::unique(npc)).expect("sized");
+            store.enrol(NpcId::unique(npc)).or_die();
         }
         group.bench_function(BenchmarkId::new("sweep_empty", subjects), |b| {
             b.iter(|| {
@@ -182,7 +175,7 @@ fn bench_stride(c: &mut Criterion) {
         // street actually has, and the one where the stride is really walked.
         let mut populated = MemoryStore::new(4_096, subjects);
         for npc in 0..4_096_u32 {
-            let index = populated.enrol(NpcId::unique(npc)).expect("sized");
+            let index = populated.enrol(NpcId::unique(npc)).or_die();
             populated.remember(
                 index,
                 SubjectId::new(0),

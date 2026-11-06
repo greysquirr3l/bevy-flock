@@ -10,16 +10,13 @@
 //!    time, and its grudge is intact while its warmth is gone.
 //! 3. Did reclamation stay bounded in time? The sweep is a cadence, not a per-frame cost,
 //!    and the work it does must not grow with the number of NPCs who ever existed.
-#![expect(
-    clippy::expect_used,
-    reason = "a fixture that cannot build its store should fail loudly"
-)]
 
 use bevy_flock::domain::ids::NpcId;
 use bevy_flock::domain::memory::{
     AgingPolicy, DecayPolicy, Encounter, EncounterKind, MemoryStore, SubjectId,
 };
 use bevy_flock::domain::tick::Tick;
+use bevy_flock::testkit::OrDie;
 
 const CADENCE: u64 = 600;
 const HALF_LIFE: u32 = 3_600;
@@ -71,7 +68,7 @@ fn an_anchored_grudge_outlives_an_hour_of_silence() {
     // NPC still knows exactly who they are — and feels nothing about it any more.
     let mut store = MemoryStore::new(8, 4);
     let wronged = NpcId::unique(42);
-    let index = store.enrol(wronged).expect("room for one");
+    let index = store.enrol(wronged).or_die();
     let player = SubjectId::new(0);
     store.remember(
         index,
@@ -101,7 +98,7 @@ fn an_anchored_grudge_outlives_an_hour_of_silence() {
     );
 
     // History: everything left to remember.
-    let slot = store.recall(index, player).expect("the record survives");
+    let slot = store.recall(index, player).or_die();
     assert!(slot.is_grudge(), "and it is still a grudge");
     assert_eq!(slot.last_seen(), Tick::new(0), "the date did not drift");
     assert_eq!(slot.encounters(), 1, "the count is history");
@@ -113,7 +110,7 @@ fn anchoring_one_npc_does_not_protect_its_neighbours() {
     // is a store that leaks again, with better intentions.
     let mut store = MemoryStore::new(16, 2);
     let anchored = NpcId::unique(1);
-    let anchored_index = store.enrol(anchored).expect("room");
+    let anchored_index = store.enrol(anchored).or_die();
     store.remember(
         anchored_index,
         SubjectId::new(0),
@@ -123,7 +120,7 @@ fn anchoring_one_npc_does_not_protect_its_neighbours() {
     let mut others = Vec::new();
     for id in 2..12 {
         let npc = NpcId::unique(id);
-        let index = store.enrol(npc).expect("room");
+        let index = store.enrol(npc).or_die();
         store.remember(
             index,
             SubjectId::new(0),
@@ -156,7 +153,7 @@ fn reclamation_work_follows_the_store_not_the_population() {
     let policy = AgingPolicy::every(CADENCE);
     let mut quiet = MemoryStore::new(16, 2);
     for id in 0..4 {
-        let index = quiet.enrol(NpcId::unique(id)).expect("room");
+        let index = quiet.enrol(NpcId::unique(id)).or_die();
         quiet.remember(
             index,
             SubjectId::new(0),

@@ -30,10 +30,18 @@
 //! what the equations always meant: a test pins the old bias so the difference stays visible
 //! rather than unexplained.
 
-#![expect(
-    clippy::indexing_slicing,
-    reason = "every index is bounded by the parallel vectors pushed in lockstep by `push`, and \
-              the bucket ranges come from the same counting sort"
+// 24 of this module's index expressions trip `indexing_slicing`, all of them in the wide kernel,
+// which addresses its lane arrays directly; the scalar and threaded roads walk iterators and trip
+// none, so the expectation has to be conditional or it is unfulfilled in a build without `simd`.
+// Every one of the 24 is bounded by a length check made earlier in the same function, and by the
+// parallel vectors `push` grows in lockstep. Removing them is a measured kernel change: it is
+// `kernel-bounds-checks` in `plan.toml`, and it has to come with a re-run of `benches/crowd.rs`.
+#![cfg_attr(
+    feature = "simd",
+    expect(
+        clippy::indexing_slicing,
+        reason = "24 sites in the wide kernel, each bounded by a length check in the same function"
+    )
 )]
 
 use bevy_math::Vec3;
@@ -41,7 +49,7 @@ use bevy_tasks::{ComputeTaskPool, TaskPool};
 #[cfg(feature = "simd")]
 use wide::f32x4;
 
-use crate::application::avoidance::{self, AvoidReport, AvoidanceParams};
+use crate::application::avoidance::{self, AvoidBody, AvoidReport, AvoidanceParams};
 use crate::domain::spatial::{SpatialGrid, SpatialGridConfig};
 use crate::domain::steering::{SteeringParams, accumulate};
 
@@ -654,7 +662,6 @@ impl Crowd {
                 *cell = velocity[2];
             }
             if let Some(cell) = self.soa.agent.get_mut(slot) {
-                #[allow(clippy::cast_precision_loss)]
                 let id = agent as f32;
                 *cell = id;
             }
@@ -694,7 +701,6 @@ impl Crowd {
                     self.flags.get(agent).copied().unwrap_or(0) & STEERS != 0
                 });
                 if all_steer {
-                    #[allow(clippy::cast_possible_truncation)]
                     let home = cell as u32;
                     self.steer_block(
                         slot,
@@ -738,10 +744,12 @@ impl Crowd {
             self.positions[agent],
             self.velocities[agent],
             target,
-            count,
-            sum_p,
-            sum_v,
-            sep,
+            NeighbourSums {
+                count,
+                sum_p,
+                sum_v,
+                sep,
+            },
             params,
         );
         report.steered += 1;
@@ -850,10 +858,12 @@ impl Crowd {
                 self.positions[agent],
                 self.velocities[agent],
                 target,
-                count as u32,
-                [sum_x[lane_index], sum_y[lane_index], sum_z[lane_index]],
-                [head_x[lane_index], head_y[lane_index], head_z[lane_index]],
-                [away_x[lane_index], away_y[lane_index], away_z[lane_index]],
+                NeighbourSums {
+                    count: count as u32,
+                    sum_p: [sum_x[lane_index], sum_y[lane_index], sum_z[lane_index]],
+                    sum_v: [head_x[lane_index], head_y[lane_index], head_z[lane_index]],
+                    sep: [away_x[lane_index], away_y[lane_index], away_z[lane_index]],
+                },
                 params,
             );
             report.steered += 1;
@@ -1120,12 +1130,8 @@ fn avoid_agent(
         report.pairs += 1;
         touched |= avoidance::solve_pair(
             params,
-            position,
-            velocity,
-            priority,
-            other_position,
-            other_velocity,
-            other_priority,
+            AvoidBody::new(position, velocity).with_priority(priority),
+            AvoidBody::new(other_position, other_velocity).with_priority(other_priority),
             &mut correction,
         );
     });
@@ -1180,7 +1186,16 @@ fn steer_agent(
         view.targets.get(index).copied()
     };
     *out = desired_for(
-        position, velocity, target, scan.count, scan.sum_p, scan.sum_v, scan.sep, params,
+        position,
+        velocity,
+        target,
+        NeighbourSums {
+            count: scan.count,
+            sum_p: scan.sum_p,
+            sum_v: scan.sum_v,
+            sep: scan.sep,
+        },
+        params,
     );
     report.steered += 1;
 }
@@ -1222,23 +1237,41 @@ struct Window {
 /// The cells on one axis that a sphere of `radius` around `value` can reach.
 fn axis_window(value: f32, radius: f32, min: f32, cell_size: f32, dim: u32) -> (i64, i64) {
     (
-        clamp_axis((value - radius - min) / cell_size, dim) as i64,
-        clamp_axis((value + radius - min) / cell_size, dim) as i64,
+        i64::from(clamp_axis((value - radius - min) / cell_size, dim)),
+        i64::from(clamp_axis((value + radius - min) / cell_size, dim)),
     )
 }
 
+/// What one neighbour scan collected, in the form the arithmetic wants it.
+///
+/// The four values travel together — they are one scan's output — so they are one argument rather
+/// than four, which also keeps the kernel's call sites readable.
+#[derive(Clone, Copy, Default)]
+struct NeighbourSums {
+    /// Neighbours counted, saturated.
+    count: u32,
+    /// Summed neighbour positions.
+    sum_p: [f32; 3],
+    /// Summed neighbour velocities (the alignment term's numerator).
+    sum_v: [f32; 3],
+    /// The separation force, already negated.
+    sep: [f32; 3],
+}
+
 /// The per-agent arithmetic: the domain model, over sums the scan already collected.
-#[allow(clippy::too_many_arguments)]
 fn desired_for(
     position: [f32; 3],
     velocity: [f32; 3],
     target: Option<[f32; 3]>,
-    count: u32,
-    sum_p: [f32; 3],
-    sum_v: [f32; 3],
-    sep: [f32; 3],
+    sums: NeighbourSums,
     params: &CrowdParams,
 ) -> [f32; 3] {
+    let NeighbourSums {
+        count,
+        sum_p,
+        sum_v,
+        sep,
+    } = sums;
     let max_speed = params.max_speed;
     let here = Vec3::new(position[0], position[1], position[2]);
     let mut steering = accumulate(
@@ -1287,7 +1320,6 @@ fn clamp_axis(value: f32, dim: u32) -> u32 {
     if index < 0.0 {
         return 0;
     }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let index = index as u32;
     index.min(last)
 }
@@ -1298,6 +1330,7 @@ mod tests {
     use crate::domain::ids::NpcId;
     use crate::domain::spatial::{GridEntry, Neighbour};
     use crate::domain::steering::{AgentState, desired_velocity};
+    use crate::testkit::OrDie;
 
     fn params() -> CrowdParams {
         CrowdParams::from_steering(&SteeringParams::human_scale())
@@ -1309,7 +1342,7 @@ mod tests {
     /// A crowd that is genuinely three-dimensional: a spiral in `xz` with a slow sine in `y`, so
     /// vertical neighbours exist and a planar kernel would fail here rather than pass by accident.
     fn fixture(count: u32) -> (SpatialGrid, Vec<Agent>) {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut points = Vec::new();
         for index in 0..count {
             let step = index as f32;
@@ -1350,7 +1383,7 @@ mod tests {
     /// The targets are behind each other, so steering alone drives them straight through: this is
     /// the doorway case, and the only thing that can keep them apart is the avoidance pass.
     fn head_on_run(avoid: bool) -> (f32, [f32; 3], [f32; 3], u64) {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         // Separation weight off, so the soft force cannot keep them apart and the fixture models
         // the case avoidance exists for: a doorway where pushing is outmatched by the traffic.
         let mut params = params();
@@ -1426,7 +1459,7 @@ mod tests {
 
     #[test]
     fn an_unusable_avoidance_config_does_nothing() {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut crowd = packed(&grid, &[([0.0, 0.0, 0.0], [0.0; 3], None)]);
         let report = crowd.avoid(&AvoidanceParams::new().with_separation(0.0));
         assert_eq!(report, AvoidReport::default());
@@ -1434,7 +1467,7 @@ mod tests {
 
     #[test]
     fn ambient_agents_are_avoided_but_do_not_avoid() {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut crowd = Crowd::default();
         crowd.configure_from_grid(&grid);
         crowd.begin();
@@ -1447,11 +1480,11 @@ mod tests {
             true,
         );
         let _ = crowd.steer(&params());
-        let steered = crowd.desired(1).expect("the walker is steered");
+        let steered = crowd.desired(1).or_die();
         let avoidance = AvoidanceParams::new();
         let report = crowd.avoid(&avoidance);
         assert_eq!(report.adjusted, 1, "only the walker is corrected");
-        let walker = crowd.desired(1).expect("steered");
+        let walker = crowd.desired(1).or_die();
         assert!(
             walker[0] < steered[0],
             "the walker must be pushed away: steered {steered:?}, avoided {walker:?}"
@@ -1461,7 +1494,7 @@ mod tests {
 
     #[test]
     fn a_lone_agent_is_isolated_and_does_not_drift() {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut crowd = packed(&grid, &[([0.0, 0.0, 0.0], [0.0; 3], None)]);
         let report = crowd.steer(&params());
         assert_eq!(report.steered, 1);
@@ -1472,7 +1505,7 @@ mod tests {
     #[test]
     fn cells_agree_with_the_spatial_grid() {
         // The kernel's bucket ids have to be the grid's, or the two disagree about neighbours.
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut state = 0x1234_5678_u64;
         let mut crowd = Crowd::default();
         crowd.configure_from_grid(&grid);
@@ -1492,7 +1525,7 @@ mod tests {
 
     #[test]
     fn ambient_agents_are_neighbours_but_not_steered() {
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let mut crowd = Crowd::default();
         crowd.configure_from_grid(&grid);
         crowd.begin();
@@ -1512,7 +1545,7 @@ mod tests {
         // Three agents stacked on the y axis, 4 m apart, with nothing pulling them anywhere else.
         // A planar kernel would return a purely horizontal desire — which is exactly the bug this
         // test exists to catch.
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let points = [
             ([0.0_f32, 0.0, 0.0], [0.0_f32; 3], None),
             ([0.0, 4.0, 0.0], [0.0; 3], None),
@@ -1520,7 +1553,7 @@ mod tests {
         ];
         let mut crowd = packed(&grid, &points);
         crowd.steer(&params());
-        let middle = crowd.desired(0).expect("steered");
+        let middle = crowd.desired(0).or_die();
         // Separation and cohesion cancel on the axis; what survives is the sum of the two 1/d²
         // pushes, which is zero for a symmetric stack. Alignment is zero too, so this agent sits
         // still — the *outer* ones must move, and toward each other vertically.
@@ -1528,12 +1561,12 @@ mod tests {
             middle[1].abs() < 1e-3,
             "a symmetric stack does not move: {middle:?}"
         );
-        let top = crowd.desired(1).expect("steered");
+        let top = crowd.desired(1).or_die();
         assert!(
             top[1] < -1e-3,
             "the top agent should be pushed down: {top:?}"
         );
-        let bottom = crowd.desired(2).expect("steered");
+        let bottom = crowd.desired(2).or_die();
         assert!(
             bottom[1] > 1e-3,
             "the bottom agent should be pushed up: {bottom:?}"
@@ -1597,7 +1630,7 @@ mod tests {
         let mut reference_grid = grid.clone();
         for (index, (position, velocity, _)) in points.iter().enumerate() {
             reference_grid.insert(GridEntry {
-                id: NpcId::unique(u32::try_from(index).expect("small fixture")),
+                id: NpcId::unique(u32::try_from(index).or_die()),
                 position: vec3(*position),
                 velocity: vec3(*velocity),
             });
@@ -1615,7 +1648,7 @@ mod tests {
             // The grid returns the agent as its own nearest neighbour and the domain model
             // averages it in; the kernel excludes it. Compare like with like, and see
             // `the_kernel_does_not_average_an_agent_into_its_own_cohesion` for that difference.
-            let own = NpcId::unique(u32::try_from(index).expect("small fixture"));
+            let own = NpcId::unique(u32::try_from(index).or_die());
             scratch.retain(|neighbour| neighbour.id != own);
             let expected = desired_velocity(
                 AgentState {
@@ -1626,7 +1659,7 @@ mod tests {
                 &scratch,
                 &SteeringParams::human_scale(),
             );
-            let actual = crowd.desired(index).expect("steered");
+            let actual = crowd.desired(index).or_die();
             worst = worst.max((vec3(actual) - expected).length());
         }
         assert!(
@@ -1641,14 +1674,14 @@ mod tests {
         // at distance zero. The old code therefore divided the cohesion and alignment sums by a
         // count that included the agent, which dilutes both by 1/n and biases every crowd toward
         // less cohesion the sparser it gets. The kernel leaves the agent out.
-        let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+        let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
         let points = [
             ([0.0_f32, 0.0, 0.0], [0.0_f32; 3], None),
             ([2.0, 1.0, 0.0], [0.0; 3], None),
         ];
         let mut crowd = packed(&grid, &points);
         crowd.steer(&params());
-        let steered = crowd.desired(0).expect("steered");
+        let steered = crowd.desired(0).or_die();
 
         let mut reference_grid = grid;
         reference_grid.insert(GridEntry {
@@ -1702,8 +1735,8 @@ mod tests {
         );
         let mut worst = 0.0_f32;
         for index in 0..points.len() {
-            let a = blocked.desired(index).expect("steered");
-            let b = scalar.desired(index).expect("steered");
+            let a = blocked.desired(index).or_die();
+            let b = scalar.desired(index).or_die();
             worst = worst.max((vec3(a) - vec3(b)).length());
         }
         assert!(worst < 1e-4, "transposed road drifted by {worst}");

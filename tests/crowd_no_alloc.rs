@@ -10,8 +10,8 @@
 // `GlobalAlloc` is unsafe by definition. The unsafe code forwards to the system allocator; the
 // crate itself still denies unsafe.
 #![allow(unsafe_code)]
-#![expect(clippy::expect_used, reason = "test setup asserts its own fixtures")]
 
+use bevy_flock::testkit::OrDie;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -72,7 +72,7 @@ fn counting<R>(body: impl FnOnce() -> R) -> (R, usize) {
 
 #[test]
 fn a_steady_frame_does_not_touch_the_allocator() {
-    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     let params = CrowdParams::from_steering(&SteeringParams::human_scale());
     let mut crowd = Crowd::default();
     crowd.configure_from_grid(&grid);
@@ -116,7 +116,7 @@ fn a_steady_frame_does_not_touch_the_allocator() {
 }
 #[test]
 fn a_steady_avoidance_pass_does_not_touch_the_allocator() {
-    let grid = SpatialGrid::new(SpatialGridConfig::default()).expect("grid");
+    let grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
     let params = CrowdParams::from_steering(&SteeringParams::human_scale());
     let avoidance = AvoidanceParams::new();
     let mut crowd = Crowd::default();
