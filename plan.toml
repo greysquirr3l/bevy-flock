@@ -1084,7 +1084,7 @@ delivered_in = "HEAD"
 slug = "ashfall-demo-playground"
 title = "Ship the Ashfall Verge playground: a city, six generated models and four artefacts"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "df18dac"
 evidence = """`demo/` is a separate package (own `[workspace]`, like `compat/`) with a bin, a library and nine tests. It builds a six-district city from a seed (large/medium/small/tiny classes, keyed NPC placement, 2096 ruined blocks, 10 shelters, 10 pylons, 44 stalls), spawns a crowd through `FlockPlugin`, places it into the districts and steps it.
 
 Six models were generated with Meshy from six concept images and shipped as GLBs: three bodies (gatewarden, aerie, scavenger) and three props (pylon, shelter-door, market-stall), 12,654 to 5,971 triangles each. `demo/tools/shrink_glb.py` re-encodes the embedded 2K base-colour maps and re-lays the binary chunk with geometry, accessors and indices byte-identical, taking 22.9 MB to 2.4 MB (89%); heights were then measured off the shipped meshes through `--report` and recorded in the asset table, so a scale error is a table error.
