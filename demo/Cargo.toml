@@ -86,9 +86,11 @@ cast_ptr_alignment = "deny"
 # system that trips this carries a documented `#[expect]`, which the audit accepts only when the
 # signature really is a system's.
 needless_pass_by_value = "deny"
-# Every numeric conversion in the demo goes through `bevy_flock::domain::num`, which owns the cast
-# and states what it does with the bits: saturating, truncating, or exact. Outside that module the
-# demo now has no raw `as` between numeric types at all.
+# Every conversion the four cast lints can see goes through `bevy_flock::domain::num`, which owns
+# the cast and states what it does with the bits: saturating, truncating, or exact. What remains is
+# widening that `From` cannot express -- `u32 as usize`, `usize as u64` -- which is lossless on every
+# target this crate supports and which none of the four lints flags. The demo is not cast-free; it is
+# free of the casts that lose information silently.
 cast_precision_loss = "deny"
 cast_possible_truncation = "deny"
 cast_sign_loss = "deny"

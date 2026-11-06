@@ -378,7 +378,9 @@ environment classification, adapter policy, the pipeline recipe, the shader rule
 gates and the benchmarking traps. It is written for an agent to follow, and it says where the numbers
 are allowed to come from. `demo/README.md` explains the
 city, the assets, the test that caught a headless app having no clock, and why the tier histogram
-reads 100% reflex below the manifest band.
+reads 100% reflex below the manifest band. `demo-gpu/README.md` is the front end's own page: the
+backend flags, the three numbers each view prints, which tests need a device, and why an `llvmpipe`
+adapter is a correctness target rather than a performance one.
 
 ## Architecture
 

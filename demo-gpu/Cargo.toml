@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Direct, not just through the demo: this crate converts a linear channel to a byte, and
-# `bevy_flock::domain::num` is where every cast in the repository is written down.
+# `bevy_flock::domain::num` is where every cast that can lose information is written down.
 bevy-flock = { path = ".." }
 bevy-flock-demo = { path = "../demo" }
 bevy_math = "0.20.1"

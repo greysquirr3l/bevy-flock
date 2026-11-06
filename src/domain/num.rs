@@ -40,7 +40,10 @@
 /// Widest integer an `f32` represents exactly; beyond it, rounding begins.
 pub const F32_EXACT_INTEGER: u32 = 1 << 24;
 
-/// Converts an element count to `u32`, saturating at [`u32::MAX`].
+/// Converts a signed count to `u64`, clamping a negative count to zero.
+///
+/// For a value that arrived signed and cannot be negative in the domain -- a row count read back
+/// from a file, say -- where `as u64` would turn `-1` into eighteen quintillion.
 #[inline]
 #[must_use]
 pub const fn i64_to_count_u64(value: i64) -> u64 {
@@ -137,6 +140,7 @@ pub const fn f64_to_i64(value: f64) -> i64 {
 pub const fn u32_to_usize(value: u32) -> usize {
     value as usize
 }
+
 /// Converts a `u32` to `u8`, saturating at 255.
 #[inline]
 #[must_use]
@@ -147,6 +151,7 @@ pub const fn u32_to_u8(value: u32) -> u8 {
         value as u8
     }
 }
+
 /// Converts an `i32` to `u8`, saturating at both ends; negative values become zero.
 #[inline]
 #[must_use]
@@ -159,6 +164,7 @@ pub const fn i32_to_u8(value: i32) -> u8 {
         value as u8
     }
 }
+
 /// Converts an `f64` to `usize`, truncating toward zero and saturating; `NaN` becomes zero.
 ///
 /// The counterpart of [`f32_to_usize`] for a value that arrived as a `f64`: a JSON number, a
@@ -168,6 +174,7 @@ pub const fn i32_to_u8(value: i32) -> u8 {
 pub const fn f64_to_usize(value: f64) -> usize {
     value as usize
 }
+
 /// Converts an `f64` to `i16`, truncating toward zero and saturating; `NaN` becomes zero.
 #[inline]
 #[must_use]
@@ -420,6 +427,10 @@ mod tests {
         assert_eq!(usize_to_i32(usize::MAX), i32::MAX);
         assert_eq!(u64_to_u32(u64::MAX), u32::MAX);
         assert_eq!(u64_to_usize(u64::MAX), usize::MAX);
+        assert_eq!(u32_to_u8(255), 255);
+        assert_eq!(u32_to_u8(256), 255);
+        assert_eq!(i32_to_u8(-1), 0);
+        assert_eq!(i32_to_u8(300), 255);
     }
 
     #[test]
@@ -458,6 +469,9 @@ mod tests {
         assert_eq!(f32_to_i8(-300.0), i8::MIN);
         assert_eq!(f64_to_u32(-1.0), 0);
         assert_eq!(f64_to_i64(f64::MAX), i64::MAX);
+        assert_eq!(f64_to_usize(3.9), 3);
+        assert_eq!(f64_to_usize(-1.0), 0);
+        assert_eq!(f64_to_usize(f64::INFINITY), usize::MAX);
     }
 
     #[test]
@@ -466,13 +480,6 @@ mod tests {
         assert_eq!(f32_to_i32(f32::NAN), 0);
         assert_eq!(f32_to_usize(f32::NAN), 0);
         assert_eq!(f64_to_i64(f64::NAN), 0);
-        assert_eq!(u32_to_u8(255), 255);
-        assert_eq!(u32_to_u8(256), 255);
-        assert_eq!(i32_to_u8(-1), 0);
-        assert_eq!(i32_to_u8(300), 255);
-        assert_eq!(f64_to_usize(3.9), 3);
-        assert_eq!(f64_to_usize(-1.0), 0);
-        assert_eq!(f64_to_usize(f64::INFINITY), usize::MAX);
     }
 
     #[test]

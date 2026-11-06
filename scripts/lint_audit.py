@@ -294,6 +294,11 @@ def walk(root: Path) -> list[Path]:
     files: list[Path] = []
     for top in SEARCH:
         for path in sorted((root / top).rglob("*.rs")):
+            # `demo/`, `demo-gpu/` and `compat/` are packages, so each has its own `target/`: the
+            # build scripts of dependencies write `.rs` files there, and a generated file that
+            # happens to carry an `allow` is not a policy violation this repository can fix.
+            if "target" in path.relative_to(root).parts:
+                continue
             files.append(path)
     return files
 
@@ -502,6 +507,12 @@ def self_test() -> int:
             "#![cfg_attr(\n    feature = \"simd\",\n    expect(clippy::indexing_slicing, reason = \"x\")\n)]\nfn f() {}\n",
             1,
             "a cfg_attr wrapping an expect",
+        ),
+        (
+            "demo/target/debug/build/serde/out/private.rs",
+            "#![allow(clippy::unwrap_used)]\nfn f() {}\n",
+            0,
+            "a build artefact is not the repository's code",
         ),
         (
             "src/sys.rs",
