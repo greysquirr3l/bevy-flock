@@ -36,9 +36,10 @@ Three lints are missing from that list on purpose: `raw_borrows_via_references`,
 The `lint-future` job closes that gap. It probes each of the three on a throwaway file with
 `+stable`, then runs `cargo +stable clippy --all-targets --all-features` denying the ones that exist
 — so the tree is already clean for them, and moving the pin is a version bump instead of a sweep. It
-denies *only* those three: a newer stable also carries newer nursery lints (11 warnings on 1.99
-today, tracked as `stable-lint-drift`), and a forward check that fails on tomorrow's diagnostics
-would be noise rather than a gate.
+denies *only* those three: a newer stable also carries newer nursery lints, and a forward check that
+fails on tomorrow's diagnostics would be noise rather than a gate. Those are catalogued instead, each
+with its site and what it wants, in [lint-drift.md](lint-drift.md) — and `scripts/lint_drift.py`
+fails CI if that catalogue stops matching what stable reports, in either direction.
 
 Everything in the job is pinned with `+stable` or `rustup run stable`, deliberately.
 `rust-toolchain.toml` pins 1.97.1 and rustup honours that file over the installed default, so a bare

@@ -1028,7 +1028,7 @@ evaluation_criteria = [
 [[phases.tasks]]
 slug = "stable-lint-drift"
 title = "Fix what stable clippy reports before the pin moves"
-goal = "The tree passes `-D warnings` on the pinned 1.97.1 and not on stable 1.99: the forward job prints 11 warnings from lints that are new or newly sharper — `assert_is_empty` (6, of the `assert!(!x.is_empty())` shape), `tuple_array_conversions` (2, in `application::packed`), `manual_slice_fill`, `needless_borrows_for_generic_args` and `chunks_exact_to_as_chunks`. Fix them now, while they are warnings somebody can read, rather than in the commit that bumps `rust-toolchain.toml` and has to explain 11 unrelated failures."
+goal = "The tree passes `-D warnings` on the pinned 1.97.1 and not on stable: 11 warnings from lints that are new or newly sharper are catalogued with their sites in `docs/lint-drift.md`, which `scripts/lint_drift.py --check` keeps in step with a live run in CI. Fix each site, re-derive the page, and the pin-bump commit stops having to explain eleven unrelated failures."
 kind = "infrastructure"
 hints = [
   "`assert_is_empty` suggests `assert_ne!(x, '')` for a string and `assert!(!v.is_empty())` is what it flags for a vector; read each site, because the honest rewrite differs between the two.",
@@ -1042,6 +1042,7 @@ test_hints = [
 must_haves = [
   "Zero warnings under stable on every target, not just the library.",
   "`docs/lint-policy.md` says which toolchain owns the denials, and the forward job says which lints it denies.",
+  "`docs/lint-drift.md` ends with an empty table rather than eleven rows, and `scripts/lint_drift.py` reports nothing to compare.",
 ]
 evaluation_criteria = [
   "The forward job can be tightened to `-D warnings` without touching code.",

@@ -234,6 +234,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   argument.
 
 
+### Lint drift is a catalogue, not a sentence
+
+The eleven warnings a newer stable reports — six `assert_is_empty`, two `tuple_array_conversions` in
+the packed kernel, `manual_slice_fill`, `needless_borrows_for_generic_args` and
+`chunks_exact_to_as_chunks` — used to be one sentence in `plan.toml` with counts. A count is not an
+inventory: it does not say which file, it cannot be checked, and it goes stale silently.
+`docs/lint-drift.md` now lists every site with the rewrite stable wants, and
+`scripts/lint_drift.py` derives that table from a live `cargo +stable clippy` run and fails CI when
+the two disagree in either direction: an unlisted warning, a row that is gone, or a table derived
+from a different clippy than the one running. A clippy that does not compile exits 2 rather than
+reporting "nothing to report", which is the failure mode the old probe had.
+
 ### Lint policy is now machine-checked in both directions
 
 `scripts/lint_audit.py` grew the two checks it was missing. It now sees `#[allow]`/`#[expect]` of
