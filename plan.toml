@@ -1153,7 +1153,7 @@ Both captions now name the command that produces the image, and two claims besid
 slug = "temperament-drives-behaviour"
 title = "Make personality steer: per-NPC weight bias, needs that decay, archetype presets"
 phase = "Reach"
-delivered_in = "HEAD"
+delivered_in = "60ffb49"
 evidence = """`Temperament` and `Needs` were sampled at spawn and read by nothing, so a guard was as brave as an
 urchin and nobody was ever hungry. The bias is now multiplicative on the configured weights
 (`CrowdParams::weights` stays the baseline, which is why a game's `separation = 2.5` still means that),
