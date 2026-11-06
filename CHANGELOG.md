@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **CI is reproducible without Actions.** `scripts/ci_local.py` reads `.github/workflows/ci.yml` and
+  runs the `run:` steps itself, expanding each matrix and substituting it into the commands, so the
+  local gate cannot drift from the real one. It skips the steps that provision a runner, refuses any
+  job it cannot translate faithfully rather than running part of it, skips jobs pinned to another OS,
+  and names the two jobs that are not shell (`release` is tag-gated, `deny` is an action).
+  `--check` and `--self-test` run inside CI, so a workflow shape the translator cannot follow fails
+  the build instead of quietly thinning the local gate (21 jobs, 35 local runs).
 - **Temperament reaches the simulation, and this is a behaviour change.** A personality now scales
   that NPC's own steering weights — five multipliers on `[separation, alignment, cohesion, seek,
   arrive]`, centred on `1.0` and clamped to `0.25 ..= 4.0` so a game's tuning stays the baseline —

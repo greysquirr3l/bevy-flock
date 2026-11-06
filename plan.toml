@@ -1180,3 +1180,30 @@ the table back per run through `demo/src/behaviour.rs`, and `tests/playground.rs
 align more and jostle less than urchins on the live app, so the drive being unplugged from the
 schedule fails a test rather than a paragraph.
 """
+
+[[completed]]
+slug = "local-ci-runner"
+title = "Reproduce the CI gate locally, from the workflow rather than a copy of it"
+phase = "Reach"
+delivered_in = "65f7922"
+evidence = """CI is the gate that says `main` is healthy, and a gate behind a billing failure is no gate at all.
+`scripts/ci_local.py` reads `.github/workflows/ci.yml`, expands each job's matrix, substitutes
+`${{ matrix.* }}` into the `run:` steps and executes them with bash, so the commands exist once.
+It skips `uses:` steps (the whole point of running locally is that the machine is provisioned),
+refuses a job whose condition or expression it cannot evaluate instead of running part of it, and
+skips a job pinned to another OS rather than running the Linux commands three times and calling two
+of them a macOS pass. `release` (tag-gated) and `deny` (an action with no shell step) are declared
+exceptions with their reasons, and `--check` fails if either exception outlives its job or if any
+other job becomes untranslatable.
+
+The translator is tested rather than trusted: `--self-test` holds seven fixtures — a plain job, a
+matrix that must substitute into both command and env, a tag-gated job refused and then allowed by
+`--tag`, an unresolvable `${{ secrets.* }}` that must be refused rather than blanked, the real
+workflow translating, and the exception list matching it. Both run in CI's `scripts` job, and this
+machine has run `fmt`, `scripts` and `clippy` through it end to end (`python3 scripts/ci_local.py
+--job fmt`, `--job scripts`, `--job clippy --keep-going`), which is how the missing newline in the
+first `ci.yml` insertion was found rather than assumed.
+
+`CONTRIBUTING.md` gains the section that says all of this in three commands, because the useful
+version of a fallback gate is one a contributor can find.
+"""
