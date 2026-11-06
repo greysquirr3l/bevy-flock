@@ -24,8 +24,14 @@ cast_ptr_alignment = "deny"
 suspicious = "deny"
 
 [lints.rust]
-raw_borrows_via_references = "deny"
+unsafe_code = "deny"
+missing_docs = "deny"
 ```
+
+Three lints are missing from that list on purpose: `raw_borrows_via_references`,
+`unnecessary_rest_pattern` and `rest_pattern_accessible_field` exist in 1.99 and not in the pinned
+1.97 toolchain, and naming a lint a compiler does not know turns every downstream build into an
+`unknown_lints` warning. The `lint-future` CI job probes for each one and enables the ones it finds.
 
 `-D warnings` promotes the `warn` groups, so `pedantic`, `nursery`, `cargo`, `perf` and `all` are
 errors in practice. The `deny` list is the part that matters most: `unwrap`, `expect`, `panic` and
@@ -114,9 +120,15 @@ direction too: a sanctioned override that has disappeared is an entry to delete,
 rot into a set of exceptions nobody needs. Comments are blanked before scanning, because this
 crate's documentation talks about the overrides it forbids.
 
-`--self-test` checks the detector against fixtures, including the three that matter for the
-mechanism: a sanctioned override passes, the same override unlisted fails, and a stale sanction
-fails. CI runs both.
+It also reads `Cargo.toml` and fails if the policy there is not the policy this page describes: each
+of `unsafe_code`, `missing_docs`, `suspicious`, `unwrap_used`, `expect_used`, `panic`,
+`indexing_slicing` and `cast_ptr_alignment` must still be `deny`, and each of `all`, `pedantic`,
+`nursery`, `cargo` and `perf` must still be `warn`. A clean tree under a weakened manifest is not a
+passing audit.
+
+`--self-test` checks the detector against fixtures, including the four that matter for the
+mechanism: a sanctioned override passes, the same override unlisted fails, a stale sanction fails,
+and a manifest that downgrades `panic` to `warn` fails. CI runs both.
 
 Adding an override therefore takes three steps, in this order: a reason in the script, a plan task
 that removes it, and a sentence here. None of the three is a file-level opt-out that a reviewer

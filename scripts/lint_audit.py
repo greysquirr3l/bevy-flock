@@ -34,6 +34,7 @@ SANCTIONED: dict[tuple[str, str], str] = {}
 #: matters and the search is textual rather than syntactic.
 ATTRIBUTE = re.compile(r"#!?\[(?:cfg_attr\([^]]*?)?(allow|expect)\(([^]]*?)\)\]", re.S)
 LINT = re.compile(r"clippy::([a-z_0-9]+)")
+LEVEL = re.compile(r'level\s*=\s*"([a-z]+)"')
 
 SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz")
 
@@ -79,6 +80,71 @@ def scan(path: Path) -> list[tuple[int, str | None, str]]:
     return findings
 
 
+#: What `Cargo.toml` has to say, so the policy itself cannot drift while the exceptions stay clean.
+#: `(table, lint, level)`; a missing entry or a weaker level is a failure.
+REQUIRED = (
+    ("lints.rust", "unsafe_code", "deny"),
+    ("lints.rust", "missing_docs", "deny"),
+    ("lints.clippy", "suspicious", "deny"),
+    ("lints.clippy", "unwrap_used", "deny"),
+    ("lints.clippy", "expect_used", "deny"),
+    ("lints.clippy", "panic", "deny"),
+    ("lints.clippy", "indexing_slicing", "deny"),
+    ("lints.clippy", "cast_ptr_alignment", "deny"),
+    ("lints.clippy", "all", "warn"),
+    ("lints.clippy", "pedantic", "warn"),
+    ("lints.clippy", "nursery", "warn"),
+    ("lints.clippy", "cargo", "warn"),
+    ("lints.clippy", "perf", "warn"),
+)
+
+
+def manifest_levels(text: str) -> dict[tuple[str, str], str]:
+    """Read `[lints.<table>]` into {(table, lint): level}, ignoring comments."""
+    levels: dict[tuple[str, str], str] = {}
+    table = ""
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("["):
+            table = line.strip("[]")
+            continue
+        if not table.startswith("lints."):
+            continue
+        if "=" not in line:
+            continue
+        lint, level = line.split("=", 1)
+        # Either `name = "deny"` or the table form `name = { level = "deny", priority = -1 }`.
+        value = level.strip()
+        if value.startswith("{"):
+            found = LEVEL.search(value)
+            value = found.group(1) if found else ""
+        levels[(table, lint.strip())] = value.strip('"')
+    return levels
+
+
+def check_manifest(root: Path) -> int:
+    """Fail if the manifest no longer denies what the policy says it denies."""
+    path = root / "Cargo.toml"
+    if not path.is_file():
+        print(f"lint audit: no Cargo.toml at {path}")
+        return 1
+    levels = manifest_levels(path.read_text(encoding="utf-8"))
+    problems = []
+    for table, lint, expected in REQUIRED:
+        found = levels.get((table, lint))
+        if found != expected:
+            problems.append(f"  [{table}] {lint}: expected {expected}, found {found or 'nothing'}")
+    if problems:
+        print("the lint policy in Cargo.toml is not the policy this audit enforces:")
+        print("\n".join(problems))
+        print()
+        print("Restore the entry, or change REQUIRED here and docs/lint-policy.md together.")
+        return 1
+    return 0
+
+
 def walk(root: Path) -> list[Path]:
     """Every Rust file the policy covers."""
     files: list[Path] = []
@@ -115,6 +181,8 @@ def report_sanctioned() -> None:
 
 def check(root: Path) -> int:
     """Check the tree; return a process exit code."""
+    if check_manifest(root) != 0:
+        return 1
     unsanctioned, seen_sanctioned = findings(root)
     if unsanctioned:
         print("clippy overrides outside the sanctioned list:")
@@ -135,10 +203,26 @@ def check(root: Path) -> int:
         print("Delete them from SANCTIONED: an exception nobody needs is an exception nobody reads.")
         return 1
     print(
-        f"lint audit: {len(walk(root))} file(s) scanned, {len(seen_sanctioned)} sanctioned "
-        "override(s), none unsanctioned"
+        f"lint audit: {len(walk(root))} file(s) scanned, {len(REQUIRED)} manifest entries verified, "
+        f"{len(seen_sanctioned)} sanctioned override(s), none unsanctioned"
     )
     return 0
+
+
+def write_manifest(root: Path, override: str | None = None) -> None:
+    """Write a manifest that satisfies REQUIRED, optionally with one entry replaced."""
+    lines = ["[package]", 'name = "fixture"', 'version = "0.1.0"', ""]
+    for table in ("lints.rust", "lints.clippy"):
+        lines.append(f"[{table}]")
+        for section, lint, level in REQUIRED:
+            if section != table:
+                continue
+            if override is not None and lint == override.split("=")[0].strip():
+                lines.append(override)
+            else:
+                lines.append(f'{lint} = "{level}"')
+        lines.append("")
+    (root / "Cargo.toml").write_text("\n".join(lines), encoding="utf-8")
 
 
 def self_test() -> int:
@@ -191,6 +275,7 @@ def self_test() -> int:
     for label, present, sanctioned, expected in mechanism:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            write_manifest(root)
             if present:
                 path = root / "src" / "probe.rs"
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -204,6 +289,23 @@ def self_test() -> int:
                 code = check(root)
             finally:
                 SANCTIONED.pop(key, None)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
+            else:
+                print(f"self-test ok: {label}")
+
+    # And the policy itself: a manifest that downgrades a denied lint has to fail even though the
+    # tree carries no overrides at all.
+    for label, override, expected in [
+        ("a downgraded deny fails", 'panic = "warn"', 1),
+        ("a missing deny fails", 'unwrap_used = "allow"', 1),
+        ("an intact manifest passes", 'panic = "deny"', 0),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root, override)
+            code = check(root)
             if code != expected:
                 print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
                 failures += 1

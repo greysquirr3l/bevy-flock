@@ -17,9 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moved to one 28-byte row per agent and slices each bucket's range once, so the neighbour loop has
   no bounds check in it at all. That last part was not cosmetic: a per-neighbour `get` measured 19%
   slower on a dense crowd, and the row-plus-slice form is 2% faster than the array layout it
-  replaced (`docs/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way — it fails
-  on any override outside its (empty) sanctioned table, and on a sanctioned entry that has
-  disappeared — and `docs/lint-policy.md` states what is enforced and why. `raw_borrows_via_references`
+  replaced (`docs/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way: it fails
+  on any override outside its (empty) sanctioned table, on a sanctioned entry that has disappeared,
+  and on a `Cargo.toml` whose `[lints]` no longer denies what the policy says it denies. Both
+  `docs/lint-policy.md` and the script's `--self-test` state and check what is enforced, and why. `raw_borrows_via_references`
   and the two clippy 1.99 lints are enabled by a probe-gated CI job rather than the manifest, because
   the pinned 1.97 toolchain cannot name them and an unknown lint name warns on every downstream build.
 - **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
