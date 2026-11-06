@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- **A GPU front end, and a playbook for building the next one.** `demo-gpu/` renders the Ashfall
+  district through an instanced `wgpu` pipeline over the same scene, meshes and `Shot` table the
+  software rasteriser uses, with `Backend::{Auto, Vulkan, Gl, Noop}` so it validates and encodes on a
+  machine with no driver. `benches/frame.rs` separates a frame's latency (`frame`), its throughput
+  (`eight_frames_per_drain`) and the cost of shipping pixels back (`frame_with_readback`), and reports
+  the adapter it measured: on this sandbox that is `llvmpipe`, a CPU Vulkan driver, at 974.56 ms for
+  600x375 with 5,401,392 triangles. `docs/playbooks/gpu-demos.md` is the agent-facing instruction set
+  — environment classification, adapter policy, pipeline and shader rules, correctness gates, the
+  benchmarking trap that made a drain-free loop look like encode time, and the documentation duties.
+- **Documentation audit.** ADR 0022 had been on disk and missing from the index since it landed; the
+  index has it now. ADR 0050 gains an amendment correcting two premises that have since changed (this
+  environment has an X server and a *software* Vulkan driver, not the absence of `libvulkan`) and
+  recording the GPU measurements. The release checklist's "23 ADRs" count, which had drifted by
+  twenty-eight, is now a rule instead of a number.
+
 ## [Unreleased]
 - **The level-of-detail switch cross-fades instead of popping.** `Shot::impostor_band` widens the
   switch into a window: a body between `impostor_distance - impostor_band` and `impostor_distance` is

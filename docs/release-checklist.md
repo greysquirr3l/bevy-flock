@@ -93,7 +93,9 @@ contract, and the README quotes it.
 - [x] Dual licence (MIT OR Apache-2.0), `deny.toml` policy, `SECURITY.md`, `CONTRIBUTING.md`,
       `CODE_OF_CONDUCT.md`.
 - [x] Every public item documented; `#![warn(missing_docs)]` in force.
-- [x] 23 ADRs, indexed in `docs/adr/README.md`, including the decisions that were reversed.
+- [x] Every ADR indexed in `docs/adr/README.md`, including the decisions that were reversed.
+      The index is checked against `ls docs/adr/*.md` by hand at release: a file without a row is
+      a documentation defect, and one was found this way (0022 had been missing since it landed).
 - [x] Examples run: `hello_flock`, `registry_telemetry`, `profile_band`, `memory_probe`,
       `horde_100k`, `tavern_dialog`, `custom_behavior`, `ambient_metropolis`.
 - [x] Platform and feature audit recorded in `docs/platforms.md`, with the two

@@ -357,6 +357,32 @@ jobs:
       # by tag in compat/Cargo.toml, so this job goes red when a format change would
       # break players rather than when a test notices (ADR 0014).
       - run: cargo run --locked --manifest-path compat/Cargo.toml
+  demo-gpu:
+    name: GPU demo (encodes without a driver, benchmark compiles)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: demo-gpu
+      # A runner has no adapter, which is exactly the case the noop backend exists for: every command
+      # is validated and encoded and none is executed, so a broken bind group, pipeline state or
+      # instance upload fails here rather than on someone's desktop. The benchmark is compiled and not
+      # run: with no adapter it would skip, and with a shared CPU adapter its numbers would be noise.
+      - name: Test the off-screen renderer
+        run: cargo test --release --manifest-path demo-gpu/Cargo.toml
+      - name: Compile the frame benchmark
+        run: cargo bench --manifest-path demo-gpu/Cargo.toml --bench frame --no-run
+      - name: Encode one frame on the noop backend
+        run: |
+          # The binary prints one JSON object per view and writes one PNG; take the JSON, which is
+          # the part a runner without a driver can still check.
+          cargo run --release --quiet --manifest-path demo-gpu/Cargo.toml -- \
+            --backend noop --view district --frames 1 --width 160 --height 100 \
+            --out "$RUNNER_TEMP/gpu" > "$RUNNER_TEMP/gpu-run.jsonl"
+          python3 -c "import json,pathlib; rows=[json.loads(line) for line in pathlib.Path('$RUNNER_TEMP/gpu-run.jsonl').read_text().splitlines() if line.startswith('{')]; assert rows, 'no frame row'; assert rows[0]['instances'] > 0, rows; assert len(list(pathlib.Path('$RUNNER_TEMP/gpu').glob('*.png'))) >= 1; print('noop encode ok', rows[0]['instances'], 'instances')"
+
   demo:
     name: Demo (ashfall builds, tests and writes its artefacts)
     runs-on: ubuntu-latest

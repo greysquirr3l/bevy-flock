@@ -83,6 +83,12 @@ anything more belongs to the game that embeds it.
 
 ## Flying it in a terminal
 
+There is a second front end next door: `demo-gpu/` draws the same city, crowd, meshes and shot table
+through an instanced `wgpu` pipeline, so the software rasteriser has something to be compared *with*
+rather than only described. Its district frame is `../docs/demo/ashfall-gpu-district.png`: same
+composition, same crowd, a flat ground and no impostors, drawn on `llvmpipe` because that is the only
+adapter this machine has. It falls back to the `noop` backend where no driver exists, and
+`docs/playbooks/gpu-demos.md` is the recipe it was built from.
 The five views are still images. `ashfall-play` makes the same scene a place to stand in, without a
 window, a GPU or a widget toolkit:
 
@@ -264,6 +270,7 @@ demo/
   src/gltf.rs       glTF geometry reader for the shipped GLBs
   src/skinned.rs    Rigged meshes: clip sampling, joint matrices, CPU skinning
   src/render3d.rs   The five views, the procession, the shot table
+  ../demo-gpu/      A wgpu front end over the same scene, and its frame benchmark
   src/bin/ashfall-3d.rs  The 3D entry point
   src/report.rs     run.json
   src/json.rs       A 90-line writer (no serde: the demo writes four small documents)

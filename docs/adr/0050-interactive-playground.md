@@ -131,3 +131,53 @@ which is why the benchmark keeps both cases.
   is implemented, and none is claimed as a win.
 - **The comparison is CPU-only by construction.** Any claim about end-to-end frame times on a GPU
   needs a GPU, and this ADR claims none.
+
+## Amendment, 2026-11-06: the machine grew a GPU, and so did the playground
+
+The decision above stands — the interactive front end is a terminal client over a framebuffer, and
+the software rasteriser stays the artefact producer. Two of its premises have changed, and a record
+that quietly keeps them would be wrong.
+
+**The environment is no longer bare.** `DISPLAY=:0` answers with an X.Org server, `libvulkan`,
+`libxkbcommon`, `libwayland-client`, `libX11`, `libasound` and `libudev` are installed, and the Vulkan
+loader finds `lvp_icd.json`. What it resolves to is `llvmpipe (LLVM 20.1.2, 128 bits)` with
+`device_type: Cpu`, and there is still no `/dev/dri` render node: this is a *software* Vulkan driver,
+not a graphics card. The sentence above about `libvulkan` and `libxkbcommon` being absent was true when
+it was written and is now false; the conclusion it supported — that no GPU frame time can be claimed
+here — is still true, for the narrower reason that the only adapter is a CPU.
+
+**A second front end exists.** `demo-gpu/` renders the same city, crowd, meshes and `Shot` table
+through an instanced `wgpu` pipeline, with `Backend::{Auto, Vulkan, Gl, Noop}`. It shares the scenario
+rather than re-deriving it, so the two pictures are comparable: the same district view at 600x375, 615
+instances, 7 draws, 5,401,392 triangles.
+
+| Case (600x375, district) | Median | Interval |
+| --- | --- | --- |
+| `frame` (submit and wait) | 974.56 ms | 968.84 - 980.93 ms |
+| `eight_frames_per_drain` | 7.8932 s (986.6 ms/frame) | 7.8580 - 7.9271 s |
+| `frame_with_readback` | 997.35 ms | 994.51 - 1000.5 ms |
+
+![The same district drawn by wgpu on lavapipe](../demo/ashfall-gpu-district.png)
+
+The same district, 600x375, drawn by `demo-gpu` on `llvmpipe`. Compare it with
+`ashfall-3d-district.png` next to it: the composition and the crowd agree because both read the same
+`Shot`; the ground is flat where the software renderer draws a grid, the sky is one fog colour where
+that one has a gradient, and every body is its full mesh where that one uses impostors past forty
+metres. Those three differences are the honest cost of the second front end being a reference rather
+than a replacement.
+
+Read those as a statement about `llvmpipe` and nothing else. The interesting part is not that a CPU
+Vulkan driver is about as fast as the software rasteriser — it is the same kind of work on the same
+kind of processor — but that throughput and latency are the same number here: with no separate
+processor, a frame has no pipeline to fill. That is also why an earlier version of this benchmark,
+which submitted frames without draining the queue, reported 992 ms for a case it called `encode`: it
+was measuring queue saturation, not encoding. The case names were changed to say what the loop does,
+and `docs/playbooks/gpu-demos.md` records the trap.
+
+The `Noop` backend is the part that survives a machine with no driver at all: it validates and encodes
+every command and executes none, so CI proves the pipeline state on a runner with nothing installed.
+
+What this does **not** change: the shipped images in `docs/demo/` are still produced by the software
+rasteriser, the terminal client is still the interactive front end, and no claim is made about
+hardware frame times. What it does add is a measured reference for the day a real adapter appears —
+the encode path is already written, tested and costed, and only the adapter line in the results changes.

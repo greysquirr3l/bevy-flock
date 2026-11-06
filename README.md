@@ -367,8 +367,15 @@ three props were generated with Meshy from six concept images and shipped as GLB
 cargo run --release --manifest-path demo/Cargo.toml -- --population 4000 --ticks 900
 ```
 
-There is no renderer, deliberately: a demo that needs a GPU cannot run in CI, so `ashfall.scene.json`
-is the `build_render_plan` contract written down and checked instead. `demo/README.md` explains the
+There is no renderer in that crate, deliberately: a demo that needs a GPU cannot run in CI, so
+`ashfall.scene.json` is the `build_render_plan` contract written down and checked instead. The images
+come from the software rasteriser in `demo/src/raster.rs`, and a second front end in `demo-gpu/` draws
+the same scene, meshes and shot table through an instanced `wgpu` pipeline — with a `noop` backend so
+it still validates and encodes on a runner with no driver, and a benchmark that separates a frame's
+latency from its throughput. `docs/playbooks/gpu-demos.md` is the instruction set for building one:
+environment classification, adapter policy, the pipeline recipe, the shader rules, the correctness
+gates and the benchmarking traps. It is written for an agent to follow, and it says where the numbers
+are allowed to come from. `demo/README.md` explains the
 city, the assets, the test that caught a headless app having no clock, and why the tier histogram
 reads 100% reflex below the manifest band.
 

@@ -842,7 +842,9 @@ the index's grid window covers everything, so the fallback keeps it honest inste
 ## The software rasteriser against a wgpu pipeline (2026-11-05, ADR 0050)
 
 The playground renders with a CPU rasteriser, because CI and the remote shells this project is
-developed in have no window, no GPU and no `libvulkan`. That is a deliberate choice with a cost, and
+developed in have no window and no GPU. (When this section was written they also had no `libvulkan`;
+they now have a *software* Vulkan driver, `llvmpipe`, which is a CPU in a GPU's clothing — the
+amendment at the end of this page measures it.) That is a deliberate choice with a cost, and
 the cost is worth recording: `demo/benches/render_pipeline.rs` draws the same 2,000-body district
 scene twice, once through `raster.rs` and once through a real `wgpu` device on its `noop` backend.
 
@@ -891,3 +893,33 @@ cost is lost in the frame. The band is free where it is invisible. It is not fre
 terminal, where a body is eight to ten pixels and a body inside the band costs its mesh plus two
 triangles — the accounting test in `render3d` pins exactly that, and there is no measurement above
 because no display of that size exists here.
+
+## A GPU frame on a software Vulkan adapter (2026-11-06, ADR 0050 amendment)
+The sandbox now has a Vulkan loader and an X server, and no `/dev/dri` render node: the only adapter is
+`llvmpipe (LLVM 20.1.2, 128 bits)`, reported as `device_type: Cpu`. `demo-gpu/` renders the same
+district view through an instanced `wgpu` pipeline, so the GPU half of the comparison finally has a
+number — a number about that driver, not about a graphics card.
+`cargo bench --manifest-path demo-gpu/Cargo.toml --bench frame`, release, this sandbox, 600x375,
+615 instances, 7 draws, 5,401,392 triangles, adapter `Vulkan | llvmpipe (LLVM 20.1.2, 128 bits)`:
+| Case | Median | Interval |
+| --- | --- | --- |
+| `frame` (submit and wait) | 974.56 ms | 968.84 - 980.93 ms |
+| `eight_frames_per_drain` | 7.8932 s (986.6 ms/frame) | 7.8580 - 7.9271 s |
+| `frame_with_readback` | 997.35 ms | 994.51 - 1000.5 ms |
+Three facts, and no fourth. A CPU-backed adapter's latency and throughput are the same number (974 ms
+against 987 ms per frame), because there is no second processor to overlap with: the frame has nothing
+to pipeline into. Shipping the frame back costs about 23 ms, which a windowed front end would never pay.
+And the GPU path is not faster than the software rasteriser here — 974 ms against 850 ms for the same
+composition at the same size — because both are the same kind of work on the same kind of processor; the
+GPU path draws every triangle of every body (5.4 million) where the software path spends its time on
+impostors and a culled ground.
+The one number worth carrying forward is the CPU half, measured inside the binary rather than through a
+benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame —
+create the encoder, one render pass, seven draws, one submit. On real hardware that 0.11 ms would be the
+frame's CPU cost and the GPU would be doing the work behind it. This sandbox cannot show that, and no
+figure here pretends to.
+A trap worth recording, because it cost an hour: a benchmark case that submitted frames without ever
+draining the queue reported 992 ms for what it called `encode`, while the same submit inside the binary
+measured 0.1 ms. The loop was measuring saturation, not encoding. The cases are now named after what
+their loops do — `frame`, `eight_frames_per_drain`, `frame_with_readback` — and
+`docs/playbooks/gpu-demos.md` writes the rule down for the next person.
