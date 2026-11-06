@@ -1231,3 +1231,49 @@ would justify fusion is a benchmark, not a lint.
 fixtures including both halves of the Criterion rule. `docs/lint-policy.md` states the tolerated
 list, the migration of each lint that left it, and the one that came back.
 """
+
+[[completed]]
+slug = "demo-crates-meet-the-spine"
+title = "Hold both demo crates to the library's lint standard, and test the GPU one"
+phase = "Reach"
+delivered_in = "27a564f"
+evidence = """The user reported lint findings in VS Code after the strict-spine work landed, and was right: the
+root manifest denied nine lints, and `demo/Cargo.toml` allowed eight of them in a copy of the same
+table. The audit could not see it, because it only read the root manifest. It reads all three now,
+which is what turned a suspicion into a number -- 120 findings across 15 files in `demo`, and not
+one of them in the library.
+
+All 120 are fixed. `src/domain/num.rs` grew the conversions the demo needed (`u32`/`i32` to `u8`,
+`u32` to `usize`, `f64` to `usize`/`f32`) and every cast in `demo` now goes through it, which is the
+same boundary the library uses: one module owns the cast, and the helper says what it does with the
+bits. The determinism tests compare `to_bits()` rather than `==`, which is what "bit-identical"
+always meant and what `float_cmp` was objecting to. Eighteen constructors became `const`. Two
+functions were long enough to trip `too_many_lines` for real and were split -- the software
+rasteriser's projection out of `raster`, and the wgpu bench's two Criterion groups into one function
+each, because `finish()` consumes the group and the lint was right that the scope was too wide. One
+`#[expect(needless_pass_by_value)]` remains, on a Bevy system, where `&Res<T>` is not a `SystemParam`
+and the audit checks the signature before it accepts the reason.
+
+`demo-gpu` was the only crate in the tree with no unit tests, and the tests it now carries are the
+ones a GPU crate can have without a GPU: the readback row depadding, the CLI parser (10 cases), the
+instance layout and packed sizes `bytemuck` hands to wgpu, the generated cube and plane geometry and
+their winding, the colour and byte transforms. 17 library tests, 10 binary tests, and the two
+integration tests that do open a device. Its manifest carries the root spine with the groups at
+`deny`, since it has no `-D warnings` step of its own, so the audit compares levels by strength
+rather than for equality and checks the tolerated list once across all three manifests: a crate may
+be stricter than the library, never weaker.
+
+The audit's own parser had a flaw worth the fixture it now carries. A reason wrapped across lines
+with a trailing `\\` was not matched as a unit, so the attribute was split on its commas and the
+words of the reason were read back as lint names -- the audit was reporting a phantom `clippy::a`
+for a perfectly documented expectation. `re.S` fixes it, a self-test fixture reproduces the old
+failure against the old pattern, and two more fixtures cover the manifests that differ in strength.
+`docs/lint-policy.md` says what the audit reads now, which is three manifests and both demo crates.
+
+`demo-gpu/README.md` is new, because the crate could be built and benchmarked but nothing said how:
+the backend flags, the view names, what the three numbers per view mean, which tests need a device,
+and the warning that a `llvmpipe` or `lavapipe` adapter is a correctness target rather than a
+performance one. Verified here on `llvmpipe`: `--backend noop` encodes and draws nothing,
+`--backend vulkan` draws the district at 600x375 in 997 ms of frame time against 0.113 ms of CPU
+submit time, which is what 5.4 million triangles on a CPU rasteriser looks like.
+"""
