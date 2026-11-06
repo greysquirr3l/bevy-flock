@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The terminal capture is regenerated, not screenshotted.** `docs/demo/ashfall-play.png` is now
+  produced by `demo/examples/frame_capture.rs`, which renders through the client's own `Session` and
+  `Budget` at 120 x 44 cells and blows each framebuffer pixel up four times with the new
+  `Image::scaled` — nearest-neighbour, so a block is the pixel it came from. The capture is the
+  procession view with the impostor cross-fade active (`--band 8`, against `--band 0` for the hard
+  switch it replaced; the two differ by 1,152 pixels, which is how the band was checked), and both
+  captions now name the command that makes it, so the image cannot drift away from the code.
 
 - **A GPU front end, and a playbook for building the next one.** `demo-gpu/` renders the Ashfall
   district through an instanced `wgpu` pipeline over the same scene, meshes and `Shot` table the

@@ -144,6 +144,38 @@ impl Image {
         drawn as f32 / self.depth.len().max(1) as f32
     }
 
+    /// A nearest-neighbour integer upscale, with the depth buffer reset to the far plane.
+    ///
+    /// The terminal client draws one pixel per half cell, which is unreadably small anywhere but a
+    /// terminal: an integer factor turns that framebuffer into a faithful screenshot at a size a
+    /// document can show. Nearest-neighbour is the point — a block is the pixel it came from, so
+    /// there is no resampling to argue about. The depth buffer is not scaled, because the result is
+    /// a picture and never a render target.
+    #[must_use]
+    pub fn scaled(&self, factor: u32) -> Self {
+        let factor = factor.max(1);
+        if factor == 1 {
+            return Self {
+                width: self.width,
+                height: self.height,
+                colour: self.colour.clone(),
+                depth: self.depth.clone(),
+            };
+        }
+        let width = self.width.saturating_mul(factor);
+        let height = self.height.saturating_mul(factor);
+        let source = self;
+        let colour: Vec<[u8; 3]> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| source.pixel(x / factor, y / factor)))
+            .collect();
+        Self {
+            width,
+            height,
+            colour,
+            depth: vec![1.0; (width as usize) * (height as usize)],
+        }
+    }
+
     fn plot(&mut self, x: usize, y: usize, depth: f32, colour: [u8; 3]) {
         let index = y * (self.width as usize) + x;
         let Some(slot) = self.depth.get_mut(index) else {
@@ -1037,6 +1069,32 @@ pub fn json_colour(value: Option<&jsonr::Value>, fallback: [f32; 3]) -> [f32; 3]
 mod tests {
     use super::*;
     use bevy_flock::testkit::OrDie;
+
+    #[test]
+    fn an_integer_upscale_repeats_each_pixel_into_its_own_block() {
+        // A gradient has a different colour on every row, so a misaligned block shows up as a row
+        // that belongs to its neighbour.
+        let mut source = Image::new(3, 4);
+        source.sky_to([200.0, 40.0, 10.0], [10.0, 40.0, 200.0], 3);
+        let scaled = source.scaled(4);
+        assert_eq!((scaled.width, scaled.height), (12, 16));
+        for y in 0..4 {
+            let expected = source.pixel(0, y);
+            for scaled_y in y * 4..(y + 1) * 4 {
+                for x in 0..12 {
+                    assert_eq!(
+                        scaled.pixel(x, scaled_y),
+                        expected,
+                        "row {scaled_y} column {x} should be source row {y}"
+                    );
+                }
+            }
+        }
+        // A factor of one is the identity, including the depth buffer.
+        let same = source.scaled(1);
+        assert_eq!(same.fingerprint(), source.fingerprint());
+        assert_eq!(same.coverage(), source.coverage());
+    }
 
     /// Inflate a fixed-Huffman deflate stream, which is all the compressor emits.
     ///

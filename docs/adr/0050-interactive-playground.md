@@ -53,9 +53,15 @@ constraint is not a sandbox quirk, either: the same is true of CI, of a remote s
    `Session::camera()`, `Session::advance`, `Command`, and the `Budget` are the four things a windowed
    front end would consume.
 
-The result, captured from a pty at 120 × 88 pixels and enlarged without smoothing:
+The result, rendered through the client's own `Session` and `Budget` at 120 × 88 pixels and enlarged
+four times without smoothing:
 
-![The street view in a terminal](../demo/ashfall-play.png)
+![The procession view in a terminal](../demo/ashfall-play.png)
+
+It is regenerated rather than screenshotted, by `demo/examples/frame_capture.rs`: the client's frame
+minus the status line, at the size the client draws it. `--band 8` is the cross-fade this ADR records
+and `--band 0` is the hard switch it replaced; in this frame the two differ by 1,152 pixels, which is
+how the band was confirmed to be doing something instead of being configured and ignored.
 
 ## The measurement
 

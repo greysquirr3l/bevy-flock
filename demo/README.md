@@ -113,18 +113,24 @@ cargo run --release --manifest-path demo/Cargo.toml --bin ashfall-play -- --play
 A cell is split by `▀` into two pixels, so a 112-cell terminal shows a 112 × 40-pixel picture with
 square pixels. It is not a screenshot: it is the same rasteriser, called every frame.
 
-![The street view in a terminal](../docs/demo/ashfall-play.png)
+![The procession view in a terminal](../docs/demo/ashfall-play.png)
 
-*The street view, 120 × 88 pixels, captured from a real pty and enlarged four times without smoothing.
-The figures near the camera are meshes; the ones further off are the two-triangle impostors.
-Between sixteen and twenty-four metres a body is both, cross-faded by coverage so it dissolves
-rather than pops.*
+*The procession view: 120 × 44 cells, which is 120 × 88 framebuffer pixels, shown at 480 × 352 — four
+times, without smoothing. Regenerated from the client's own session by `examples/frame_capture.rs`
+rather than screenshotted from a pty, so it cannot rot as the terminal path changes:
+`cargo run --release --example frame_capture -- --columns 120 --rows 44 --view procession --band 8`.
+The band is on: between sixteen and twenty-four metres a body is drawn as a mesh and a two-triangle
+impostor at once, dissolving by coverage so it fades instead of popping, and `--band 0` renders the
+hard switch that differs from this frame by 1,152 pixels. At four pixels wide a dissolving body reads
+as a dotted outline, which is the honest cost of the fade at a cell count it was not designed for —
+the reason the five shipped views leave the band at zero and only the interactive client turns it on.*
 
 Two things make it fast enough to steer. The *budget* in `session::Budget` changes the shot rather
 than the world — 420 bodies, 240 m of crowd, a 0.75-pixel triangle cull — and everything past 24 m is
-drawn as two triangles instead of an 11,000-triangle mesh. The switch is hard, measured from the
-camera to the body's feet, and it lives on the shot (`Shot::impostor_distance`) rather than in the
-renderer or the session. Measured on the district view:
+drawn as two triangles instead of an 11,000-triangle mesh. The switch is measured from the camera to
+the body's feet and lives on the shot (`Shot::impostor_distance`) rather than in the renderer or the
+session; it is hard unless `Shot::impostor_band` widens it into the cross-fade described below.
+Measured on the district view:
 850 ms a frame at full detail, 19.0 ms under the budget, 38 ms in a real 112 × 88-pixel terminal
 (26 fps). The budget is a `Copy` struct, so a bigger terminal or a faster machine is four numbers, not
 a code change.
@@ -136,10 +142,14 @@ a code change.
 ffmpeg -framerate 30 -i target/demo/flight/%03d.png -pix_fmt yuv420p flight.mp4
 ```
 
-**On `bevy-archie`:** the windowed front end is the one thing here that is not wired, and the reason is
-the environment — `winit` needs a display server and this machine has none, nor `libvulkan`, nor
-`libxkbcommon`. What a windowed front end needs from this side exists and is tested: `Session` (camera,
-view, lens, budget), `Session::advance(&CameraInput, dt)`, `input::Command` and `session::Budget`.
+**On `bevy-archie`:** the windowed front end is the one thing here that is not wired, and the reason
+has changed. When this was written the machine had no display server, no `libvulkan` and no
+`libxkbcommon`; all three are present now, and the Vulkan loader resolves to `llvmpipe` — a CPU
+driver, not a card. So a window would open and run at software-renderer speed, which is why the
+second front end went the other way: `../demo-gpu/` binds `wgpu` directly and renders to a texture
+instead of a surface, which works with no window at all. What a windowed front end still needs from
+this side exists and is tested: `Session` (camera, view, lens, budget),
+`Session::advance(&CameraInput, dt)`, `input::Command` and `session::Budget`.
 See [ADR 0050](../docs/adr/0050-interactive-playground.md).
 
 ### The cross-fade band
