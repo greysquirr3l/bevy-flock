@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- **A fourth naming culture, and the names stop shouting.** `NameStyle` gains `Highland` — broad
+  vowels, gutturals, and surnames taken from places rather than trades — so a world seed can land on
+  one of four cultures instead of three. A blueprint now carries its own style, and a collision is
+  broken with an epithet from that culture: a Highland called "of the Glen" rather than "of the
+  Fjord". The second syllable's onset is also lowered now, which fixes a bug that predates this
+  change and affected every style: the onset pools are capitalised because the first one opens the
+  name, so a mid-word onset kept its capital too, and names came out as "SkaNaum" and "TaQuaeus".
+  They are now "Skanaur" and "Taquaeus".
 - **The GPU demo draws on an Apple GPU.** `demo-gpu` asked `wgpu` for Vulkan, GL and the noop
   device, and a Mac has neither of the first two, so every run on Apple silicon fell through to
   the device that encodes commands and draws none: a blank image while the hardware sat idle. The

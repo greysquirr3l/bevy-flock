@@ -29,6 +29,17 @@ pub const MAX_TAGS: usize = 4;
 /// A style is a whole naming culture, not a list of names: onsets, vowels and
 /// codas combine into far more given names than any curated list could hold, and
 /// the surname list supplies the family or trade name on top.
+///
+/// ```
+/// use bevy_flock::domain::generator::NameStyle;
+/// use bevy_flock::domain::ids::SimSeed;
+/// use bevy_flock::domain::rng::RngStream;
+///
+/// let mut rng = RngStream::new(SimSeed::new(7), 1);
+/// let name = NameStyle::Highland.compose(&mut rng, None);
+/// assert!(!name.given.is_empty());
+/// assert!(!name.family.is_empty());
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NameStyle {
@@ -38,11 +49,18 @@ pub enum NameStyle {
     Latin,
     /// A trading city: short, mixed, slightly foreign.
     TradeCity,
+    /// The highlands: broad vowels, gutturals, surnames taken from places.
+    Highland,
 }
 
 impl NameStyle {
     /// Every style, in a fixed order.
-    pub const ALL: [Self; 3] = [Self::Nordic, Self::Latin, Self::TradeCity];
+    pub const ALL: [Self; 4] = [
+        Self::Nordic,
+        Self::Latin,
+        Self::TradeCity,
+        Self::Highland,
+    ];
 
     /// The style's fixed pool of onsets.
     #[must_use]
@@ -60,6 +78,10 @@ impl NameStyle {
                 "A", "B", "D", "F", "H", "J", "K", "M", "N", "P", "R", "S", "T", "Y", "Z", "Sh",
                 "Mar", "Sar",
             ],
+            Self::Highland => &[
+                "B", "Br", "C", "Cr", "D", "Dr", "F", "G", "Gr", "H", "L", "Ll", "M", "N", "R",
+                "S", "T", "Th",
+            ],
         }
     }
 
@@ -70,6 +92,9 @@ impl NameStyle {
             Self::Nordic => &["a", "e", "i", "o", "u", "au", "ei", "y"],
             Self::Latin => &["a", "e", "i", "o", "u", "ae", "ia", "io"],
             Self::TradeCity => &["a", "e", "i", "o", "u", "ai", "ea"],
+            Self::Highland => &[
+                "a", "e", "i", "o", "u", "ai", "ei", "ia", "io", "oa", "ua", "ea",
+            ],
         }
     }
 
@@ -80,6 +105,9 @@ impl NameStyle {
             Self::Nordic => &["d", "f", "g", "k", "l", "m", "n", "r", "s", "st", "th", "v"],
             Self::Latin => &["", "n", "s", "us", "a", "ia", "ius", "or"],
             Self::TradeCity => &["", "n", "r", "s", "l", "m", "th", "ck"],
+            Self::Highland => &[
+                "", "ch", "dh", "g", "gh", "l", "ll", "m", "n", "nn", "r", "rd", "th", "s",
+            ],
         }
     }
 
@@ -126,6 +154,15 @@ impl NameStyle {
                 "Larkin", "Mercer", "Nott", "Pike", "Quill", "Rook", "Sable", "Thorne", "Vance",
                 "Wick",
             ],
+            Self::Highland => &[
+                "Balmorran", "Braemar", "Cauldwell", "Craigmore", "Dellraven", "Dunmore", "Elgin",
+                "Farrow", "Fernbrake", "Garroway", "Glenmorgan", "Glenrigh", "Hartstone", "Heatherby",
+                "Highfern", "Inverloch", "Isleworth", "Jedburgh", "Kilbride", "Kilmartin",
+                "Kirkmara", "Linnheath", "Lochran", "Moredun", "Muirfield", "Netherfield",
+                "Norvale", "Ormsby", "Pennan", "Quennell", "Raeburn", "Rosslyn", "Stonehaven",
+                "Strathmore", "Struan", "Tarbert", "Thistlewood", "Torquil", "Uist", "Westerloch",
+                "Yarrowdale",
+            ],
         }
     }
 
@@ -154,6 +191,13 @@ impl NameStyle {
                 "of the Quay",
                 "the Quick",
             ],
+            Self::Highland => &[
+                "of the Brae",
+                "of the Glen",
+                "of the Loch",
+                "the Steadfast",
+                "the Wanderer",
+            ],
         }
     }
 
@@ -164,6 +208,7 @@ impl NameStyle {
             Self::Nordic => "nordic",
             Self::Latin => "latin",
             Self::TradeCity => "trade-city",
+            Self::Highland => "highland",
         }
     }
 
@@ -180,7 +225,14 @@ impl NameStyle {
             if let Some(onset) =
                 onsets.get(rng.next_bounded(num::usize_to_u32(onsets.len())) as usize)
             {
-                name.push_str(onset);
+                // The first onset opens the name and keeps the capital the pool gave it.
+                // Every later onset sits mid-word, where a capital reads as a typo — "SkaNaum"
+                // rather than "Skanaur" — so it is lowered.
+                if syllable == 0 {
+                    name.push_str(onset);
+                } else {
+                    name.extend(onset.chars().map(|c| c.to_ascii_lowercase()));
+                }
             }
             if let Some(vowel) =
                 vowels.get(rng.next_bounded(num::usize_to_u32(vowels.len())) as usize)
@@ -214,6 +266,20 @@ impl NameStyle {
             family,
             epithet: epithet.map(str::to_owned),
         }
+    }
+}
+
+/// The style written as its name, so a log line reads as prose rather than as a variant.
+///
+/// ```
+/// use bevy_flock::domain::generator::NameStyle;
+///
+/// assert_eq!(NameStyle::Highland.to_string(), "highland");
+/// assert_eq!(NameStyle::TradeCity.to_string(), "trade-city");
+/// ```
+impl core::fmt::Display for NameStyle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -404,6 +470,11 @@ pub struct NpcBlueprint {
     pub index: u32,
     /// What this person is called.
     pub name: Name,
+    /// The naming culture the name came from.
+    ///
+    /// A blueprint keeps its style so that a collision is broken with an epithet from the
+    /// same culture as the name: a Highland called "of the Glen" rather than "of the Fjord".
+    pub style: NameStyle,
     /// The archetype row that produced them.
     pub archetype: Archetype,
     /// A short label from the table, owned so a blueprint read from a save file does
@@ -429,11 +500,14 @@ impl NpcBlueprint {
     /// to "Aldric Vane" reads as a bug. The ordinal comes from the generator's
     /// collision rule (the second Aldric is `Major`, the third `the Younger`), so
     /// the same crowd always disambiguates the same way.
+    ///
+    /// The epithet comes from this blueprint's own style, so it belongs to the same
+    /// culture as the name it is appended to.
     pub fn disambiguate(&mut self, ordinal: u32) {
         if ordinal == 0 || self.name.epithet.is_some() {
             return;
         }
-        let epithets = NameStyle::Nordic.epithets();
+        let epithets = self.style.epithets();
         let pick = usize::try_from(ordinal.saturating_sub(1))
             .unwrap_or(0)
             .wrapping_rem(epithets.len());
@@ -534,6 +608,7 @@ impl Generator {
         NpcBlueprint {
             index,
             name,
+            style: self.style,
             archetype,
             label,
             temperament,
@@ -680,6 +755,86 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "batch generation left duplicate names");
+    }
+
+    /// Every style draws a name, and the pools are never empty.
+    ///
+    /// An empty pool would make `compose` fall back to its unreachable arm and produce a
+    /// nameless NPC, which is a bug the collision tests would not catch.
+    #[test]
+    fn every_style_draws_a_name_from_its_own_pools() {
+        for style in NameStyle::ALL {
+            assert!(!style.onsets().is_empty(), "{style} has no onsets");
+            assert!(!style.vowels().is_empty(), "{style} has no vowels");
+            assert!(!style.codas().is_empty(), "{style} has no codas");
+            assert!(!style.surnames().is_empty(), "{style} has no surnames");
+            assert!(!style.epithets().is_empty(), "{style} has no epithets");
+            let mut rng = RngStream::new(SimSeed::new(21), 7);
+            let name = style.compose(&mut rng, None);
+            assert!(!name.given.is_empty(), "{style} drew an empty given name");
+            assert!(!name.family.is_empty(), "{style} drew an empty family name");
+        }
+    }
+
+    /// A collision is broken with an epithet from the blueprint's own culture.
+    #[test]
+    fn disambiguation_uses_the_blueprints_own_style() {
+        for style in NameStyle::ALL {
+            let mut blueprint = generate(SimSeed::new(8), 3, &table());
+            blueprint.style = style;
+            blueprint.disambiguate(1);
+            let Some(epithet) = blueprint.name.epithet.as_deref() else {
+                unreachable!("a blueprint that asked for an epithet was given none");
+            };
+            assert!(
+                style.epithets().contains(&epithet),
+                "{style} was disambiguated with `{epithet}`, which is not its own"
+            );
+        }
+    }
+
+    /// A given name has one capital, at its start.
+    ///
+    /// The onset pools are capitalised because the first one opens the name. The second
+    /// syllable's onset sits mid-word, and a capital there reads as a typo: `SkaNaum`
+    /// rather than `Skanaur`.
+    #[test]
+    fn a_given_name_has_one_capital_and_it_is_the_first_letter() {
+        for style in NameStyle::ALL {
+            let mut rng = RngStream::new(SimSeed::new(31), 3);
+            for _ in 0..200 {
+                let name = style.compose(&mut rng, None);
+                let capitals = name
+                    .given
+                    .chars()
+                    .filter(char::is_ascii_uppercase)
+                    .count();
+                assert_eq!(
+                    capitals, 1,
+                    "{style} drew `{}`, which has {capitals} capitals",
+                    name.given
+                );
+                assert!(
+                    name.given.starts_with(char::is_uppercase),
+                    "{style} drew `{}`, which does not start with a capital",
+                    name.given
+                );
+            }
+        }
+    }
+
+    /// The Highland style is in the rotation, and a seed that picks it says so.
+    ///
+    /// A style nobody can reach is a style that does not exist, and `ALL` is the only
+    /// list that decides what a seed can land on.
+    #[test]
+    fn highland_is_part_of_the_rotation() {
+        assert!(
+            NameStyle::ALL.contains(&NameStyle::Highland),
+            "Highland is not in the rotation"
+        );
+        assert_eq!(NameStyle::Highland.as_str(), "highland");
+        assert_eq!(NameStyle::ALL.len(), 4);
     }
 
     #[test]
