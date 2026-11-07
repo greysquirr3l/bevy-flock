@@ -145,3 +145,5 @@ demo/target/
 demo/out/
 # The GPU demo builds into its own package directory, like `demo`.
 /demo-gpu/target/
+
+.github/skills/

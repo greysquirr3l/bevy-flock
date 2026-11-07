@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+- **The asset pipeline skills move to `.github/skills/`, and CI stops checking them.** The four
+  playbooks are agent-facing tooling rather than crate source, so they live under `.github/` where
+  the tooling reads them and are ignored by Git. Three `scripts` job steps went with them — the
+  `py_compile` of the Blender scripts and the two runs of the animation contract checker — because
+  CI checks out the repository and those files are no longer in it. A workflow that names a path
+  the runner does not have fails on every push, which is worse than the check it was carrying.
 - **The lint spine now actually holds.** Eight lints that had been allowed with a paragraph each —
   `needless_pass_by_value`, `cast_precision_loss`, `cast_possible_truncation`, `cast_sign_loss`,
   `cast_possible_wrap`, `float_cmp`, `missing_const_for_fn`, `significant_drop_tightening` — are
@@ -60,6 +67,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   twenty-eight, is now a rule instead of a number.
 
 ## [Unreleased]
+
 - **The level-of-detail switch cross-fades instead of popping.** `Shot::impostor_band` widens the
   switch into a window: a body between `impostor_distance - impostor_band` and `impostor_distance` is
   drawn as both, the billboard claiming an increasing share of the pixels while the mesh gives its own
@@ -248,7 +256,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fixture, so four of its eighteen builds never happened. The CI job runs a reduced matrix (shape A,
   one core and the runner's own, concurrency 1/2/4) and uploads the raw sweep and verdict as artifacts.
 
-
 - **Group scaling measured at 1, 2, 3 and 6 cores, both task shapes.** `scripts/scaling_sweep.sh`
   pins every run with `taskset` and gives each task a cold target directory; `scripts/scaling_curves.py`
   plots wall clock and speedup with the raw rows checked in at `docs/data/scaling-sweep.json`. Findings:
@@ -256,7 +263,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cargo's I/O start overlaps), threads per task dominates the curve, and a six-thread task is already
   queue-limited on three cores. ADR 0033 records all three, including the case where the formula
   under-admits.
-
 
 - **ADR 0033 states the group capping policy once.** `cap = nproc / threads_per_task`, measured per
   task rather than assumed, with group sizes taken from `wiggum validate` because wiggum injects audit
@@ -266,13 +272,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   detection, and a plan that still parses. Capacity stays out of CI on purpose — runners have two to
   four cores, so a strict gate would be switched off within a week.
 
-
 - **ADR 0032, amendment 2: the group cap is a thread budget.** Eight one-core codegen tasks on six
   cores: sequential 24 s, capped at half the cores 15 s, capped at six 10 s, uncapped 8 s. The
   earlier "cap at half the cores" advice was measured on workspace builds that each spawn `cargo -j6`
   and is wrong for any other shape. `cap = nproc / threads_per_task`, measured with
   `scripts/group_cap.py --measure "<command>"`; the old rule is withdrawn rather than quietly dropped.
-
 
 - **ADR 0032 amended: the build lock is nearly free and `CARGO_TARGET_DIR` isolation does not pay.**
   Three cold compile tasks on six cores: one target sequential 45 s, one target concurrent 43 s
@@ -281,14 +285,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   what the overlap won. The shared target directory stays the default; isolation is now documented as
   a debugging tool, and compile-heavy groups are capped at about half the cores.
 
-
 - **ADR 0031's re-open trigger is now a CI gate.** `scripts/cell_size_gate.py` reads the
   `flock_frame_cell` estimates and compares 9 m against 13.5 m: below a 3% saving the decision
   stands, 3-10% annotates the run, above 10% the build fails and the ADR is wrong. The thresholds
   are asymmetric because a runner cannot resolve 3% and a flapping gate gets disabled. The
   `cell-size-gate` CI job runs the benchmark and the script on every push, and the plan carries the
   dependency as `cell-size-reopen-gate`, which watches the `benchmark-suite` regression-gate work.
-
 
 - **The cell budget is configurable, and the ECS sweep says leave the default alone (ADR 0031).**
   `SpatialGridConfig::max_cells` and `with_cell_budget` let a game raise the grid past 2^20 cells;
@@ -297,7 +299,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   frame the way it moves the kernel — tiering caps the steered population at a few thousand, so the
   8-20% kernel preference for 9 m never reaches the frame. `MAX_CELLS` stays at 2^20; the knob is
   there for games that steer more of their crowd.
-
 
 - **The transposed crowd kernel is on by default, and cell sizing is documented (ADR 0031).** A
   sweep of five cell sizes at 10,000 and 100,000 agents found the road winning at every density —
@@ -310,7 +311,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   would also raise the cost of the ECS query path that ADR 0003 sized it for. `examples/grid_sweep.rs`
   re-runs the measurement; end to end at 100,000 agents the frame is 79.07 ms, down from 90.0 ms.
 
-
 - **The crowd kernel can now use SIMD — the transposed shape (ADR 0030).** ADR 0029 rejected
   lane-per-neighbour vectorisation for good reasons: the lanes shared nothing and the masked
   arithmetic threw away every rejected neighbour. The shape that works is the band kernel's
@@ -321,7 +321,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identical counters and desired velocities against `Crowd::steer_scalar`. Off by default: it costs
   a per-frame structure-of-arrays copy that a sparse crowd does not earn back.
 
-
 - **SIMD was measured against the 3D crowd kernel and rejected (ADR 0029).** A structure-of-arrays,
   four-neighbours-at-a-time scan with a scalar tail was built behind the `simd` feature, held to
   parity with the scalar road in the same process, and benchmarked on planar, volumetric and dense
@@ -330,7 +329,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The code is removed rather than flagged off; the `crowd_kernel` benchmark group and ADR 0029 keep
   the measurement reproducible. The `simd` feature still vectorises the band kernel (ADR 0023),
   where it wins.
-
 
 - **Crowds are three-dimensional (ADR 0028).** The steering kernel and the spawn placement no
   longer assume the plane `y = 0`: positions, velocities and desired velocities are `[f32; 3]`,
@@ -345,7 +343,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Asset pipeline skills, ported and made checkable
 
-`skills/` gains four playbooks carried over from the TrapGrid Arsenal project and rewritten for a
+`.github/skills/` gains four playbooks carried over from the TrapGrid Arsenal project and rewritten for a
 crowd library: Meshy NPC assets, the complete archetype package, Git-safe external placeholders, and
 the shared humanoid action library. The vocabulary moved (operator -> NPC archetype, deck -> roster
 card, selection line -> bark) and so did the boundary: this crate loads no media, so every skill
@@ -406,8 +404,6 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 - `FlockConfig` is no longer `Copy` (a placement may own a list of points) and `FlockPlugin` is
   `Clone` instead; `spawn_position(index)` remains as the default placement's answer.
 
-
-
 ### Changed
 
 - **Crowd steering is cell-major (ADR 0026).** `steer_flock` now gathers the crowd into arrays in
@@ -427,8 +423,6 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
   `pairs`, `cells`), and `steer_flock_reference` keeps the old per-agent path available for games
   that want to inspect neighbour lists.
 
-
-
 ### Reproducibility
 
 - `Cargo.lock` and `compat/Cargo.lock` are committed, and every CI job runs `--locked`, with a
@@ -444,7 +438,6 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 - Stated plainly rather than left to be inferred: the 10,000-agent crowd frame is 18.2 ms, i.e.
   55 fps against a 16.6 ms budget. The 60 Hz route at that crowd size is the band path.
 
-
 ### Fixed
 
 - **The band no longer manifolds what it folds.** The manifest window was square, so its
@@ -456,7 +449,6 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
   from the origin and stopping when the count ran out — which had left the map's centre empty
   and made the manifest behave like a vacuum cleaner.
 
-
 ### Documentation
 
 - `docs/memory.md`: heap and cache profile of the packed kernel, scalar and wide.
@@ -465,14 +457,12 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
   1,000,000-inhabitant milestone, with the open manifest/fold churn listed as a 1.0 blocker.
 - `examples/memory_probe.rs`: allocation and footprint probe, cachegrind-friendly.
 
-
 ### Added
 
 - `simd` feature: the steering kernel processes four agents at a time with `wide::f32x4`,
   behind a cell-major block order. 1,000,000-inhabitant frame 4.75 -> 3.78 ms; packed steer
   at 50,000 agents 138 -> 56.5 ms. Bit-identical to the scalar path, which is kept as the
   reference and tested against it. See ADR 0023.
-
 
 ### Added
 

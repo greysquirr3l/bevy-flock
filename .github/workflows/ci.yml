@@ -101,15 +101,10 @@ jobs:
       - run: python3 scripts/lint_audit.py
       # The drift catalogue is a table in a page; its parser has to be checked without a compiler too.
       - run: python3 scripts/lint_drift.py --self-test
-      # The Blender scripts under skills/ cannot run here, so their syntax and their shared contract
-      # are checked instead: bpy is never imported by either check.
-      - run: python3 -m py_compile scripts/*.py skills/*/scripts/*.py
       # The local CI runner reads this file to reproduce these jobs off Actions, so a workflow it
       # can no longer translate is a failure rather than a silently thinner local gate.
       - run: python3 scripts/ci_local.py --check
       - run: python3 scripts/ci_local.py --self-test
-      - run: python3 skills/bevy-flock-npc-animation-library/scripts/check_action_contract.py --self-test
-      - run: python3 skills/bevy-flock-npc-animation-library/scripts/check_action_contract.py
       # Informational: capacity is machine-dependent, so this reports and never fails a runner.
       - run: python3 scripts/group_cap.py --check-plan plan.toml || true
   scaling-regression:

@@ -99,12 +99,12 @@ use, that is a bug report, not a difference of opinion.
 
 ## Asset pipeline skills
 
-`skills/` holds the agent-facing playbooks for the work that surrounds the crate: generating NPC
+`.github/skills/` holds the agent-facing playbooks for the work that surrounds the crate: generating NPC
 bodies and portraits with Meshy, shipping a complete archetype, keeping media out of Git without
 breaking the build, and building the shared humanoid action library every rig plays. They are written
 for *your* game, not for this crate — flock loads no media, and `build_render_plan` is the only seam
-between a simulation and a mesh. See [skills/README.md](skills/README.md) for what changed when they
-were ported from another project and why.
+between a simulation and a mesh. See [.github/skills/README.md](.github/skills/README.md) for what
+changed when they were ported from another project and why.
 
 ## The book
 
@@ -246,7 +246,6 @@ nearest labels and the game draws them, and `DebugOverlayConfig::enabled` is `fa
 default so the system costs one branch (ADR 0042).
 
 ## Determinism, precisely
-
 
 The guarantee is: *same binary, same platform, same features, same seed and the
 same tick count produce the same world state*. That is what the tests assert, by

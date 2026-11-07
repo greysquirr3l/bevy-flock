@@ -6,7 +6,7 @@
 //! agree with the code.
 //!
 //! Three bodies cover five archetypes. That is the variant budget from
-//! `skills/bevy-flock-meshy-assets/SKILL.md`, applied: a crowd is silhouettes and tints, and a
+//! `.github/skills/bevy-flock-meshy-assets/SKILL.md`, applied: a crowd is silhouettes and tints, and a
 //! sixth body is a generation task that buys less than a wider tint range. The mapping is
 //! exhaustive, so a new archetype fails to compile until somebody decides what it looks like.
 
