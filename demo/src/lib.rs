@@ -14,6 +14,15 @@
 //! cannot run in CI, and a demo that cannot run in CI stops being evidence. The shipped assets are
 //! real GLBs with a real consumer (`ashfall.scene.json`); see `README.md`.
 
+// The demo's formulas are pinned by tests that compare exact bits, so the arithmetic is left
+// unfused: `a * b + c` rounds twice where `a.mul_add(b, c)` rounds once. The manifest allows the
+// lint crate-wide; this attribute states the same decision in the source, where it outranks the
+// lint flags an editor appends to the command line.
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "the demo's formulas are pinned by bit-exact tests, and fusion rounds once where the unfused form rounds twice"
+)]
+
 pub mod app;
 pub mod assets;
 pub mod behaviour;

@@ -9,9 +9,12 @@ warnings, CI passes `-D warnings`, a named list of lints is denied outright — 
 Two things can break that policy, so this script checks both:
 
 - **An override in a file.** Any `#[allow]`/`#[expect]` of any lint, clippy's or rustc's, outside
-  `SANCTIONED` fails. Today that is four entries, all `unsafe_code`, all a counting allocator in a
-  test or an example — `GlobalAlloc` is unsafe by definition, and there is no way to assert "this
-  frame allocates nothing" from outside the crate without one.
+  `SANCTIONED` fails. Today that is eight entries: four are `unsafe_code`, all a counting allocator
+  in a test or an example — `GlobalAlloc` is unsafe by definition, and there is no way to assert
+  "this frame allocates nothing" from outside the crate without one — and four are `too_many_lines`
+  on a file whose shape is the point of it. A crate-level `#[expect]` is judged by rule instead:
+  `expected_is_allowed` states the four cases the policy permits, and one of them is a source
+  attribute that restates a decision the package's own manifest already made.
 - **A weakened manifest.** `REQUIRED` must still be denied and `TOLERATED` must still be exactly the
   allowed set, so a lint cannot be quietly downgraded in a file nobody reads.
 
@@ -95,7 +98,7 @@ REQUIRED = (
     ("lints.clippy", "perf", "warn"),
     # The lints below were allowed with a paragraph of justification each. They are denied now, and
     # the code satisfies them; `num` and the Bevy system signatures carry the only `#[expect]`s,
-    # under the three rules `expected_is_allowed` states.
+    # under the rules `expected_is_allowed` states.
     ("lints.clippy", "needless_pass_by_value", "deny"),
     ("lints.clippy", "cast_precision_loss", "deny"),
     ("lints.clippy", "cast_possible_truncation", "deny"),
@@ -131,6 +134,14 @@ CAST_LINTS = frozenset(
 )
 #: The conversion module: the one file permitted to carry a cast expectation.
 NUM_MODULE = "src/domain/num.rs"
+#: The crate roots that carry a source-level expectation, and the manifest that governs each one.
+#: A crate-level attribute applies to the crate it is written in and no other, so the root and the
+#: manifest have to agree: `src/lib.rs` is the library's root and `Cargo.toml` is the library's
+#: manifest.
+CRATE_ROOTS = {
+    "src/lib.rs": "Cargo.toml",
+    "demo/src/lib.rs": "demo/Cargo.toml",
+}
 #: A Bevy system parameter, by value, as the framework's `SystemParam` contract requires.
 BEVY_PARAM = re.compile(
     r"\b(?:Res|ResMut|Query|Commands|Local|EventReader|EventWriter|Single|ParamSet)<"
@@ -139,8 +150,12 @@ BEVY_PARAM = re.compile(
 SIGNATURE_WINDOW = 60
 
 #: Attributes worth finding. `cfg_attr` wraps `expect`/`allow`, so the inner lint name is what
-#: matters and the search is textual rather than syntactic.
-ATTRIBUTE = re.compile(r"#!?\[(?:cfg_attr\([^]]*?\)?)?(allow|expect)\(([^]]*?)\)\]", re.S)
+#: matters and the search is textual rather than syntactic. The groups keep the `#!`, which is what
+#: separates a crate-level attribute from one attached to an item, and the `cfg_attr` wrapper, which
+#: makes the attribute conditional and so not a plain crate-level decision.
+ATTRIBUTE = re.compile(
+    r"(#!?)\[(?:(cfg_attr\([^]]*?\)?))?(allow|expect)\(([^]]*?)\)\]", re.S
+)
 #: `level = "deny"` inside the manifest's table form.
 LEVEL = re.compile(r'level\s*=\s*"([a-z]+)"')
 #: `reason = "…"`, stripped before an attribute body is split on commas.
@@ -210,15 +225,23 @@ def lint_names(body: str) -> list[str]:
     return names
 
 
-def scan(path: Path) -> list[tuple[int, str | None, str]]:
-    """Return (line, kind, lint) for every override in a file, clippy's or rustc's."""
+def scan(path: Path) -> list[tuple[int, str, str, bool, bool]]:
+    """Return (line, kind, lint, crate_level, conditional) for every override in a file.
+
+    `crate_level` is true for `#![...]` and false for `#[...]`. The distinction is what makes a
+    crate-root expectation different from one attached to a single item, so the policy judges them
+    by different rules. `conditional` is true when a `cfg_attr` wraps the attribute, which means the
+    attribute is only present under some configuration and so cannot be a crate-wide decision.
+    """
     findings = []
     text = strip_comments(path.read_text(encoding="utf-8"))
     for match in ATTRIBUTE.finditer(text):
-        kind = match.group(1)
+        kind = match.group(3)
         line = text.count("\n", 0, match.start()) + 1
-        for lint in lint_names(match.group(2)):
-            findings.append((line, kind, lint))
+        crate_level = match.group(1) == "#!"
+        conditional = match.group(2) is not None
+        for lint in lint_names(match.group(4)):
+            findings.append((line, kind, lint, crate_level, conditional))
     return findings
 
 
@@ -310,18 +333,44 @@ def walk(root: Path) -> list[Path]:
     return files
 
 
-def expected_is_allowed(path: Path, relative: str, line: int, lint: str) -> bool:
-    """Whether an `#[expect]` at this site is one of the two the policy permits.
+def manifest_allows(root: Path, relative: str, lint: str) -> bool:
+    """Whether the manifest that governs a file allows a lint crate-wide.
+
+    The manifest is the authority: a crate-level expectation is only ever a *restatement* of a
+    decision the manifest already made, so the audit asks the manifest whether it made it.
+    """
+    manifest = root / relative
+    if not manifest.is_file():
+        return False
+    levels = manifest_levels(manifest.read_text(encoding="utf-8"))
+    for (table, name), level in levels.items():
+        if table.startswith("lints.") and name == lint and level == "allow":
+            return True
+    return False
+
+
+def expected_is_allowed(
+    path: Path,
+    root: Path,
+    relative: str,
+    line: int,
+    lint: str,
+    crate_level: bool,
+    conditional: bool,
+) -> bool:
+    """Whether an `#[expect]` at this site is one of the four the policy permits.
 
     An `#[expect]` is not a suppression: it fails the build when the lint stops firing, so it cannot
     rot into an `allow`. It is still only correct where the lint is *right about the code and wrong
-    about the rule*, which is true in exactly three places here:
+    about the rule*, which is true in exactly four places here:
 
     * `num` owns every numeric cast, and each of its helpers says what it does with the bits.
     * A Bevy system is handed its parameters by value; `&Res<T>` is not a `SystemParam`, so the
       signature cannot be changed to satisfy the lint.
     * Criterion writes its report when the benchmark group drops, so the group's scope *is* the
       measurement; shortening its life would measure less, not more.
+    * A crate root restates a decision its own manifest already made, so that the statement holds
+      against the lint flags an editor appends to the command line after the manifest's.
 
     Everything else is code to fix, which is why the reason is required and the rules are narrow.
     """
@@ -340,6 +389,12 @@ def expected_is_allowed(path: Path, relative: str, line: int, lint: str) -> bool
     if lint == "significant_drop_tightening":
         # Criterion writes its report when the group drops, so the group's scope is the measurement.
         return relative.startswith("benches/") and "Criterion" in attribute
+    if crate_level and not conditional:
+        # A crate-level expectation at a crate root, naming a lint the root's own manifest allows
+        # crate-wide. The manifest decides; the source says so where it outranks the command line.
+        manifest = CRATE_ROOTS.get(relative)
+        if manifest is not None and manifest_allows(root, manifest, lint):
+            return True
     return False
 
 
@@ -349,12 +404,14 @@ def findings(root: Path) -> tuple[list[tuple[str, int, str | None, str]], set[tu
     seen = set()
     for path in walk(root):
         relative = path.relative_to(root).as_posix()
-        for line, kind, lint in scan(path):
+        for line, kind, lint, crate_level, conditional in scan(path):
             key = (relative, lint)
             if key in SANCTIONED:
                 seen.add(key)
                 continue
-            if kind == "expect" and expected_is_allowed(path, relative, line, lint):
+            if kind == "expect" and expected_is_allowed(
+                path, root, relative, line, lint, crate_level, conditional
+            ):
                 seen.add(key)
                 continue
             unsanctioned.append((relative, line, kind, lint))
@@ -533,11 +590,42 @@ def self_test() -> int:
             0,
             "a reason wrapped across lines does not become a lint name",
         ),
+        (
+            "src/lib.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n    reason = "the kernels must not fuse"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "a crate-level expectation restating the manifest's crate-wide allow",
+        ),
+        (
+            "src/lib.rs",
+            '#![expect(\n    clippy::unwrap_used,\n    reason = "the manifest denies this"\n)]\n'
+            "fn f() {}\n",
+            1,
+            "a crate-level expectation of a lint the manifest does not allow",
+        ),
+        (
+            "src/module.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n    reason = "not a crate root"\n)]\n'
+            "fn f() {}\n",
+            1,
+            "a crate-level expectation that is not at a crate root",
+        ),
+        (
+            "src/lib.rs",
+            '#![cfg_attr(\n    feature = "simd",\n    expect(clippy::suboptimal_flops, reason = "x")\n)]\n'
+            "fn f() {}\n",
+            1,
+            "a conditional crate-level expectation",
+        ),
     ]
     failures = 0
     for relative, body, expected, label in cases:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # The manifests are written because the crate-root rule consults them: an expectation
+            # that restates a manifest decision is only recognised when the manifest is there.
+            write_manifest(root)
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")

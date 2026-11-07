@@ -178,7 +178,7 @@ hour on a one-ulp difference: fusing the wide lane and not the scalar reference 
 Fusion is a numerical decision, not a tidy-up, so the lint is allowed again with that reason and the
 kernels stay unfused.
 
-Three `#[expect]`s are therefore permitted, and the audit checks all three:
+Four `#[expect]`s are therefore permitted, and the audit checks all four:
 
 1. **In `src/domain/num.rs`, for a cast lint.** The module exists so a numeric conversion happens
    once, with its rounding written down, instead of at three hundred call sites. Every helper there
@@ -192,6 +192,41 @@ Three `#[expect]`s are therefore permitted, and the audit checks all three:
    benchmark group drops, so the group's scope *is* the measurement; shortening the guard's life
    would measure less, not more. The audit only accepts the expectation in a bench, and only when
    the reason names Criterion.
+4. **At a crate root, for a lint that crate's own manifest already allows crate-wide.** The library
+   root (`src/lib.rs`) and the demo library root (`demo/src/lib.rs`) each carry one, for
+   `suboptimal_flops`. The manifest is the authority — it allows the lint for the reason above — and
+   the attribute restates that decision in the source, where it outranks the command line. The audit
+   reads the manifest that governs the root and accepts the expectation only when that manifest
+   allows the named lint crate-wide, so the two can never drift apart: a manifest that stopped
+   allowing the lint, or a root that moved, fails the audit.
+
+### Why the fourth one is in the source at all
+
+The manifest already allows `suboptimal_flops` crate-wide, so the attribute looks redundant. It is
+not, and the reason is how rustc applies lint flags.
+
+Cargo turns a `[lints]` table into command-line flags — `--allow=clippy::suboptimal_flops` — and
+those flags sit *before* anything a caller appends after `--`. rustc applies command-line lint
+flags left to right, last one wins, so an editor that adds `-W clippy::nursery` re-enables every
+nursery lint, `suboptimal_flops` included, and the manifest's `allow` is overridden. The editor then
+reports the lint as an error in its diagnostics, against code the project has decided, in writing, not
+to change.
+
+A source attribute outranks every command-line flag. So the crate root states the decision where it
+wins, and the manifest stays the record of *why* the decision was made.
+
+Two consequences follow, and both are checked:
+
+- The expectation must be **fulfilled** in every configuration the project builds, or
+  `unfulfilled_lint_expectations` fails the build. That is the property that makes this an
+  `#[expect]` and not an `#[allow]`: when the last unfused multiply-add in the library is rewritten,
+  the build says so. The library root's sites are in `application::crowd` and `application::packed`,
+  which are always compiled; the demo root's are spread across its ten modules, which are always
+  compiled too.
+- The attribute covers **one crate**. A crate-level attribute in `src/lib.rs` says nothing about
+  `tests/`, `benches/` or `examples/`, which are separate crates with their own roots. Those targets
+  carry no unfused arithmetic today, so they need no attribute; if one grows some, it needs its own.
+
 
 An `#[expect]` is not a suppression. It fails the build the day the lint stops firing, so it cannot
 rot into an `allow`; it is a statement that the lint is wrong here, and the compiler holds you to it.
@@ -205,12 +240,16 @@ clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
 half the crate's doc comments talk about the overrides they forbid. An `#[allow]` that is not in
 the script's `SANCTIONED` table fails the build; so does a `SANCTIONED` entry that has disappeared,
-because an exception nobody needs is an exception nobody reads. An `#[expect]` is judged by the three
-rules above instead: right file or right signature, and a reason.
+because an exception nobody needs is an exception nobody reads. An `#[expect]` is judged by the four
+rules above instead: right file or right signature, or a crate root whose manifest says the same
+thing, and a reason.
 
 The `reason = "…"` argument is stripped as a unit before an attribute is split on commas, so a
 reason with a comma in it does not become a phantom lint name, and a name that is not an identifier
-is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported.
+is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported. The
+`#!` is read too, because it is what separates a crate-level attribute from one attached to a single
+item, and a `cfg_attr` wrapper marks the attribute conditional — a decision that holds under some
+configuration is not a crate-wide one, so the audit does not accept it as one.
 
 It also reads every manifest that carries the table — the library's `Cargo.toml`, `demo/Cargo.toml`
 and `demo-gpu/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
@@ -234,11 +273,12 @@ both directions:
 and `expect`, a documented cast expectation inside the conversion module, the same expectation
 without a reason, the same expectation in another file, a documented expectation on a Bevy system,
 one on a function that is not a system, and a reason wrapped across lines with a trailing `\` — the
-shape that used to be split on its commas and read back as a list of lint names; then the sanction
-mechanism (a listed override passes, the same override unlisted fails, a stale entry fails); then
-the manifest (a downgraded deny, a deny replaced by an allow, an undocumented allow, a tolerated
-allow that vanished, an intact manifest, a second crate that is stricter than the library, and a
-second crate that allows what the library does not). CI runs both.
+shape that used to be split on its commas and read back as a list of lint names; then a crate-level
+expectation the manifest agrees with, one it does not, one outside a crate root, and a conditional
+one; then the sanction mechanism (a listed override passes, the same override unlisted fails, a
+stale entry fails); then the manifest (a downgraded deny, a deny replaced by an allow, an
+undocumented allow, a tolerated allow that vanished, an intact manifest, a second crate that is
+stricter than the library, and a second crate that allows what the library does not). CI runs both.
 
 Adding an override therefore takes three steps, in this order: a reason in the script, a plan task
 that removes it, and a sentence here. None of the three is a file-level opt-out a reviewer would have

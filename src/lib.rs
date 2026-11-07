@@ -71,6 +71,15 @@
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// The steering kernels are compared bit for bit across the scalar, SIMD and threaded roads, so the
+// arithmetic is deliberately left unfused: `a * b + c` rounds twice where `a.mul_add(b, c)` rounds
+// once, and fusing one road but not another is a one-ulp divergence the parity tests catch. The
+// manifest allows the lint crate-wide; this attribute states the same decision in the source, where
+// it outranks the lint flags an editor appends to the command line.
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "the steering roads are compared bit for bit, and fusion rounds once where the unfused form rounds twice"
+)]
 
 pub mod adapters;
 pub mod application;
