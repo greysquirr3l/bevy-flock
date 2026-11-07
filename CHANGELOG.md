@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- **The GPU demo draws on an Apple GPU.** `demo-gpu` asked `wgpu` for Vulkan, GL and the noop
+  device, and a Mac has neither of the first two, so every run on Apple silicon fell through to
+  the device that encodes commands and draws none: a blank image while the hardware sat idle. The
+  Metal backend is now enabled and `Backend::Metal` can be asked for by name, and `auto` asks for
+  Metal first — a Mac with `MoltenVK` installed would otherwise answer with a translation layer,
+  and a frame time measured through one describes the layer rather than the hardware. The Apple
+  dependencies are `cfg`-gated inside `wgpu`, so a Linux runner compiles the Metal backend away and
+  the noop CI job is unaffected.
 - **The asset pipeline skills move to `.github/skills/`, and CI stops checking them.** The four
   playbooks are agent-facing tooling rather than crate source, so they live under `.github/` where
   the tooling reads them and are ignored by Git. Three `scripts` job steps went with them — the

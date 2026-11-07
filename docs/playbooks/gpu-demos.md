@@ -85,11 +85,16 @@ bodies under a nearest-first cap. Assert on selected counts, not just on "someth
 ## 4. Pick the backend policy once, in one place
 
 ```rust
-pub enum Backend { Auto, Vulkan, Gl, Noop }
+pub enum Backend { Auto, Metal, Vulkan, Gl, Noop }
 ```
 
-- `Auto` asks for `VULKAN | GL | NOOP` and takes what it gets. It is the default everywhere.
-- `Vulkan`/`Gl` exist so a bug can be pinned to one driver without editing code.
+- `Auto` asks for `METAL | VULKAN | GL | NOOP` and takes what it gets. It is the default everywhere.
+- `Metal`/`Vulkan`/`Gl` exist so a bug can be pinned to one driver without editing code.
+- The order in `Auto` is a decision, not a set. Metal comes first because it is the only backend an
+  Apple machine has, and because a Mac with `MoltenVK` installed would otherwise answer with a
+  translation layer whose timings describe the layer rather than the hardware. The backends a
+  platform does not have cost nothing: `wgpu` compiles the Metal backend away on anything that is
+  not Apple, so one `Auto` serves every machine.
 - `Noop` encodes and validates every command and executes none. It needs no driver, so CI can prove
   the encode path — instance upload, bind groups, pipeline state, render pass — on a machine with no
   GPU at all. `wgpu` requires the option to be switched on explicitly:

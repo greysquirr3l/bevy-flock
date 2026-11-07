@@ -13,13 +13,18 @@ same way a game would.
 cargo run --release --manifest-path demo-gpu/Cargo.toml -- --backend auto --view all
 ```
 
-`--backend auto` opens the first adapter that answers, in this order: Vulkan, then GL, then `noop`.
-Pass `vulkan` or `gl` to insist, and `noop` to encode every command and draw none — that one runs
-anywhere, including a runner with no driver, and writes a blank image.
+`--backend auto` opens the first adapter that answers, in this order: Metal, then Vulkan, then GL,
+then `noop`. Pass `metal`, `vulkan` or `gl` to insist, and `noop` to encode every command and draw
+none — that one runs anywhere, including a runner with no driver, and writes a blank image.
+
+Metal is first because it is the only backend an Apple machine has: a Mac has neither Vulkan nor
+GL, so without it the demo falls through to `noop` and writes a blank image while the hardware sits
+idle. Metal also comes before Vulkan on purpose — a Mac with `MoltenVK` installed would answer with
+it, and a frame time measured through a translation layer describes the layer, not the GPU.
 
 | flag | meaning |
 | --- | --- |
-| `--backend auto\|vulkan\|gl\|noop` | which wgpu backend to open |
+| `--backend auto\|metal\|vulkan\|gl\|noop` | which wgpu backend to open |
 | `--view district\|street\|hero\|skyline\|procession\|all` | which shot to draw (default `all`) |
 | `--width N --height N` | frame size in pixels (default 600x375, at least 1 and at most 16384 a side, and no more than the device allows — 8192 with the default wgpu limits) |
 | `--frames N` | frames to time after two warm-up frames (default 20) |
