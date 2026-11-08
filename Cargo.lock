@@ -134,6 +134,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy-flock-anim"
+version = "0.1.0"
+dependencies = [
+ "bevy-flock",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "bevy_app"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

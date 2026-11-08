@@ -1,0 +1,67 @@
+[package]
+name = "bevy-flock-anim"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
+description = "Animation binding for bevy-flock: locomotion, gaze and gestures driven by the simulation, with the clips supplied by the game."
+repository = "https://github.com/greysquirr3l/bevy-flock"
+homepage = "https://github.com/greysquirr3l/bevy-flock"
+documentation = "https://docs.rs/bevy-flock-anim"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bevy", "animation", "crowd", "npc", "gamedev"]
+categories = ["game-development", "animation"]
+
+# This crate is the opt-in. The simulation core cannot carry an `anim` feature that depends on it —
+# a feature may not add a dependency on a crate that depends on the feature's own package — so the
+# integration is opted into by depending on `bevy-flock-anim`, and the core's dependency graph stays
+# exactly what ADR 0052 says it is. The `gltf` feature is the one that can exist here: it decides
+# whether this crate knows how to read a `.glb`, and a game with its own asset pipeline turns it off.
+
+[dependencies]
+# The simulation this binds to. Path dependency inside the same workspace; versioned together.
+bevy-flock = { path = "../..", default-features = false, features = ["simd", "threads"] }
+# Typed errors at the profile boundary, like every other library crate in this repository.
+thiserror = "2.0"
+
+[dev-dependencies]
+proptest = "1.12"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+# The same spine as the root package, restated rather than inherited: a workspace-wide `[workspace
+# .lints]` table would move the denials out of the manifest that `scripts/lint_audit.py` verifies,
+# and the audit is the thing that stops a lint being switched off quietly.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+suboptimal_flops = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+todo = "deny"
+unimplemented = "deny"
+needless_pass_by_value = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+missing_const_for_fn = "deny"
+significant_drop_tightening = "deny"

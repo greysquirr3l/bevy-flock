@@ -142,6 +142,11 @@ Two notes on what the audit does *not* cover, both deliberate:
   do not inherit `[lints]`; the audit scans their sources for overrides and CI builds them, but the
   spine itself stops at the crate boundary. Closing that is `sibling-crate-lint-spine` in
   `plan.toml`.
+- **Workspace crates.** Everything under `crates/` carries its own copy of the spine, because a
+  `[workspace.lints]` table would move the levels out of the manifest the audit reads and a lint
+  could then be weakened where nobody looks. The audit discovers `crates/*/Cargo.toml` on disk and
+  fails when one carries a lint table that is not in its `MANIFESTS` list, so adding a crate
+  cannot add an unchecked manifest.
 
 Everything else a reasonable reader might expect to see is decided in the manifest rather than in a
 file, so it appears once and reads as policy. `scripts/lint_audit.py` holds the same list as
@@ -234,8 +239,9 @@ A bare `#[allow]` is never correct and the audit rejects one outright, `reason` 
 
 ## Policing the exceptions
 
-`scripts/lint_audit.py` scans every Rust file in the tree — `src`, `tests`, `benches`, `examples`,
-`compat`, `fuzz`, `demo`, `demo-gpu`, `playground` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint,
+`scripts/lint_audit.py` scans every Rust file in the tree — `src`, `crates`, `tests`, `benches`,
+`examples`, `compat`, `fuzz`, `demo`, `demo-gpu`, `playground` — for `#[allow(…)]` and `#[expect(…)]` of
+**any** lint,
 clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
 half the crate's doc comments talk about the overrides they forbid. An `#[allow]` that is not in
