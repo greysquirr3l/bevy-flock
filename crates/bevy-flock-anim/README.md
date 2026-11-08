@@ -43,10 +43,23 @@ assert!((pivot.weight(ClipSlot::TurnInPlace) - 1.0).abs() < 1e-5);
 
 ## Status
 
-Phase 2 of the roadmap, which is the shell around a shipped simulation core. This crate currently
-carries the profile and its blend space; the ECS bindings (locomotion, gaze, gestures), the culling
-policy and the skinned example land against the same contract, each with its own tests. The
-adoption chapter is `docs/book/src/animation.md` in the repository.
+Phase 2 of the roadmap, which is the shell around a shipped simulation core. This crate carries the
+profile, its blend space, and the binding that drives a `AnimationPlayer`: `ClipBindings` maps the
+four slots onto nodes in *your* graph, and `apply_locomotion_blend` writes weights and stride-derived
+playback rates once per tick. Gaze and gestures land against the same contract, each with its own
+tests.
+
+```rust
+use bevy_animation::graph::AnimationNodeIndex;
+use bevy_flock_anim::{AnimPlugin, ClipBindings, LocomotionProfile};
+
+# fn wire(app: &mut bevy_app::App, graph_nodes: [AnimationNodeIndex; 3]) {
+app.add_plugins(AnimPlugin);
+// Your graph: three clips, one cycle long each, resolved to node indices when you build it.
+let bindings = ClipBindings::new(profile_handle, graph_nodes[0], graph_nodes[1], graph_nodes[2]);
+// …then spawn `(Locomotion::default(), bindings, AnimationPlayer::default())` per NPC.
+# }
+```
 
 ## Licence
 

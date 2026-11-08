@@ -24,9 +24,21 @@ categories = ["game-development", "animation"]
 bevy-flock = { path = "../..", default-features = false, features = ["simd", "threads"] }
 # Typed errors at the profile boundary, like every other library crate in this repository.
 thiserror = "2.0"
+# Bevy's animation crate is the only reason this package exists as a package. It is a normal
+# dependency rather than a feature: a game opts in by depending on `bevy-flock-anim`, and a server
+# build that never mentions this crate never compiles `bevy_animation` at all.
+bevy_animation = "0.20.1"
+bevy_app = "0.20.1"
+bevy_asset = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_reflect = "0.20.1"
 
 [dev-dependencies]
 proptest = "1.12"
+# The frame-rate fixture steers on a circle; `libm` rather than `f32::sin` because the fixture must
+# produce the same track on every platform, exactly as the simulation does.
+libm = "0.2"
 
 [lints.rust]
 unsafe_code = "deny"

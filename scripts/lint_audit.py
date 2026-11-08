@@ -41,6 +41,10 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "unsafe_code",
     ): "a counting allocator is the only way to report steady-state allocation",
     (
+        "crates/bevy-flock-anim/tests/no_alloc.rs",
+        "unsafe_code",
+    ): "a counting allocator is the only way to observe an allocation; confined to one test binary",
+    (
         "tests/band_continuity.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to assert gate 7",

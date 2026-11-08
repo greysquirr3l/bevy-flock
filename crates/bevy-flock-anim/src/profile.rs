@@ -9,6 +9,8 @@
 //! no state and allocates nothing: the same two numbers always produce the same four weights, which
 //! is what lets a replay animate identically at 20 frames a second and at 200.
 
+use bevy_asset::Asset;
+use bevy_reflect::TypePath;
 use thiserror::Error;
 
 /// The four poses a walking body blends between.
@@ -83,7 +85,11 @@ pub enum ProfileError {
 ///
 /// Construct one with [`LocomotionProfile::try_new`]: every field is validated once, at the
 /// boundary, so nothing inside the blend has to re-check it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// It is a Bevy [`Asset`], so a game can load it from a file and hot-reload a designer's tweak
+/// without a rebuild. Being an asset changes nothing about the maths: the blend is a function of the
+/// numbers it holds, not of where they came from.
+#[derive(Asset, TypePath, Debug, Clone, Copy, PartialEq)]
 pub struct LocomotionProfile {
     walk_speed: f32,
     run_speed: f32,

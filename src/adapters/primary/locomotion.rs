@@ -177,10 +177,6 @@ fn signed_angle(from: Vec2, to: Vec2) -> f32 {
 /// same expression as [`integrate_flock`](crate::boids::integrate_flock): a tick that integration
 /// treated as one sixtieth of a second is one sixtieth of a second here too, whether the rate came
 /// from a [`SimClock`] or from the default.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
-)]
 pub fn derive_locomotion(
     clock: Option<Res<SimClock>>,
     mut bodies: Query<(&NpcVelocity, &NpcDesiredVelocity, &mut Locomotion)>,
@@ -230,7 +226,7 @@ mod tests {
         );
         // Settled speed has settled acceleration.
         assert!(motion.acceleration().abs() < 1e-3);
-        assert!((motion.distance_metres() - f64::from(1.4) * f64::from(60.0 * TICK)).abs() < 1e-3);
+        assert!((motion.distance_metres() - 1.4_f64 * f64::from(60.0 * TICK)).abs() < 1e-3);
     }
 
     #[test]
@@ -340,7 +336,7 @@ mod tests {
         use crate::adapters::primary::components::{NpcDesiredVelocity, NpcVelocity};
         use crate::application::SimClock;
         use crate::domain::tick::TicksPerSecond;
-        use crate::testkit::{GetOrDie, OrDie};
+        use crate::testkit::OrDie;
 
         let mut world = World::new();
         // Thirty ticks a second, so a quarter turn in one tick is a turn rate of pi/2 * 30.

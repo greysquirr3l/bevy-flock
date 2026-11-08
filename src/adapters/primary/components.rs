@@ -61,7 +61,7 @@ pub struct NpcVelocity(pub Vec3);
 
 impl NpcVelocity {
     /// The horizontal component: what a walking animation and the spatial index care about.
-    pub fn planar(&self) -> Vec2 {
+    pub const fn planar(&self) -> Vec2 {
         Vec2::new(self.0.x, self.0.z)
     }
 }
@@ -76,7 +76,7 @@ pub struct NpcDesiredVelocity(pub Vec3);
 
 impl NpcDesiredVelocity {
     /// The horizontal component: where the body is trying to go.
-    pub fn planar(&self) -> Vec2 {
+    pub const fn planar(&self) -> Vec2 {
         Vec2::new(self.0.x, self.0.z)
     }
 }

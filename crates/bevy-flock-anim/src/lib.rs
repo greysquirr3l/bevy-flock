@@ -55,6 +55,8 @@
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod binding;
 pub mod profile;
 
+pub use binding::{AnimPlugin, BlendFrame, ClipBindings, apply_locomotion_blend};
 pub use profile::{BlendWeights, ClipSlot, LocomotionProfile, ProfileError};
