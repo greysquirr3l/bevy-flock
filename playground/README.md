@@ -61,11 +61,13 @@ frames a second move the crowd across the city at the same rate, and only the sm
 a software rasteriser that means a quarter-second stride per frame — correct, and visibly coarse.
 That coarseness is the reason the timing line below is worth reading before judging the motion.
 
-Each frame reads the crowd back with `Playground::bodies`, which allocates one `Vec` of 2,000 bodies
-and sorts it. That is a demo-side cost, not the library's: `bodies` is a snapshot API built for
-diffable captures, and the zero-allocation claims in the library docs are about the steering kernels,
-not this readback. A streaming accessor keyed by identity is the fix if this ever matters at 10,000
-bodies; at 2,000 the sort is a rounding error next to the draw.
+Each frame reads the crowd back with `Playground::bodies_into`, which fills a buffer this crate keeps
+and allocates nothing once that buffer is warm. It was not always so: the first version called
+`Playground::bodies`, a snapshot API built for diffable captures — one `Vec`, one stable sort, one
+copy, per frame. Measured with `demo/benches/crowd_readback.rs`, that cost 30 µs at 2,000 bodies and
+150 µs at 10,000, half of it the sort and the copies. Caching the query, reusing the buffer and
+sorting in place took it to 18 µs and 90 µs; the remaining cost is the ECS iteration itself, at
+roughly 7 ns a body. `docs/performance.md` has the table and the numbers behind it.
 
 When the frame count runs out, the run prints one line and exits:
 

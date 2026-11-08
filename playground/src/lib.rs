@@ -323,7 +323,8 @@ fn simulate(
     mut links: Query<(&BodyLink, &mut Transform)>,
 ) {
     simulation.0.tick(1);
-    crowd.bodies = simulation.0.bodies();
+    // Into the buffer the last frame filled: after the first frame this allocates nothing.
+    simulation.0.bodies_into(&mut crowd.bodies);
     // A population that changed between frames invalidates the slot mapping; the next spawn pass
     // would rebuild it, and until then a body is better left where it is than teleported.
     let count = crowd.bodies.len();

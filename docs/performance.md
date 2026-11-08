@@ -942,3 +942,48 @@ buffer is grown once and cleared rather than freed (ADR 0051).
 Needs decay is not in this table because it is not per frame: the system runs once every
 `NeedsDecay` ticks (eight by default) and touches one component pair per NPC when it does.
 
+
+## The crowd readback: what the sort cost (2026-11-08)
+
+The window that draws Ashfall through Bevy reads the crowd out of the ECS once per rendered frame to
+move 2,000 entities. `Playground::bodies` was built for snapshots — one call, one `Vec`, sorted by
+identity so a captured scene is diffable — and a live loop was paying a snapshot API's price sixty
+times a second. `benches/crowd_readback.rs` (in `demo/`) separates the parts, on this machine's ARM
+core, `cargo bench` profile, a crowd warmed by 600 ticks:
+
+| Case | 2,000 | 10,000 |
+|---|---|---|
+| `full` — build query, iterate, collect, stable-sort, copy out | 30.0 µs | 149.6 µs |
+| `fresh_query` — the same without the sort and the copy | 14.5 µs | 78.5 µs |
+| `reused_query` — iterate through a `QueryState` built once | 13.5 µs | 70.2 µs |
+
+Half the call was bookkeeping, and most of that was the sort: `sort_by_key` is a stable merge sort,
+which allocates a scratch buffer of half the elements and moves 40-byte pairs through it. The keys
+are `Npc` identity bits, which are unique, so there was no stability to preserve and nothing to
+allocate for it. Three changes, in order of what they bought:
+
+* `sort_unstable_by_key` — no merge buffer, in place, same order, because the keys cannot tie.
+* One buffer instead of three: the pairs are refilled rather than reallocated, and the caller hands
+  in the output `Vec` via the new `bodies_into`. After the first frame the call allocates nothing.
+* The `QueryState` is kept on the `Playground` instead of rebuilt per call: 1.2 µs at 2,000, 10 µs at
+  10,000, and it is the same archetype match every time.
+
+| Case | 2,000 before | 2,000 after | 10,000 before | 10,000 after |
+|---|---|---|---|---|
+| `full` | 30.0 µs | 18.0 µs | 149.6 µs | 90.3 µs |
+| `into_reused` — the path the window uses | — | 18.0 µs | — | 89.4 µs |
+
+Forty percent, and the shape of what is left changed: 13.5 µs of the remaining 18 is the query
+iteration itself — four component fetches and a 40-byte write per body, 6.7 ns each — which is the
+floor for reading 2,000 entities through the ECS, not something this API can tune away.
+
+The next step, if a window ever wants 10,000 bodies at 120 Hz, is to drop the sort entirely:
+`Npc` identity is dense, so a preallocated slot table indexed by identity would scatter each body
+into place in one pass and skip the ordering work. It was not done here because it trades a
+2.8 µs saving (2,000) against a correctness contract that currently rests on one clear rule — slot
+order equals identity order, which is what `BodyLink` relies on to move the right entity. `90 µs` at
+10,000 bodies is 0.5% of a 16.7 ms frame; the contract is worth more than the microseconds.
+
+`bodies()` remains, allocating exactly one `Vec`: snapshot callers — the binaries, the example, the
+tests — were never the problem, and changing their signature to save an allocation they make once
+would be churn.

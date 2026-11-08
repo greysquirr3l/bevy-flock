@@ -37,6 +37,11 @@ bytemuck = { version = "1", features = ["derive"] }
 name = "render_pipeline"
 harness = false
 
+# Where the per-frame cost of reading the crowd out of the ECS goes, and how much of it is the sort.
+[[bench]]
+name = "crowd_readback"
+harness = false
+
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "deny"
