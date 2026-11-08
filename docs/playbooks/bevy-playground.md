@@ -65,6 +65,19 @@ cargo run --manifest-path playground/Cargo.toml -- --help
 | `--extent M` | layout half-extent in metres, default 900 |
 | `--help` | usage |
 
+## It moves
+
+The window is a running simulation, not a snapshot: each frame calls `Playground::tick(1)` and writes
+every body's position and yaw onto its entity, plus a 4 cm walk bob whose phase advances with the
+distance that body covered since the last frame — a stride is 1.5 m, two steps, one rise each.
+Scenery does not move: pylons, shelters, stalls and blocks are spawned without a link. `--ticks` only
+decides how dispersed the crowd is when the window opens.
+
+One tick per rendered frame, with the library's fixed timestep consuming the wall time since the last
+frame: the crowd crosses the city at the same speed regardless of frame rate, and only the smoothness
+changes. On a software rasteriser that is a quarter-second step per frame, which reads as coarse
+motion rather than as a different speed — worth knowing before judging a capture.
+
 ## Reading the run
 
 Two lines matter. The first is Bevy's, and names the device:
@@ -128,11 +141,12 @@ the event loop and a plugin added after it never sees a frame.
 
 ## What was verified, and where
 
-The crate's 29 tests cover the parts that do not need a device: geometry for every shipped model,
+The crate's 31 tests cover the parts that do not need a device: geometry for every shipped model,
 the cube and ground meshes and their winding, transform mapping, tint quantisation at its bounds, the
 camera's angle/forward round trip and basis, the pitch clamp, view cycling, every flag including the
-window-size pair, the frame statistics (median, mean, p95, and the empty run), and the refusal of a
-capture format this build cannot encode.
+window-size pair, the frame statistics (median, mean, p95, and the empty run), the walk cycle (phase
+advance, wrapping, and the bob's amplitude), and the refusal of a capture format this build cannot
+encode.
 
 The window itself is not covered, and cannot be: it needs a display and a driver. The capture above
 is the closest thing to a test — it was produced by running the real binary on a real Vulkan driver

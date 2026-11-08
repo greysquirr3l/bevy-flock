@@ -34,6 +34,32 @@ fn played(seed: u64) -> Playground {
 }
 
 #[test]
+fn reading_the_crowd_into_a_buffer_matches_the_allocating_read() {
+    let mut playground = played(11);
+    let snapshot = playground.bodies();
+    let mut buffer = Vec::new();
+    playground.bodies_into(&mut buffer);
+    assert_eq!(buffer.len(), snapshot.len());
+    for (read, expected) in buffer.iter().zip(&snapshot) {
+        assert_eq!(read.position, expected.position);
+        // `f32` bit for bit: the same value, not one within a tolerance of it.
+        assert_eq!(read.yaw.to_bits(), expected.yaw.to_bits());
+        assert_eq!(read.appearance_seed, expected.appearance_seed);
+    }
+    // The point of the buffer: after the first call it is big enough, and stays big enough.
+    let capacity = buffer.capacity();
+    for _ in 0..8 {
+        playground.bodies_into(&mut buffer);
+    }
+    assert_eq!(
+        buffer.capacity(),
+        capacity,
+        "the readback grew its output buffer after it was warm"
+    );
+    assert_eq!(buffer.len(), snapshot.len());
+}
+
+#[test]
 fn two_runs_of_the_same_seed_produce_the_same_digest() {
     let first = played(7).diagnostics().digest();
     let second = played(7).diagnostics().digest();

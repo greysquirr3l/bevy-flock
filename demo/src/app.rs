@@ -73,6 +73,29 @@ pub struct Playground {
     pub population: u32,
     /// Where the visitor stands: the anchor the cognition ladder measures from.
     pub anchor: Vec3,
+    /// Buffers the per-frame readback reuses.
+    readback: Readback,
+}
+
+/// The components a body is read from.
+type Crowd = (
+    &'static Npc,
+    &'static NpcIdentity,
+    &'static NpcVelocity,
+    &'static Transform,
+);
+
+/// What the readback keeps between calls, so a running frame allocates nothing.
+///
+/// `bodies` used to build a `QueryState`, a `Vec` of pairs, a stable sort's merge buffer and an
+/// output `Vec` on every call. A window that reads the crowd sixty times a second paid for all four
+/// every frame; measured, the sort and the copies were half the cost of the call at 2,000 bodies.
+#[derive(Default)]
+struct Readback {
+    /// The archetype match, built once. `'static` because the world it queries is the app's own.
+    query: Option<QueryState<Crowd>>,
+    /// Identity and body, refilled and sorted in place on each call.
+    scratch: Vec<(u32, Body)>,
 }
 
 impl Playground {
@@ -149,6 +172,7 @@ impl Playground {
             city,
             population,
             anchor,
+            readback: Readback::default(),
         })
     }
 
@@ -219,32 +243,52 @@ impl Playground {
     /// Read the crowd back out as bodies a renderer could draw.
     ///
     /// Sorted by identity, so the artefacts do not depend on the order the ECS happened to iterate:
-    /// that is the difference between a diffable scene and a noisy one.
+    /// that is the difference between a diffable scene and a noisy one. Allocates the `Vec` and
+    /// nothing else, which is what a caller taking a snapshot wants; a caller that reads the crowd
+    /// every frame wants [`Playground::bodies_into`] instead.
     #[must_use]
     pub fn bodies(&mut self) -> Vec<Body> {
-        let mut query: QueryState<(&Npc, &NpcIdentity, &NpcVelocity, &Transform)> =
-            self.app.world_mut().query();
-        let world = self.app.world_mut();
-        let mut collected: Vec<(u32, Body)> = query
-            .iter(world)
-            .map(|(npc, identity, velocity, transform)| {
-                let yaw = if velocity.0.length_squared() > 1e-6 {
-                    velocity.0.x.atan2(velocity.0.z)
-                } else {
-                    0.0
-                };
-                (
-                    npc.0.to_bits(),
-                    Body {
-                        archetype: identity.archetype,
-                        position: transform.translation,
-                        yaw,
-                        appearance_seed: identity.appearance_seed,
-                    },
-                )
-            })
-            .collect();
-        collected.sort_by_key(|(id, _)| *id);
-        collected.into_iter().map(|(_, body)| body).collect()
+        let mut bodies = Vec::new();
+        self.bodies_into(&mut bodies);
+        bodies
+    }
+
+    /// Read the crowd back into a buffer the caller owns, in identity order.
+    ///
+    /// The one a running renderer should call. Nothing is allocated once `out` and the internal
+    /// scratch buffer are big enough: the archetype match is cached, the pairs are sorted in place,
+    /// and `out` is refilled rather than replaced. The sort is `sort_unstable` -- the keys are NPC
+    /// identity bits, which are unique, so there is no stability to lose and no merge buffer to
+    /// allocate for it.
+    pub fn bodies_into(&mut self, out: &mut Vec<Body>) {
+        let Self { app, readback, .. } = self;
+        if readback.query.is_none() {
+            readback.query = Some(app.world_mut().query::<Crowd>());
+        }
+        let Some(query) = readback.query.as_mut() else {
+            out.clear();
+            return;
+        };
+        readback.scratch.clear();
+        let world = app.world();
+        for (npc, identity, velocity, transform) in query.iter(world) {
+            let yaw = if velocity.0.length_squared() > 1e-6 {
+                velocity.0.x.atan2(velocity.0.z)
+            } else {
+                0.0
+            };
+            readback.scratch.push((
+                npc.0.to_bits(),
+                Body {
+                    archetype: identity.archetype,
+                    position: transform.translation,
+                    yaw,
+                    appearance_seed: identity.appearance_seed,
+                },
+            ));
+        }
+        readback.scratch.sort_unstable_by_key(|(id, _)| *id);
+        out.clear();
+        out.extend(readback.scratch.iter().map(|(_, body)| *body));
     }
 }
