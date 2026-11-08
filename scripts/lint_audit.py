@@ -164,11 +164,35 @@ NAME = re.compile(r"[a-z_][a-z0-9_]*")
 # stops at the newline leaves the reason's own words looking like lint names.
 REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"', re.S)
 
-SEARCH = ("src", "tests", "benches", "examples", "compat", "fuzz", "demo", "demo-gpu")
+SEARCH = (
+    "src",
+    "tests",
+    "benches",
+    "examples",
+    "compat",
+    "fuzz",
+    "demo",
+    "demo-gpu",
+    "playground",
+)
 
 #: Every manifest that carries the policy, relative to the repository root. A crate that is not in
 #: this list has no table to weaken; one that is, cannot weaken it quietly.
-MANIFESTS = ("Cargo.toml", "demo/Cargo.toml", "demo-gpu/Cargo.toml")
+MANIFESTS = (
+    "Cargo.toml",
+    "demo/Cargo.toml",
+    "demo-gpu/Cargo.toml",
+    "playground/Cargo.toml",
+)
+
+#: Lints a manifest may leave at `allow` because the framework, not the code, forces the shape.
+#: Bevy hands a system its parameters by value and the reference forms are not `SystemParam`s, so
+#: `needless_pass_by_value` is unsatisfiable in a crate that writes systems; the exception is
+#: recorded against that one manifest and nowhere else. Every entry here needs the reason in the
+#: manifest itself, where a reader of the table will find it.
+TOLERATED_BY_MANIFEST = {
+    "playground/Cargo.toml": {"needless_pass_by_value"},
+}
 
 #: How strong a level is. A crate may be stricter than the policy — the GPU demo denies the groups
 #: instead of warning about them — but never weaker.
@@ -288,7 +312,10 @@ def check_manifest(root: Path) -> int:
             problems.append(f"  {relative}: the manifest that carries the policy is missing")
             continue
         levels = manifest_levels(path.read_text(encoding="utf-8"))
+        tolerated = set(TOLERATED) | TOLERATED_BY_MANIFEST.get(relative, set())
         for table, lint, expected in REQUIRED:
+            if lint in TOLERATED_BY_MANIFEST.get(relative, set()):
+                continue
             found = levels.get((table, lint))
             if STRENGTH.get(found or "", -1) < STRENGTH[expected]:
                 problems.append(
@@ -300,7 +327,7 @@ def check_manifest(root: Path) -> int:
             for (table, lint), level in levels.items()
             if table.startswith("lints.") and level == "allow"
         }
-        for lint in sorted(allowed - set(TOLERATED)):
+        for lint in sorted(allowed - tolerated):
             problems.append(f"  {relative}: allowed but not in TOLERATED: {lint}")
         covered.update(allowed)
     # A crate may deny what another crate tolerates, so the tolerated set is checked once against
@@ -667,6 +694,34 @@ def self_test() -> int:
             if code != expected:
                 print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
                 failures += 1
+    # The one exception recorded against a manifest: honoured where it is written down, refused
+    # anywhere else, so the reason has to name a crate that cannot satisfy the lint.
+    for label, relative, expected in [
+        ("the recorded manifest exception is honoured", "playground/Cargo.toml", 0),
+        ("the exception does not leak to another manifest", "demo/Cargo.toml", 1),
+    ]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_manifest(root)
+            path = root / relative
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    'needless_pass_by_value = "deny"', 'needless_pass_by_value = "allow"'
+                ),
+                encoding="utf-8",
+            )
+            saved = dict(SANCTIONED)
+            SANCTIONED.clear()
+            try:
+                code = check(root)
+            finally:
+                SANCTIONED.clear()
+                SANCTIONED.update(saved)
+            if code != expected:
+                print(f"self-test FAILED: {label}: expected exit {expected}, got {code}")
+                failures += 1
+            else:
+                print(f"self-test ok: {label}")
     # A manifest that carries the policy and is not there is a failure. Without this, renaming or
     # deleting a crate's manifest removes it from the audit and the run still reports success.
     for label, removed, expected in [

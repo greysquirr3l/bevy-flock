@@ -1,0 +1,103 @@
+[package]
+name = "bevy-flock-playground"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
+description = "A windowed 3D Ashfall playground: the crowd and the city, drawn by Bevy's PBR pipeline on whatever GPU the machine has -- Metal on macOS."
+repository = "https://github.com/greysquirr3l/bevy-flock"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "ashfall-playground"
+path = "src/main.rs"
+
+# Bevy's subcrates rather than the `bevy` umbrella. The umbrella is a re-export of
+# `bevy_internal`, which re-exports every subsystem Bevy has: audio, text, UI, gizmos,
+# animation, scenes. This demo draws a city with PBR and nothing else, and depending on the
+# subcrates it actually uses keeps the graph to what the renderer needs. It is also the only
+# form that resolves for a reader whose registry cache holds the subcrates but not the
+# umbrella, which is exactly the offline case.
+[dependencies]
+bevy-flock = { path = ".." }
+bevy-flock-demo = { path = "../demo" }
+bevy_a11y = "0.20.1"
+bevy_app = "0.20.1"
+bevy_asset = "0.20.1"
+bevy_camera = "0.20.1"
+bevy_color = "0.20.1"
+bevy_core_pipeline = "0.20.1"
+bevy_diagnostic = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_image = { version = "0.20.1", features = ["bmp"] }
+bevy_input = "0.20.1"
+bevy_light = "0.20.1"
+bevy_log = "0.20.1"
+bevy_math = "0.20.1"
+bevy_mesh = "0.20.1"
+bevy_pbr = "0.20.1"
+bevy_render = "0.20.1"
+bevy_time = "0.20.1"
+bevy_transform = "0.20.1"
+bevy_window = "0.20.1"
+bevy_winit = "0.20.1"
+# The backend mask `WgpuSettings` takes. `bevy_render` depends on wgpu 30 and does not re-export
+# it, so the same version is named here: one `Backends` type, not two.
+wgpu = { version = "30", default-features = false, features = ["metal", "vulkan", "gles"] }
+
+# The same spine the other crates in this repository carry, for the same reasons. Instance
+# and block data arrive from a generator, so an index into either is a bug rather than a
+# possibility, and every count that leaves this crate is checked at the boundary.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+# Groups first, at the lowest priority, so the individual lints below can move either way. This is
+# the repository's spine, the same table the library carries, with the same reasons.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# Allowed: opted out of, because they fight the domain vocabulary or duplicate documentation that
+# is enforced elsewhere.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+# The library's steering kernels must not fuse (`mul_add` rounds once where `a * b + c` rounds
+# twice) and its parity tests compare the roads bit for bit. This crate draws what they computed,
+# and writes its camera, fog and quantiser arithmetic as the maths reads for the same reason: a
+# fused expression here would be a second, differently-rounded description of the same scene.
+suboptimal_flops = "allow"
+# Denied: each of these is a production incident, tests included, and the code satisfies them by
+# construction. `unreachable!()` is not denied -- it is `testkit::OrDie`'s failure primitive and the
+# way a `match` says "the other arm cannot happen".
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+todo = "deny"
+unimplemented = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+missing_const_for_fn = "deny"
+significant_drop_tightening = "deny"
+# Bevy hands a system its parameters by value (`Res<T>`, `Query<..>`, `Commands`, `ResMut<T>`): the
+# signature is the framework's, and taking them by reference does not compile.
+# Bevy hands a system its parameters by value (`Res<T>`, `ResMut<T>`, `Query<..>`, `MessageReader`,
+# `Commands`). The reference forms are not `SystemParam`s -- `cargo check` refuses `&mut ResMut<T>`
+# with "does not describe a valid system configuration" -- so the signature is the framework's and
+# this is the one entry in this table the code cannot satisfy by construction. `scripts/lint_audit.py`
+# records the exception against this manifest and fails if it appears anywhere else.
+needless_pass_by_value = "allow"

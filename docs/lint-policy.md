@@ -235,7 +235,7 @@ A bare `#[allow]` is never correct and the audit rejects one outright, `reason` 
 ## Policing the exceptions
 
 `scripts/lint_audit.py` scans every Rust file in the tree — `src`, `tests`, `benches`, `examples`,
-`compat`, `fuzz`, `demo`, `demo-gpu` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint,
+`compat`, `fuzz`, `demo`, `demo-gpu`, `playground` — for `#[allow(…)]` and `#[expect(…)]` of **any** lint,
 clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
 half the crate's doc comments talk about the overrides they forbid. An `#[allow]` that is not in
@@ -252,7 +252,7 @@ item, and a `cfg_attr` wrapper marks the attribute conditional — a decision th
 configuration is not a crate-wide one, so the audit does not accept it as one.
 
 It also reads every manifest that carries the table — the library's `Cargo.toml`, `demo/Cargo.toml`
-and `demo-gpu/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
+`demo-gpu/Cargo.toml` and `playground/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
 both directions:
 
 - **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
@@ -265,7 +265,7 @@ both directions:
   *stricter* than the library — the GPU demo denies the groups rather than warning about them, since
   it has no `-D warnings` step of its own — the comparison is against a strength order rather than
   for equality, and no manifest may allow a lint that `TOLERATED` does not list. The tolerated set
-  itself is checked once against all three manifests together, so an entry nothing allows any more
+  itself is checked once against all four manifests together, so an entry nothing allows any more
   still fails.
 
 `--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level
