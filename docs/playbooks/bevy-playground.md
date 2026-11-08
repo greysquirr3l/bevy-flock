@@ -140,3 +140,50 @@ is the closest thing to a test — it was produced by running the real binary on
 a regression that empties the frame is visible as an image rather than as a discussion. What it does
 **not** show: anti-aliasing quality, shadow filtering, or a frame time that means anything. Those are
 a Mac's job, and the summary line above is where to read them.
+
+## The skinned district: the same crowd, with skeletons
+
+`playground`'s main binary draws boxes for bodies. The `skinned` binary draws the same crowd as
+five-joint rigs with skinned meshes and a seven-clip blend tree, so the animation is Bevy's skinning
+path rather than geometry moved by hand.
+
+```sh
+cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --npc 2000
+```
+
+| Flag | |
+|---|---|
+| `--npc N` | bodies, default 2000 |
+| `--radius M` | plaza radius, metres, default 34 |
+| `--frames N` | draw N frames and exit |
+| `--capture PATH` | write the last frame as a BMP |
+| `--width N` `--height N` | default 1280x800 |
+| `--backend NAME` | `auto`, `metal`, `vulkan`, `gl` |
+| `--assert-motion` | non-zero exit unless the crowd provably animated |
+
+Verify it without a display, and without trusting your eyes:
+
+```sh
+cd playground
+cargo build --bin skinned
+xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
+# skinned: 213 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.612 m
+```
+
+The four numbers are the gate: something moved, something blended walk or run above half weight,
+a gesture cue reached a clip, and someone aimed their gaze. Drop `--assert-motion` and those numbers
+are printed but do not fail the run.
+
+### Four Bevy 0.20 traps this example exists to document
+
+- **Magenta frames.** `Tonemapping::TonyMcMapface` needs the `tonemapping_luts` feature. Without it
+  Bevy logs one line and renders the entire frame magenta, which reads as a broken material for as
+  long as it takes to notice the log. This example uses `Tonemapping::None`.
+- **Skinned scenery.** A mesh carrying `JOINTS_0` and `JOINT_WEIGHT` is drawn with the skinned
+  pipeline. Give such a mesh to an entity without `SkinnedMesh` and wgpu fails validation on the
+  first frame and quits the app. Scenery meshes therefore carry no skin attributes at all.
+- **Ambient light.** `GlobalAmbientLight` is read while `PbrPlugin` builds, so inserting it after
+  `add_plugins` sets a resource the shader never sees. Insert it first.
+- **Windings.** A box face listed clockwise against an outward normal renders black, not wrong. The
+  `every_triangle_faces_its_normal` test compares each triangle's geometric normal with the stored
+  one, which is the cheapest way to keep a corner table and a normal table honest.

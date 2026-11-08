@@ -13,6 +13,10 @@ publish = false
 name = "ashfall-playground"
 path = "src/main.rs"
 
+[[bin]]
+name = "skinned"
+path = "src/bin/skinned.rs"
+
 # Bevy's subcrates rather than the `bevy` umbrella. The umbrella is a re-export of
 # `bevy_internal`, which re-exports every subsystem Bevy has: audio, text, UI, gizmos,
 # animation, scenes. This demo draws a city with PBR and nothing else, and depending on the
@@ -22,7 +26,9 @@ path = "src/main.rs"
 [dependencies]
 bevy-flock = { path = ".." }
 bevy-flock-demo = { path = "../demo" }
+bevy-flock-anim = { path = "../crates/bevy-flock-anim" }
 bevy_a11y = "0.20.1"
+bevy_animation = "0.20.1"
 bevy_app = "0.20.1"
 bevy_asset = "0.20.1"
 bevy_camera = "0.20.1"

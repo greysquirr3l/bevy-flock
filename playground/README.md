@@ -87,3 +87,44 @@ make a real GPU run a bounded, scriptable check:
 ```sh
 cargo run --release -p bevy-flock-playground -- --backend metal --frames 120 --view district
 ```
+
+## The skinned district: 2,000 bodies with a skeleton each
+
+`ashfall-playground` draws boxes. `skinned` draws people: every body is a five-joint rig with a
+skinned mesh, an `AnimationPlayer` and a blend tree, all built at startup, so the thing moving on
+screen is Bevy's own skinning and animation path and not a hand-rolled shader.
+
+```sh
+cargo run --release -p bevy-flock-playground --bin skinned -- --npc 2000
+```
+
+![Two thousand skinned bodies around the monolith](../docs/demo/ashfall-skinned-district.png)
+*2,000 bodies, 200 frames, 1280x800, captured on `llvmpipe` under Xvfb. Each body is ten thousand
+vertices of skinned geometry and one blend tree of seven clips.*
+
+| Flag | |
+|---|---|
+| `--npc N` | bodies to spawn, default 2000 |
+| `--radius M` | plaza radius in metres, default 34 |
+| `--frames N` | draw N frames and exit; omit to keep the window open |
+| `--capture PATH` | write the last frame to `PATH` as a BMP |
+| `--width N` `--height N` | window size, default 1280x800 |
+| `--backend NAME` | `auto` (default), `metal`, `vulkan`, `gl` |
+| `--assert-motion` | exit non-zero unless the crowd provably animated |
+
+What the crowd does is the library's: `bevy-flock-anim` binds walk/run/idle/nod/wave clips to the
+rig through a per-entity blend, `bevy_flock`'s locomotion decides the blend weights from velocity,
+its gesture channel decides when a body waves, and `resolve_gaze` turns every body's head towards
+the monolith. The crate contributes the rig, the clips, the spiral placement and the milling motion —
+each a pure function with tests.
+
+`--assert-motion` is the interesting flag. It is the difference between "the window opened" and "the
+crowd animated": it fails unless at least one body moved since spawn, blended walk or run above half
+weight, received a gesture cue that reached a clip, and aimed its gaze. Every failure is named on its
+own line, because "nothing moved" sends the reader to the wrong file when the real problem was that
+no gesture was ever requested:
+
+```sh
+xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
+# skinned: 213 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.612 m
+```
