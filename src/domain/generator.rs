@@ -55,12 +55,7 @@ pub enum NameStyle {
 
 impl NameStyle {
     /// Every style, in a fixed order.
-    pub const ALL: [Self; 4] = [
-        Self::Nordic,
-        Self::Latin,
-        Self::TradeCity,
-        Self::Highland,
-    ];
+    pub const ALL: [Self; 4] = [Self::Nordic, Self::Latin, Self::TradeCity, Self::Highland];
 
     /// The style's fixed pool of onsets.
     #[must_use]
@@ -155,12 +150,46 @@ impl NameStyle {
                 "Wick",
             ],
             Self::Highland => &[
-                "Balmorran", "Braemar", "Cauldwell", "Craigmore", "Dellraven", "Dunmore", "Elgin",
-                "Farrow", "Fernbrake", "Garroway", "Glenmorgan", "Glenrigh", "Hartstone", "Heatherby",
-                "Highfern", "Inverloch", "Isleworth", "Jedburgh", "Kilbride", "Kilmartin",
-                "Kirkmara", "Linnheath", "Lochran", "Moredun", "Muirfield", "Netherfield",
-                "Norvale", "Ormsby", "Pennan", "Quennell", "Raeburn", "Rosslyn", "Stonehaven",
-                "Strathmore", "Struan", "Tarbert", "Thistlewood", "Torquil", "Uist", "Westerloch",
+                "Balmorran",
+                "Braemar",
+                "Cauldwell",
+                "Craigmore",
+                "Dellraven",
+                "Dunmore",
+                "Elgin",
+                "Farrow",
+                "Fernbrake",
+                "Garroway",
+                "Glenmorgan",
+                "Glenrigh",
+                "Hartstone",
+                "Heatherby",
+                "Highfern",
+                "Inverloch",
+                "Isleworth",
+                "Jedburgh",
+                "Kilbride",
+                "Kilmartin",
+                "Kirkmara",
+                "Linnheath",
+                "Lochran",
+                "Moredun",
+                "Muirfield",
+                "Netherfield",
+                "Norvale",
+                "Ormsby",
+                "Pennan",
+                "Quennell",
+                "Raeburn",
+                "Rosslyn",
+                "Stonehaven",
+                "Strathmore",
+                "Struan",
+                "Tarbert",
+                "Thistlewood",
+                "Torquil",
+                "Uist",
+                "Westerloch",
                 "Yarrowdale",
             ],
         }
@@ -804,11 +833,7 @@ mod tests {
             let mut rng = RngStream::new(SimSeed::new(31), 3);
             for _ in 0..200 {
                 let name = style.compose(&mut rng, None);
-                let capitals = name
-                    .given
-                    .chars()
-                    .filter(char::is_ascii_uppercase)
-                    .count();
+                let capitals = name.given.chars().filter(char::is_ascii_uppercase).count();
                 assert_eq!(
                     capitals, 1,
                     "{style} drew `{}`, which has {capitals} capitals",
