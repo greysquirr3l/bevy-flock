@@ -7,6 +7,7 @@ pub mod dialogue;
 pub mod grouping;
 #[cfg(feature = "memory")]
 pub mod interaction;
+pub mod locomotion;
 #[cfg(feature = "memory")]
 pub mod memory_bridge;
 pub mod observability;

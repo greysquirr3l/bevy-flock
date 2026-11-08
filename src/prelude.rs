@@ -15,6 +15,7 @@ pub use crate::adapters::primary::components::{
     FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcBrain, NpcBundle, NpcDesiredVelocity,
     NpcIdentity, NpcMood, NpcNeeds, NpcTarget, NpcTemperament, NpcVelocity,
 };
+pub use crate::adapters::primary::locomotion::{Locomotion, MIN_MOVING_SPEED};
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
     spawn_position,

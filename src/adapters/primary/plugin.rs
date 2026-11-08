@@ -483,6 +483,14 @@ impl Plugin for FlockPlugin {
                 )
                     .chain()
                     .in_set(FlockSet::AdvanceTick),
+            )
+            // Animation intent is derived from the velocity integration just wrote, so a game
+            // that renders after `Integration` reads the same tick it drew (ADR 0052).
+            .add_systems(
+                Update,
+                crate::adapters::primary::locomotion::derive_locomotion
+                    .after(crate::boids::integrate_flock)
+                    .in_set(FlockSet::Integration),
             );
 
         // Memory is opt-in at build time as well as at compile time: the store's
@@ -556,6 +564,7 @@ pub fn drain_spawn_queue(
             needs: NpcNeeds(Needs::satisfied()),
             velocity: NpcVelocity(Vec3::ZERO),
             desired: NpcDesiredVelocity(Vec3::ZERO),
+            locomotion: crate::adapters::primary::locomotion::Locomotion::default(),
             lod: LodTier::Near,
         });
         spawned += 1;

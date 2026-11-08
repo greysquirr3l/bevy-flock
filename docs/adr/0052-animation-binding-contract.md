@@ -20,7 +20,7 @@ binding is a pure function of simulation state, and the tick — never the frame
 ### Three interfaces, and nothing else in the contract
 | Interface | Crate | Owner | What it is |
 |---|---|---|---|
-| `Locomotion` | `bevy-flock` (core) | library | A component: planar speed, turn rate, acceleration, stride phase, derived from the steering solution each tick. |
+| `Locomotion` | `bevy-flock` (core) | library | A component: planar speed, turn rate, acceleration and distance travelled, derived from the velocity integration wrote. Phase is `distance / stride`, because the stride belongs to the artwork. |
 | `LocomotionProfile` | `bevy-flock-anim` | game, as data | Validated authored numbers: walking speed, running speed, stride length, turn band. No clip names, no asset handles, no node indices. |
 | `ClipSlot` | `bevy-flock-anim` | library | Four names — idle, walk, run, turn-in-place — that a game maps onto nodes in its own `AnimationGraph`. |
 The game writes the fourth thing: a binding from `ClipSlot` to `AnimationNodeIndex`, because only it
@@ -48,9 +48,10 @@ Bodies in the ambient band are not animated. Far bodies step at a configured int
 every frame. The input is the tier the virtual-cost scheduler already computes (ADR 0009), because a
 second distance metric would inevitably disagree with the first, and an NPC would then be drawn but
 not animated, or animated but not drawn.
-On return from culling, the clip restarts at `stride_phase` rather than at zero, so a body that
-comes back into view is mid-stride rather than mid-step. That is the reason `Locomotion` carries a
-phase and not only a speed.
+On return from culling, the clip restarts at the phase the distance walked implies rather than at
+zero, so a body that comes back into view is mid-stride rather than mid-step. That is the reason
+`Locomotion` carries distance and not only a speed, and the reason `phase` takes a stride length
+rather than assuming one: a stride is a property of the artwork, and the core has never seen it.
 ### Root motion: the simulation owns movement by default
 A clip may carry its own translation. The default is to ignore it: the steering solution is
 authoritative, the spatial index stays correct, and the replay stays deterministic. A profile may
