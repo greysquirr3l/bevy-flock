@@ -396,6 +396,49 @@ impl Plugin for MemoryBridgePlugin {
     }
 }
 
+/// Register the shell: the systems that turn simulation state into what an animation layer reads.
+///
+/// Kept out of [`Plugin::build`] so the schedule declaration in that function stays readable. The
+/// orderings live here because they are the whole point of these two systems: a gesture is
+/// adjudicated after the leaf that asked for it, and gaze is resolved after integration moved
+/// whatever is being looked at (ADR 0052).
+fn add_shell_systems(app: &mut App) {
+    app
+        // Gaze and gestures are decided here and posed by `bevy-flock-anim`; the numbers that
+        // decide them are the crowd's, so they live with the crowd.
+        .init_resource::<crate::adapters::primary::gaze::GazeConfig>()
+        .init_resource::<crate::adapters::primary::gesture::GestureConfig>()
+        .init_resource::<crate::adapters::primary::gesture::GestureChannel>()
+        .add_systems(
+            Update,
+            // Leaves run inside `tick_chosen` and write their gesture requests to the blackboard,
+            // so collection and adjudication follow it in the same tick: a leaf that asks on this
+            // tick is answered on this tick.
+            (
+                plan_thinks,
+                tick_chosen,
+                crate::adapters::primary::gesture::collect_gesture_requests,
+                crate::adapters::primary::gesture::advance_gestures,
+            )
+                .chain()
+                .in_set(FlockSet::Cognition),
+        )
+        .add_systems(
+            Update,
+            (
+                // Animation intent is derived from the velocity integration just wrote, so a game
+                // that renders after `Integration` reads the same tick it drew.
+                crate::adapters::primary::locomotion::derive_locomotion
+                    .after(crate::boids::integrate_flock),
+                // Gaze reads the transform of whatever entity cognition named, which moved this
+                // tick, so it waits for the same system locomotion does.
+                crate::adapters::primary::gaze::resolve_gaze
+                    .after(crate::boids::integrate_flock),
+            )
+                .in_set(FlockSet::Integration),
+        );
+}
+
 impl Plugin for FlockPlugin {
     fn build(&self, app: &mut App) {
         // The schedule's capacity is the configured population: an NPC beyond it is a
@@ -471,27 +514,15 @@ impl Plugin for FlockPlugin {
             )
             .add_systems(
                 Update,
-                (plan_thinks, tick_chosen)
-                    .chain()
-                    .in_set(FlockSet::Cognition),
-            )
-            .add_systems(
-                Update,
                 (
                     crate::adapters::primary::world_director::run_world_director,
                     advance_clock,
                 )
                     .chain()
                     .in_set(FlockSet::AdvanceTick),
-            )
-            // Animation intent is derived from the velocity integration just wrote, so a game
-            // that renders after `Integration` reads the same tick it drew (ADR 0052).
-            .add_systems(
-                Update,
-                crate::adapters::primary::locomotion::derive_locomotion
-                    .after(crate::boids::integrate_flock)
-                    .in_set(FlockSet::Integration),
             );
+
+        add_shell_systems(app);
 
         // Memory is opt-in at build time as well as at compile time: the store's
         // capacity is the game's bill, so it comes with the config rather than with
