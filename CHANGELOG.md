@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- **A fourth naming culture, and the names stop shouting.** `NameStyle` gains `Highland` — broad
+  vowels, gutturals, and surnames taken from places rather than trades — so a world seed can land on
+  one of four cultures instead of three. A blueprint now carries its own style, and a collision is
+  broken with an epithet from that culture: a Highland called "of the Glen" rather than "of the
+  Fjord". The second syllable's onset is also lowered now, which fixes a bug that predates this
+  change and affected every style: the onset pools are capitalised because the first one opens the
+  name, so a mid-word onset kept its capital too, and names came out as "SkaNaum" and "TaQuaeus".
+  They are now "Skanaur" and "Taquaeus".
+- **The GPU demo draws on an Apple GPU.** `demo-gpu` asked `wgpu` for Vulkan, GL and the noop
+  device, and a Mac has neither of the first two, so every run on Apple silicon fell through to
+  the device that encodes commands and draws none: a blank image while the hardware sat idle. The
+  Metal backend is now enabled and `Backend::Metal` can be asked for by name, and `auto` asks for
+  Metal first — a Mac with `MoltenVK` installed would otherwise answer with a translation layer,
+  and a frame time measured through one describes the layer rather than the hardware. The Apple
+  dependencies are `cfg`-gated inside `wgpu`, so a Linux runner compiles the Metal backend away and
+  the noop CI job is unaffected.
 - **The asset pipeline skills move to `.github/skills/`, and CI stops checking them.** The four
   playbooks are agent-facing tooling rather than crate source, so they live under `.github/` where
   the tooling reads them and are ignored by Git. Three `scripts` job steps went with them — the

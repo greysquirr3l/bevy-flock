@@ -50,9 +50,11 @@ const GROUND: &str = "\u{0}ground";
 /// Which graphics backend to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Backend {
-    /// Vulkan, then GL, then the noop device: whatever this machine can actually do.
+    /// Metal, then Vulkan, then GL, then the noop device: whatever this machine can actually do.
     #[default]
     Auto,
+    /// Metal only: the native backend on macOS, and the one that answers on an Apple machine.
+    Metal,
     /// Vulkan only. `lavapipe` counts as Vulkan, and is what a machine with no GPU will give you.
     Vulkan,
     /// OpenGL ES only.
@@ -67,6 +69,7 @@ impl Backend {
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "auto" => Some(Self::Auto),
+            "metal" => Some(Self::Metal),
             "vulkan" => Some(Self::Vulkan),
             "gl" | "gles" => Some(Self::Gl),
             "noop" => Some(Self::Noop),
@@ -79,6 +82,7 @@ impl Backend {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Auto => "auto",
+            Self::Metal => "metal",
             Self::Vulkan => "vulkan",
             Self::Gl => "gl",
             Self::Noop => "noop",
@@ -88,9 +92,15 @@ impl Backend {
     /// The backends to ask `wgpu` for.
     const fn mask(self) -> wgpu::Backends {
         match self {
-            Self::Auto => wgpu::Backends::VULKAN
+            // Metal comes first because it is the only backend an Apple machine has, and asking
+            // for it first means the adapter that answers is the one the hardware wants. The rest
+            // follow in the order they are worth: Vulkan with a real driver, then GL, then the
+            // device that always answers.
+            Self::Auto => wgpu::Backends::METAL
+                .union(wgpu::Backends::VULKAN)
                 .union(wgpu::Backends::GL)
                 .union(wgpu::Backends::NOOP),
+            Self::Metal => wgpu::Backends::METAL,
             Self::Vulkan => wgpu::Backends::VULKAN,
             Self::Gl => wgpu::Backends::GL,
             Self::Noop => wgpu::Backends::NOOP,
@@ -1351,7 +1361,13 @@ mod tests {
     /// Every backend's printed name parses back to itself, because the name is also the flag value.
     #[test]
     fn backend_names_round_trip_through_parse() {
-        for backend in [Backend::Auto, Backend::Vulkan, Backend::Gl, Backend::Noop] {
+        for backend in [
+            Backend::Auto,
+            Backend::Metal,
+            Backend::Vulkan,
+            Backend::Gl,
+            Backend::Noop,
+        ] {
             assert_eq!(Backend::parse(backend.name()), Some(backend));
         }
     }
@@ -1361,8 +1377,24 @@ mod tests {
     fn backend_parse_accepts_both_spellings_of_opengl_and_rejects_nonsense() {
         assert_eq!(Backend::parse("gl"), Some(Backend::Gl));
         assert_eq!(Backend::parse("gles"), Some(Backend::Gl));
-        assert_eq!(Backend::parse("metal"), None);
+        assert_eq!(Backend::parse("moly"), None);
         assert_eq!(Backend::parse(""), None);
+    }
+
+    /// Metal is asked for ahead of the others, because it is the only backend an Apple machine has.
+    ///
+    /// If Vulkan came first, a Mac with `MoltenVK` installed would answer with it rather than with
+    /// the driver the hardware actually wants, and the frame time would describe a translation layer.
+    #[test]
+    fn auto_asks_for_metal_before_the_others() {
+        let auto = Backend::Auto.mask();
+        assert!(auto.contains(wgpu::Backends::METAL), "auto does not ask for Metal");
+        assert!(auto.contains(wgpu::Backends::VULKAN), "auto does not ask for Vulkan");
+        assert!(auto.contains(wgpu::Backends::GL), "auto does not ask for GL");
+        assert!(auto.contains(wgpu::Backends::NOOP), "auto does not ask for noop");
+        // Asking for one backend means asking for that one and nothing else.
+        assert_eq!(Backend::Metal.mask(), wgpu::Backends::METAL);
+        assert_eq!(Backend::Noop.mask(), wgpu::Backends::NOOP);
     }
 
     /// The default is the one that opens whatever the machine has, not a backend it may not.

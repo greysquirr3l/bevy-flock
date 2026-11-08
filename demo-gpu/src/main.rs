@@ -345,7 +345,7 @@ fn chunk(out: &mut Vec<u8>, kind: [u8; 4], data: &[u8]) {
 const USAGE: &str = "\
 ashfall-gpu — render the Ashfall views on a graphics device
 
-  --backend auto|vulkan|gl|noop   which wgpu backend to open (default auto)
+  --backend auto|metal|vulkan|gl|noop   which wgpu backend to open (default auto)
   --view district|street|hero|skyline|procession|all
   --width N --height N            frame size in pixels (default 600x375)
   --frames N                      frames to time after two warm-up frames (default 20)
@@ -448,9 +448,18 @@ mod tests {
     /// An unknown backend names the value that was not understood.
     #[test]
     fn an_unknown_backend_names_the_value() {
-        let error = usage_error("--backend metal");
+        let error = usage_error("--backend moly");
         assert!(matches!(error, Error::Usage(_)), "got {error:?}");
-        assert!(error.to_string().contains("metal"), "got {error}");
+        assert!(error.to_string().contains("moly"), "got {error}");
+    }
+
+    /// Metal is a backend a person can ask for, on the machines that have one.
+    #[test]
+    fn metal_is_a_backend_the_command_line_accepts() {
+        let Request::Run(options) = parse_line("--backend metal").or_die() else {
+            unreachable!("a backend flag is not a request for help");
+        };
+        assert_eq!(options.backend, Backend::Metal);
     }
 
     /// The median of an even count is the upper middle, and an empty set is zero rather than a panic.

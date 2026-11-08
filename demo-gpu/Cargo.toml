@@ -18,10 +18,12 @@ bevy-flock-demo = { path = "../demo" }
 bevy_math = "0.20.1"
 # The real backends, so the crate can render on a device when one exists. `noop` stays in the feature
 # list because it is the only backend that runs with no driver at all, and CI needs a case that runs
-# everywhere.
+# everywhere. `metal` is the native backend on macOS, where Vulkan and GL are both absent; without
+# it an Apple machine has no adapter at all and falls through to `noop`.
 wgpu = { version = "30", default-features = false, features = [
     "vulkan",
     "gles",
+    "metal",
     "noop",
     "std",
     "wgsl",
