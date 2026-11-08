@@ -57,8 +57,10 @@
 
 pub mod binding;
 pub mod gaze;
+pub mod gesture;
 pub mod profile;
 
 pub use binding::{AnimPlugin, BlendFrame, ClipBindings, apply_locomotion_blend};
 pub use gaze::{GazeBone, GazeLimits, GazePlugin, GazeRig, apply_gaze, look_angles, split_yaw};
+pub use gesture::{GestureClips, GesturePlayback, GesturePlugin, play_gestures};
 pub use profile::{BlendWeights, ClipSlot, LocomotionProfile, ProfileError};
