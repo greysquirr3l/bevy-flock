@@ -65,6 +65,17 @@ cargo run --manifest-path playground/Cargo.toml -- --help
 | `--extent M` | layout half-extent in metres, default 900 |
 | `--help` | usage |
 
+## It moves
+
+The window is a running simulation, not a snapshot: each frame calls `Playground::tick(1)` and writes
+every body's position and yaw onto its entity, plus a walk bob driven by the distance that body has
+covered. `--ticks` only decides how dispersed the crowd is when the window opens.
+
+One tick per rendered frame, with the library's fixed timestep consuming the wall time since the last
+frame: the crowd crosses the city at the same speed regardless of frame rate, and only the smoothness
+changes. On a software rasteriser that is a quarter-second step per frame, which reads as coarse
+motion rather than as a different speed — worth knowing before judging a capture.
+
 ## Reading the run
 
 Two lines matter. The first is Bevy's, and names the device:

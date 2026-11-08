@@ -43,6 +43,26 @@ different rasteriser, different shading model, different anti-aliasing.*
 `--backend metal` on a machine without Metal is not a fallback: wgpu finds no adapter and Bevy
 reports it. That is deliberate, because a demo that silently draws nothing looks like a scene bug.
 
+## The crowd moves
+
+This is not a diorama. Every frame ticks the simulation once and writes each body's pose onto the
+entity that was spawned for its slot: position, facing, and a 4 cm walk bob whose phase advances with
+the distance that body actually covers, so a standing NPC's feet stay still and a walking one's do
+not. `--ticks` is the pre-warm before the window opens — the crowd arrives already dispersed — and
+from the first frame on it is live.
+
+One tick per *rendered* frame, and the tick itself advances the library's fixed timestep by the wall
+time since the last one. That is what keeps the crowd's speed honest: sixty frames a second and four
+frames a second move the crowd across the city at the same rate, and only the smoothness differs. On
+a software rasteriser that means a quarter-second stride per frame — correct, and visibly coarse.
+That coarseness is the reason the timing line above is worth reading before judging the motion.
+
+Each frame reads the crowd back with `Playground::bodies`, which allocates one `Vec` of 2,000 bodies
+and sorts it. That is a demo-side cost, not the library's: `bodies` is a snapshot API built for
+diffable captures, and the zero-allocation claims in the library docs are about the steering kernels,
+not this readback. A streaming accessor keyed by identity is the fix if this ever matters at 10,000
+bodies; at 2,000 the sort is a rounding error next to the draw.
+
 When the frame count runs out, the run prints one line and exits:
 
 ```text

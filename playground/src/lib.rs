@@ -35,12 +35,13 @@ use bevy_ecs::prelude::*;
 use bevy_flock::domain::num;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::render3d::{self, Meshes};
+use bevy_flock_demo::scene::Body;
 use bevy_flock_demo::scene::Scene;
 use bevy_image::ImagePlugin;
 use bevy_input::InputPlugin;
 use bevy_light::{AmbientLight, DirectionalLight, LightPlugin};
 use bevy_log::LogPlugin;
-use bevy_math::Vec3;
+use bevy_math::{Quat, Vec3};
 use bevy_mesh::MeshPlugin;
 use bevy_pbr::{DistanceFog, FogFalloff, PbrPlugin};
 use bevy_render::RenderPlugin;
@@ -52,7 +53,7 @@ use bevy_transform::components::Transform;
 use bevy_window::{Window, WindowPlugin, WindowResolution};
 use bevy_winit::WinitPlugin;
 use camera::{BASE_SPEED, FlyCamera, Views};
-use scene::AshfallScene;
+use scene::{AshfallScene, BodyLink};
 use std::path::PathBuf;
 use wgpu::Backends;
 
@@ -272,6 +273,82 @@ fn parse<T: std::str::FromStr>(value: &str) -> Result<T, Error> {
     value
         .parse()
         .map_err(|_| Error::Usage(format!("`{value}` is not a number")))
+}
+
+/// The live simulation, and the buffer the crowd's poses are read into.
+///
+/// The scene is a snapshot: `Playground::bodies` sorts by identity and collects, which is what makes
+/// a captured frame diffable. Running it is the other half -- tick, read back, write each body onto
+/// the entity that was spawned for its slot.
+///
+/// Non-send, because `Playground` owns an `App` with an exit runner that is not `Send`; a resource
+/// has to be. That costs nothing here: the simulation is one `update()` on the main thread, and a
+/// system with a `NonSendMut` parameter is scheduled there rather than on a task pool worker.
+struct Simulation(Playground);
+
+/// The last readback, plus one walk phase per body.
+#[derive(Resource, Default)]
+struct Crowd {
+    /// Poses as of the last tick.
+    bodies: Vec<Body>,
+    /// Metres walked since the body was spawned, in radians of walk cycle.
+    phases: Vec<f32>,
+}
+
+/// How far one full walk cycle carries a body, in metres.
+const STRIDE_METRES: f32 = 1.5;
+
+/// How far a walking body rises off its feet, in metres.
+const BOB_METRES: f32 = 0.04;
+
+/// Advance a walk phase by the distance walked, wrapped to one turn.
+fn stride_phase(phase: f32, walked: f32) -> f32 {
+    (phase + walked * std::f32::consts::TAU / STRIDE_METRES).rem_euclid(std::f32::consts::TAU)
+}
+
+/// The vertical offset of a walk cycle: two rises per stride, one per step.
+fn bob(phase: f32) -> f32 {
+    phase.sin().abs() * BOB_METRES
+}
+
+/// Tick the simulation once and put every body where it now is.
+///
+/// One tick per rendered frame, and the tick itself advances the library's fixed timestep by the
+/// wall time since the last one -- so the crowd crosses the city at the same speed on a GPU that
+/// draws sixty frames a second and on a software rasteriser that manages four, and only the
+/// smoothness differs. `--ticks` is the pre-warm before the window opens; this is the running.
+fn simulate(
+    mut simulation: NonSendMut<Simulation>,
+    mut crowd: ResMut<Crowd>,
+    mut links: Query<(&BodyLink, &mut Transform)>,
+) {
+    simulation.0.tick(1);
+    crowd.bodies = simulation.0.bodies();
+    // A population that changed between frames invalidates the slot mapping; the next spawn pass
+    // would rebuild it, and until then a body is better left where it is than teleported.
+    let count = crowd.bodies.len();
+    if count != crowd.phases.len() {
+        crowd.phases.resize(count, 0.0);
+    }
+    for (link, mut transform) in &mut links {
+        let Some(body) = crowd.bodies.get(link.0).copied() else {
+            continue;
+        };
+        // Distance across the ground since the last frame, which is what a walk cycle tracks; the
+        // height is taken off both ends so the bob is not counted as walking.
+        let walked = body
+            .position
+            .with_y(0.0)
+            .distance(transform.translation.with_y(0.0));
+        let Some(phase) = crowd.phases.get_mut(link.0) else {
+            transform.translation = body.position;
+            transform.rotation = Quat::from_rotation_y(body.yaw);
+            continue;
+        };
+        *phase = stride_phase(*phase, walked);
+        transform.translation = body.position.with_y(body.position.y + bob(*phase));
+        transform.rotation = Quat::from_rotation_y(body.yaw);
+    }
 }
 
 /// The window's size in pixels, so a report says what it measured.
@@ -533,7 +610,12 @@ fn spawn_sun(mut commands: Commands, views: Res<Views>) {
 }
 
 /// Build the app: the plugins a 3D scene needs, the scene itself, and the systems that steer it.
-pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
+pub fn build_app(
+    scene: AshfallScene,
+    playground: Playground,
+    views: Views,
+    options: &Options,
+) -> App {
     let mut app = App::new();
     // Two tuples, not one: `Plugins` is implemented for tuples of at most sixteen, and this list is
     // longer than that because the umbrella crate is not here to hide it. The order is Bevy's own.
@@ -593,11 +675,13 @@ pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
     });
     app.insert_resource(scene);
     app.insert_resource(views);
+    app.world_mut().insert_non_send(Simulation(playground));
+    app.init_resource::<Crowd>();
     app.add_systems(
         Startup,
         (spawn_camera, spawn_sun, scene::spawn_scene).chain(),
     );
-    app.add_systems(Update, (camera::fly, camera::cycle));
+    app.add_systems(Update, (simulate, camera::fly, camera::cycle));
     app
 }
 
@@ -653,7 +737,7 @@ pub fn run(options: &Options) -> Result<(), Error> {
     let names = shots.iter().map(|shot| shot.name).collect();
     let views = Views { shots, current: 0 };
     let ashfall = AshfallScene::new(scene, meshes, names, options.extent);
-    let mut app = build_app(ashfall, views, options);
+    let mut app = build_app(ashfall, playground, views, options);
     app.insert_resource(Lifecycle::new(options.frames, options.capture.clone()));
     app.add_systems(Update, record_frames);
     app.add_systems(Last, lifecycle);
@@ -811,6 +895,36 @@ mod tests {
             "--help",
         ] {
             assert!(USAGE.contains(flag), "the usage does not mention {flag}");
+        }
+    }
+
+    /// A walk cycle advances with the distance walked, and comes back to where it started.
+    #[test]
+    fn the_walk_cycle_tracks_distance_and_wraps() {
+        // No distance, no movement of the legs.
+        assert!(stride_phase(0.0, 0.0).abs() < 1e-6);
+        // Half a stride is half a turn: the other foot is down.
+        assert!((stride_phase(0.0, STRIDE_METRES / 2.0) - std::f32::consts::PI).abs() < 1e-5);
+        // A whole stride is a whole turn, which is no turn at all.
+        assert!(stride_phase(0.0, STRIDE_METRES).abs() < 1e-5);
+        // However far a body walks, the phase stays inside one turn.
+        let far = stride_phase(0.0, 100_000.0);
+        assert!((0.0..std::f32::consts::TAU).contains(&far), "{far}");
+        // Phases accumulate: two half strides land where one whole stride would.
+        let two = stride_phase(stride_phase(0.0, STRIDE_METRES / 2.0), STRIDE_METRES / 2.0);
+        assert!(two.abs() < 1e-5 || (two - std::f32::consts::TAU).abs() < 1e-5);
+    }
+
+    /// The bob is a rise, twice a stride, and never more than its amplitude.
+    #[test]
+    fn the_bob_rises_and_never_exceeds_its_amplitude() {
+        assert!(bob(0.0).abs() < 1e-6);
+        assert!((bob(std::f32::consts::FRAC_PI_2) - BOB_METRES).abs() < 1e-6);
+        assert!(bob(std::f32::consts::PI).abs() < 1e-5);
+        for step in 0..64 {
+            let phase = std::f32::consts::TAU * num::u32_to_f32(step) / 64.0;
+            let rise = bob(phase);
+            assert!((0.0..=BOB_METRES + 1e-6).contains(&rise), "{rise}");
         }
     }
 

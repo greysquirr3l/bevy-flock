@@ -193,6 +193,46 @@ impl AshfallScene {
     }
 }
 
+/// The crowd entity's slot in the body list, so a frame can find the pose that belongs to it.
+///
+/// The scene is spawned from a snapshot sorted by identity, and `Playground::bodies` sorts the same
+/// way, so slot `n` of the snapshot is slot `n` of every later frame. That holds until the
+/// population changes, which is why the simulation checks the count before it writes a pose.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyLink(pub usize);
+
+/// Mesh and material handles, resolved once per model and once per tint bucket.
+#[derive(Default)]
+struct Handles {
+    meshes: BTreeMap<&'static str, Handle<BevyMesh>>,
+    materials: BTreeMap<[u8; 3], Handle<StandardMaterial>>,
+}
+
+impl Handles {
+    /// The pair one instance draws with, or `None` if the scene names a model it does not carry.
+    fn of(
+        &mut self,
+        instance: &Instance,
+        scene: &AshfallScene,
+        meshes: &mut Assets<BevyMesh>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Option<(Handle<BevyMesh>, Handle<StandardMaterial>)> {
+        let model = scene.meshes.get(instance.model)?;
+        let mesh = self
+            .meshes
+            .entry(instance.model)
+            .or_insert_with(|| meshes.add(bevy_mesh(model)))
+            .clone();
+        let bucket = tint_bucket(instance.tint);
+        let material = self
+            .materials
+            .entry(bucket)
+            .or_insert_with(|| materials.add(material_for(bucket)))
+            .clone();
+        Some((mesh, material))
+    }
+}
+
 /// Spawn every instance in the scene, one entity per body, merged materials per tint bucket.
 ///
 /// Bodies share a mesh per model and a material per bucket, which is what lets Bevy draw a
@@ -203,36 +243,40 @@ pub fn spawn_scene(
     mut meshes_assets: ResMut<Assets<BevyMesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut mesh_handles: BTreeMap<&'static str, Handle<BevyMesh>> = BTreeMap::new();
-    let mut material_handles: BTreeMap<[u8; 3], Handle<StandardMaterial>> = BTreeMap::new();
-
+    let mut handles = Handles::default();
+    // The crowd, linked to its slot so the simulation can move it afterwards.
+    for (index, instance) in scene.scene.bodies.iter().enumerate() {
+        let Some((mesh, material)) =
+            handles.of(instance, &scene, &mut meshes_assets, &mut materials)
+        else {
+            continue;
+        };
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            transform_for(instance),
+            BodyLink(index),
+        ));
+    }
+    // The scenery: pylons, shelters and stalls never move, so they carry no link.
     for instance in scene
         .scene
-        .bodies
+        .pylons
         .iter()
-        .chain(scene.scene.pylons.iter())
         .chain(scene.scene.shelters.iter())
         .chain(scene.scene.stalls.iter())
     {
-        let Some(model) = scene.meshes.get(instance.model) else {
+        let Some((mesh, material)) =
+            handles.of(instance, &scene, &mut meshes_assets, &mut materials)
+        else {
             continue;
         };
-        let mesh = mesh_handles
-            .entry(instance.model)
-            .or_insert_with(|| meshes_assets.add(bevy_mesh(model)))
-            .clone();
-        let bucket = tint_bucket(instance.tint);
-        let material = material_handles
-            .entry(bucket)
-            .or_insert_with(|| materials.add(material_for(bucket)))
-            .clone();
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
             transform_for(instance),
         ));
     }
-
     // The city sits on something. Without this the crowd stands in the clear colour and the blocks
     // float, which reads as a broken renderer rather than as an empty plain.
     let ground = meshes_assets.add(ground_mesh(scene.extent));
@@ -247,7 +291,8 @@ pub fn spawn_scene(
     ));
     let cube = meshes_assets.add(cube_mesh());
     for block in &scene.scene.blocks {
-        let material = material_handles
+        let material = handles
+            .materials
             .entry(tint_bucket([
                 block.ruin.clamp(0.0, 1.0) * -0.18 + 0.42,
                 0.40,
