@@ -56,7 +56,9 @@
 #![deny(missing_docs)]
 
 pub mod binding;
+pub mod gaze;
 pub mod profile;
 
 pub use binding::{AnimPlugin, BlendFrame, ClipBindings, apply_locomotion_blend};
+pub use gaze::{GazeBone, GazeLimits, GazePlugin, GazeRig, apply_gaze, look_angles, split_yaw};
 pub use profile::{BlendWeights, ClipSlot, LocomotionProfile, ProfileError};

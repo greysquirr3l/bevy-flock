@@ -231,6 +231,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_math",
  "bevy_reflect",
+ "bevy_transform",
  "libm",
  "proptest",
  "thiserror 2.0.21",

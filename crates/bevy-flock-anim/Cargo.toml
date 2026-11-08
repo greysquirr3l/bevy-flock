@@ -33,6 +33,7 @@ bevy_asset = "0.20.1"
 bevy_ecs = "0.20.1"
 bevy_math = "0.20.1"
 bevy_reflect = "0.20.1"
+bevy_transform = "0.20.1"
 
 [dev-dependencies]
 proptest = "1.12"
