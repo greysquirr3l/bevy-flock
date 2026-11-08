@@ -386,7 +386,10 @@ shadows, fog, a fly camera and `Tab` between the shipped views. On macOS that is
 Vulkan or GL, and the GPU path is Bevy's rather than one written here, which is the point — the
 offscreen front end exists to make its numbers comparable across machines, and this one exists to
 show what the crowd looks like standing in it. `playground/README.md` has the flags and the
-controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it.
+controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it, and
+`docs/playbooks/bevy-playground.md` is the operational page: building for Metal, capturing a frame,
+reading the timing line, and the six-plugin checklist whose omission is a flat-coloured window
+rather than an error.
 
 ## Architecture
 

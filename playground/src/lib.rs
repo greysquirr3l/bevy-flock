@@ -23,25 +23,30 @@ pub mod camera;
 pub mod scene;
 
 use bevy_a11y::AccessibilityPlugin;
-use bevy_app::{App, AppExit, Startup, TaskPoolPlugin, Update};
+use bevy_app::{App, AppExit, Last, Startup, TaskPoolPlugin, Update};
 use bevy_asset::AssetPlugin;
-use bevy_camera::{Camera, Camera3d, PerspectiveProjection, Projection};
+use bevy_camera::{Camera, Camera3d, CameraPlugin, ClearColor, PerspectiveProjection, Projection};
 use bevy_color::Color;
 use bevy_core_pipeline::CorePipelinePlugin;
+use bevy_core_pipeline::tonemapping::Tonemapping;
 use bevy_diagnostic::FrameCountPlugin;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::prelude::*;
+use bevy_flock::domain::num;
 use bevy_flock_demo::app::Playground;
 use bevy_flock_demo::render3d::{self, Meshes};
 use bevy_flock_demo::scene::Scene;
 use bevy_image::ImagePlugin;
 use bevy_input::InputPlugin;
-use bevy_light::{AmbientLight, DirectionalLight};
+use bevy_light::{AmbientLight, DirectionalLight, LightPlugin};
+use bevy_log::LogPlugin;
 use bevy_math::Vec3;
+use bevy_mesh::MeshPlugin;
 use bevy_pbr::{DistanceFog, FogFalloff, PbrPlugin};
 use bevy_render::RenderPlugin;
 use bevy_render::settings::{RenderCreation, WgpuSettings};
-use bevy_time::TimePlugin;
+use bevy_render::view::window::screenshot::{Screenshot, save_to_disk};
+use bevy_time::{Time, TimePlugin};
 use bevy_transform::TransformPlugin;
 use bevy_transform::components::Transform;
 use bevy_window::{Window, WindowPlugin, WindowResolution};
@@ -78,6 +83,8 @@ pub struct Options {
     pub height: u32,
     /// Frames to draw before closing, or `None` to keep the window open.
     pub frames: Option<u32>,
+    /// Where to write a PNG of the last frame, if anywhere.
+    pub capture: Option<PathBuf>,
     /// Which graphics backend to open.
     pub backend: Backend,
     /// A single view to open at, or `None` for the first.
@@ -94,6 +101,7 @@ impl Default for Options {
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
             frames: None,
+            capture: None,
             backend: Backend::Auto,
             view: None,
         }
@@ -163,6 +171,8 @@ pub enum Error {
     Demo(String),
     /// A flag was given a value that is not valid for it.
     Usage(String),
+    /// A path could not be written: the capture directory does not exist and would not be made.
+    Io(String),
 }
 
 impl std::fmt::Display for Error {
@@ -170,6 +180,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::Demo(why) => write!(formatter, "demo: {why}"),
             Self::Usage(why) => write!(formatter, "usage: {why}"),
+            Self::Io(why) => write!(formatter, "io: {why}"),
         }
     }
 }
@@ -187,6 +198,7 @@ Flags:
                       skyline, procession) instead of the first
     --frames N        draw N frames and close, for a smoke test on a machine
                       with no one watching
+    --capture PATH    write the last frame to PATH as a PNG, then close
     --width N         window width in pixels (default 1280, at most 16384)
     --height N        window height in pixels (default 800, at most 16384)
     --backend NAME    auto, metal, vulkan or gl (default auto; metal on macOS)
@@ -228,6 +240,7 @@ impl Options {
                 "--width" => width = parse(&value()?)?,
                 "--height" => height = parse(&value()?)?,
                 "--frames" => options.frames = Some(parse(&value()?)?),
+                "--capture" => options.capture = Some(PathBuf::from(value()?)),
                 "--view" => options.view = Some(value()?),
                 "--backend" => {
                     let name = value()?;
@@ -261,20 +274,173 @@ fn parse<T: std::str::FromStr>(value: &str) -> Result<T, Error> {
         .map_err(|_| Error::Usage(format!("`{value}` is not a number")))
 }
 
-/// How many frames are left before the window closes itself.
-#[derive(Resource, Debug)]
-struct ExitAfter {
-    /// Frames still to draw.
-    remaining: u32,
+/// The window's size in pixels, so a report says what it measured.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameSize {
+    /// Width, pixels.
+    pub width: u32,
+    /// Height, pixels.
+    pub height: u32,
 }
 
-/// Count down and ask the app to exit, so `--frames` is a smoke test rather than a hang.
-fn exit_after_frames(mut remaining: ResMut<ExitAfter>, mut exit: MessageWriter<AppExit>) {
-    if remaining.remaining == 0 {
-        exit.write(AppExit::Success);
+/// What a run's frames took.
+///
+/// The median is the number to read: the first frames of any Bevy run include shader compilation and
+/// pipeline creation, and a mean over a short run is mostly that. The 95th percentile is the stutter
+/// ceiling, which is what a walk through a crowd is actually judged on.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FrameStats {
+    /// Frames measured.
+    pub samples: usize,
+    /// Mean frame time, seconds.
+    pub mean: f32,
+    /// Median frame time, seconds.
+    pub median: f32,
+    /// 95th percentile frame time, seconds.
+    pub p95: f32,
+}
+
+impl FrameStats {
+    /// Measure a run.
+    pub fn from_samples(samples: &[f32]) -> Self {
+        if samples.is_empty() {
+            return Self::default();
+        }
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(f32::total_cmp);
+        let count = sorted.len();
+        let divisor = num::usize_to_f32(count);
+        let mean = sorted.iter().sum::<f32>() / divisor;
+        let middle = count / 2;
+        let median = if count.is_multiple_of(2) {
+            match (sorted.get(middle.wrapping_sub(1)), sorted.get(middle)) {
+                (Some(low), Some(high)) => low.midpoint(*high),
+                // Unreachable for an even count, and the mean is the answer that is still true.
+                _ => mean,
+            }
+        } else {
+            sorted.get(middle).copied().unwrap_or(mean)
+        };
+        let p95 = sorted
+            .get((count * 95 / 100).min(count - 1))
+            .copied()
+            .unwrap_or(mean);
+        Self {
+            samples: count,
+            mean,
+            median,
+            p95,
+        }
+    }
+
+    /// The report line, in milliseconds because that is how a frame budget is written.
+    pub fn describe(&self) -> String {
+        if self.samples == 0 {
+            return "no frames drawn".to_owned();
+        }
+        let fps = if self.median > 0.0 {
+            1.0 / self.median
+        } else {
+            0.0
+        };
+        format!(
+            "{} frames — median {:.1} ms ({fps:.1} fps), mean {:.1} ms, p95 {:.1} ms",
+            self.samples,
+            self.median * 1_000.0,
+            self.mean * 1_000.0,
+            self.p95 * 1_000.0
+        )
+    }
+}
+
+/// How many frames are left, where a capture goes, and what the frames took.
+///
+/// One resource rather than three, because the three answers are one decision: a capture is only
+/// worth taking on a frame that is drawn, the report is only worth printing on a run that ended, and
+/// the exit waits for the capture's readback rather than racing it.
+#[derive(Resource, Debug)]
+struct Lifecycle {
+    /// Frames still to draw, or `None` for a window that stays open.
+    remaining: Option<u32>,
+    /// Where the last frame's PNG goes.
+    capture: Option<PathBuf>,
+    /// Set once the screenshot has been asked for.
+    captured: bool,
+    /// Frames still to draw after the capture, so the readback finishes before the window closes.
+    grace: u32,
+    /// Wall time of every frame drawn, seconds.
+    samples: Vec<f32>,
+}
+
+impl Lifecycle {
+    /// A run of `frames` frames, capturing to `capture`.
+    const fn new(frames: Option<u32>, capture: Option<PathBuf>) -> Self {
+        Self {
+            remaining: frames,
+            capture,
+            captured: false,
+            grace: 0,
+            samples: Vec::new(),
+        }
+    }
+}
+
+/// Frames to keep drawing after a capture, so the readback lands before the window closes.
+const CAPTURE_GRACE_FRAMES: u32 = 12;
+
+/// Keep the frame times, for the report.
+fn record_frames(mut lifecycle: ResMut<Lifecycle>, time: Res<Time>) {
+    if lifecycle.remaining.is_some() {
+        lifecycle.samples.push(time.delta_secs());
+    }
+}
+
+/// Count down, capture on the last frame, report, exit.
+///
+/// Runs in `Last`, after the camera has moved and the crowd has been drawn, so a capture is of the
+/// frame the run is being measured on rather than of the one before it.
+fn lifecycle(
+    mut state: ResMut<Lifecycle>,
+    size: Option<Res<FrameSize>>,
+    mut commands: Commands,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(remaining) = state.remaining else {
+        return;
+    };
+    if remaining > 0 {
+        state.remaining = Some(remaining - 1);
+    }
+    if state.remaining != Some(0) {
         return;
     }
-    remaining.remaining -= 1;
+
+    if let Some(path) = state.capture.clone()
+        && !state.captured
+    {
+        // `save_to_disk` writes from an observer on the readback, which lands a frame or two later.
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
+        state.captured = true;
+        state.grace = CAPTURE_GRACE_FRAMES;
+    }
+    if state.grace > 0 {
+        state.grace -= 1;
+        return;
+    }
+
+    let summary = FrameStats::from_samples(&state.samples);
+    let how_big = size.as_ref().map_or_else(String::new, |size| {
+        format!(" at {}x{}", size.width, size.height)
+    });
+    // The adapter is in Bevy's own startup log, which names the device and the backend it opened;
+    // repeating it here would be a second copy of a fact that is already printed once.
+    println!("ashfall-playground: {}{how_big}", summary.describe());
+    if let Some(path) = state.capture.clone() {
+        println!("ashfall-playground: wrote {}", path.display());
+    }
+    exit.write(AppExit::Success);
 }
 
 /// The fog: a linear falloff from the eye to the draw distance, near the demo's sky.
@@ -284,8 +450,8 @@ const fn fog() -> DistanceFog {
         directional_light_color: Color::srgba(1.0, 0.85, 0.65, 0.35),
         directional_light_exponent: 24.0,
         falloff: FogFalloff::Linear {
-            start: 120.0,
-            end: 1_400.0,
+            start: 60.0,
+            end: 900.0,
         },
     }
 }
@@ -321,12 +487,17 @@ fn spawn_camera(mut commands: Commands, views: Res<Views>) {
             ..PerspectiveProjection::default()
         }),
         Transform::from_translation(eye).with_rotation(fly.rotation()),
+        // ACES rather than the default TonyMcMapFace, which needs the `tonemapping_luts` feature's
+        // baked tables; ACES is a curve in code and the same on every machine.
+        Tonemapping::AcesFitted,
         fly,
         // Per-camera, so a second camera would not inherit the dusk: Bevy's global ambient is the
         // fallback, and this is the view's own light.
         AmbientLight {
             color: Color::srgb(0.55, 0.62, 0.75),
-            brightness: 220.0,
+            // A dusk sky is most of the light on a vertical face: without a fill this size the
+            // shadowed sides of the blocks read as holes rather than as shade.
+            brightness: 900.0,
             ..AmbientLight::default()
         },
         fog(),
@@ -353,7 +524,7 @@ fn spawn_sun(mut commands: Commands, views: Res<Views>) {
                 colour.get(1).copied().unwrap_or(1.0),
                 colour.get(2).copied().unwrap_or(1.0),
             ),
-            illuminance: 11_000.0,
+            illuminance: 9_000.0,
             shadow_maps_enabled: true,
             ..DirectionalLight::default()
         },
@@ -364,11 +535,18 @@ fn spawn_sun(mut commands: Commands, views: Res<Views>) {
 /// Build the app: the plugins a 3D scene needs, the scene itself, and the systems that steer it.
 pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
     let mut app = App::new();
+    // Two tuples, not one: `Plugins` is implemented for tuples of at most sixteen, and this list is
+    // longer than that because the umbrella crate is not here to hide it. The order is Bevy's own.
     app.add_plugins((
         TaskPoolPlugin::default(),
+        LogPlugin::default(),
         TimePlugin,
         TransformPlugin,
         InputPlugin,
+        AccessibilityPlugin,
+        FrameCountPlugin,
+    ));
+    app.add_plugins((
         WindowPlugin {
             primary_window: Some(Window {
                 title: format!(
@@ -382,9 +560,17 @@ pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
             }),
             ..WindowPlugin::default()
         },
-        AccessibilityPlugin,
         AssetPlugin::default(),
         ImagePlugin::default(),
+        // Cameras and visibility propagation. Without it every entity keeps the `ViewVisibility`
+        // it was spawned with, which is false, and a perfectly lit city draws nothing at all.
+        CameraPlugin,
+        // `Assets<Mesh>`, which `VolumetricFogPlugin` reaches for in its own `build`, before any
+        // render pipeline exists to have made one.
+        MeshPlugin,
+        // `GlobalAmbientLight`, which `PbrPlugin` reads: without it a lit scene panics on its first
+        // frame with a resource whose name Bevy cannot print.
+        LightPlugin,
         RenderPlugin {
             render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
                 backends: Some(options.backend.mask()),
@@ -394,11 +580,17 @@ pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
         },
         CorePipelinePlugin,
         PbrPlugin::default(),
-        FrameCountPlugin,
-        // Last: it installs the event loop, and a plugin added after it would never see a frame.
-        WinitPlugin::default(),
     ));
+    // Last, and alone: it installs the event loop, and anything added after it never sees a frame.
+    app.add_plugins(WinitPlugin::default());
 
+    // What the frame is cleared to, which is also where the fog's linear falloff ends: the horizon
+    // and the sky have to agree or the draw distance shows as a band.
+    app.insert_resource(ClearColor(Color::srgb(0.36, 0.40, 0.47)));
+    app.insert_resource(FrameSize {
+        width: options.width,
+        height: options.height,
+    });
     app.insert_resource(scene);
     app.insert_resource(views);
     app.add_systems(
@@ -416,6 +608,27 @@ pub fn build_app(scene: AshfallScene, views: Views, options: &Options) -> App {
 /// [`Error::Demo`] when the crowd or the assets cannot be built, [`Error::Usage`] when `--view`
 /// names a view the demo does not ship.
 pub fn run(options: &Options) -> Result<(), Error> {
+    if let Some(path) = options.capture.as_ref() {
+        // `bevy_image` compiles in the encoders a feature list asks for; this crate asks for BMP,
+        // the one that needs no extra crate. Saying so at the flag is better than a silent GIF.
+        let extension = path
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .map(str::to_ascii_lowercase);
+        if extension.as_deref() != Some("bmp") {
+            return Err(Error::Usage(format!(
+                "this build writes BMP captures: give a `.bmp` path, not {}",
+                path.display()
+            )));
+        }
+    }
+    if let Some(path) = options.capture.as_ref()
+        && let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| Error::Io(format!("{}: {error}", parent.display())))?;
+    }
     let mut playground = Playground::new(options.seed, options.population, options.extent)
         .map_err(|error| Error::Demo(format!("{error}")))?;
     playground.drain_spawn();
@@ -439,12 +652,11 @@ pub fn run(options: &Options) -> Result<(), Error> {
 
     let names = shots.iter().map(|shot| shot.name).collect();
     let views = Views { shots, current: 0 };
-    let ashfall = AshfallScene::new(scene, meshes, names);
+    let ashfall = AshfallScene::new(scene, meshes, names, options.extent);
     let mut app = build_app(ashfall, views, options);
-    if let Some(frames) = options.frames {
-        app.insert_resource(ExitAfter { remaining: frames });
-        app.add_systems(Update, exit_after_frames);
-    }
+    app.insert_resource(Lifecycle::new(options.frames, options.capture.clone()));
+    app.add_systems(Update, record_frames);
+    app.add_systems(Last, lifecycle);
     app.run();
     Ok(())
 }
@@ -595,10 +807,78 @@ mod tests {
             "--ticks",
             "--seed",
             "--extent",
+            "--capture",
             "--help",
         ] {
             assert!(USAGE.contains(flag), "the usage does not mention {flag}");
         }
+    }
+
+    /// The stats are the median, the mean and the p95 of what was measured, in that order of trust.
+    #[test]
+    fn the_frame_stats_measure_the_run() {
+        // Ten frames from 1 to 10 ms: the median is 5.5 ms, the mean is 5.5 ms, and the 95th
+        // percentile is the tenth sample, 10 ms -- nearest rank, not an interpolation.
+        let mut samples = Vec::new();
+        for millis in 1..=10 {
+            samples.push(num::u32_to_f32(millis) / 1_000.0);
+        }
+        let stats = FrameStats::from_samples(&samples);
+        assert_eq!(stats.samples, 10);
+        assert!((stats.median - 0.0055).abs() < 1e-6);
+        assert!((stats.mean - 0.0055).abs() < 1e-6);
+        assert!((stats.p95 - 0.010).abs() < 1e-6);
+
+        // An odd count has a sample in the middle, not an average of two.
+        let stats = FrameStats::from_samples(&[0.001, 0.002, 0.003]);
+        assert!((stats.median - 0.002).abs() < 1e-6);
+        assert_eq!(stats.samples, 3);
+    }
+
+    /// A run with no frames says so rather than dividing by zero.
+    #[test]
+    fn an_empty_run_has_no_numbers() {
+        let stats = FrameStats::from_samples(&[]);
+        assert_eq!(stats, FrameStats::default());
+        assert_eq!(stats.describe(), "no frames drawn");
+    }
+
+    /// The report is in milliseconds and names the frame rate the median implies.
+    #[test]
+    fn the_report_reads_as_a_frame_budget() {
+        let stats = FrameStats::from_samples(&[0.016, 0.016, 0.016]);
+        let line = stats.describe();
+        assert!(line.contains("3 frames"), "{line}");
+        assert!(line.contains("16.0 ms"), "{line}");
+        assert!(line.contains("62.5 fps"), "{line}");
+    }
+
+    /// `--capture` takes a path and does not need `--frames` to be understood.
+    #[test]
+    fn the_capture_path_is_read() {
+        let Ok(Request::Run(options)) = parse_line("--capture out/frame.bmp --frames 30") else {
+            unreachable!("the line was refused");
+        };
+        assert_eq!(
+            options.capture.as_deref(),
+            Some(std::path::Path::new("out/frame.bmp"))
+        );
+        assert_eq!(options.frames, Some(30));
+        assert_eq!(Options::default().capture, None);
+    }
+
+    /// A capture path this build cannot encode is refused before a window opens.
+    #[test]
+    fn a_capture_in_an_unsupported_format_is_refused() {
+        let options = match parse_line("--capture out/frame.png --frames 1") {
+            Ok(Request::Run(options)) => options,
+            other => unreachable!("unexpected parse: {other:?}"),
+        };
+        let error = run(&options)
+            .err()
+            .unwrap_or_else(|| unreachable!("a PNG was accepted"));
+        assert!(matches!(error, Error::Usage(_)), "{error}");
+        assert!(error.to_string().contains("BMP"), "{error}");
     }
 
     /// The demo's own fog and camera math is what the scene is lit with, so the light direction is

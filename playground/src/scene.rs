@@ -40,6 +40,31 @@ pub fn bevy_mesh(model: &GltfMesh) -> BevyMesh {
     mesh
 }
 
+/// The ground: one quad, upward-facing, reaching past the last block and into the fog.
+///
+/// `Plane3d` would be a dependency for four vertices, and a plane this large is the cheapest thing
+/// in the scene; ten lines is the better trade.
+pub fn ground_mesh(extent: f32) -> BevyMesh {
+    let half = extent.max(1.0) * 1.6;
+    let mut mesh = BevyMesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(
+        BevyMesh::ATTRIBUTE_POSITION,
+        vec![
+            [-half, 0.0, -half],
+            [half, 0.0, -half],
+            [half, 0.0, half],
+            [-half, 0.0, half],
+        ],
+    );
+    mesh.insert_attribute(BevyMesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
+    // Counter-clockwise from above, so the triangles face the sky rather than the underside.
+    mesh.insert_indices(Indices::U32(vec![0, 2, 1, 0, 3, 2]));
+    mesh
+}
+
 /// A unit cube, centred on the origin, for the ruined blocks the layout draws rather than models.
 pub fn cube_mesh() -> BevyMesh {
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(24);
@@ -152,15 +177,18 @@ pub struct AshfallScene {
     pub meshes: Meshes,
     /// Every view the demo ships, in order.
     pub views: Vec<&'static str>,
+    /// Half-extent of the layout in metres, so the ground reaches past the last block.
+    pub extent: f32,
 }
 
 impl AshfallScene {
     /// Assemble the scene the software renderer would have drawn.
-    pub const fn new(scene: Scene, meshes: Meshes, views: Vec<&'static str>) -> Self {
+    pub const fn new(scene: Scene, meshes: Meshes, views: Vec<&'static str>, extent: f32) -> Self {
         Self {
             scene,
             meshes,
             views,
+            extent,
         }
     }
 }
@@ -205,6 +233,18 @@ pub fn spawn_scene(
         ));
     }
 
+    // The city sits on something. Without this the crowd stands in the clear colour and the blocks
+    // float, which reads as a broken renderer rather than as an empty plain.
+    let ground = meshes_assets.add(ground_mesh(scene.extent));
+    commands.spawn((
+        Mesh3d(ground),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.36, 0.34, 0.30),
+            perceptual_roughness: 0.95,
+            ..StandardMaterial::default()
+        })),
+        Transform::default(),
+    ));
     let cube = meshes_assets.add(cube_mesh());
     for block in &scene.scene.blocks {
         let material = material_handles
