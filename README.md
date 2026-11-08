@@ -381,6 +381,13 @@ reads 100% reflex below the manifest band. `demo-gpu/README.md` is the front end
 backend flags, the three numbers each view prints, which tests need a device, and why an `llvmpipe`
 adapter is a correctness target rather than a performance one.
 
+A third front end, `playground/`, draws the same scene through Bevy's own PBR pipeline in a window:
+shadows, fog, a fly camera and `Tab` between the shipped views. On macOS that is Metal, elsewhere
+Vulkan or GL, and the GPU path is Bevy's rather than one written here, which is the point — the
+offscreen front end exists to make its numbers comparable across machines, and this one exists to
+show what the crowd looks like standing in it. `playground/README.md` has the flags and the
+controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it.
+
 ## Architecture
 
 ```

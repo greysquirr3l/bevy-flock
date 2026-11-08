@@ -1277,3 +1277,35 @@ performance one. Verified here on `llvmpipe`: `--backend noop` encodes and draws
 `--backend vulkan` draws the district at 600x375 in 997 ms of frame time against 0.113 ms of CPU
 submit time, which is what 5.4 million triangles on a CPU rasteriser looks like.
 """
+
+[[completed]]
+id = "playground-bevy-front-end"
+title = "Draw the Ashfall scene through Bevy's own PBR pipeline, in a window"
+status = "done"
+gate = "playground"
+notes = """
+Two front ends already drew this city: the software rasteriser, which needs nothing, and the
+offscreen `wgpu` one, which draws the same meshes through a pipeline written by hand so its numbers
+are comparable across machines. Neither answers what the crowd looks like standing in it. A third,
+`playground/`, does: Bevy's `PbrPlugin`, a directional light with shadow maps, linear distance fog,
+a per-camera ambient, and a fly camera that `Tab` jumps between the shipped views.
+It depends on Bevy's subcrates rather than the `bevy` umbrella. The umbrella re-exports every
+subsystem Bevy has -- audio, text, UI, gizmos, animation, scenes -- and this binary draws a city; a
+dependency graph that cannot resolve is also how the umbrella fails on a machine whose registry
+cache holds the subcrates, which is the offline case. The scene is not a second city: `Playground`
+builds it, `Scene::build` casts it, `Meshes::load` supplies the models, and `render3d::shots` the
+views, exactly as `ashfall-3d` reads them.
+Tints are quantised to four levels a channel before a material is created. A crowd of two thousand
+has two thousand appearances, one material each is one bind group each, and the draw calls then
+outnumber the triangles; sixty-four buckets is enough that the crowd is not stamped and few enough
+that Bevy batches it.
+The tests are the ones a windowed GPU crate can have without a display: every shipped model through
+`bevy_mesh` with its arrays intact and its indices in range, the cube's six faces and twenty-four
+corners, transform mapping for an instance and a block, tint quantisation and its bounds including
+`-2.0` and `5.0`, the camera's angle/forward round trip, its orthonormal basis, the pitch clamp, view
+cycling and every flag including the window-size pair. 24 tests, `clippy -D warnings` clean.
+`needless_pass_by_value` is the one manifest entry this crate cannot satisfy: Bevy hands a system its
+parameters by value, and `cargo check` refuses `&mut ResMut<T>` with "does not describe a valid
+system configuration". The audit records that exception against this one manifest, has a fixture for
+it, and fails if the same allow appears anywhere else.
+"""
