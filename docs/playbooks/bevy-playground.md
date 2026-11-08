@@ -144,8 +144,9 @@ a Mac's job, and the summary line above is where to read them.
 ## The skinned district: the same crowd, with skeletons
 
 `playground`'s main binary draws boxes for bodies. The `skinned` binary draws the same crowd as
-five-joint rigs with skinned meshes and a seven-clip blend tree, so the animation is Bevy's skinning
-path rather than geometry moved by hand.
+nine-joint rigs with skinned meshes and a seven-clip blend tree, so the animation is Bevy's skinning
+path rather than geometry moved by hand. The rig matters more than the clip: a body whose mesh has
+legs but whose skeleton has no leg joints cannot step, and no amount of keyframes fixes that.
 
 ```sh
 cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --npc 2000
@@ -167,7 +168,7 @@ Verify it without a display, and without trusting your eyes:
 cd playground
 cargo build --bin skinned
 xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
-# skinned: 213 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.612 m
+# skinned: 200 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.494 m
 ```
 
 The four numbers are the gate: something moved, something blended walk or run above half weight,
@@ -182,8 +183,19 @@ are printed but do not fail the run.
 - **Skinned scenery.** A mesh carrying `JOINTS_0` and `JOINT_WEIGHT` is drawn with the skinned
   pipeline. Give such a mesh to an entity without `SkinnedMesh` and wgpu fails validation on the
   first frame and quits the app. Scenery meshes therefore carry no skin attributes at all.
-- **Ambient light.** `GlobalAmbientLight` is read while `PbrPlugin` builds, so inserting it after
-  `add_plugins` sets a resource the shader never sees. Insert it first.
+- **Ambient light.** `LightPlugin` inserts `GlobalAmbientLight` with a brightness of 80, so an insert
+  *before* `add_plugins` is simply overwritten: the scene keeps its default and "the ambient setting
+  does nothing". Insert it after the plugins. A body with its back to the sun then reads as a body,
+  not as a black silhouette.
+- **A rig without limb joints.** The first cut of this example had five joints and three stacked
+  boxes: legs, torso, head. The walk animated the hips, so the crowd turned while it slid, and every
+  body read as a plank. The fix is a joint per limb plus a channel per joint —
+  `every_limb_joint_carries_weight` and `the_walk_moves_the_legs_and_the_arms` are the two tests that
+  now fail if either half goes missing again.
+- **A rigid box split across two slots.** Weighting a limb by height with the same joint in both
+  slots leaves every vertex at half weight in each slot. It renders, but the mesh is no longer rigid
+  and no test that looks for a full-weight slot can see the limb; a box with one joint on both ends
+  now takes the whole weight in the first slot.
 - **Windings.** A box face listed clockwise against an outward normal renders black, not wrong. The
   `every_triangle_faces_its_normal` test compares each triangle's geometric normal with the stored
   one, which is the cheapest way to keep a corner table and a normal table honest.

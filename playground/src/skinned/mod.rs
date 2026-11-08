@@ -310,14 +310,6 @@ struct SpawnPositions(std::collections::HashMap<Entity, Vec3>);
 /// Build the app: plugins, resources, and the systems that make the crowd walk, blend and look.
 pub fn build_app(options: &Options) -> App {
     let mut app = App::new();
-    // Before the plugins, because `PbrPlugin` reads the ambient light while it builds its pipeline:
-    // set afterwards, the resource says 120 and the shader keeps the default it was compiled with,
-    // which reads as "the ambient setting does nothing" for an afternoon.
-    app.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.58, 0.64, 0.78),
-        brightness: 120.0,
-        ..GlobalAmbientLight::default()
-    });
     app.add_plugins((
         TaskPoolPlugin::default(),
         LogPlugin::default(),
@@ -368,7 +360,7 @@ pub fn build_app(options: &Options) -> App {
     app.insert_resource(ClearColor(Color::srgb(0.36, 0.40, 0.47)));
     app.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.62, 0.68, 0.80),
-        brightness: 120.0,
+        brightness: 1_000.0,
         ..GlobalAmbientLight::default()
     });
     app.insert_resource(GestureChannel::new(4_096));
@@ -381,6 +373,14 @@ pub fn build_app(options: &Options) -> App {
         settled: false,
     });
     app.init_resource::<SpawnPositions>();
+    app.insert_resource(PlazaRadius(options.radius));
+    // After the plugins, because `LightPlugin` inserts its own default and would overwrite an
+    // earlier insert: ambient set before `add_plugins` reads back as "the setting does nothing".
+    app.insert_resource(GlobalAmbientLight {
+        color: Color::srgb(0.62, 0.68, 0.80),
+        brightness: 1_000.0,
+        ..GlobalAmbientLight::default()
+    });
     app.init_resource::<Telemetry>();
 
     app.add_systems(
@@ -439,6 +439,10 @@ fn build_and_spawn_crowd(world: &mut World) {
     println!("skinned: spawned {bodies} bodies and {joints} joints");
 }
 
+/// The plaza's radius, so the camera and the ground plane frame whatever `--radius` asked for.
+#[derive(Resource, Debug, Clone, Copy)]
+struct PlazaRadius(f32);
+
 /// Every body's spawn position, for the movement test.
 fn collect_positions(world: &mut World) -> std::collections::HashMap<Entity, Vec3> {
     let mut query = world.query::<(Entity, &Transform)>();
@@ -449,7 +453,16 @@ fn collect_positions(world: &mut World) -> std::collections::HashMap<Entity, Vec
 }
 
 /// A camera on the plaza, high enough to see the crowd as a crowd.
-fn spawn_camera(mut commands: Commands) {
+///
+/// The framing follows the plaza rather than being a constant, so `--npc 1 --radius 3` is a portrait
+/// of one body and `--npc 2000 --radius 40` is the whole crowd. A fixed camera makes the second
+/// composition work and the first useless, which is how an inspection shot turns into a guess.
+fn spawn_camera(mut commands: Commands, plaza: Res<PlazaRadius>) {
+    let radius = plaza.0;
+    // Outside the crowd, not inside it: a camera standing among two thousand bodies sees the back
+    // of the nearest hundred and nothing else.
+    let distance = radius * 1.02 + 4.0;
+    let height = radius * 0.52 + 3.0;
     commands.spawn((
         Camera3d::default(),
         Camera::default(),
@@ -457,15 +470,19 @@ fn spawn_camera(mut commands: Commands) {
             fov: 0.85,
             ..PerspectiveProjection::default()
         }),
-        Transform::from_xyz(15.0, 8.5, 15.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_xyz(distance, height, distance)
+            .looking_at(Vec3::new(0.0, 1.4, 0.0), Vec3::Y),
         // Not `TonyMcMapface`: that tonemapper needs the `tonemapping_luts` feature, and without it
         // the whole frame comes out magenta — a look that is easy to mistake for a material bug.
         Tonemapping::None,
         DistanceFog {
             color: Color::srgb(0.36, 0.40, 0.47),
+            // Fog is what hides the ground plane's edge, so it is measured from the plaza rather
+            // than from the camera: tying it to the camera instead fogged a one-body portrait into
+            // a grey rectangle.
             falloff: FogFalloff::Linear {
-                start: 30.0,
-                end: 95.0,
+                start: radius + 20.0,
+                end: (radius + 20.0) * 2.6,
             },
             ..DistanceFog::default()
         },
@@ -476,20 +493,23 @@ fn spawn_camera(mut commands: Commands) {
 fn spawn_sun(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
-            illuminance: 8_000.0,
+            illuminance: 4_500.0,
             ..DirectionalLight::default()
         },
-        Transform::from_xyz(26.0, 22.0, -14.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(20.0, 30.0, 16.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
 /// The plaza: a plane the crowd stands on, so a shadow has somewhere to land.
 fn spawn_ground(
     mut commands: Commands,
+    plaza: Res<PlazaRadius>,
     mut meshes: ResMut<Assets<bevy_mesh::Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let plane = ground(160.0);
+    // Wide enough that the plane's edge is past the fog's far distance for any plaza this binary
+    // frames, so the horizon is fog rather than a visible seam.
+    let plane = ground(plaza.0 * 8.0 + 60.0);
     commands.spawn((
         Mesh3d(meshes.add(plane)),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -507,19 +527,28 @@ fn spawn_landmark(
     mut meshes: ResMut<Assets<bevy_mesh::Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn((
-        Landmark,
-        Mesh3d(meshes.add(static_box(
-            Vec3::new(-0.7, 0.0, -0.7),
-            Vec3::new(0.7, 6.0, 0.7),
-        ))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.55, 0.48, 0.40),
-            perceptual_roughness: 0.7,
-            ..StandardMaterial::default()
-        })),
-        Transform::from_xyz(0.0, 3.0, 0.0),
-    ));
+    // Three tiers rather than one box: the silhouette is what the crowd is standing around, and a
+    // slab reads as a slab. The tiers are separate meshes because the builder takes `(min, max)`.
+    let stone = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.48, 0.40),
+        perceptual_roughness: 0.72,
+        ..StandardMaterial::default()
+    });
+    let tiers = [
+        ((-1.30, 0.0, -1.30), (1.30, 0.55, 1.30)),
+        ((-0.90, 0.55, -0.90), (0.90, 1.55, 0.90)),
+        ((-0.45, 1.55, -0.45), (0.45, 8.20, 0.45)),
+    ];
+    for (min, max) in tiers {
+        commands.spawn((
+            Landmark,
+            Mesh3d(meshes.add(static_box(
+                Vec3::new(min.0, min.1, min.2),
+                Vec3::new(max.0, max.1, max.2),
+            ))),
+            MeshMaterial3d(stone.clone()),
+        ));
+    }
 }
 
 /// Every third body looks at the monolith, with an interest that varies by body.

@@ -17,9 +17,14 @@ use bevy_mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy_transform::components::Transform;
 
 /// How many joints one body has.
-pub const JOINT_COUNT: usize = 5;
+pub const JOINT_COUNT: usize = 9;
 
 /// The joints of one body, in the order the mesh's joint indices refer to them.
+///
+/// Two of them are pivots: children of an animated bone that no clip touches, which is where gaze
+/// composes on top of the walk instead of fighting it for the same rotation. The arms hang off the
+/// chest pivot rather than the chest itself, so a body that turns its head and shoulders towards the
+/// monolith still has its arms attached to the shoulders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum Joint {
@@ -33,6 +38,14 @@ pub enum Joint {
     TorsoPivot = 3,
     /// A child of the head that gaze rotates.
     HeadPivot = 4,
+    /// The left shoulder, which swings the arm.
+    ArmLeft = 5,
+    /// The right shoulder, which raises the hand when a body waves.
+    ArmRight = 6,
+    /// The left hip, which swings the leg.
+    LegLeft = 7,
+    /// The right hip.
+    LegRight = 8,
 }
 
 impl Joint {
@@ -43,6 +56,10 @@ impl Joint {
         Self::Head,
         Self::TorsoPivot,
         Self::HeadPivot,
+        Self::ArmLeft,
+        Self::ArmRight,
+        Self::LegLeft,
+        Self::LegRight,
     ];
 
     /// The index this joint's vertices carry in `JOINTS_0`.
@@ -54,6 +71,22 @@ impl Joint {
         self as u16
     }
 
+    /// The joint this one hangs from, or `None` for the root.
+    ///
+    /// The hierarchy is declared once, here, and the spawn loop and the bind offsets both read it, so
+    /// a joint cannot end up parented one way and posed another.
+    #[must_use]
+    pub const fn parent(self) -> Option<Self> {
+        match self {
+            Self::Hips => None,
+            // The chest and its pivot hang from the pelvis; so do both legs.
+            Self::Torso | Self::TorsoPivot | Self::LegLeft | Self::LegRight => Some(Self::Hips),
+            Self::Head => Some(Self::Torso),
+            Self::HeadPivot => Some(Self::Head),
+            Self::ArmLeft | Self::ArmRight => Some(Self::TorsoPivot),
+        }
+    }
+
     /// A stable name, used as the animation target id and in the entity hierarchy.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -63,6 +96,10 @@ impl Joint {
             Self::Head => "head",
             Self::TorsoPivot => "torso_pivot",
             Self::HeadPivot => "head_pivot",
+            Self::ArmLeft => "arm_left",
+            Self::ArmRight => "arm_right",
+            Self::LegLeft => "leg_left",
+            Self::LegRight => "leg_right",
         }
     }
 }
@@ -74,22 +111,26 @@ impl Joint {
 #[must_use]
 pub const fn bind_translation(joint: Joint) -> Vec3 {
     match joint {
-        Joint::Hips => Vec3::new(0.0, 0.92, 0.0),
-        // The chest is a third of the way up the torso, so the arm swing reads as a lean.
-        Joint::Torso | Joint::TorsoPivot => Vec3::new(0.0, 1.235, 0.0),
-        Joint::Head | Joint::HeadPivot => Vec3::new(0.0, 1.60, 0.0),
+        Joint::Hips => Vec3::new(0.0, 0.94, 0.0),
+        // The chest sits a third of the way up the torso, so a lean pivots at the waist.
+        Joint::Torso | Joint::TorsoPivot => Vec3::new(0.0, 1.24, 0.0),
+        Joint::Head | Joint::HeadPivot => Vec3::new(0.0, 1.57, 0.0),
+        // Shoulders: just below the top of the chest, outside it, so the arm hangs along the body.
+        Joint::ArmLeft => Vec3::new(-0.2425, 1.42, 0.0),
+        Joint::ArmRight => Vec3::new(0.2425, 1.42, 0.0),
+        // Hips, just below the pelvis box's centre, so a swinging leg keeps its top edge inside it.
+        Joint::LegLeft => Vec3::new(-0.10, 0.88, 0.0),
+        Joint::LegRight => Vec3::new(0.10, 0.88, 0.0),
     }
 }
 
 /// Where a joint sits relative to its parent at bind time.
 #[must_use]
 pub fn local_offset(joint: Joint) -> Vec3 {
-    let parent = match joint {
-        Joint::Hips => return bind_translation(Joint::Hips),
-        Joint::Torso | Joint::TorsoPivot => Joint::Hips,
-        Joint::Head | Joint::HeadPivot => Joint::Torso,
-    };
-    bind_translation(joint) - bind_translation(parent)
+    joint.parent().map_or_else(
+        || bind_translation(joint),
+        |parent| bind_translation(joint) - bind_translation(parent),
+    )
 }
 
 /// The transform a joint carries at bind time, before any clip runs.
@@ -136,8 +177,13 @@ impl MeshBuilder {
     fn push_box(&mut self, min: Vec3, max: Vec3, blend: (Joint, Joint, f32, f32)) {
         let (lower, upper, from, to) = blend;
         let span = (to - from).abs();
+        // One joint on both ends means a rigid box: every vertex takes the whole weight in the first
+        // slot rather than being split across two slots that name the same bone. Splitting it is not
+        // wrong, but it doubles the joint indices for nothing and hides the fact that the limb is
+        // rigid from any check that looks for a slot at full weight.
+        let rigid = lower == upper;
         let weight_at = |y: f32| {
-            if span < f32::EPSILON {
+            if rigid || span < f32::EPSILON {
                 return (1.0_f32, 0.0_f32);
             }
             let t = ((y - from) / span).clamp(0.0, 1.0);
@@ -281,40 +327,70 @@ impl MeshBuilder {
     }
 }
 
-/// The shared body mesh: legs, pelvis, chest and head, skinned to [`JOINT_COUNT`] joints.
+/// The shared body mesh: legs, arms, pelvis, chest and head, skinned to [`JOINT_COUNT`] joints.
 ///
 /// One mesh for the whole crowd, because two thousand identical bodies should cost one copy of the
 /// geometry. The variety in a crowd of these comes from materials, scale and animation phase, not
 /// from the vertex buffer.
+///
+/// The proportions are what make the crowd read as people rather than as a field of posts: legs
+/// separated by a gap so a step is visible, arms hanging outside the chest, a neck narrower than the
+/// head. Every box overlaps its neighbour by a centimetre or two, because butt joints leave a
+/// hairline seam that shows the inside of the body as a black sliver.
 #[must_use]
 pub fn body_mesh() -> Mesh {
     let mut builder = MeshBuilder::default();
-    // Legs, all the way to the pelvis: rigid to the hips, because a knee would need a fourth joint
-    // and the example's point is the blend, not the anatomy.
-    // The boxes overlap by a few centimetres at each seam. Butt-jointed boxes leave a hairline gap
-    // that shows the inside of the body as a black sliver from any angle but straight on.
+    // Pelvis: rigid to the hips, and wide enough that the two legs hang from its corners.
     builder.push_box(
-        Vec3::new(-0.14, 0.0, -0.11),
-        Vec3::new(0.14, 0.92, 0.11),
+        Vec3::new(-0.17, 0.84, -0.11),
+        Vec3::new(0.17, 1.02, 0.11),
         (Joint::Hips, Joint::Hips, 0.0, 1.0),
     );
-    // Pelvis to chest: blended, so the seam bends instead of tearing.
+    // Chest: blended over the waist only, so the torso leans rather than folding in half.
     builder.push_box(
-        Vec3::new(-0.18, 0.86, -0.11),
-        Vec3::new(0.18, 1.50, 0.11),
-        (Joint::Hips, Joint::TorsoPivot, 0.90, 1.40),
+        Vec3::new(-0.18, 1.00, -0.115),
+        Vec3::new(0.18, 1.50, 0.115),
+        (Joint::Hips, Joint::TorsoPivot, 1.00, 1.08),
     );
-    // Shoulders and head: the pivot, so gaze turns the head that the clip also turns.
+    // Neck: narrow, and the one place the head's weight runs into the chest's.
     builder.push_box(
-        Vec3::new(-0.15, 1.44, -0.12),
-        Vec3::new(0.15, 1.78, 0.12),
+        Vec3::new(-0.075, 1.42, -0.07),
+        Vec3::new(0.075, 1.57, 0.07),
+        (Joint::TorsoPivot, Joint::HeadPivot, 1.46, 1.51),
+    );
+    // Head: rigid to the head pivot, so the gaze solve turns it as a unit.
+    builder.push_box(
+        Vec3::new(-0.115, 1.52, -0.115),
+        Vec3::new(0.115, 1.76, 0.115),
         (Joint::HeadPivot, Joint::HeadPivot, 0.0, 1.0),
+    );
+    // Arms: rigid to a shoulder joint at the top of the box, which is the axis they swing around.
+    builder.push_box(
+        Vec3::new(-0.285, 0.84, -0.06),
+        Vec3::new(-0.17, 1.42, 0.06),
+        (Joint::ArmLeft, Joint::ArmLeft, 0.0, 1.0),
+    );
+    builder.push_box(
+        Vec3::new(0.17, 0.84, -0.06),
+        Vec3::new(0.285, 1.42, 0.06),
+        (Joint::ArmRight, Joint::ArmRight, 0.0, 1.0),
+    );
+    // Legs: rigid to a hip joint near the pelvis, with a gap between them.
+    builder.push_box(
+        Vec3::new(-0.17, 0.0, -0.095),
+        Vec3::new(-0.02, 0.90, 0.095),
+        (Joint::LegLeft, Joint::LegLeft, 0.0, 1.0),
+    );
+    builder.push_box(
+        Vec3::new(0.02, 0.0, -0.095),
+        Vec3::new(0.17, 0.90, 0.095),
+        (Joint::LegRight, Joint::LegRight, 0.0, 1.0),
     );
     builder.build()
 }
 
 /// The body's height in metres, which is where the head box ends.
-pub const BODY_HEIGHT: f32 = 1.78;
+pub const BODY_HEIGHT: f32 = 1.76;
 
 /// A box standing between `min` and `max`, for scenery rather than for a body.
 ///
@@ -405,23 +481,38 @@ mod tests {
             .attribute(bevy_mesh::Mesh::ATTRIBUTE_POSITION)
             .map_or(0, VertexAttributeValues::len);
         assert!(positions > 0);
-        assert!((bind_translation(Joint::Head) - Vec3::new(0.0, 1.60, 0.0)).length() < 1.0e-6);
+        assert!((bind_translation(Joint::Head) - Vec3::new(0.0, 1.57, 0.0)).length() < 1.0e-6);
         assert!(bind_translation(Joint::Head).y < BODY_HEIGHT);
     }
 
     #[test]
     fn the_local_offsets_sum_to_the_bind_translation() {
         for joint in Joint::ALL {
-            let parent = match joint {
-                Joint::Hips => None,
-                Joint::Torso | Joint::TorsoPivot => Some(Joint::Hips),
-                Joint::Head | Joint::HeadPivot => Some(Joint::Torso),
-            };
-            let rebuilt = parent.map_or(Vec3::ZERO, bind_translation) + local_offset(joint);
+            // The table under test, not a copy of it: a second `match` here would keep passing
+            // while the rig it describes drifted, which is the failure this test exists to catch.
+            let rebuilt = joint.parent().map_or(Vec3::ZERO, bind_translation) + local_offset(joint);
             assert!(
                 (rebuilt - bind_translation(joint)).length() < 1.0e-6,
                 "{} drifted from its parent",
                 joint.name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_parent_of_a_joint_is_always_before_it() {
+        // The spawn walks `Joint::ALL` once and resolves each parent from what it has already built,
+        // so a joint parented to a later one would silently hang off the body instead.
+        for (index, joint) in Joint::ALL.iter().enumerate() {
+            let Some(parent) = joint.parent() else {
+                assert_eq!(index, 0, "only the root has no parent");
+                continue;
+            };
+            assert!(
+                usize::from(parent.index()) < index,
+                "{} is parented to {}, which is spawned after it",
+                joint.name(),
+                parent.name()
             );
         }
     }
@@ -437,6 +528,94 @@ mod tests {
                 joint.name()
             );
         }
+    }
+
+    /// The vertices weighted to one joint, with their weight.
+    fn weighted_to(joint: Joint) -> Vec<(Vec3, f32)> {
+        let mesh = body_mesh();
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(bevy_mesh::Mesh::ATTRIBUTE_POSITION)
+        else {
+            return Vec::new();
+        };
+        let Some(VertexAttributeValues::Uint16x4(indices)) =
+            mesh.attribute(bevy_mesh::Mesh::ATTRIBUTE_JOINT_INDEX)
+        else {
+            return Vec::new();
+        };
+        let Some(VertexAttributeValues::Float32x4(weights)) =
+            mesh.attribute(bevy_mesh::Mesh::ATTRIBUTE_JOINT_WEIGHT)
+        else {
+            return Vec::new();
+        };
+        let wanted = joint.index();
+        indices
+            .iter()
+            .zip(weights.iter())
+            .zip(positions.iter())
+            .filter_map(|((joints, weights), position)| {
+                let index = joints.iter().position(|slot| *slot == wanted)?;
+                let weight = *weights.get(index)?;
+                (weight > 0.0).then(|| (Vec3::from_array(*position), weight))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_limb_joint_carries_weight() {
+        // A limb bone that no vertex is weighted to is a bone whose animation moves nothing: the
+        // first version of this rig had legs in the mesh and no leg joints, and the walk read as
+        // sliding planks. The picture was the only thing that caught it, which is why this is a test.
+        for joint in [
+            Joint::ArmLeft,
+            Joint::ArmRight,
+            Joint::LegLeft,
+            Joint::LegRight,
+        ] {
+            let weighted = weighted_to(joint);
+            assert!(
+                weighted.len() > 8,
+                "{} carries {} vertices, so animating it moves nothing",
+                joint.name(),
+                weighted.len()
+            );
+            let rigid = weighted
+                .iter()
+                .filter(|(_, weight)| *weight > 0.999)
+                .count();
+            assert!(
+                rigid > 8,
+                "{} is never rigid, so a swing would smear the mesh",
+                joint.name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_legs_reach_the_ground_and_the_arms_sit_outside_the_chest() {
+        let leg = weighted_to(Joint::LegLeft);
+        let lowest = leg
+            .iter()
+            .map(|(position, _)| position.y)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            lowest.abs() < 1.0e-6,
+            "a leg floats {lowest} above the ground"
+        );
+        let highest = leg
+            .iter()
+            .map(|(position, _)| position.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(highest > 0.8, "a leg stops at {highest}, under its own hip");
+
+        // Arms outside the chest, not inside it: a silhouette where the arm is part of the torso
+        // reads as a slab from every angle.
+        let arm = weighted_to(Joint::ArmRight);
+        let widest = arm
+            .iter()
+            .map(|(position, _)| position.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(widest > 0.20, "the right arm only reaches x={widest}");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Spawning the crowd: one body, five joints, and a walking direction that keeps them moving.
+//! Spawning the crowd: one body, nine joints, and a walking direction that keeps them moving.
 //!
 //! Every body is the same mesh, the same graph and the same profile, and differs only in where it
 //! stands, how fast it walks and which phase of its cycle it is in. That is the honest version of a
@@ -37,8 +37,8 @@ pub struct RigHandles {
     pub mesh: Handle<Mesh>,
     /// The inverse bind matrices for those joints.
     pub inverse_bindposes: Handle<SkinnedMeshInverseBindposes>,
-    /// The material the crowd is drawn with.
-    pub material: Handle<StandardMaterial>,
+    /// The palette the crowd is drawn from.
+    pub materials: Vec<Handle<StandardMaterial>>,
     /// The animation graph every body plays.
     pub graph: Handle<AnimationGraph>,
     /// The profile that decides how speed maps onto idle, walk and run.
@@ -47,12 +47,35 @@ pub struct RigHandles {
     pub clips: RigClips,
 }
 
+impl RigHandles {
+    /// The material body `index` wears.
+    ///
+    /// Six tints rather than one: a thousand bodies of a single colour reads as a texture, and six
+    /// reads as a crowd. The choice is by index so a given body wears the same colour every run.
+    #[must_use]
+    pub fn material_for(&self, index: usize) -> Handle<StandardMaterial> {
+        self.materials
+            .get(index % self.materials.len().max(1))
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+/// How tall body `index` stands, as a multiplier on the rig.
+///
+/// Between 0.94 and 1.06 in seven steps, which is the difference between "a crowd" and "a hundred
+/// copies of one person" at the distance this example is viewed from.
+#[must_use]
+pub fn body_scale(index: usize) -> f32 {
+    0.94 + num::usize_to_f32(index % 7) * 0.02
+}
+
 /// What one spawn produced, for the report the example prints and the tests assert on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CrowdReport {
     /// Bodies spawned.
     pub bodies: usize,
-    /// Joint entities spawned: five per body.
+    /// Joint entities spawned, [`super::rig::JOINT_COUNT`] per body.
     pub joints: usize,
 }
 
@@ -115,18 +138,31 @@ pub fn build_handles(world: &mut World) -> Result<RigHandles, RigError> {
     let profile = world
         .resource_mut::<Assets<LocomotionProfile>>()
         .add(rig_profile()?);
-    let material = world
-        .resource_mut::<Assets<StandardMaterial>>()
-        .add(StandardMaterial {
-            // Weathered concrete, which is the district's colour and reads against the fog.
-            base_color: bevy_color::Color::srgb(0.56, 0.52, 0.46),
-            perceptual_roughness: 0.85,
-            ..StandardMaterial::default()
-        });
+    // Weathered concrete and its neighbours: six tints that read against the fog and against each
+    // other. One material per tint means six bind groups for the whole crowd, not one per body.
+    let materials = [
+        (0.58, 0.53, 0.45),
+        (0.39, 0.40, 0.44),
+        (0.70, 0.66, 0.58),
+        (0.55, 0.44, 0.35),
+        (0.47, 0.50, 0.55),
+        (0.63, 0.58, 0.47),
+    ]
+    .into_iter()
+    .map(|(red, green, blue)| {
+        world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color: bevy_color::Color::srgb(red, green, blue),
+                perceptual_roughness: 0.85,
+                ..StandardMaterial::default()
+            })
+    })
+    .collect();
     Ok(RigHandles {
         mesh,
         inverse_bindposes,
-        material,
+        materials,
         graph: library.graph,
         profile,
         clips: library.clips,
@@ -187,7 +223,7 @@ fn spawn_joint(
     entity.id()
 }
 
-/// Spawn `count` bodies on a disc of `radius` metres, each with its five joints and clips bound.
+/// Spawn `count` bodies on a disc of `radius` metres, each with its joints and clips bound.
 pub fn spawn_crowd(
     world: &mut World,
     handles: &RigHandles,
@@ -200,13 +236,14 @@ pub fn spawn_crowd(
         // The bundle owns the transform, so the spawn position goes in through it: adding a second
         // `Transform` to the same entity is a duplicate component, not an override.
         let mut bundle = NpcBundle::default_for(id);
-        bundle.transform = Transform::from_translation(position);
+        bundle.transform =
+            Transform::from_translation(position).with_scale(Vec3::splat(body_scale(index)));
         let body = world
             .spawn((
                 bundle,
                 Visibility::default(),
                 Mesh3d(handles.mesh.clone()),
-                MeshMaterial3d(handles.material.clone()),
+                MeshMaterial3d(handles.material_for(index)),
                 AnimationPlayer::default(),
                 AnimationGraphHandle(handles.graph.clone()),
                 ClipBindings::new(
@@ -231,20 +268,35 @@ pub fn spawn_crowd(
             ))
             .id();
 
-        // Three bones a clip animates, plus two pivots gaze drives that hang off the chest and the
-        // head. The order here is the order of `JOINTS_0` in the mesh, so it is not free to change.
-        let hips = spawn_joint(world, body, Joint::Hips, body, false);
-        let torso = spawn_joint(world, body, Joint::Torso, hips, false);
-        let head = spawn_joint(world, body, Joint::Head, torso, false);
-        let torso_pivot = spawn_joint(world, body, Joint::TorsoPivot, torso, true);
-        let head_pivot = spawn_joint(world, body, Joint::HeadPivot, head, true);
+        // One entity per joint, parented exactly as `Joint::parent` declares and pushed in the
+        // joint's own index order, so the hierarchy, the `SkinnedMesh` list and the mesh's `JOINTS_0`
+        // values are three views of one table rather than three tables that have to agree.
+        //
+        // A parent is always an earlier entry in `Joint::ALL`, which is what makes a single forward
+        // pass enough; `the_parent_of_a_joint_is_always_before_it` is the test that keeps that true.
+        let mut joints: Vec<Entity> = Vec::with_capacity(super::rig::JOINT_COUNT);
+        for joint in Joint::ALL {
+            let parent = joint
+                .parent()
+                .and_then(|parent| joints.get(usize::from(parent.index())).copied())
+                .unwrap_or(body);
+            let gaze = matches!(joint, Joint::TorsoPivot | Joint::HeadPivot);
+            joints.push(spawn_joint(world, body, joint, parent, gaze));
+        }
+        let pivot = |joint: Joint| {
+            joints
+                .get(usize::from(joint.index()))
+                .copied()
+                .unwrap_or(body)
+        };
+        let gaze_rig = GazeRig::new(pivot(Joint::TorsoPivot), pivot(Joint::HeadPivot));
 
         world.entity_mut(body).insert((
             SkinnedMesh {
                 inverse_bindposes: handles.inverse_bindposes.clone(),
-                joints: vec![hips, torso, head, torso_pivot, head_pivot],
+                joints,
             },
-            GazeRig::new(torso_pivot, head_pivot),
+            gaze_rig,
         ));
     }
 
@@ -344,6 +396,24 @@ mod tests {
     /// Speeds to the nearest centimetre per second, so the set holds numbers rather than float bits.
     fn num_speed(speed: f32) -> u32 {
         bevy_flock::domain::num::f32_to_u32((speed * 100.0).round())
+    }
+
+    #[test]
+    fn the_palette_is_cycled_and_the_stature_varies() {
+        // Six tints and seven heights: enough that a thousand bodies are not one body, and rational
+        // enough that the same crowd looks the same in every run.
+        let shortest = super::body_scale(0);
+        let tallest = super::body_scale(6);
+        assert!((shortest - 0.94).abs() < 1.0e-6);
+        assert!((tallest - 1.06).abs() < 1.0e-6);
+        let scales: Vec<f32> = (0..7).map(super::body_scale).collect();
+        assert!(
+            scales
+                .windows(2)
+                .all(|pair| matches!(pair, [low, high] if high > low)),
+            "the stature steps must ascend"
+        );
+        assert!((super::body_scale(7) - super::body_scale(0)).abs() < 1.0e-6);
     }
 
     #[test]

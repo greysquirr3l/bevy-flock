@@ -90,8 +90,9 @@ cargo run --release -p bevy-flock-playground -- --backend metal --frames 120 --v
 
 ## The skinned district: 2,000 bodies with a skeleton each
 
-`ashfall-playground` draws boxes. `skinned` draws people: every body is a five-joint rig with a
-skinned mesh, an `AnimationPlayer` and a blend tree, all built at startup, so the thing moving on
+`ashfall-playground` draws boxes. `skinned` draws people: every body is a nine-joint rig — hips,
+chest, head, two shoulders, two hips, and the two pivots gaze turns — with a skinned mesh, an
+`AnimationPlayer` and a blend tree, all built at startup, so the thing moving on
 screen is Bevy's own skinning and animation path and not a hand-rolled shader.
 
 ```sh
@@ -126,5 +127,5 @@ no gesture was ever requested:
 
 ```sh
 xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
-# skinned: 213 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.612 m
+# skinned: 200 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.494 m
 ```

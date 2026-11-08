@@ -104,7 +104,12 @@ fn add_loop_rotation(
 ///
 /// Four seconds of weight shift, which is slow enough to read as breathing rather than as a sway, and
 /// a head that drifts a degree and a half — the movement that tells a viewer the crowd is alive even
-/// when nothing is happening.
+/// The idle clip: a body standing still is not a statue.
+///
+/// Four seconds of weight shift, which is slow enough to read as breathing rather than as a sway, a
+/// head that drifts a degree and a half, and arms that follow the chest a beat late. No leg motion:
+/// a standing body's feet stay planted, which is the difference between idle and a walk at zero
+/// speed.
 fn idle_clip() -> Result<AnimationClip, ClipError> {
     let mut clip = AnimationClip::default();
     add_loop_rotation(
@@ -112,9 +117,9 @@ fn idle_clip() -> Result<AnimationClip, ClipError> {
         "torso",
         &[
             (0.0, euler(0.0, 0.0, 0.0)),
-            (1.0, euler(0.0, 0.012, 0.022)),
+            (1.0, euler(0.0, 0.010, 0.020)),
             (2.0, euler(0.0, 0.0, 0.0)),
-            (3.0, euler(0.0, -0.012, -0.022)),
+            (3.0, euler(0.0, -0.010, -0.020)),
             (4.0, euler(0.0, 0.0, 0.0)),
         ],
     )?;
@@ -123,10 +128,28 @@ fn idle_clip() -> Result<AnimationClip, ClipError> {
         "head",
         &[
             (0.0, euler(0.0, 0.0, 0.0)),
-            (1.3, euler(0.04, -0.02, 0.0)),
+            (1.3, euler(0.05, -0.015, 0.0)),
             (2.6, euler(0.0, 0.0, 0.0)),
-            (3.9, euler(-0.04, 0.02, 0.0)),
+            (3.9, euler(-0.05, 0.015, 0.0)),
             (5.2, euler(0.0, 0.0, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "arm_left",
+        &[
+            (0.0, euler(0.0, 0.0, 0.0)),
+            (2.0, euler(0.0, 0.03, 0.0)),
+            (4.0, euler(0.0, 0.0, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "arm_right",
+        &[
+            (0.0, euler(0.0, 0.0, 0.0)),
+            (2.2, euler(0.0, 0.03, 0.0)),
+            (4.4, euler(0.0, 0.0, 0.0)),
         ],
     )?;
     Ok(clip)
@@ -135,48 +158,100 @@ fn idle_clip() -> Result<AnimationClip, ClipError> {
 /// A walk: two steps a cycle, with the hips bobbing twice and the shoulders counter-rotating.
 ///
 /// The counter-rotation is the detail that makes a walk read as a walk: the pelvis turns with the
-/// leading leg and the chest turns against it, which is why `torso` gets the opposite sign to `hips`.
+/// A walk: two steps a cycle, with the hips bobbing twice and the shoulders counter-rotating.
+///
+/// The legs are the clip. Everything else is what a body does *around* a step: the pelvis turns with
+/// the leading leg, the chest turns against it, the arms swing opposite the legs, and the hips drop
+/// twice a cycle because a walk's lowest point is when both feet are down.
 fn walk_clip() -> Result<AnimationClip, ClipError> {
     let mut clip = AnimationClip::default();
+    // Legs: a straight sinusoid a half cycle apart. Positive pitch swings a limb forward, and the
+    // forward is the body's own -Z, so a body walking along its facing steps where it looks.
+    add_loop_rotation(
+        &mut clip,
+        "leg_left",
+        &[
+            (0.0, euler(0.0, 0.42, 0.0)),
+            (0.25, euler(0.0, 0.0, 0.0)),
+            (0.5, euler(0.0, -0.42, 0.0)),
+            (0.75, euler(0.0, 0.0, 0.0)),
+            (1.0, euler(0.0, 0.42, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "leg_right",
+        &[
+            (0.0, euler(0.0, -0.42, 0.0)),
+            (0.25, euler(0.0, 0.0, 0.0)),
+            (0.5, euler(0.0, 0.42, 0.0)),
+            (0.75, euler(0.0, 0.0, 0.0)),
+            (1.0, euler(0.0, -0.42, 0.0)),
+        ],
+    )?;
+    // Arms swing against the legs, at about two thirds of the amplitude: an arm that swings as far as
+    // a leg reads as a march.
+    add_loop_rotation(
+        &mut clip,
+        "arm_left",
+        &[
+            (0.0, euler(0.0, -0.30, 0.0)),
+            (0.25, euler(0.0, 0.0, 0.0)),
+            (0.5, euler(0.0, 0.30, 0.0)),
+            (0.75, euler(0.0, 0.0, 0.0)),
+            (1.0, euler(0.0, -0.30, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "arm_right",
+        &[
+            (0.0, euler(0.0, 0.30, 0.0)),
+            (0.25, euler(0.0, 0.0, 0.0)),
+            (0.5, euler(0.0, -0.30, 0.0)),
+            (0.75, euler(0.0, 0.0, 0.0)),
+            (1.0, euler(0.0, 0.30, 0.0)),
+        ],
+    )?;
     add_loop_rotation(
         &mut clip,
         "hips",
         &[
-            (0.0, euler(0.09, 0.0, 0.0)),
+            (0.0, euler(0.08, 0.0, 0.0)),
             (0.25, euler(0.0, 0.0, 0.0)),
-            (0.5, euler(-0.09, 0.0, 0.0)),
+            (0.5, euler(-0.08, 0.0, 0.0)),
             (0.75, euler(0.0, 0.0, 0.0)),
-            (1.0, euler(0.09, 0.0, 0.0)),
+            (1.0, euler(0.08, 0.0, 0.0)),
         ],
     )?;
     add_loop_rotation(
         &mut clip,
         "torso",
         &[
-            (0.0, euler(-0.07, 0.0, 0.035)),
+            (0.0, euler(-0.06, 0.0, 0.025)),
             (0.25, euler(0.0, 0.0, 0.0)),
-            (0.5, euler(0.07, 0.0, -0.035)),
+            (0.5, euler(0.06, 0.0, -0.025)),
             (0.75, euler(0.0, 0.0, 0.0)),
-            (1.0, euler(-0.07, 0.0, 0.035)),
+            (1.0, euler(-0.06, 0.0, 0.025)),
         ],
     )?;
     add_loop_rotation(
         &mut clip,
         "head",
         &[
-            (0.0, euler(0.05, 0.0, 0.0)),
-            (0.5, euler(-0.05, 0.0, 0.0)),
-            (1.0, euler(0.05, 0.0, 0.0)),
+            (0.0, euler(0.03, 0.0, 0.0)),
+            (0.5, euler(-0.03, 0.0, 0.0)),
+            (1.0, euler(0.03, 0.0, 0.0)),
         ],
     )?;
     clip.add_curve_to_target(
         target("hips"),
         translation_curve(&[
-            (0.0, Vec3::new(0.0, 0.92, 0.0)),
-            (0.25, Vec3::new(0.0, 0.955, 0.0)),
-            (0.5, Vec3::new(0.0, 0.92, 0.0)),
-            (0.75, Vec3::new(0.0, 0.955, 0.0)),
-            (1.0, Vec3::new(0.0, 0.92, 0.0)),
+            (0.0, Vec3::new(0.0, 0.915, 0.0)),
+            (0.25, Vec3::new(0.0, 0.94, 0.0)),
+            (0.5, Vec3::new(0.0, 0.915, 0.0)),
+            (0.75, Vec3::new(0.0, 0.94, 0.0)),
+            (1.0, Vec3::new(0.0, 0.915, 0.0)),
         ])?,
     );
     Ok(clip)
@@ -187,59 +262,120 @@ fn run_clip() -> Result<AnimationClip, ClipError> {
     let mut clip = AnimationClip::default();
     add_loop_rotation(
         &mut clip,
-        "hips",
+        "leg_left",
         &[
-            (0.0, euler(0.16, 0.05, 0.0)),
-            (0.16, euler(0.0, 0.05, 0.0)),
-            (0.32, euler(-0.16, 0.05, 0.0)),
-            (0.48, euler(0.0, 0.05, 0.0)),
-            (0.64, euler(0.16, 0.05, 0.0)),
+            (0.0, euler(0.0, 0.70, 0.0)),
+            (0.16, euler(0.0, 0.0, 0.0)),
+            (0.32, euler(0.0, -0.70, 0.0)),
+            (0.48, euler(0.0, 0.0, 0.0)),
+            (0.64, euler(0.0, 0.70, 0.0)),
         ],
     )?;
     add_loop_rotation(
         &mut clip,
+        "leg_right",
+        &[
+            (0.0, euler(0.0, -0.70, 0.0)),
+            (0.16, euler(0.0, 0.0, 0.0)),
+            (0.32, euler(0.0, 0.70, 0.0)),
+            (0.48, euler(0.0, 0.0, 0.0)),
+            (0.64, euler(0.0, -0.70, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "arm_left",
+        &[
+            (0.0, euler(0.12, -0.62, 0.0)),
+            (0.16, euler(0.12, 0.0, 0.0)),
+            (0.32, euler(0.12, 0.62, 0.0)),
+            (0.48, euler(0.12, 0.0, 0.0)),
+            (0.64, euler(0.12, -0.62, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "arm_right",
+        &[
+            (0.0, euler(-0.12, 0.62, 0.0)),
+            (0.16, euler(-0.12, 0.0, 0.0)),
+            (0.32, euler(-0.12, -0.62, 0.0)),
+            (0.48, euler(-0.12, 0.0, 0.0)),
+            (0.64, euler(-0.12, 0.62, 0.0)),
+        ],
+    )?;
+    add_loop_rotation(
+        &mut clip,
+        "hips",
+        &[
+            (0.0, euler(0.14, 0.0, 0.0)),
+            (0.16, euler(0.0, 0.0, 0.0)),
+            (0.32, euler(-0.14, 0.0, 0.0)),
+            (0.48, euler(0.0, 0.0, 0.0)),
+            (0.64, euler(0.14, 0.0, 0.0)),
+        ],
+    )?;
+    // A run leans: negative pitch takes the chest forward over the leading foot.
+    add_loop_rotation(
+        &mut clip,
         "torso",
         &[
-            (0.0, euler(-0.14, 0.10, 0.07)),
-            (0.16, euler(0.0, 0.10, 0.0)),
-            (0.32, euler(0.14, 0.10, -0.07)),
-            (0.48, euler(0.0, 0.10, 0.0)),
-            (0.64, euler(-0.14, 0.10, 0.07)),
+            (0.0, euler(-0.10, -0.16, 0.05)),
+            (0.16, euler(0.0, -0.16, 0.0)),
+            (0.32, euler(0.10, -0.16, -0.05)),
+            (0.48, euler(0.0, -0.16, 0.0)),
+            (0.64, euler(-0.10, -0.16, 0.05)),
         ],
     )?;
     add_loop_rotation(
         &mut clip,
         "head",
         &[
-            (0.0, euler(0.08, -0.06, 0.0)),
-            (0.32, euler(-0.08, -0.06, 0.0)),
-            (0.64, euler(0.08, -0.06, 0.0)),
+            (0.0, euler(0.04, 0.12, 0.0)),
+            (0.32, euler(-0.04, 0.12, 0.0)),
+            (0.64, euler(0.04, 0.12, 0.0)),
         ],
     )?;
     clip.add_curve_to_target(
         target("hips"),
         translation_curve(&[
             (0.0, Vec3::new(0.0, 0.90, 0.0)),
-            (0.16, Vec3::new(0.0, 0.98, 0.0)),
+            (0.16, Vec3::new(0.0, 0.965, 0.0)),
             (0.32, Vec3::new(0.0, 0.90, 0.0)),
-            (0.48, Vec3::new(0.0, 0.98, 0.0)),
+            (0.48, Vec3::new(0.0, 0.965, 0.0)),
             (0.64, Vec3::new(0.0, 0.90, 0.0)),
         ])?,
     );
     Ok(clip)
 }
 
-/// A one-shot gesture: a shrug that turns into a wave, and back.
+/// A one-shot gesture: the right arm comes up and waves, twice, and comes down.
+///
+/// Roll raises the arm; the small pitch on the way up is what stops it reading as a semaphore. The
+/// left arm stays where the blend left it, which is the point of a per-kind clip rather than one
+/// "gesture" animation that moves the whole body.
 fn wave_clip() -> Result<AnimationClip, ClipError> {
     let mut clip = AnimationClip::default();
+    add_loop_rotation(
+        &mut clip,
+        "arm_right",
+        &[
+            (0.0, euler(0.0, 0.0, 0.0)),
+            (0.2, euler(0.0, -0.10, 2.10)),
+            (0.35, euler(0.0, -0.10, 1.80)),
+            (0.5, euler(0.0, -0.10, 2.25)),
+            (0.65, euler(0.0, -0.10, 1.80)),
+            (0.8, euler(0.0, -0.10, 2.10)),
+            (0.95, euler(0.0, 0.0, 0.0)),
+        ],
+    )?;
     add_loop_rotation(
         &mut clip,
         "torso",
         &[
             (0.0, euler(0.0, 0.0, 0.0)),
-            (0.2, euler(0.35, 0.0, 0.12)),
-            (0.45, euler(0.05, 0.0, -0.05)),
-            (0.7, euler(0.35, 0.0, 0.12)),
+            (0.2, euler(0.10, 0.0, -0.06)),
+            (0.8, euler(0.10, 0.0, -0.06)),
             (0.95, euler(0.0, 0.0, 0.0)),
         ],
     )?;
@@ -248,7 +384,7 @@ fn wave_clip() -> Result<AnimationClip, ClipError> {
         "head",
         &[
             (0.0, euler(0.0, 0.0, 0.0)),
-            (0.3, euler(0.25, 0.06, 0.0)),
+            (0.3, euler(0.18, 0.05, 0.0)),
             (0.95, euler(0.0, 0.0, 0.0)),
         ],
     )?;
@@ -280,7 +416,7 @@ fn flinch_clip() -> Result<AnimationClip, ClipError> {
         "torso",
         &[
             (0.0, euler(0.0, 0.0, 0.0)),
-            (0.1, euler(0.0, 0.22, 0.0)),
+            (0.1, euler(0.0, 0.18, 0.0)),
             (0.35, euler(0.0, -0.04, 0.0)),
             (0.6, euler(0.0, 0.0, 0.0)),
         ],
@@ -459,6 +595,27 @@ mod tests {
                     assert!(domain.end() <= duration + 1.0e-6);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_walk_moves_the_legs_and_the_arms() {
+        // The channel list is the animation. A walk that animates the hips alone is a body that
+        // turns as it slides, which is what the first cut of this example did.
+        let clip = walk_clip().unwrap_or_else(|error| unreachable!("{error:?}"));
+        let targets: Vec<bevy_animation::AnimationTargetId> =
+            clip.curves().keys().copied().collect();
+        for joint in [
+            super::super::rig::Joint::LegLeft,
+            super::super::rig::Joint::LegRight,
+            super::super::rig::Joint::ArmLeft,
+            super::super::rig::Joint::ArmRight,
+        ] {
+            assert!(
+                targets.contains(&super::target(joint.name())),
+                "the walk never animates {}",
+                joint.name()
+            );
         }
     }
 
