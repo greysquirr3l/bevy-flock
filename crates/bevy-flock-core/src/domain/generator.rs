@@ -31,9 +31,9 @@ pub const MAX_TAGS: usize = 4;
 /// the surname list supplies the family or trade name on top.
 ///
 /// ```
-/// use bevy_flock::domain::generator::NameStyle;
-/// use bevy_flock::domain::ids::SimSeed;
-/// use bevy_flock::domain::rng::RngStream;
+/// use bevy_flock_core::domain::generator::NameStyle;
+/// use bevy_flock_core::domain::ids::SimSeed;
+/// use bevy_flock_core::domain::rng::RngStream;
 ///
 /// let mut rng = RngStream::new(SimSeed::new(7), 1);
 /// let name = NameStyle::Highland.compose(&mut rng, None);
@@ -301,7 +301,7 @@ impl NameStyle {
 /// The style written as its name, so a log line reads as prose rather than as a variant.
 ///
 /// ```
-/// use bevy_flock::domain::generator::NameStyle;
+/// use bevy_flock_core::domain::generator::NameStyle;
 ///
 /// assert_eq!(NameStyle::Highland.to_string(), "highland");
 /// assert_eq!(NameStyle::TradeCity.to_string(), "trade-city");

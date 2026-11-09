@@ -21,7 +21,9 @@
 //! replaces a leaf with a more expensive one gets an honest number:
 //!
 //! ```
-//! # use bevy_flock::prelude::*;
+//! # use bevy_flock_core::behavior::FlockRegistry;
+//! # use bevy_flock_core::domain::cost::VirtualCost;
+//! # use bevy_flock_core::domain::temperament::Archetype;
 //! let mut registry = FlockRegistry::new();
 //! let leaves = registry.register_standard_leaves().expect("fresh registry");
 //! let guard = Archetype::Guard

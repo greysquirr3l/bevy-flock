@@ -6,7 +6,7 @@
 //! crate alone and get the same deterministic results a game gets.
 //!
 //! The Bevy-facing half — plugins, components, systems, the crowd resource — lives in the `bevy-flock` facade, which
-//! re-exports these modules under the same paths they always had. A game that compiled against `bevy_flock::domain::…`
+//! re-exports these modules under the same paths they always had. A game that compiled against `bevy_flock_core::domain::…`
 //! keeps compiling, because the path is a re-export rather than a copy.
 //!
 //! The `ecs` feature exists only so the facade can put `#[derive(Resource)]` on three of these types; it is off by

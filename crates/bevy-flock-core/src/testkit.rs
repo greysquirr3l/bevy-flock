@@ -11,7 +11,7 @@
 //! `unreachable!` and a message that names the fixture:
 //!
 //! ```rust
-//! use bevy_flock::testkit::OrDie;
+//! use bevy_flock_core::testkit::OrDie;
 //!
 //! let parsed: u32 = "42".parse::<u32>().or_die();
 //! assert_eq!(parsed, 42);
