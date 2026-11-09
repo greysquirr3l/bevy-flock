@@ -1,0 +1,30 @@
+{
+  "name": "bevy-flock-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "bash scripts/deploy-docs.sh",
+    "deploy:dry": "bash scripts/deploy-docs.sh --no-push"
+  },
+  "deploy-docs": {
+    "pagesRepo": "../../../greysquirr3l.github.io",
+    "subdir": "bevy-flock",
+    "liveUrl": "https://greysquirr3l.github.io/bevy-flock/",
+    "sourceRepo": "greysquirr3l/bevy-flock"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.34.0",
+    "astro": "^5.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  },
+  "packageManager": "pnpm@11.25.0"
+}

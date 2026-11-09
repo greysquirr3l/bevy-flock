@@ -43,7 +43,7 @@ let schedule = ThinkSchedule::new(capacity, VirtualCost::from_micros(900));
 - **Virtual cost, not wall time.** Every leaf declares what it costs
   (`LeafBehavior::cost`), and the scheduler spends *that* number. A frame's thinking is then
   a property of the world, not of the machine, so two runs of the same seed make the same
-  decisions even if one ran on a busy host. `docs/performance.md` records the calibration
+  decisions even if one ran on a busy host. `docs/dev/tuning/performance.md` records the calibration
   that keeps the declared numbers within 20% of measured.
 - **A queue, not a loop.** Participants are ordered by a stride schedule, so no NPC starves
   and no NPC hogs: each has a pass value that advances only when it thinks, and the lowest
@@ -68,7 +68,7 @@ bigger budget.
 Distance and engagement pick the tier (`TierPolicy`), each tier gets a guaranteed share of
 the budget (`BudgetShares`), and promotions are rate-limited (`promotions_per_tick`, default
 16) so that a player rounding a corner into a packed square does not promote four hundred
-NPCs in one frame and drop it. Demotion has hysteresis — a wider band than promotion — so an
+NPCs in one frame and drop it. Demotion has hysteresis, a wider band than promotion, so an
 NPC standing exactly on a boundary does not oscillate between tiers and pay both costs
 forever.
 

@@ -53,8 +53,8 @@ let config = MemoryConfig::default()
     .with_enrol_budget(64);     // how many new rows per tick
 ```
 
-`domain::memory::select_enrolment` implements the rule as a pure function — nearest first,
-ties broken by identity — and the ECS bridge uses the same comparator, so a replay of the
+`domain::memory::select_enrolment` implements the rule as a pure function, nearest first,
+ties broken by identity, and the ECS bridge uses the same comparator, so a replay of the
 same approach grants the same rows.
 
 ## Reaching a behaviour tree
@@ -119,12 +119,12 @@ format is versioned, carries a subject registry (ADR 0013) so attributes cannot 
 shift meaning, and ends with a checksum over the section table. `restore` reports what it
 could not do rather than failing silently:
 
-- `store_records`, `archive_records`, `slots` — what came back;
-- `dropped_slots` — slots whose subject is gone from the current registry;
-- `translated` — the registry moved, so identifiers were remapped;
-- `unverified_mapping` — a version 1 file, whose subjects were taken on trust.
+- `store_records`, `archive_records`, `slots`, what came back;
+- `dropped_slots`, slots whose subject is gone from the current registry;
+- `translated`, the registry moved, so identifiers were remapped;
+- `unverified_mapping`, a version 1 file, whose subjects were taken on trust.
 
-`docs/adr/0012` to `0014` and `docs/memory.md` carry the details, including the measured
+`docs/dev/adr/0012` to `0014` and `docs/dev/tuning/memory.md` carry the details, including the measured
 encoding and decoding costs at 50,000 rows.
 
 ## The honest limits

@@ -11,13 +11,14 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec3;
 use bevy_transform::prelude::Transform;
 
+use crate::adapters::primary::clock::advance_clock;
 use crate::adapters::primary::cognition::{
     ThinkSchedule, TierConfig, WeightConfig, assign_tiers, plan_thinks, tick_chosen,
 };
 use crate::adapters::primary::components::{
     LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcNeeds, NpcTemperament, NpcVelocity,
 };
-use crate::application::{SimClock, advance_clock};
+use crate::application::SimClock;
 use crate::boids::{BoidsConfig, BoidsPlugin};
 use crate::domain::ids::{NpcId, SimSeed};
 use crate::domain::num;

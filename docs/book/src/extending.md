@@ -37,7 +37,7 @@ let id = registry.register_leaf("guard_door", GuardDoor)?;
 ```
 
 Rules the tests enforce: `tick` must not allocate, must not panic on a missing slot, and
-must keep per-NPC state on the blackboard — the trait takes `&self` precisely because one
+must keep per-NPC state on the blackboard, the trait takes `&self` precisely because one
 instance serves every NPC running that leaf. `abort` is where a leaf clears what `tick` set,
 so an interrupted conversation does not resume stale.
 
@@ -122,7 +122,7 @@ let cost = archetypes.cost(Archetype::Guard);   // the number the scheduler budg
 ```
 
 `docs/adr` and `src/behavior/archetypes.rs` carry the cost table; the benchmark
-`benches/brain.rs` is what keeps it honest, and `docs/performance.md` records the measured
+`benches/brain.rs` is what keeps it honest, and `docs/dev/tuning/performance.md` records the measured
 cognition costs that the table is calibrated against.
 
 ## What not to do
@@ -143,5 +143,5 @@ cognition costs that the table is calibrated against.
 
 `FlockRegistry` is where the seams meet: leaves, trees, directors and providers register
 once, by name, and the name is what a log, an overlay and an authored file all use. A duplicate
-name is an error, not a silent override — two leaves called `wander` is a bug that would
+name is an error, not a silent override, two leaves called `wander` is a bug that would
 otherwise only show up as "the wrong one ran".

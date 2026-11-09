@@ -270,3 +270,38 @@ leaves the saving to T04, because a number invented in a decision record is a nu
 Rejected shapes are recorded with reasons, including the one worth remembering: five crates buys nothing a consumer
 can observe, since Cargo builds a dependency chain in order and only the root gets faster.
 """
+
+[[completed]]
+task = "rehome-ecs-resources (T03, partial: the gate lands, the adapter split waits on T02)"
+delivered_in = "feat/phase6-t02-extract-core"
+note = """
+Three `bevy_ecs` mentions remained in the core layers after the phase-5 audit, all `Resource` derives. Two candidate
+mechanisms were rejected against the compiler rather than on paper: a hand-written `impl Resource` plus `impl Component`
+in the adapter compiles but fails at runtime with `Res<T>` validation ("Resource does not exist"), because
+`#[derive(Resource)]` registers something the public surface does not expose; and newtype wrappers work but move nine
+files and ~170 call sites for a boundary about which crate names the trait.
+Adopted: `#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]` on `SimClock`, `FlockRegistry` and
+`MemoryStore`, with `ecs` on by default in the facade. `advance_clock` moved to `adapters/primary/clock.rs`, so
+`application` carries no engine type in any signature. The gate is enforced by a test, not by a comment:
+`core_mentions_of_the_engine_are_feature_gated` fails if any core file names `bevy_ecs` off a `feature = "ecs"` line.
+Gate: clippy -D warnings clean, 550 lib tests, 5 boundary tests, lint audit clean.
+Remaining for T02: `--no-default-features` still fails because the adapter modules need the engine; gating
+`pub mod adapters` on `ecs` is what makes the facade usable as a core-only dependency.
+"""
+
+[[completed]]
+task = "extract-core-crate (T02)"
+delivered_in = "feat/phase6-t02-extract-core"
+note = """
+`crates/bevy-flock-core` holds `domain`, `behavior`, `application`, `error` and `testkit`, moved with `git mv`. The facade
+re-exports them from its root, which is what keeps every published path compiling -- and what keeps the facade's own
+`crate::domain::...` references resolving, because a `pub use` puts the name in the root namespace.
+Verified: `cargo tree -p bevy-flock-core` lists no bevy_ecs, bevy_app or bevy_transform; the facade compiles with
+`--no-default-features`; 418 core tests plus 132 facade tests (550, unchanged); the boundary scanner now points at the core
+crate and its 5 tests pass, including the one that fails if a core file names bevy_ecs off a `feature = "ecs"` line;
+clippy is clean across all targets and features.
+Features forward by name both ways (`simd`, `threads`, `memory`, `serde`, `navmesh`, `ecs`); the core defaults to
+`simd`+`threads` and not `ecs`, which is what keeps a headless consumer's graph free of the engine.
+Still open: `headless-consumer-gate` needs a consumer that is not the facade -- a test crate that depends on
+`bevy-flock-core` alone and runs a crowd end to end -- before this phase can be called done.
+"""

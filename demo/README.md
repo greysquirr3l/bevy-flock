@@ -109,7 +109,7 @@ through an instanced `wgpu` pipeline, so the software rasteriser has something t
 rather than only described. Its district frame is `../docs/demo/ashfall-gpu-district.png`: same
 composition, same crowd, a flat ground and no impostors, drawn on `llvmpipe` because that is the only
 adapter this machine has. It falls back to the `noop` backend where no driver exists, and
-`docs/playbooks/gpu-demos.md` is the recipe it was built from.
+`docs/dev/tuning/playbooks/gpu-demos.md` is the recipe it was built from.
 The five views are still images. `ashfall-play` makes the same scene a place to stand in, without a
 window, a GPU or a widget toolkit:
 
@@ -171,7 +171,7 @@ second front end went the other way: `../demo-gpu/` binds `wgpu` directly and re
 instead of a surface, which works with no window at all. What a windowed front end still needs from
 this side exists and is tested: `Session` (camera, view, lens, budget),
 `Session::advance(&CameraInput, dt)`, `input::Command` and `session::Budget`.
-See [ADR 0050](../docs/adr/0050-interactive-playground.md).
+See [ADR 0050](../docs/dev/adr/0050-interactive-playground.md).
 
 ### The cross-fade band
 
@@ -207,7 +207,7 @@ pass and submission, with the commands discarded — so the CPU half of each fra
 
 The wgpu figure is the API's CPU cost, not a frame time; nothing here was measured on a GPU. Read the
 ratio as the shape of the work — per-pixel and per-triangle labour belongs to the device, and what is
-left on the CPU is fixed and scales with the draw list. `docs/performance.md` records the run.
+left on the CPU is fixed and scales with the draw list. `docs/dev/tuning/performance.md` records the run.
 
 
 ## The city
@@ -280,7 +280,7 @@ reason to demote anyone. Push the population past it and the ladder starts foldi
 benchmarks cover that path; this demo is sized to stay readable.
 
 `ms_per_tick` is one number on one machine with a debug-friendly configuration: it is not the
-kernel benchmark, and `docs/performance.md` is where the measured performance of the steering road
+kernel benchmark, and `docs/dev/tuning/performance.md` is where the measured performance of the steering road
 lives. What `ashfall.run.json` gives you is the same measurement *for the run you just made*, next
 to the seed and the digest, so a change in this demo's cost is attributable.
 

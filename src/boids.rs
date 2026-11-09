@@ -169,7 +169,7 @@ impl BoidsConfig {
     ///
     /// `0` means "as many as the machine has", resolved once per rebuild. A count larger than
     /// [`std::thread::available_parallelism`] is clamped, because oversubscription measured 25% *slower*
-    /// on every phase of the sweep in `docs/performance.md` — six workers on six cores beat eight every
+    /// on every phase of the sweep in `docs/dev/tuning/performance.md` — six workers on six cores beat eight every
     /// time, so a configuration cannot ask the framework to make that mistake.
     #[must_use]
     pub const fn workers(&self) -> usize {
@@ -425,7 +425,7 @@ pub fn rebuild_spatial_grid(
     query: Query<(&Transform, &Npc, &NpcVelocity)>,
 ) {
     // Asking for more workers than the machine has costs throughput rather than buying it: the sweep in
-    // `docs/performance.md` measured eight workers on six cores at 25% slower than six. `0` means the
+    // `docs/dev/tuning/performance.md` measured eight workers on six cores at 25% slower than six. `0` means the
     // machine default, so the framework never oversubscribes unless someone insists by name.
     let available = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let workers = if config.workers() == 0 {

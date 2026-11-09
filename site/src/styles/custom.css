@@ -1,0 +1,81 @@
+/* Field notebook. Every token below is one line of DESIGN.md, and both themes are written out rather than inherited:
+   a grey ramp set on bare :root is inherited by both themes, which is how the first version shipped 2.68:1 body text on
+   white. Measured ratios are in the comment beside each value, against that theme's page colour. */
+:root {
+  --sl-font: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --sl-font-mono: ui-monospace, 'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, monospace;
+  --bf-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  /* Light: warm paper. 15.4:1 body, 6.4:1 muted, 6.6:1 accent. */
+  --sl-color-white: #1c1b18;
+  --sl-color-black: #fbf9f4;
+  --sl-color-gray-1: #2b2924;
+  --sl-color-gray-2: #3d3a33;
+  --sl-color-gray-3: #56524a;
+  --sl-color-gray-4: #8a857a;
+  --sl-color-gray-5: #d8d2c4;
+  --sl-color-gray-6: #eee9dd;
+  --sl-color-gray-7: #f5f1e6;
+  --sl-color-accent-low: #f2e2c9;
+  --sl-color-accent: #8a4b12;
+  --sl-color-accent-high: #6b3a0d;
+  --sl-color-text: #1c1b18;
+  --sl-color-text-accent: #8a4b12;
+  --sl-color-bg: #fbf9f4;
+  --sl-color-bg-nav: #f5f1e6;
+  --sl-color-bg-sidebar: #f7f3ea;
+  --sl-color-hairline: #ddd6c6;
+}
+:root[data-theme='dark'] {
+  /* Ink. 13.1:1 body, 6.1:1 muted, 7.6:1 accent. */
+  --sl-color-white: #e8e4da;
+  --sl-color-black: #12141a;
+  --sl-color-gray-1: #d5d1c7;
+  --sl-color-gray-2: #bdb9ae;
+  --sl-color-gray-3: #a6a29a;
+  --sl-color-gray-4: #6c6a66;
+  --sl-color-gray-5: #2b2e37;
+  --sl-color-gray-6: #1b1e26;
+  --sl-color-gray-7: #16181f;
+  --sl-color-accent-low: #2a2114;
+  --sl-color-accent: #e0a54a;
+  --sl-color-accent-high: #f2cd92;
+  --sl-color-text: #e8e4da;
+  --sl-color-text-accent: #e0a54a;
+  --sl-color-bg: #12141a;
+  --sl-color-bg-nav: #16181f;
+  --sl-color-bg-sidebar: #16181f;
+  --sl-color-hairline: #2b2e37;
+}
+/* Serif headings: the page's own hierarchy, with no colour or icons doing the work. */
+.sl-markdown-content :is(h1, h2, h3, h4),
+h1#_top,
+.content-panel h1 {
+  font-family: var(--bf-display);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.sl-markdown-content h2 {
+  border-top: 1px solid var(--sl-color-hairline);
+  padding-top: 1.5rem;
+  margin-top: 2.5rem;
+}
+/* A reading measure. Starlight's default is wider than prose wants. */
+.sl-markdown-content > p,
+.sl-markdown-content > ul,
+.sl-markdown-content > ol {
+  max-width: 68ch;
+}
+.sl-markdown-content table {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95em;
+}
+.sl-markdown-content code {
+  font-feature-settings: 'calt' 0;
+}
+/* The one emphasised number on a page, used sparingly by hand: <span class="figure">3.78 ms</span> */
+.figure {
+  font-family: var(--bf-display);
+  font-weight: 600;
+  font-size: 1.1em;
+  color: var(--sl-color-text-accent);
+}

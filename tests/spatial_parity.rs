@@ -28,7 +28,7 @@
 //! Runtime: the fast gate is 10,000 bodies over 120 ticks at four thread policies (about two seconds).
 //! The `#[ignore]`d run is the release gate named in the plan: 100,000 bodies over 10,000 ticks, two
 //! runs — `cargo test --release --test spatial_parity -- --ignored --nocapture`. Its cost is measured
-//! and recorded in `docs/performance.md` rather than guessed at here.
+//! and recorded in `docs/dev/tuning/performance.md` rather than guessed at here.
 
 use bevy_flock::application::schedule::ThinkScheduler;
 use bevy_flock::domain::ids::NpcId;

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **Documentation is now three things instead of one pile.** An Astro + Starlight site in `site/` covers install, a first
+  crowd, concepts, guides and reference, published at <https://greysquirr3l.github.io/bevy-flock/>. Everything written for
+  maintainers moved under `docs/dev/` (ADRs, tuning journals, gates, benchmarks, lint policy, release checklists) and is
+  linked from the site rather than duplicated. `README.md` was cut to what a newcomer needs: the logo, the five-line
+  example, what the crate does, how to verify it in ten minutes, and where to read next.
+- **Neither ships.** Both crates exclude `docs/`, `site/`, `benchmarks/`, `crates/`, `scripts/` and the demo crates from the
+  package tarball. `cargo package --list` for `bevy-flock` contains no documentation directory.
+- **The simulation is its own crate.** `bevy-flock-core` now holds `domain`, `behavior`, `application`, `error` and
+  `testkit` with no Bevy app in its dependency graph, so a headless server, a replay tool or a test harness can run a crowd
+  without an engine. `bevy-flock` re-exports every path that moved, so existing code compiles unchanged; the only edit
+  needed is if you depended on the crate with `default-features = false`, where the `ecs` feature now decides whether the
+  three `Resource` derives exist. Feature names forward unchanged: `simd`, `threads`, `memory`, `serde`, `navmesh`.
 
 - **A fourth naming culture, and the names stop shouting.** `NameStyle` gains `Highland` — broad
   vowels, gutturals, and surnames taken from places rather than trades — so a world seed can land on
@@ -73,7 +85,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machine with no driver. `benches/frame.rs` separates a frame's latency (`frame`), its throughput
   (`eight_frames_per_drain`) and the cost of shipping pixels back (`frame_with_readback`), and reports
   the adapter it measured: on this sandbox that is `llvmpipe`, a CPU Vulkan driver, at 974.56 ms for
-  600x375 with 5,401,392 triangles. `docs/playbooks/gpu-demos.md` is the agent-facing instruction set
+  600x375 with 5,401,392 triangles. `docs/dev/tuning/playbooks/gpu-demos.md` is the agent-facing instruction set
   — environment classification, adapter policy, pipeline and shader rules, correctness gates, the
   benchmarking trap that made a drain-free loop look like encode time, and the documentation duties.
 - **Documentation audit.** ADR 0022 had been on disk and missing from the index since it landed; the
@@ -108,7 +120,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `noop` backend — pipeline, buffers, instance upload, render pass, submission, commands discarded.
   The CPU half of a wgpu frame is 33.6 µs for 2,064 instances and does not care how big the target is;
   the software path is 850 ms at full detail and 19.0 ms under the interactive budget. Figures,
-  caveats and what they do *not* say are in `docs/performance.md` and ADR 0050.
+  caveats and what they do *not* say are in `docs/dev/tuning/performance.md` and ADR 0050.
 - **A 3D playground with an animated crowd.** `demo/src/bin/ashfall-3d.rs` renders five views of the
   same city with no GPU, window or renderer dependency: a software rasteriser (`raster.rs`, with
   near-plane clipping, a depth buffer, footprint-aware procedural shading, supersampling and a
@@ -141,10 +153,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moved to one 28-byte row per agent and slices each bucket's range once, so the neighbour loop has
   no bounds check in it at all. That last part was not cosmetic: a per-neighbour `get` measured 19%
   slower on a dense crowd, and the row-plus-slice form is 2% faster than the array layout it
-  replaced (`docs/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way: it fails
+  replaced (`docs/dev/tuning/performance.md`, ADR 0049). `scripts/lint_audit.py` keeps it that way: it fails
   on any override outside its (empty) sanctioned table, on a sanctioned entry that has disappeared,
   and on a `Cargo.toml` whose `[lints]` no longer denies what the policy says it denies. Both
-  `docs/lint-policy.md` and the script's `--self-test` state and check what is enforced, and why. `raw_borrows_via_references`
+  `docs/dev/lint/lint-policy.md` and the script's `--self-test` state and check what is enforced, and why. `raw_borrows_via_references`
   and the two clippy 1.99 lints are enabled by a probe-gated CI job rather than the manifest, because
   the pinned 1.97 toolchain cannot name them and an unknown lint name warns on every downstream build.
 - **Reciprocal local avoidance (ADR 0045).** A second pass over the neighbour set the kernel
@@ -204,7 +216,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   costs) that reads as Markdown on a forge and builds with `mdbook`. The README gains a
   ten-minute verification section: every claim it makes is mapped to the test, benchmark or
   script that pins it.
-- **Platform and feature audit (`docs/platforms.md`).** Nine host configurations and four
+- **Platform and feature audit (`docs/dev/tuning/platforms.md`).** Nine host configurations and four
   `wasm32-unknown-unknown` configurations are now compiled and recorded, and the audit found
   a real bug: with `--no-default-features`, the memory leaves and the diagnostics reached
   into `memory`-gated modules, so the server build did not compile. The leaves now restate
@@ -265,7 +277,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is `unverified`, the sequential cell's spread propagates to every row that divides by it, and a run
   where fewer than half the cells could be verified exits 2. Found by the first full verification, where
   one 17.7 s outlier on the one-core denominator turned five rows into fake 9-12% gains.
-  `scripts/scaling_report.py` writes `docs/reports/scaling-report.md` — wall clock, speedup and
+  `scripts/scaling_report.py` writes `docs/dev/tuning/reports/scaling-report.md` — wall clock, speedup and
   efficiency matrices, the measured optimum against the cap formula, an ASCII chart and the verdict —
   from the same baseline the gate uses. The sweep moves to millisecond timing, two repeats per cell and
   a `meta` record, and corrects an earlier defect: shape B built six-crate bundles from an eight-crate
@@ -274,7 +286,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Group scaling measured at 1, 2, 3 and 6 cores, both task shapes.** `scripts/scaling_sweep.sh`
   pins every run with `taskset` and gives each task a cold target directory; `scripts/scaling_curves.py`
-  plots wall clock and speedup with the raw rows checked in at `docs/data/scaling-sweep.json`. Findings:
+  plots wall clock and speedup with the raw rows checked in at `docs/dev/tuning/data/scaling-sweep.json`. Findings:
   the cap formula is a floor with headroom (six one-thread tasks take 8 s, all eight take 5 s, because
   cargo's I/O start overlaps), threads per task dominates the curve, and a six-thread task is already
   queue-limited on three cores. ADR 0033 records all three, including the case where the formula
@@ -380,7 +392,7 @@ The eleven warnings a newer stable reports — six `assert_is_empty`, two `tuple
 the packed kernel, `manual_slice_fill`, `needless_borrows_for_generic_args` and
 `chunks_exact_to_as_chunks` — used to be one sentence in `plan.toml` with counts. A count is not an
 inventory: it does not say which file, it cannot be checked, and it goes stale silently.
-`docs/lint-drift.md` now lists every site with the rewrite stable wants, and
+`docs/dev/lint/lint-drift.md` now lists every site with the rewrite stable wants, and
 `scripts/lint_drift.py` derives that table from a live `cargo +stable clippy` run and fails CI when
 the two disagree in either direction: an unlisted warning, a row that is gone, or a table derived
 from a different clippy than the one running. A clippy that does not compile exits 2 rather than
@@ -443,9 +455,9 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 
 - `Cargo.lock` and `compat/Cargo.lock` are committed, and every CI job runs `--locked`, with a
   `lockfile` job that fails if either is stale. A dependency bump is now a commit rather than a
-  silent resolution, which matters because `docs/performance.md` publishes timings that only
+  silent resolution, which matters because `docs/dev/tuning/performance.md` publishes timings that only
   mean something against an exact dependency graph.
-- `docs/performance.md` grew a reproduction section: the toolchain and profile that are pinned,
+- `docs/dev/tuning/performance.md` grew a reproduction section: the toolchain and profile that are pinned,
   the lockfiles, the exact `cargo bench` command for each row, the host the numbers were taken
   on (6 vCPU Neoverse-N1, single-threaded paths), and what still varies between runs (1-4% run
   to run; a different machine is a different measurement, which is why the document argues in
@@ -467,9 +479,9 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 
 ### Documentation
 
-- `docs/memory.md`: heap and cache profile of the packed kernel, scalar and wide.
-- `docs/adr/0024`: the layout as a cost contract, the ordering constraints, and the parity rule.
-- `docs/release-checklist.md`: gate ledger, performance and memory sign-off for the
+- `docs/dev/tuning/memory.md`: heap and cache profile of the packed kernel, scalar and wide.
+- `docs/dev/adr/0024`: the layout as a cost contract, the ordering constraints, and the parity rule.
+- `docs/dev/meta/release-checklist.md`: gate ledger, performance and memory sign-off for the
   1,000,000-inhabitant milestone, with the open manifest/fold churn listed as a 1.0 blocker.
 - `examples/memory_probe.rs`: allocation and footprint probe, cachegrind-friendly.
 
@@ -609,7 +621,7 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 - ADR 0018 proposes the ambient continuum: population outside a manifest band becomes
   per-cell density advected by the flow field, manifested and folded deterministically,
   with a packed reflex batch for the band itself.
-- Full-suite measurement at 64,000 and 100,000 (see `docs/performance.md`): 64,000 reflex
+- Full-suite measurement at 64,000 and 100,000 (see `docs/dev/tuning/performance.md`): 64,000 reflex
   agents thinking every tick cost 11.44 ms of frame; 100,000 cost 14.01 ms. The crowd path
   with no brains at all costs **198 ms** at 100,000 — the real ceiling, and the one the
   continuum is aimed at.
@@ -622,7 +634,7 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
   with an anchor exemption, so NPCs nobody simulates cannot leak rows, and anchored
   memories fade in warmth without losing their record.
 - Gate 8 of ADR 0018 **fails**: a 5,000-entity manifest band costs 9.47 ms because the
-  crowd path costs ~1.9 ms per 1,000 steered NPCs. See `docs/gates/continuum.md`.
+  crowd path costs ~1.9 ms per 1,000 steered NPCs. See `docs/dev/tuning/gates/continuum.md`.
 
 - `application::packed`: steering over contiguous arrays with a bucket grid. 5,000 agents
   steer, integrate and advance in **1.50 ms**, against 9.47 ms through the ECS crowd path.

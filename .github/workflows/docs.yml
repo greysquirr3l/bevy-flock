@@ -1,0 +1,29 @@
+# The site is the adoption path, so a broken build is a broken front door. This job builds it on every change to site/
+# and fails on a build error rather than letting a broken page reach Pages.
+name: docs
+
+on:
+  push:
+    paths: ["site/**", ".github/workflows/docs.yml"]
+  pull_request:
+    paths: ["site/**", ".github/workflows/docs.yml"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No version pin here: pnpm/action-setup reads packageManager from site/package.json, so the lockfile and the
+      # tool that wrote it can never drift apart.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - name: install
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+      - name: build
+        working-directory: site
+        run: pnpm build

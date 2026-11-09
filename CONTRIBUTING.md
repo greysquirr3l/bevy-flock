@@ -18,7 +18,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 Dependencies are locked, and CI enforces it: `Cargo.lock` and `compat/Cargo.lock`
 are committed and every job runs `--locked`, with a `lockfile` job that fails if
 either has gone stale. If you change a dependency, commit the regenerated lockfile
-in the same commit as the manifest change. The reason is `docs/performance.md`:
+in the same commit as the manifest change. The reason is `docs/dev/tuning/performance.md`:
 the timings published there are only reproducible against an exact dependency
 graph, so a silent resolution bump would quietly invalidate them.
 
@@ -44,7 +44,7 @@ listed in the script with that reason.
 
 The lint profile (all + pedantic + nursery + cargo + perf, with `unwrap_used`,
 `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and `suspicious`
-denied) lives in `Cargo.toml`, and `docs/lint-policy.md` says what each exception
+denied) lives in `Cargo.toml`, and `docs/dev/lint/lint-policy.md` says what each exception
 is for. Do not add `#[allow]`: a denied lint that reappears in a file is caught by
 `scripts/lint_audit.py`, which runs in CI and fails on any override that is not on
 its sanctioned list. If a lint is genuinely wrong for this domain, argue for it in
@@ -73,7 +73,7 @@ reviewable in one place.
 
 ## Architecture
 
-`ARCHITECTURE.md` and `docs/adr/` explain the boundaries. The short version:
+`ARCHITECTURE.md` and `docs/dev/adr/` explain the boundaries. The short version:
 `domain/` is pure and knows nothing about Bevy, time, or I/O; adapters translate.
 A pull request that puts a `Transform` in `domain/` will be asked to move it.
 
@@ -186,9 +186,9 @@ short and it is measured:
   churn, not 3 minutes.
 - **Benchmark-bearing tasks get their own group**, because a benchmark sharing a machine with three
   compilations measures the machine.
-- **Re-baselining the scaling sweep is a reviewed commit.** `docs/data/scaling-sweep.json` is what the
+- **Re-baselining the scaling sweep is a reviewed commit.** `docs/dev/tuning/data/scaling-sweep.json` is what the
   `Scaling regression` job compares against (ADR 0034). If a change genuinely trades parallel
-  efficiency for something else, run `scripts/scaling_sweep.sh docs/data/scaling-sweep.json`, commit
+  efficiency for something else, run `scripts/scaling_sweep.sh docs/dev/tuning/data/scaling-sweep.json`, commit
   the raw rows with the reasoning, and say what got slower. Never re-baseline to clear a red build
   without explaining which trade-off was made.
 - **Cap by threads, not by task count** (ADR 0033). `cap = nproc / threads_per_task`: a workspace

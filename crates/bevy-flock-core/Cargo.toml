@@ -1,0 +1,43 @@
+[package]
+name = "bevy-flock-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
+description = "The engine-free simulation core of bevy-flock: spatial index, steering, behaviour trees, cognition tiers and the continuum ambient tier, with no Bevy app in the dependency graph."
+repository = "https://github.com/greysquirr3l/bevy-flock"
+homepage = "https://github.com/greysquirr3l/bevy-flock"
+license = "MIT OR Apache-2.0"
+publish = false
+# Same rule as the facade: this crate publishes code, and the tuning material stays in the repository.
+exclude = ["docs/"]
+
+[features]
+default = ["simd", "threads"]
+# Four agents at a time through `wide::f32x4` (ADR 0023): the band kernel's blocks and the crowd kernel's lanes.
+simd = ["dep:wide"]
+# Steering and the spatial build on the task pool (ADR 0044, 0059). Off gives a single-threaded, dependency-light core
+# for a deterministic replay harness, and the parallel passes fall back to their serial shapes rather than disappearing.
+threads = ["bevy_tasks/multi_threaded"]
+# Social memory: an opt-in store so a game that never remembers anyone does not pay for the rows.
+memory = []
+# Serialisation of blueprints, snapshots and authored behaviour trees.
+# `bevy_math/serialize` is not optional here: `Vec3` appears in every saved type, so a `serde` feature without it
+# produces deserialize impls that cannot be satisfied. The facade's serde feature had the same omission, hidden because
+# some other dependency happened to turn `serialize` on.
+serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy_math/serialize"]
+# A polygon navmesh with derived adjacency, area costs and a string-pulled route.
+navmesh = []
+# The `Resource` derives on `SimClock`, `FlockRegistry` and `MemoryStore`. Off by default here, which is the point: the
+# core builds with no engine in the graph, and the facade turns it on because a Bevy game is the reason it exists.
+ecs = ["dep:bevy_ecs"]
+[dependencies]
+bevy_math = "0.20.1"
+bevy_tasks = { version = "0.20.1", default-features = false }
+smallvec = "1.16"
+thiserror = "2.0"
+libm = "0.2"
+serde = { version = "1.0", features = ["derive"], optional = true }
+ron = { version = "0.9", optional = true }
+wide = { version = "1.7", default-features = false, optional = true }
+bevy_ecs = { version = "0.20.1", optional = true }

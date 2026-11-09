@@ -1,0 +1,40 @@
+# bevy-flock
+
+A deterministic NPC and crowd simulation library for Bevy 0.20. Rust, MSRV 1.97.1.
+Repository: https://github.com/greysquirr3l/bevy-flock
+
+## Two crates
+
+- bevy-flock: the Bevy-facing facade (plugin, components, systems). Re-exports everything from the core.
+- bevy-flock-core: the simulation with no engine in its dependency graph. For headless servers, replays, CI.
+
+## Start here
+
+- Install: cargo add bevy-flock; verify with `cargo run --example hello_flock`.
+- A crowd in five lines: App::new(); add_plugins(FlockPlugin::new(FlockConfig::preset(CrowdPreset::CityAmbient))); app.update().
+- Read state: app.flock_stats().population(), SimClock resource, Npc / NpcVelocity / NpcNeeds / NpcTemperament components.
+
+## Concepts
+
+- Tick-based and deterministic: same seed + features + platform gives the same state digest.
+- Uniform spatial grid, rebuilt per frame or per N frames; byte-identical across worker counts.
+- Tiers by distance: reflex (steering), ambient (cheap decision), cognition (full tree, memory, dialogue).
+- Bands above ~250k: a density/velocity field that manifests individuals near the camera and folds them away from it.
+
+## Features
+
+simd (on), threads (on), ecs (on), memory (off), serde (off), navmesh (off).
+
+## Performance, reference machine
+
+1M band frame 3.78 ms wide / 4.75 ms scalar (gate 6 ms). 100k with 5,000 manifested 3.37 ms. 1M spatial rebuild 4.572 ms
+at 6 workers. 32 B per agent wide, 28 B scalar, zero steady-state allocations.
+
+## Not included
+
+Rendering, physics, networking, filesystem adapters, dialogue content. It simulates; Bevy renders.
+
+## Internals
+
+ADRs, performance journals, gates and benchmark harnesses live in the repository under docs/dev/ and are not published to
+crates.io.

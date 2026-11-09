@@ -16,7 +16,7 @@
 //! necessarily bought anything: the no-allocation suites in this repository assert zero steady-frame
 //! allocations, so a mechanism that allocates per pass is not adoptable however fast it is.
 //!
-//! Output is JSON lines so the numbers can be pasted into docs/performance.md without retyping them.
+//! Output is JSON lines so the numbers can be pasted into docs/dev/tuning/performance.md without retyping them.
 //!
 //! ```text
 //! cargo run --release --example spawn_cost

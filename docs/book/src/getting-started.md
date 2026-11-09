@@ -21,9 +21,9 @@ frames (budgeted, so a large crowd does not stall the first tick), and registers
 that steer it. There is nothing else to add, and nothing to draw: the plugin moves
 `Transform`s and leaves rendering to you.
 
-If you have no renderer at all — a server, a test, a benchmark — use `App::new()` and add
+If you have no renderer at all, a server, a test, a benchmark, use `App::new()` and add
 only `FlockPlugin`. The crate never asks for a window, and every benchmark in
-`docs/performance.md` was measured headless.
+`docs/dev/tuning/performance.md` was measured headless.
 
 ## Sizing the crowd
 
@@ -38,7 +38,7 @@ let config = FlockConfig::preset(CrowdPreset::CityAmbient).with_population(size)
 `PopulationSize::try_new` is fallible on purpose: a population of zero or above
 `MAX_POPULATION` is a bug in the game's configuration, and the crate refuses it at the point
 where it can still be reported instead of clamping it into a silent surprise. Above 10,000,
-see [Crowds at scale](crowds-at-scale.md) — the answer is not "more entities", it is bands
+see [Crowds at scale](crowds-at-scale.md), the answer is not "more entities", it is bands
 and density.
 
 Two ways to fill those slots:
@@ -110,12 +110,12 @@ app.add_plugins(FlockPlugin::new(FlockConfig::preset(CrowdPreset::CityAmbient)))
     .insert_resource(ThinkSchedule::new(2_000, VirtualCost::from_micros(900)));
 ```
 
-`ThinkSchedule::DEFAULT_BUDGET` is 14 ms of *virtual* cost — not wall time. The scheduler
+`ThinkSchedule::DEFAULT_BUDGET` is 14 ms of *virtual* cost, not wall time. The scheduler
 spends a queue of per-NPC costs against that number, which makes a frame's thinking
 reproducible on any machine (see [The model](the-model.md)). Nine hundred microseconds of
 virtual cost does not buy two thousand deliberating NPCs; it buys a few dozen deliberating,
 a few hundred reacting and the rest running on reflex. That is the design, not a
-limitation — it is also what a real crowd looks like.
+limitation, it is also what a real crowd looks like.
 
 `TierConfig` and `WeightConfig` are the other two knobs: how distance picks a tier, and how
 close an NPC has to be before it is worth promoting.
@@ -155,7 +155,7 @@ Checklist before you ship it:
 
 ## Next
 
-- [The model](the-model.md) — what a tick actually does, and in what order.
-- [Behaviour](behaviour.md) — give them something to want.
+- [The model](the-model.md), what a tick actually does, and in what order.
+- [Behaviour](behaviour.md), give them something to want.
 - `examples/hello_flock.rs` first, then `examples/horde_100k.rs` for the moment the crowd
   stops being a list.

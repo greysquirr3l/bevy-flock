@@ -92,7 +92,8 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// The core source tree, rooted at `src/`.
 fn core_sources() -> Vec<(String, String)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    // The core layers moved to their own crate (ADR 0058); the scanner follows them rather than the facade.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/bevy-flock-core/src");
     let mut files = Vec::new();
     for layer in CORE_LAYERS {
         let mut found = Vec::new();
@@ -186,4 +187,40 @@ fn the_scanner_ignores_comments_and_catches_attributes() {
     // A token, not a prefix: the crate has a `bevy_flock_app`-shaped name nowhere, but a substring match would
     // also flag `bevy_application` and make the guard cry wolf.
     assert!(!names("use bevy_application_shim::Thing;", "bevy_app"));
+}
+
+/// Every `bevy_ecs` mention left in a core file is gated by the `ecs` feature.
+///
+/// The ledger says *which* files may mention the engine. This says they may only mention it inside a
+/// `#[cfg_attr(feature = "ecs", derive(...))]`, which is the difference between a temporary exception and a permanent
+/// one: a bare `#[derive(Resource)]` would compile, pass the ledger check, and quietly put the engine back in the
+/// core's dependency graph the moment the core crate stops enabling the feature.
+///
+/// This is the test that lets `bevy-flock-core` build with `default-features = false` and no `bevy_ecs` at all: if a
+/// future derive creeps in ungated, it fails here rather than in a downstream crate that cannot compile.
+#[test]
+fn core_mentions_of_the_engine_are_feature_gated() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/bevy-flock-core/src");
+    let mut checked = 0usize;
+    for relative in ECS_EXCEPTIONS {
+        let path = root.join(relative);
+        let source = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(!source.is_empty(), "{} is unreadable", path.display());
+        for (number, line) in source.lines().enumerate() {
+            if !line.contains("bevy_ecs") {
+                continue;
+            }
+            assert!(
+                line.contains("feature = \"ecs\""),
+                "{}:{} names the engine without gating it on the `ecs` feature: {line}",
+                path.display(),
+                number + 1
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= ECS_EXCEPTIONS.len(),
+        "the gate check found nothing to check"
+    );
 }

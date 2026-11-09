@@ -67,7 +67,7 @@ and allocates nothing once that buffer is warm. It was not always so: the first 
 copy, per frame. Measured with `demo/benches/crowd_readback.rs`, that cost 30 µs at 2,000 bodies and
 150 µs at 10,000, half of it the sort and the copies. Caching the query, reusing the buffer and
 sorting in place took it to 18 µs and 90 µs; the remaining cost is the ECS iteration itself, at
-roughly 7 ns a body. `docs/performance.md` has the table and the numbers behind it.
+roughly 7 ns a body. `docs/dev/tuning/performance.md` has the table and the numbers behind it.
 
 When the frame count runs out, the run prints one line and exits:
 
@@ -76,7 +76,7 @@ ashfall-playground: 300 frames at 1280x800 — median 4.1 ms (243.9 fps), mean 5
 ```
 
 Read the median. The mean carries the first frames, which include shader compilation and pipeline
-creation; the p95 is the stutter ceiling. `docs/playbooks/bevy-playground.md` covers the rest:
+creation; the p95 is the stutter ceiling. `docs/dev/tuning/playbooks/bevy-playground.md` covers the rest:
 building for Metal, capturing frames, and the plugin list this crate had to name because the `bevy`
 umbrella was not there to add it — each omission of which shows up as a black or flat-coloured
 window with no error.

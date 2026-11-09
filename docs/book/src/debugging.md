@@ -67,7 +67,7 @@ library with a gizmo dependency is a crowd library that cannot be used on a serv
    the whole crowd; the default spreads it.
 3. **Check the grid volume.** The rebuild is a fixed cost sized from the configured volume:
    a 1 km box is ~1.0 ms per frame regardless of population, a 200 m box ~20 µs.
-4. **Profile.** `docs/performance.md` records the flamegraph method and what it found: the
+4. **Profile.** `docs/dev/tuning/performance.md` records the flamegraph method and what it found: the
    steering kernel, then the neighbour walk, then the write pattern.
 
 ## "It is not deterministic"
@@ -78,7 +78,7 @@ the cause is one of:
 - **Something read the clock.** `Instant::now` in a leaf, a system or a provider.
 - **Something iterated a `HashMap`.** Iteration order of a hash map is not a contract.
 - **Something used a global RNG.** `rand::thread_rng` is not seeded by the world.
-- **Something depended on spawn order** without using the seeded stream — an `Entity` id is
+- **Something depended on spawn order** without using the seeded stream, an `Entity` id is
   not stable across runs, an `NpcId` is.
 - **Something used `f32` transcendentals** compiled differently; the crate uses `libm` for
   exactly this reason.

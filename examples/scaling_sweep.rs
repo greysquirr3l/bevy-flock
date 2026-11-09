@@ -14,7 +14,7 @@
 //! Every cell is the median of `REPEATS` runs of the same fixtures, so a single scheduler hiccup on a VM
 //! cannot become a curve. Output is JSON lines: one `meta` record naming the machine and the fixtures, then
 //! one record per (phase, thread count). `scripts/spatial_scaling.py` turns them into the table and the
-//! figure in `docs/performance.md`.
+//! figure in `docs/dev/tuning/performance.md`.
 //!
 //! ```text
 //! cargo run --release --example scaling_sweep > /tmp/spatial-scaling.json
