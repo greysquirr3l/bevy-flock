@@ -19,6 +19,8 @@ pub struct AnimationState {
     slide: FootSlide,
 }
 
+impl AnimationState {}
+
 impl AnimationState {
     /// The LOD level and the counters behind it.
     #[must_use]
