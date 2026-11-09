@@ -80,23 +80,28 @@ fn grid(population: usize, threads: usize) -> SpatialGrid {
 }
 
 fn bench_build(criterion: &mut Criterion) {
+    // Serial and parallel side by side: the gate needs a parallel baseline to protect, and keeping the
+    // serial case means a regression in either path has somewhere to show up.
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let mut group = criterion.benchmark_group("spatial_build");
     for population in [100_000_usize, 1_000_000] {
-        // Filled once, outside the loop: `build()` is what is being measured, not `extend_from`.
-        let mut grid = grid(population, 1);
         group.throughput(Throughput::Elements(num::i64_to_u64(num::usize_to_i64(
             population,
         ))));
-        group.bench_with_input(
-            BenchmarkId::new("build", population),
-            &population,
-            |bencher, _| {
-                bencher.iter(|| {
-                    grid.build();
-                    black_box(&grid);
-                });
-            },
-        );
+        // Filled once, outside the loop: `build()` is what is being measured, not `extend_from`.
+        for (label, threads) in [("build", 1_usize), ("build_parallel", workers)] {
+            let mut grid = grid(population, threads);
+            group.bench_with_input(
+                BenchmarkId::new(label, population),
+                &population,
+                |bencher, _| {
+                    bencher.iter(|| {
+                        grid.build();
+                        black_box(&grid);
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }

@@ -122,6 +122,7 @@ pub struct BoidsConfig {
     avoidance: Option<AvoidanceParams>,
     temperament: Option<TemperamentDrive>,
     needs: Option<NeedsDecay>,
+    workers: usize,
 }
 
 impl BoidsConfig {
@@ -154,6 +155,7 @@ impl BoidsConfig {
             avoidance: Some(AvoidanceParams::new()),
             temperament: Some(TemperamentDrive::default()),
             needs: Some(NeedsDecay::default()),
+            workers: 0,
         })
     }
 
@@ -163,7 +165,25 @@ impl BoidsConfig {
         self.params
     }
 
-    /// The spatial grid parameters.
+    /// Workers the per-tick rebuild may use.
+    ///
+    /// `0` means "as many as the machine has", resolved once per rebuild. A count larger than
+    /// [`std::thread::available_parallelism`] is clamped, because oversubscription measured 25% *slower*
+    /// on every phase of the sweep in `docs/performance.md` — six workers on six cores beat eight every
+    /// time, so a configuration cannot ask the framework to make that mistake.
+    #[must_use]
+    pub const fn workers(&self) -> usize {
+        self.workers
+    }
+
+    /// Set the worker count for the per-tick rebuild. `0` restores the machine default.
+    #[must_use]
+    pub const fn with_workers(mut self, workers: usize) -> Self {
+        self.workers = workers;
+        self
+    }
+
+    /// The spatial grid the perception pass builds every tick.
     #[must_use]
     pub const fn grid(&self) -> SpatialGridConfig {
         self.grid
@@ -293,6 +313,7 @@ impl Default for BoidsConfig {
             avoidance: Some(AvoidanceParams::new()),
             temperament: Some(TemperamentDrive::default()),
             needs: Some(NeedsDecay::default()),
+            workers: 0,
         }
     }
 }
@@ -394,10 +415,31 @@ impl Plugin for BoidsPlugin {
 ///
 /// Reads positions and velocities, writes the grid. Runs first in the frame so
 /// steering sees the world as it is now, not as it was last tick.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
+)]
 pub fn rebuild_spatial_grid(
     mut grid: ResMut<FlockSpatialGrid>,
+    config: Res<BoidsConfig>,
     query: Query<(&Transform, &Npc, &NpcVelocity)>,
 ) {
+    // Asking for more workers than the machine has costs throughput rather than buying it: the sweep in
+    // `docs/performance.md` measured eight workers on six cores at 25% slower than six. `0` means the
+    // machine default, so the framework never oversubscribes unless someone insists by name.
+    let available = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let workers = if config.workers() == 0 {
+        available
+    } else {
+        config.workers().min(available)
+    };
+    if workers != grid.0.threads() {
+        // `with_threads` takes the grid by value; the grid is the resource's own, so this is a move
+        // rather than a copy of the cell array.
+        let grid_owned =
+            std::mem::replace(&mut grid.0, crate::domain::spatial::SpatialGrid::empty());
+        grid.0 = grid_owned.with_threads(workers);
+    }
     grid.0.clear();
     for (transform, npc, velocity) in &query {
         grid.0.insert(GridEntry {
@@ -1021,6 +1063,45 @@ mod tests {
         assert!(
             decayed.satiety < start.satiety,
             "the fourth frame decays the burst"
+        );
+    }
+
+    #[test]
+    fn the_ecs_rebuild_is_identical_at_any_worker_count() {
+        // The sweep found that the rebuild scales, but a framework is not a benchmark: the wiring has to
+        // produce the same grid in a running App as it does on the bench fixture. Two thousand bodies is
+        // over `PARALLEL_MIN_BODIES`, so the parallel path is genuinely taken rather than skipped.
+        let digests: Vec<u32> = [1_usize, 2, 3, 8]
+            .into_iter()
+            .map(|workers| {
+                let mut app = app();
+                app.world_mut()
+                    .resource_mut::<BoidsConfig>()
+                    .clone_from(&BoidsConfig::default().with_workers(workers));
+                for index in 0..2_000_u32 {
+                    let step = crate::domain::num::u32_to_f32(index);
+                    let radius = 3.0 + (step * 0.37).rem_euclid(20.0);
+                    let angle = step * 0.618_034;
+                    app.world_mut().spawn(
+                        NpcBundle::default_for(NpcId::unique(index)).with_position(Vec3::new(
+                            radius * libm::cosf(angle),
+                            0.0,
+                            radius * libm::sinf(angle),
+                        )),
+                    );
+                }
+                app.update();
+                let grid = app.world().resource::<FlockSpatialGrid>();
+                crate::testkit::spatial_digest(
+                    &grid.0,
+                    &[Vec3::ZERO, Vec3::new(9.0, 0.0, 4.0)],
+                    12.0,
+                )
+            })
+            .collect();
+        assert!(
+            digests.windows(2).all(|pair| pair.first() == pair.get(1)),
+            "the ECS rebuild must not depend on its worker count, got {digests:?}"
         );
     }
 
