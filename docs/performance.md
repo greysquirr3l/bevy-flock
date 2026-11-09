@@ -1630,3 +1630,40 @@ derived block counts at seven cell counts, so an edit to the constant fails a te
 The sweep also says what the block constant *cannot* buy: `prefix` is 0.22–0.28 ms of a 6.7 ms rebuild at every
 setting, so no choice here moves the total by more than noise. The 5x gate does not hinge on it — the dispatch tax
 does (§*What a thread hand-off costs*), which is what T05 is for.
+
+## Why the continuity gates were slow (and what the cost actually was)
+
+`tests/band_continuity.rs` runs five gates, four of which drive 10,000 ticks of a full `App`. The suite reported
+`gate_6` and `gate_7` "running for over 60 seconds" and one run left `gate_6` at **39 minutes and 213% CPU** before it
+was killed, so the first question was whether the fixture does something quadratic per tick.
+
+It does not. `examples/band_ticks.rs` was written to ask: same app, same 40,000-person seed, same sine path, every
+tick timed.
+
+| profile | per tick | 10,000 ticks |
+| --- | ---: | ---: |
+| release, moving camera | 1.62 ms median (p95 1.76) | 16 s |
+| release, camera held still | 1.56 ms median | 15 s |
+| dev/test profile, `gate_6` alone | 31 ms | 5 min 14 s |
+
+Two findings, and neither is an algorithmic one.
+
+**The camera is not the cost.** Holding it still moves the median by 0.06 ms: the ration's spawns and despawns are
+noise beside the per-tick work. Whatever the gates spend, they spend it every tick whether anyone crosses the band or
+not, which is the steering kernel plus the systems' own scans.
+
+**The profile is the cost.** 31 ms against 1.62 ms is 19x, and it is 19x on SIMD code that the dev profile does not
+vectorise, does not inline, and re-checks on every arithmetic op. Five such tests running in parallel on six cores
+with one counting allocator between them is where the 39 minutes came from — not from anything the band does.
+
+So the fix is a `[profile.test]` with `opt-level = 2`, not a smaller fixture and not an `#[ignore]`. The ticks are the
+gate (ADR 0022); the profile was never part of what it asserts, and `debug-assertions` and `overflow-checks` are still
+inherited from `dev`, so the tests keep checking. Measured effect, whole file, five gates:
+
+| | wall clock |
+| --- | ---: |
+| dev profile | > 39 min (killed) |
+| `opt-level = 2` | **45 s** |
+
+The compile side pays about a minute for the test profile once. Everything after that is fifty times cheaper, which
+is the difference between a suite nobody runs locally and one that finishes while you read the diff.

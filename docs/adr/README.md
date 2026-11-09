@@ -86,3 +86,4 @@ replay.
 | [0056](0056-placement-cursor-is-a-copy.md) | The placement cursor is a copy, not the window table | Accepted |
 | [0057](0057-fused-count-and-scan.md) | The count pass absorbs the scan's totals, and the scan seats its own cursors | Accepted |
 | [0058](0058-core-crate-boundary.md) | The simulation core becomes a crate, and the engine keeps the adapter | Accepted |
+| [0059](0059-worker-pool-ownership.md) | Who owns the buffers a parked worker writes: two scopes now, one `unsafe` module only if it is earned | Accepted |

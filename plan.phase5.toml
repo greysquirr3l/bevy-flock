@@ -393,3 +393,22 @@ constant and proved only that it is self-consistent.
 The sweep also bounds what this task could ever win: prefix is 0.22-0.28 ms of a 6.7 ms rebuild at every setting, so
 no choice of constant moves the total beyond noise. The 5x gate hinges on the dispatch tax, which is T05.
 """
+
+[[completed]]
+task = "phase-5 T05 persistent-worker-pool: ownership decided (ADR 0059)"
+delivered_in = "perf/continuity-gates"
+note = """
+T05 turned out to be a soundness decision before it was a task, and the decision is now on record rather than
+discovered halfway through an implementation. A thread that outlives a call cannot hold a borrow of the grid's
+buffers, and the passes do not merely outlive the call — clear needs &mut on the cell list that count needs to read,
+which is why there are three scopes today and not one.
+Three options were priced. An unsafe parked pool takes the whole 1.59 ms dispatch tax and costs a hand-written
+aliasing guarantee in a crate whose lints were tightened because that class of bug had already shipped. Interior
+mutability is safe and either serialises the passes behind one mutex or pays a lock per block in exactly the loops
+being optimised, and it would fragment cell_start into something the rest of the crate assumes is contiguous.
+bevy_tasks is 13 us a round and allocates nine times, which the no-allocation promise refuses.
+Chosen: fuse the passes that do not conflict into one scope (count, block scan, place — disjoint &mut slices, bases
+derived per worker between barriers), keeping clear alone. That is one scope instead of three for a restructure of
+existing code with no unsafe, and it takes two thirds of the tax. The last third stays behind a feature flag until
+someone needs it enough to run Miri over it.
+"""
