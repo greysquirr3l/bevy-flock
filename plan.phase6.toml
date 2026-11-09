@@ -1,0 +1,252 @@
+# plan.phase6.toml — bevy-flock, phase 6: split the simulation core out of the engine adapter
+#
+#   wiggum validate plan.phase6.toml
+#   wiggum generate plan.phase6.toml --dry-run
+#
+# The crate is a hexagon that only habit holds together. `src/ports` has no dependencies at all, `src/domain` names
+# `bevy_math` in ten files and `bevy_ecs` in one — and that one is a `#[derive(Resource)]`. `src/behavior` is the
+# same. Everything that needs the engine lives in `src/adapters`, where `bevy_app` appears in sixteen files,
+# `bevy_transform` in fourteen and `bevy_ecs` in twenty. `cargo tree -p bevy-flock` is 186 lines, and most of the
+# app-runtime half of it is compiled for the benefit of twenty-three files.
+#
+# So the boundary is already drawn; what is missing is that nothing enforces it. `tests/core_boundary.rs` now does,
+# for the four engine crates that matter and for the one ECS exception ledger below, and it earned its keep on the
+# first run by finding `behavior/social.rs` importing `crate::adapters::primary::perception` for two blackboard
+# keys. That was the hexagon inverted: a core behaviour learning its own inputs from an adapter. The keys moved
+# into `behavior::social`, `perception` re-exports them so its published path still resolves, and the arrow points
+# the way it is drawn.
+#
+# This phase finishes the job by paying for the structure rather than for the scan:
+#
+#   before                                    after
+#   one crate, 73 files                        bevy-flock-core (ports, domain, behavior, application)
+#   bevy_app/bevy_transform in the core        + bevy-flock (adapters, plugin, prelude, re-exports)
+#   3 bevy_ecs exception files                 + bevy-flock-anim, unchanged
+#                                             0 bevy_ecs exception files
+#
+# The shape is deliberately two crates and not five. Splitting `domain`, `ports`, `behavior` and `application` from
+# each other buys nothing a consumer can observe — Cargo builds a dependency chain in order regardless, so only the
+# root of the chain gets faster — while costing four more strict lint tables, four more manifests for the audit, and
+# a re-export layer for every internal type. `bevy-flock-anim` stays separate because it already is, for a reason
+# that still holds: it needs `bevy_animation`, which no headless simulation should compile.
+#
+# Two decisions carry the whole phase and are worth stating before any file moves:
+#
+# 1. **Module paths do not change inside the core.** `crate::domain::num` stays `crate::domain::num`; the four
+#    layer modules move directory-for-directory into the new crate. That is what keeps the change mechanical: 62
+#    files reference `crate::domain`, 20 `crate::behavior`, 17 `crate::application`, and none of them need editing.
+#    Only the adapter layer rewrites its imports, and it is 23 files.
+# 2. **The facade re-exports, it does not re-implement.** `bevy-flock` keeps `pub use bevy_flock_core::{domain,
+#    application, behavior, ports};` and its prelude, so `bevy_flock::domain::num::f32_to_i64` — the path in the
+#    README, in three demos and in every ADR — resolves unchanged. A split that renames the public surface is a
+#    breaking release disguised as an internal refactor.
+#
+# The measurement that justifies the phase is compile time, so it is the phase's last task rather than its first
+# claim: `cargo check -p bevy-flock-core` must not build `bevy_app`, `bevy_transform` or `bevy_render`, verified
+# with `cargo tree` rather than asserted in prose, and `cargo test -p bevy-flock-core` must run the simulation suite
+# without them.
+#
+# Execution groups derive from `depends_on` alone (ADR 0033); scripts/group_cap.py chooses how many run at once.
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name        = "bevy-flock"
+description = """
+bevy-flock is a crowd and NPC simulation engine for Bevy 0.20, and phase 6 is the work that turns its hexagonal
+layout into two crates so the simulation can be compiled and tested without the engine's app runtime.
+"""
+language     = "rust"
+path         = "/home/ubuntu/bevy-flock"
+architecture = "hexagonal"
+conventions = [
+    "Strict lint policy: only six allows repo-wide, `unwrap`/`expect`/`panic`/`indexing` denied everywhere including tests, every exception audited by scripts/lint_audit.py with a reason and a removing task. A new crate means a new manifest with the same spine — that is a cost of the split, not a reason to relax it.",
+    "The public surface does not move. `bevy_flock::domain`, `bevy_flock::application`, `bevy_flock::behavior`, `bevy_flock::ports` and the prelude keep resolving through re-exports, because a demotion of a public path between 0.1.0 and 0.2.0 is a breaking change sold as housekeeping.",
+    "Determinism is a documented guarantee (ADR 0004). A split that changes the order of anything observable — type identity, float evaluation, iteration order — is a regression regardless of how tidy the tree looks afterwards.",
+    "One commit per relocation, each one compiling and green, so a bisect lands on the file that broke rather than on the phase. A single commit that moves seventy files cannot be reviewed and cannot be reverted selectively.",
+    "Every task ends with `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, the full test suite and `python3 scripts/lint_audit.py`; commit author is Nick Campbell <s0ma@protonmail.com>.",
+    "The engine boundary is enforced by `tests/core_boundary.rs`, not by review. Its `bevy_ecs` ledger shrinks to empty during this phase; it never grows.",
+]
+[[phases]]
+name  = "Decide the boundary, then move the files"
+order = 1
+description = "Contract the two-crate split in an ADR, extract the core with its module paths intact, empty the ECS exception ledger, and prove with `cargo tree` that a headless consumer no longer compiles the app runtime."
+[[phases.tasks]]
+slug      = "core-split-adr"
+kind      = "research"
+title     = "ADR 0058: two crates, feature forwarding, and why the public paths do not move"
+goal      = "Write the decision record for `bevy-flock-core` + `bevy-flock` before any file moves, so the extraction has a stated contract to be checked against: what belongs in the core, how the four feature flags (`memory`, `threads`, `serde`, `wide`) forward from the facade, how the facade re-exports without breaking a single published path, and which of the five candidate crates was rejected and why."
+depends_on = []
+hints = [
+    "Include the dependency counts that motivated the phase: 186 nodes in `cargo tree -p bevy-flock`, `bevy_app` in 16 adapter files, `bevy_transform` in 14, and the fact that the core names `bevy_ecs` in exactly three files, all of them derives or a prelude import.",
+    "Feature forwarding is where this goes wrong quietly. A facade feature that adds a dependency to the facade but not to the core produces a `bevy-flock` whose `memory` support compiles while `bevy-flock-core`'s does not. State the rule: every facade feature is `dep:...`-free and forwards to a core feature of the same name plus whatever the adapter itself needs.",
+    "Say explicitly what the split does not buy: not a faster incremental build of the facade, because Cargo still builds core before adapters. What it buys is a consumer that does not compile the engine at all, and a boundary the compiler enforces instead of a test that greps.",
+    "Record the rejected shapes — five crates, a `-types` crate, a workspace with the demo crates folded in — with the reason each lost. The demo crates are excluded deliberately today (their own lock files, their own release profiles, three renderers before one simulation test).",
+    "The ADR must survive a hostile reading in a year: name the type-identity hazard (two versions of the core in one binary is a compile error, not a silent wrong answer) and the doc-link hazard (intra-doc links from adapters into core need a path that resolves in the facade's rustdoc).",
+]
+test_hints = [
+    "No test — this is the record the later tasks are graded against. Its acceptance is that each of the four following tasks can point at a paragraph and say whether it complied.",
+]
+must_haves = [
+    "The dependency boundary is stated as the set of crates the core may name, not as prose about layers",
+    "Feature forwarding is specified per feature, with the failure mode of getting it wrong written down",
+    "The public-path guarantee is explicit and says which paths are covered by it",
+    "The rejected shapes are recorded with reasons",
+]
+evaluation_criteria = [
+    "A reader who has never seen the repository can predict which crate a given file belongs in",
+    "Nothing in the ADR depends on a measurement that phase 6 has not taken",
+]
+[[phases.tasks]]
+slug      = "extract-core-crate"
+kind      = "infrastructure"
+title     = "Move the four core layers into `bevy-flock-core` with their module paths unchanged"
+goal     = "Create `crates/bevy-flock-core` and relocate `domain`, `ports`, `behavior` and `application` into it verbatim, keeping every `crate::` path inside the core identical, then reduce `bevy-flock` to the adapter layers plus re-exports that preserve the published paths."
+depends_on = ["core-split-adr"]
+hints = [
+    "Move directories, not files: `git mv src/domain crates/bevy-flock-core/src/domain` and three more like it, so the history follows the code and `git log --follow` still works on a module a reader is trying to understand.",
+    "Inside the core the paths do not change, which is the entire trick. `crate::domain::num` still means what it meant; only the adapter files, which currently say `crate::domain::...`, must say `bevy_flock_core::domain::...` instead.",
+    "`src/lib.rs` splits in two: the core's root declares the four layer modules plus `error` and `testkit`; the facade's root declares `adapters`, the plugin, the prelude, and `pub use bevy_flock_core::{application, behavior, domain, ports, error, testkit};`. Keep `pub use adapters::primary::{...}` as it is.",
+    "The testkit is core, but the adapter tests use it. That is fine and it is the reason it belongs in the core: a consumer who plugs their own adapters needs `OrDie` and friends too.",
+    "`tests/` and `benches/` are mostly written against the public `bevy_flock::` path and should need no edits. The ones that reach into internals (`tests/spatial_parity.rs` uses `bevy_flock::domain::spatial`) keep working through the re-export; fix only what the compiler names.",
+    "Feature flags move with their dependencies: `serde`/`ron`/`wide`/`memory` are core features, `threads` stays in the core because the batch query lives there, and the facade forwards all of them. `default` in the facade must enable the same set it does today, or a consumer's `default-features = false` silently stops meaning what it meant.",
+    "Add the new crate to `[workspace] members = [\"crates/*\"]` — it is already covered by the glob — and give it the strict lint spine, because `scripts/lint_audit.py` validates every policy-carrying manifest and will fail the task if the table is missing or weaker.",
+]
+test_hints = [
+    "The full root suite must pass without editing a single test file. A test that needs an import changed is evidence the public-path guarantee was broken and is the defect to fix, not the test.",
+    "`cargo test -p bevy-flock-core` runs the simulation suite; `cargo test -p bevy-flock` runs adapters, integration tests and the boundary guard. Both must be green.",
+    "`git log --follow crates/bevy-flock-core/src/domain/spatial.rs` still reaches the phase-3 commits — checked once by hand, because a copied file loses its history and nobody notices until an archaeology question.",
+]
+must_haves = [
+    "No file inside the core changes its `crate::` paths",
+    "Every path under `bevy_flock::` that resolved before the split resolves after it",
+    "The facade's default feature set is unchanged",
+    "Both crates carry the full lint spine and pass the audit",
+]
+evaluation_criteria = [
+    "The root test suite passes with zero test-file edits",
+    "`git log --follow` traces a moved core module back past the split",
+    "No new `#[expect]` or `#[allow]` was introduced to make the move compile",
+]
+[[phases.tasks]]
+slug      = "rehome-ecs-resources"
+kind      = "infrastructure"
+title     = "Empty the `bevy_ecs` exception ledger so the core has no ECS dependency at all"
+goal     = "Remove the three places the core names `bevy_ecs` — `domain/memory.rs`'s conditional `Resource` derive, `behavior/registry.rs`'s derive, and `application/mod.rs`'s prelude import — by moving registration into the adapter layer, so `tests/core_boundary.rs`'s ledger is empty and the core's dependency set is `bevy_math` and `bevy_tasks` only."
+depends_on = ["extract-core-crate"]
+hints = [
+    "The two derives are the whole of the domain and behaviour coupling, and both are on types whose ECS role is an adapter concern: `SocialMemory` and `BehaviorRegistry`. The options are a newtype wrapper in `adapters` that owns the derive, or an explicit `unsafe impl`-free registration in the plugin that inserts the value rather than deriving on the type. Prefer the wrapper: it is visible at the point of use and keeps the core type usable outside Bevy, which is the point of the phase.",
+    "A wrapper costs a deref and a `.0` at every adapter call site. Count those sites before choosing — if the derive is load-bearing in fifty places, say so in the task notes and keep the derive behind a core feature that a headless consumer turns off, rather than pretending the wrapper is cheaper than it is.",
+    "`application/mod.rs`'s `use bevy_ecs::prelude::*` is the interesting one: the application layer's public API may hand out `Entity` or take a `Resource`. If it does, that is a genuine design question about where the ECS boundary sits, and the answer belongs in ADR 0058's consequences rather than in a `#[cfg]`.",
+    "After the move, `bevy_ecs` should still be a dependency of the core crate only if a feature that a consumer opts into needs it. A `default-features = false` build of the core must not compile it.",
+]
+test_hints = [
+    "`tests/core_boundary.rs::bevy_ecs_appears_only_where_the_ledger_says` passes with `ECS_EXCEPTIONS` deleted entirely, not merely shortened — the constant and its test should go, because an empty ledger is a guard nobody reads.",
+    "The `memory` feature's tests still pass, in both crates, with the wrapper in place.",
+    "`cargo tree -p bevy-flock-core --no-default-features` names no `bevy_ecs`.",
+]
+must_haves = [
+    "The `bevy_ecs` exception ledger is deleted rather than emptied",
+    "`cargo tree -p bevy-flock-core --no-default-features` contains no `bevy_ecs`",
+    "The memory feature's behaviour is unchanged, proven by its existing tests",
+]
+evaluation_criteria = [
+    "The core crate's manifest lists no engine crate other than `bevy_math` and `bevy_tasks`",
+    "No adapter call site gained a silent clone or an allocation to work around the wrapper",
+]
+[[phases.tasks]]
+slug      = "headless-consumer-gate"
+kind      = "audit"
+title     = "Prove with `cargo tree` that a headless consumer compiles the simulation and not the engine"
+goal     = "Record the compile-time and dependency result of the split: `cargo check -p bevy-flock-core` — and `cargo tree -p bevy-flock-core` — must be free of `bevy_app`, `bevy_transform` and `bevy_render`, the numbers go into docs/performance.md and the README's headless section, and the split's own claim is graded against the measurement rather than the intention."
+depends_on = ["rehome-ecs-resources"]
+hints = [
+    "Measure what the phase claims: wall time of `cargo check -p bevy-flock-core` against `cargo check -p bevy-flock` from a warm target directory, and the node count of each crate's `cargo tree`. A cold-build comparison on a shared VM measures the VM.",
+    "The honest headline is dependency count and consumer reach, not seconds. If `cargo check -p bevy-flock` is no faster than before the split — it should not be, since adapters still need the core — say so in the doc, because a reader who assumed otherwise will feel misled by the phase title.",
+    "State the consumer the split is for: a headless simulation, a server, a test harness, or a non-Bevy engine binding. Each is a row in the doc with the command that proves it.",
+    "The README and docs/book need the new crate named where the old one was, and `docs/lint-policy.md` needs `crates/bevy-flock-core/Cargo.toml` in the manifest list — the audit will fail the build until it is there.",
+    "Update `scripts/lint_audit.py`'s scanned paths if the core's sources move outside `src/`. The audit currently walks `src`, `tests`, `benches`, `examples`, `compat`, `fuzz`, `demo`, `demo-gpu` and `crates`; confirm `crates/bevy-flock-core/src` is covered by the existing glob before assuming it is.",
+]
+test_hints = [
+    "A test that asserts the boundary rather than measuring it: `cargo tree -p bevy-flock-core` piped through a check that fails on `bevy_app`, wired into CI beside the existing gates, so a later dependency added for convenience fails the build rather than the review.",
+    "`cargo test --offline` at the root, plus `-p bevy-flock-core` and `-p bevy-flock` separately, all green.",
+]
+must_haves = [
+    "`cargo tree -p bevy-flock-core` is free of `bevy_app`, `bevy_transform` and `bevy_render`, and a CI check enforces it",
+    "docs/performance.md records the before and after with the machine named, including any number that did not improve",
+    "docs/lint-policy.md and the audit cover the new manifest",
+]
+evaluation_criteria = [
+    "The phase's claim is either confirmed by a measurement or corrected in the doc, with no sentence that survives only because nobody re-ran it",
+    "A reader can copy the documented command and get the documented result on this machine",
+]
+# Wiggum injects `integration-wiring` and `stub-cleanup` into any plan with three or more tasks. Both audits exist
+# as T37 and T38 of the phase-2 manifest and were closed there; letting the injector add them again duplicates the
+# slugs across plans and inflates the DAG by two. Switched off once, with the reason attached (same decision as
+# phase 5), not silently dropped.
+[integration]
+skip_wiring_audit = true
+skip_stub_audit   = true
+# ─── Orchestrator ─────────────────────────────────────────────────────────────
+[orchestrator]
+persona     = "You are a principal Rust engineer who has split a game library into a core and an engine adapter before, and who knows the two ways it goes wrong: the public paths move and every downstream consumer breaks, or a `#[cfg]` grows in the core until it is an adapter with a different name. You move directories rather than rewriting files, you keep one commit per relocation so a bisect means something, and you treat a test file that had to be edited as a defect in the split rather than a chore."
+strategy    = "complete"
+max_retries = 3
+on_failure  = "pause"
+require_evaluator = true
+rules = [
+    "Rust edition 2024, stable toolchain, Bevy 0.20.1. The split adds no dependency and removes one (`bevy_ecs` from the core, at the last task); a crate that ships a new runtime to make a split tidy has misunderstood the exercise.",
+    "The public surface does not move. `bevy_flock::domain`, `::application`, `::behavior`, `::ports`, `::prelude`, `::testkit` and `::error` resolve before and after, through re-exports. A path that has to change is a breaking change and needs a version, not a changelog line.",
+    "Module paths inside the core do not change. That is what makes the move mechanical and the review possible: a diff of `crates/bevy-flock-core/src/domain/spatial.rs` should be empty apart from its move.",
+    "One commit per relocation, each compiling and green on its own. A single commit that moves seventy files cannot be reviewed, cannot be bisected, and cannot be reverted selectively when a consumer reports a break.",
+    "No `#[cfg(feature = ...)]` may appear in the core to satisfy an adapter. If the core needs a feature to compile under the facade, the dependency is in the wrong place.",
+    "No `.unwrap()`, `.expect()`, `panic!`, `unreachable!` or panicking indexing, including in tests; the crate's `testkit` helpers exist for that. No `#[allow(clippy::...)]`: fix the lint, or use `#[expect(...)]` with a reason recorded in scripts/lint_audit.py.",
+    "The engine boundary is `tests/core_boundary.rs`. Its `bevy_ecs` ledger is deleted by this phase, never extended, and the guard is the reason a later shortcut fails a build instead of a review.",
+    "Every task ends with `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, the full test suite and `python3 scripts/lint_audit.py`; commit author is Nick Campbell <s0ma@protonmail.com>.",
+    "A measurement that does not support the phase's premise is reported. If a headless consumer gains nothing measurable, the doc says so and the phase's value is the enforced boundary — which is a real value and does not need inflating.",
+]
+# ─── Evaluator ────────────────────────────────────────────────────────────────
+[evaluator]
+persona        = "You are a hostile reviewer for a library whose 0.1.0 users have pinned a path in their code. You assume the split broke one of them and that the test suite was edited to hide it. You diff the public surface before and after with `cargo doc`, you check `git log --follow` on a moved module, you count the new `#[cfg]` attributes in the core, and you re-run the headless build on a warm target directory before believing any number."
+pass_threshold = 8
+hard_fail      = true
+test_tool      = "cargo test --offline --all-targets --all-features"
+mode           = "blocking"
+contract_review = true
+[[evaluator.criteria]]
+name        = "public-surface-unchanged"
+weight      = 30
+description = "Every path under `bevy_flock::` that resolved at the phase's base commit resolves at its head, demonstrated by building the crates, the demos and the playground against it. No test file was edited to accommodate an import change."
+[[evaluator.criteria]]
+name        = "core-is-engine-free"
+weight      = 25
+description = "`cargo tree -p bevy-flock-core` names neither `bevy_app`, `bevy_transform` nor `bevy_render`, `cargo tree -p bevy-flock-core --no-default-features` names no `bevy_ecs`, and CI checks the first of those rather than trusting this evaluation."
+[[evaluator.criteria]]
+name        = "no-cfg-drift"
+weight      = 20
+description = "The core gained no `#[cfg(feature = ...)]` written for an adapter's benefit, and no `cfg_attr` derive that exists only because a system wants the type in the ECS."
+[[evaluator.criteria]]
+name        = "history-and-reviewability"
+weight      = 15
+description = "Each relocation is its own commit, `git log --follow` traces a moved core module past the split, and the per-commit diff of a moved file is empty apart from the move."
+[[evaluator.criteria]]
+name        = "measured-claim"
+weight      = 10
+description = "docs/performance.md records the dependency counts and the `cargo check` wall times before and after, on the named machine, including any figure the split failed to improve."
+[[completed]]
+task = "phase-6 precondition: `tests/core_boundary.rs` guards the hexagon"
+delivered_in = "chore/core-boundary-guard"
+note = """
+The guard the split depends on, delivered ahead of the phase because it is cheap and it catches drift today. Four
+tests: core layers must not name `bevy_app`, `bevy_asset`, `bevy_core_pipeline`, `bevy_pbr`, `bevy_render`,
+`bevy_transform` or `bevy_window`; the `bevy_ecs` exception ledger must match exactly (three files, pinned, so a
+fourth has to be argued for); core layers must not name `adapters`; and a self-test that the scanner ignores
+comments while catching derives and use paths.
+A source scan rather than a dependency scan, deliberately: `cargo tree` only sees the crates the manifest names, and
+the manifest names them for the adapter layer's benefit - one crate's dependencies are available to every module in
+it, so per-file is the only granularity that can see this.
+It found a real inversion on its first run. `behavior/social.rs` imported
+`crate::adapters::primary::perception::{KEY_PLAYER_DISTANCE, KEY_PLAYER_SEEN}`, so a core behaviour learned its own
+inputs from an adapter. The keys moved into `behavior::social` beside `KEY_TALK_TO`, `perception` re-exports them so
+its published path is unchanged, and the arrow now points the way the hexagon is drawn. A consumer can plug in its
+own perception and keep the contract, because the contract is a number in the core rather than a function of the
+engine.
+"""

@@ -15,19 +15,17 @@
 use crate::adapters::primary::cognition::NpcBlackboard;
 use crate::adapters::primary::components::Npc;
 use crate::application::SimClock;
-use crate::behavior::blackboard::{BlackboardKey, Value};
+use crate::behavior::blackboard::Value;
 use crate::domain::ids::NpcId;
 use crate::domain::tick::Tick;
 use bevy_ecs::prelude::*;
 use bevy_transform::prelude::Transform;
 use smallvec::SmallVec;
 
-/// The blackboard key set when a player character is within notice range.
-pub const KEY_PLAYER_SEEN: BlackboardKey = BlackboardKey::new(20);
-
-/// The blackboard key holding the distance to the nearest noticed player, in
-/// metres. Absent when nobody is in range, which is different from zero.
-pub const KEY_PLAYER_DISTANCE: BlackboardKey = BlackboardKey::new(21);
+// The keys live in the behaviour layer, because the leaves that read them are core code and must not import an
+// adapter to learn their own inputs. Re-exported here so `perception::KEY_PLAYER_SEEN` — the path this module has
+// published since it was written — keeps resolving, and so the writer and the reader are documented in one place.
+pub use crate::behavior::social::{KEY_PLAYER_DISTANCE, KEY_PLAYER_SEEN};
 
 /// The most people one NPC remembers having noticed.
 pub const NOTICED_CAPACITY: usize = 4;
