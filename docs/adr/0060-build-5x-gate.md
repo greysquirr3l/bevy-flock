@@ -100,3 +100,7 @@ body order that survives a rebuild, or a placement that consumes one), not folde
   is allowed to claim anything on top of it.
 - No measurement was taken on a machine with more than six cores, which is the configuration where a 5x gate would be
   least contentious.
+- The 6.289 ms baseline here and the 6.488 ms in `docs/performance.md` are the same binary on the same machine: the
+  former is today's three-run sweep, the latter the alternating-pairs comparison that produced the T05 record. The 3%
+  between them is run-to-run spread on this sandbox, and it is the same order as the margin this gate is being argued
+  over — which is part of the case for re-deriving it rather than defending it.
