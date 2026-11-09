@@ -9,9 +9,7 @@
 //! If this file stops compiling because something reached for the engine, the boundary moved and ADR 0058 is wrong.
 use bevy_flock_core::ConfigError;
 use bevy_flock_core::domain::ids::NpcId;
-use bevy_flock_core::domain::spatial::{
-    GridEntry, Neighbour, SpatialGrid, SpatialGridConfig,
-};
+use bevy_flock_core::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
 use bevy_math::Vec3;
 
 /// A deterministic scatter with no RNG and no wall clock: two builds of the same seed must agree exactly.
@@ -58,10 +56,17 @@ fn a_crowd_can_be_indexed_and_queried_without_an_app() -> Result<(), ConfigError
         .map_or(Vec3::ZERO, |entry| entry.position);
     first.radius(centre, 32.0, &mut left);
     second.radius(centre, 32.0, &mut right);
-    assert_eq!(left.len(), right.len(), "the same query must find the same bodies");
+    assert_eq!(
+        left.len(),
+        right.len(),
+        "the same query must find the same bodies"
+    );
 
     // A radius query is the reason the index exists: it looks at a neighbourhood, not the whole crowd.
-    assert!(!left.is_empty(), "the crew is dense enough to find something");
+    assert!(
+        !left.is_empty(),
+        "the crew is dense enough to find something"
+    );
     assert!(
         left.len() < first.entries().len(),
         "a radius query must not walk the whole population"

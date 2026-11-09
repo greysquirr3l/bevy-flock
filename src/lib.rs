@@ -98,7 +98,7 @@ pub use adapters::primary::{
 };
 // The simulation, re-exported rather than reimplemented: every path a reader has in their code keeps working, and
 // `bevy_flock_core` is where the code actually is. `crate::domain::…` inside this crate resolves through these lines.
-pub use bevy_flock_core::{application, behavior, domain, error};
+pub use bevy_flock_core::error::{ConfigError, FlockError, PopulationError, RegistrationError};
 #[doc(hidden)]
 pub use bevy_flock_core::testkit;
-pub use bevy_flock_core::error::{ConfigError, FlockError, PopulationError, RegistrationError};
+pub use bevy_flock_core::{application, behavior, domain, error};
