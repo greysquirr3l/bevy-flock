@@ -196,3 +196,21 @@ about the serial floor was right and the per-pass estimate for one of its terms 
 - **Do nothing and chase the clear instead.** Tempting given the measurement, and partly what the revised plan
   does — but the restore deletion depends on this decomposition, and 0.68 ms of a 8.85 ms rebuild is worth
   having once the frame is 16 ms.
+
+## Amendment — the block constant, swept (phase 5 T04)
+
+§6 chose `CELLS_PER_BLOCK = 4096` from the shape of the decomposition rather than from a measurement, and the phase 5
+plan recorded a doubt with it: 103 blocks at the benchmark's 421,876 cells is 17 per worker on six cores, which the
+task text guessed was too few.
+
+The sweep (two populations × nine block counts, `docs/performance.md` §*Picking CELLS_PER_BLOCK*) refutes the guess
+and confirms the number. The walls are at ~1.3 blocks per worker (8 blocks: `prefix` 0.285 ms against 0.23 in the
+middle, a tail five workers watch) and at 103 cells per block (4096 blocks: the per-block overhead shows up in
+`count`, 1.98 against 1.85 ms, and costs the total 0.3 ms). Everything from 32 to 2048 blocks is inside the fixture's
+noise.
+
+What justifies 4096 specifically is bytes, not blocks: a 16 KB window slice with the cursor slice beside it is 32 KB,
+which fits L1d on the cache geometries this crate targets and is why the local scan's forward walk and its totals read
+stay in cache. The derivation itself is now a free function (`derived_blocks`) so a test can pin the constant, its
+byte size, and the block count at seven cell counts — an edit to the constant fails a test that cites this table
+instead of moving silently with it.

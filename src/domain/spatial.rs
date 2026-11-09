@@ -605,16 +605,7 @@ impl SpatialGrid {
     /// Blocks the prefix sum will actually be split into.
     #[must_use]
     pub fn block_count(&self) -> usize {
-        let cells = self.cell_count();
-        if cells < PARALLEL_MIN_CELLS {
-            return 1;
-        }
-        let requested = if self.blocks == 0 {
-            cells.div_ceil(CELLS_PER_BLOCK)
-        } else {
-            self.blocks
-        };
-        requested.clamp(1, MAX_BLOCKS).min(cells)
+        derived_blocks(self.cell_count(), self.blocks)
     }
 
     /// Threads a rebuild will actually use for this grid's size.
@@ -1595,6 +1586,24 @@ struct CellBounds {
 /// The first `cells % blocks` blocks take one extra cell (ADR 0055 §2). Two implementers who differ on that
 /// produce different `block_base` and therefore different `cell_start`, so the rule lives here rather than in
 /// each caller.
+/// How many blocks a grid of `cells` cells is split into, with `requested` as the caller's override.
+///
+/// A function of the cell count and nothing else (ADR 0055 §6): the worker count never enters, so a grid built on
+/// six cores decomposes exactly as one built on sixteen and the bytes match. `0` derives the count from
+/// [`CELLS_PER_BLOCK`]; anything else is clamped rather than honoured, so a caller cannot ask for a split that is
+/// slower than the serial scan or one whose blocks outnumber its cells.
+fn derived_blocks(cells: usize, requested: usize) -> usize {
+    if cells < PARALLEL_MIN_CELLS {
+        return 1;
+    }
+    let asked = if requested == 0 {
+        cells.div_ceil(CELLS_PER_BLOCK)
+    } else {
+        requested
+    };
+    asked.clamp(1, MAX_BLOCKS).min(cells)
+}
+
 fn block_span(index: usize, cells: usize, blocks: usize) -> (usize, usize) {
     let blocks = blocks.max(1);
     let base = cells / blocks;
@@ -2166,6 +2175,44 @@ mod tests {
         assert_eq!(blocks_for(8, usize::MAX), MAX_BLOCKS);
     }
 
+    #[test]
+    fn the_block_constant_is_pinned_by_its_bytes_and_its_table() {
+        // Phase 5 T04 swept the constant and kept it (docs/performance.md §*Picking CELLS_PER_BLOCK*), so these
+        // numbers are literal on purpose: editing `CELLS_PER_BLOCK` has to fail *here*, and the failure has to send
+        // the reader back to the sweep. A test written as `cells.div_ceil(CELLS_PER_BLOCK)` would move with the
+        // constant and prove only that it is self-consistent.
+        assert_eq!(
+            CELLS_PER_BLOCK, 4_096,
+            "the sweep chose this value; re-run it before changing it"
+        );
+        assert_eq!(
+            CELLS_PER_BLOCK * core::mem::size_of::<u32>(),
+            16_384,
+            "one block's window slice must stay L1-sized: the cursor slice beside it is the same again"
+        );
+        // Cells per block -> blocks, at the points where the rule bends: the parallel floor, the sweep's own
+        // fixture, a round million, and the point where MAX_BLOCKS takes over from the derived count.
+        for (cells, blocks) in [
+            (65_535_usize, 1),
+            (65_536, 16),
+            (131_072, 32),
+            (421_876, 103),
+            (1_000_000, 245),
+            (16_777_216, MAX_BLOCKS),
+            (64_000_000, MAX_BLOCKS),
+        ] {
+            assert_eq!(
+                derived_blocks(cells, 0),
+                blocks,
+                "{cells} cells derived {} blocks, expected {blocks}",
+                derived_blocks(cells, 0)
+            );
+        }
+        // And the override is clamped, not trusted, at both walls.
+        assert_eq!(derived_blocks(65_536, usize::MAX), MAX_BLOCKS);
+        assert_eq!(derived_blocks(421_876, 1), 1);
+        assert_eq!(derived_blocks(421_876, 200_000), MAX_BLOCKS);
+    }
     #[test]
     fn small_grids_keep_the_serial_scan_whatever_the_caller_asks_for() {
         // ADR 0055 §7: the override is clamped, not honoured, so a caller cannot make a small grid slower and
