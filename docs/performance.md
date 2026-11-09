@@ -1445,3 +1445,48 @@ Placement output is unchanged byte for byte: the fill still walks each window up
 byte-equality matrix and the parity harness still compare exactly. What did change is what a rebuild can promise:
 `cell_start` is now the scan's output and nothing writes through it, which is why the postcondition has a test
 (`placement_leaves_the_window_table_alone`) that builds its expectation from body positions alone.
+
+## What a thread hand-off costs, and why `count` looked like it refused to scale
+
+Phase 5 began by pricing the thing every parallel pass pays before it does any work. `examples/spawn_cost.rs`
+measures three ways to get `n` workers going with an empty body, so the figure is dispatch and nothing else; the
+median of 15 samples of 200 dispatches each, on the six-core aarch64 VM, with a counting allocator wrapped around
+it because a dispatch that removes a thread spawn but adds a boxed task has not necessarily bought anything:
+
+| mechanism | 1 thread | 2 | 3 | 6 | allocations per round (6) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `thread::scope` per pass | 147.7 µs | 218.1 µs | 298.6 µs | **530.6 µs** | 95 |
+| one scope + `Barrier` per pass | 6.1 µs | 13.3 µs | 18.7 µs | **51.2 µs** | ~0 |
+| `bevy_tasks::ComputeTaskPool` | 6.2 µs | 5.6 µs | 8.3 µs | **13.3 µs** | 9 |
+
+Three things follow, and the first one is uncomfortable.
+
+**The rebuild spends 1.6 ms of its 6.95 ms starting threads.** Three parallel passes at 0.53 ms each is 23% of the
+build, not the 0.3 ms an earlier estimate inferred from the seat experiment. The estimate was wrong because it
+divided a confounded measurement: the parallel seat (0.21 ms) was 1.7 MB of copying *plus* a spawn, and reading
+the difference against the serial copy attributed the whole gap to the copy. Measuring an empty scope removes the
+work and leaves the tax.
+
+**That tax was flattening the per-pass scaling, and `count` was its main victim.** Subtracting 0.53 ms from each
+parallel pass gives the work-only figures below; the one-worker column has no tax because `worker_count()` returns
+1 and the rebuild takes the serial path.
+
+| pass | 1 worker | 6 workers, as reported | 6 workers, spawn removed | work scaling |
+| --- | ---: | ---: | ---: | ---: |
+| clear | 13.0 ms | 2.46 ms (5.3x) | 1.93 ms | 6.7x |
+| count | 1.72 ms | 1.76 ms (**0.98x**) | 1.23 ms | **1.4x** |
+| place | 7.1 ms | 2.22 ms (3.2x) | 1.69 ms | 4.2x |
+
+`count` does not refuse to scale; it scales 1.4x and was drowned by a dispatch cost 30% the size of the pass. The
+algorithmic problem phase 4 named is real — each worker re-reads the whole cell list, so the pass is
+`O(workers × n)` — but it is a 1.4x problem, not a 1.0x one, and phase 5's T03 should be read with that correction.
+
+**Of the two mechanisms that remove the tax, only one is adoptable.** `bevy_tasks` is 4x faster again, but its
+`scope` boxes a task per spawn: 9 allocations per round, against the zero steady-frame allocations that
+`tests/crowd_no_alloc.rs` and `tests/spatial_batch_no_alloc.rs` assert. A barrier inside one `std::thread::scope`
+costs ~0 allocations and 51 µs per round, and needs no unsafe and no change to the public surface — so that is the
+shape the rebuild should take, with the constraint recorded: the serial scan has to run *between* barriers, and a
+worker holding `&mut` to its slice of the window table cannot hand it back mid-closure. The one-scope design
+therefore has to either keep the scan outside the scope (two scopes per rebuild, 1.06 ms instead of 1.59 ms) or
+give the scan's local pass to the workers, which is what T03's fused totals would allow.
+
