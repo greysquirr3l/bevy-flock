@@ -189,6 +189,15 @@ fn main() {
         count + prefix + place
     );
 
+    // The same rebuild partitioned. `time_build` reuses the grid's own buffers, so this is the steady
+    // frame cost rather than a first-tick allocation.
+    let available = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    for threads in [1, available] {
+        let mut partitioned = grid.clone().with_threads(threads);
+        let label = format!("build(), {threads} thread(s)");
+        report(&label, time_build(&mut partitioned));
+    }
+
     let mut out = Vec::new();
     grid.radius(Vec3::splat(EXTENT * 0.5), 12.0, &mut out);
     let first: Option<Neighbour> = out.first().copied();

@@ -71,19 +71,19 @@ fn config() -> SpatialGridConfig {
     })
 }
 
-fn grid(population: usize) -> SpatialGrid {
+fn grid(population: usize, threads: usize) -> SpatialGrid {
     let mut grid = SpatialGrid::new(config())
         .unwrap_or_else(|_| unreachable!("the benchmark fixture's cell size and volume are valid"));
     grid.extend_from((0..population).map(entry));
     grid.build();
-    grid
+    grid.with_threads(threads)
 }
 
 fn bench_build(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("spatial_build");
     for population in [100_000_usize, 1_000_000] {
         // Filled once, outside the loop: `build()` is what is being measured, not `extend_from`.
-        let mut grid = grid(population);
+        let mut grid = grid(population, 1);
         group.throughput(Throughput::Elements(num::i64_to_u64(num::usize_to_i64(
             population,
         ))));
@@ -104,7 +104,7 @@ fn bench_build(criterion: &mut Criterion) {
 fn bench_query(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("spatial_query");
     for population in [100_000_usize, 1_000_000] {
-        let grid = grid(population);
+        let grid = grid(population, 1);
         let centres: Vec<Vec3> = (0..QUERIES)
             .map(|index| position(index * 977, EXTENT))
             .collect();
