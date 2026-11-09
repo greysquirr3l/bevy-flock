@@ -364,10 +364,13 @@ pub struct PassCosts {
     pub prefix: Duration,
     /// Placing bodies into their windows and filling `order`: `place_cells_*`. Partitions.
     pub place: Duration,
-    /// Copying the window starts into the write cursors `place` advances. One `memcpy`.
+    /// Copying the window starts into the write cursors `place` advances.
     ///
     /// Previously a serial `restore` pass that shifted the whole array down by one cell to undo placement's
     /// cursor advance. The copy does the same job from the other side, and costs a tenth of it (ADR 0056).
+    ///
+    /// Zero on the parallel path: the copy runs inside the `place` dispatch, one slice per worker, so it is
+    /// counted there rather than claiming a serial pass that no longer exists (ADR 0056, amendment).
     pub seat: Duration,
     /// Blocks the prefix sum was split into: 1 means the serial reference ran.
     ///
@@ -397,7 +400,8 @@ impl PassCosts {
 
     /// The share of the rebuild that ran on a single thread.
     ///
-    /// `prefix` and `seat` are the serial passes and `clear`, `count` and `place` partition, so this is the
+    /// `prefix` is the serial pass, and `seat` joins it only on the serial path — the parallel rebuild copies
+    /// the window starts inside the `place` dispatch — so this is the
     /// fraction a blocked scan or a parallel copy could in principle recover, times the workers it could use.
     /// Zero when the rebuild took no measurable time.
     #[must_use]
@@ -640,11 +644,12 @@ impl SpatialGrid {
     /// one prefix sum over the (budgeted) cell array, one placement pass. No sorting, and the four
     /// buffers are reused every tick.
     ///
-    /// The buffers are not the whole story on the parallel path: `std::thread::scope` boxes one work
-    /// packet per worker, so a parallel rebuild makes a handful of allocator calls per tick (22 for six
-    /// workers on this machine, measured). A frame that must not touch the allocator at all should call
-    /// [`SpatialGrid::with_threads`] with `1`, or keep a worker pool alive across ticks, which is
-    /// recorded as an open follow-up in plan.phase3.toml.
+    /// The buffers are not the whole story on the parallel path: `std::thread::scope` boxes one work packet per
+    /// worker, and `examples/spawn_cost.rs` prices a six-worker dispatch at 95 allocator calls. A parallel rebuild
+    /// makes three of those — clear, count, and seat-and-place — so a frame that must not touch the allocator at
+    /// all should call [`SpatialGrid::with_threads`] with `1`, or wait for a worker pool that stays alive across
+    /// ticks, which is phase 5's `persistent-worker-pool` task. The number is quoted from the harness rather than
+    /// from an older measurement of this comment: the previous figure here was 22, and the harness disagrees.
     ///
     /// With [`SpatialGrid::with_threads`] above one, the three `O(n)` passes are partitioned across
     /// workers and the prefix sum stays serial. The result is byte-identical at every thread count,
@@ -686,17 +691,19 @@ impl SpatialGrid {
         costs.blocks = self.prefix_cells(workers);
         costs.prefix = start.elapsed();
 
-        let start = Instant::now();
-        self.seat_cursors();
-        costs.seat = start.elapsed();
-
-        let start = Instant::now();
+        // The seat and the place are one dispatch on the parallel path: the copy costs a dispatch of its own
+        // when it runs alone, and next to nothing once a dispatch exists (see `seat_and_place_parallel`).
         if workers <= 1 {
+            let start = Instant::now();
+            self.seat_cursors();
+            costs.seat = start.elapsed();
+
+            let start = Instant::now();
             self.place_cells_serial();
+            costs.place = start.elapsed();
         } else {
-            self.place_cells_parallel(workers);
+            costs.place = self.seat_and_place_parallel(workers);
         }
-        costs.place = start.elapsed();
 
         costs.workers = workers;
         costs.bodies = self.entries.len();
@@ -891,19 +898,40 @@ impl SpatialGrid {
         }
     }
 
-    fn place_cells_parallel(&mut self, workers: usize) {
+    /// Seat the cursors and place the bodies in a single dispatch.
+    ///
+    /// These were two passes, and the seating was deliberately left serial because a parallel copy measured
+    /// slower than the serial one: 0.21 ms against 0.11 ms, which was read as "six `thread::scope` spawns cost
+    /// more than the 1.7 MB they share". Phase 5 priced the scope on its own and found it costs 0.53 ms, so the
+    /// comparison was measuring the dispatch, not the copy. Once a dispatch exists the copy is nearly free
+    /// inside it, and merging the two means the rebuild pays for one dispatch here instead of two.
+    ///
+    /// Each worker seats its own cell range from `cell_start` — which nothing writes, so it stays available to
+    /// every worker as a shared slice — and then places the bodies whose cell falls in that range, advancing only
+    /// its own cursors and writing only its own run of `order`. The two arrays are split before anything spawns,
+    /// so no worker can reach another's cells, and placement order within a cell is the body order the serial
+    /// path uses, which is what keeps the output byte-identical.
+    ///
+    /// Returns the wall time of the whole dispatch, spawn included, so the figure is comparable with `clear` and
+    /// `count`, which are timed the same way. The copy is inside it and is not reported separately: it is a
+    /// dispatch-shaped cost only when it runs alone, and on the parallel path `PassCosts::seat` is zero.
+    fn seat_and_place_parallel(&mut self, workers: usize) -> Duration {
         let cells_in_grid = self.cell_count();
         let bodies = self.entries.len();
         let Self {
+            cell_start,
             cell_cursor,
             order,
             cells,
             ..
         } = self;
-        let cell_list: &[u32] = cells;
+        let starts: &[u32] = cell_start.as_slice();
+        let cell_list: &[u32] = cells.as_slice();
+        cell_cursor.resize(starts.len(), 0);
         order.clear();
         order.resize(bodies, 0);
         let per = cells_in_grid.div_ceil(workers);
+        let started = Instant::now();
         thread::scope(|scope| {
             let mut cursor_rest: &mut [u32] = cell_cursor.as_mut_slice();
             let mut order_rest: &mut [u32] = order.as_mut_slice();
@@ -915,8 +943,8 @@ impl SpatialGrid {
                 if lo >= hi {
                     continue;
                 }
-                let begin = cursor_rest.first().copied().unwrap_or(0) as usize;
-                let end = cursor_rest.get(hi - lo).copied().unwrap_or(0) as usize;
+                let begin = starts.get(lo).copied().unwrap_or(0) as usize;
+                let end = starts.get(hi).copied().unwrap_or(0) as usize;
                 let remaining = std::mem::take(&mut cursor_rest);
                 let runs_remaining = std::mem::take(&mut order_rest);
                 let (Some(head), Some(run)) = (
@@ -941,7 +969,11 @@ impl SpatialGrid {
                 };
                 order_rest = runs_rest;
                 order_at = end;
+                let seats = starts.get(lo..hi);
                 scope.spawn(move || {
+                    if let Some(seats) = seats {
+                        cursor.copy_from_slice(seats);
+                    }
                     for (body, cell) in cell_list.iter().enumerate() {
                         let cell = *cell as usize;
                         if cell < lo || cell >= hi {
@@ -962,19 +994,21 @@ impl SpatialGrid {
                 });
             }
         });
+        started.elapsed()
     }
 
     /// Give `place` a cursor to advance, so that `cell_start` survives placement untouched.
     ///
-    /// This is the one `O(cells)` step in the rebuild that runs on a single thread, and it is deliberate. The
-    /// pass it replaces — shifting the ends back down to starts, after placement had walked them up — cost
-    /// 0.68 ms because it read what it had just written: a dependent chain of 421k steps. A `memcpy` over the
-    /// same 1.7 MB carries no such dependency and costs 0.13 ms, which is already about 13 GB/s.
+    /// This is the serial path's copy. The pass it replaces — shifting the ends back down to starts, after
+    /// placement had walked them up — cost 0.68 ms because it read what it had just written: a dependent chain of
+    /// 421k steps. A `memcpy` over the same 1.7 MB carries no such dependency and costs 0.11 ms, already about
+    /// 15 GB/s.
     ///
-    /// Splitting that copy across six workers was implemented and measured, not assumed away: it came out at
-    /// 0.21 ms, because six `thread::scope` spawns cost more than the copy they share. So this stays serial and
-    /// the pre-condition for revisiting it is written down rather than guessed — a worker pool that is already
-    /// alive across ticks would remove the spawn cost that makes the parallel version lose (ADR 0056).
+    /// Splitting it across six workers as a dispatch of its own was measured at 0.21 ms, and phase 5 priced the
+    /// `thread::scope` that split used at 0.53 ms — so the copy was not what lost, the dispatch was. A parallel
+    /// rebuild therefore does the copy inside the dispatch it already pays for, one slice per worker in
+    /// [`SpatialGrid::seat_and_place_parallel`], and only a serial rebuild comes through here (ADR 0056,
+    /// amendment).
     ///
     /// The buffer is sized on the first rebuild and reused, because a grid's cell count does not change: the
     /// `resize` below is a no-op after that, so a steady frame neither allocates nor memsets here.

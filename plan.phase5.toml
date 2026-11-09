@@ -308,3 +308,24 @@ serial scan must sit between barriers and a worker cannot hand back `&mut` mid-c
 rebuild (1.06 ms) or the scan's local pass moved into the workers, which needs T03's fused totals first.
 The scan sub-pass split half of this task is not done; it is carried into T02's design work rather than claimed.
 """
+
+[[completed]]
+task = "phase-5 T03 fused-count-and-scan (seat half)"
+delivered_in = "feat/phase5-barrier-dispatch"
+note = """
+Deletes the seat pass from the parallel path without fusing the totals, which was the other half of the task and is
+still open. `seat_and_place_parallel` splits `cell_cursor` and `order` across the place workers; each copies its own
+slice of `cell_start`, which nothing writes and so stays a shared slice, and then places the bodies whose cell falls
+in its range.
+The precondition T01 established is what made this possible: the parallel copy lost to the serial one by 0.1 ms only
+because it bought a 0.53 ms dispatch to do it in. Inside a dispatch that already exists the copy is nearly free.
+Measured by alternating two prebuilt binaries five times on one machine, because runs of this fixture vary more than
+the effect (the unchanged build spanned 6.60-7.39 ms across five runs): median 7.010 ms -> 6.671 ms, five pairs, five
+wins, 0.34 ms or 4.8%.
+The saving is larger than the 0.11 ms the serial copy cost and that is not explained here: the likeliest account is
+locality, since the serial copy streamed 1.7 MB that the placement pass re-read cold. Recorded as a hypothesis.
+`PassCosts::seat` is zero on the parallel path and the copy is counted in `place`; `serial_share` now reports one
+serial pass. The serial path is unchanged and still seats before it places.
+The dispatch count is unchanged at three, so T05's evaluation criterion ("the spawn cost is gone from the inventory
+rather than moved to a different row") is NOT met and the pool remains the way to meet it.
+"""

@@ -1490,3 +1490,50 @@ worker holding `&mut` to its slice of the window table cannot hand it back mid-c
 therefore has to either keep the scan outside the scope (two scopes per rebuild, 1.06 ms instead of 1.59 ms) or
 give the scan's local pass to the workers, which is what T03's fused totals would allow.
 
+
+## Phase 5: the seat rides inside the place dispatch
+
+Phase 5 priced the thread hand-off at 0.53 ms per `thread::scope` (see *What a thread costs to start*), which turned
+a note in ADR 0056 into an actionable one: the copy of the window starts into the write cursors — the "seat" — was
+left serial because a parallel version had measured 0.21 ms against the serial 0.11 ms. With the dispatch priced, the
+reason is visible: the parallel copy was never losing to the serial copy, it was paying 0.53 ms for a scope it did
+not need. A rebuild already pays for a dispatch to place the bodies; the copy can go inside it.
+
+It now does — `seat_and_place_parallel` splits `cell_cursor` and `order` across the same workers, each copying its
+own slice from `cell_start` (which nothing writes, so it stays a shared slice) and then placing the bodies whose cell
+falls in its range. `PassCosts::seat` is zero on the parallel path and the copy is counted in `place`.
+
+### Measured, alternately, on one machine
+
+The fixture is noisy enough that a before-and-after on separate runs is worthless: five consecutive runs of the
+*unchanged* build spanned 6.60–7.39 ms. So the two binaries were built once and then alternated, which also removes
+the drift that comes from a shared VM warming up:
+
+| run | before | after |
+| --- | ---: | ---: |
+| 1 | 6.963 ms | 6.884 ms |
+| 2 | 6.886 ms | 6.610 ms |
+| 3 | 7.032 ms | 6.813 ms |
+| 4 | 7.057 ms | 6.671 ms |
+| 5 | 7.010 ms | 6.611 ms |
+| **median** | **7.010 ms** | **6.671 ms** |
+
+Five pairs, five wins, 0.34 ms (4.8%). The separation is twice the within-group spread, which is the only reason the
+change is claimed at all — a single pair from this fixture said the opposite.
+
+The saving is larger than the 0.11 ms the serial copy cost, which the measurement does not explain and this document
+will not pretend to: the likely cause is locality. The serial copy streamed 1.7 MB that the placement pass then
+re-read from a cold cache, while each worker now copies the slice it is about to walk. That is a hypothesis with a
+number attached, not a finding, and it is recorded as such.
+
+### What it does not do
+
+It does not remove a dispatch. The rebuild still pays three — clear, count, seat-and-place — and the count pass is
+still partitioned by cell range while it reads the whole body list, the `O(workers × n)` re-read that phase 4 named.
+Removing a whole dispatch needs the body-cell pass and the count pass to share one scope, which they cannot: the
+first writes slices of the cell list that the second reads in full. That is a different design (atomics per body, or
+per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` task, not this one.
+
+At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is now 4.72 ms of single-worker build, and the
+remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
+target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.

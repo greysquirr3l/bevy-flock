@@ -52,6 +52,23 @@ serial — six `thread::scope` spawns cost more than the copy they share, and th
 worker pool that outlives a tick (the same follow-up phase 3 recorded for the scan's spawn cost), at which point
 the copy's spawn cost goes to zero and the parallel version wins by construction.
 
+> **Amendment, phase 5.** The paragraph above names the right cause and draws one conclusion too many. Phase 5
+> priced the dispatch on its own — an empty `thread::scope` at six workers costs **0.53 ms** — so the parallel copy
+> was not losing to the serial copy, it was buying a scope it did not need. A rebuild already pays for a scope to
+> place the bodies, and the copy fits inside it: `seat_and_place_parallel` splits `cell_cursor` and `order` across
+> the same workers and each copies its own slice of `cell_start`, which nothing writes and therefore stays a shared
+> slice. This does not require the worker pool the paragraph above waits for, and it lands sooner than one.
+>
+> Measured by alternating two prebuilt binaries five times on one machine, because separate runs of this fixture
+> vary by more than the effect: **7.010 ms → 6.671 ms, median, five pairs, five wins**. The saving exceeds the
+> 0.11 ms the serial copy cost, which the measurement does not explain; the likeliest account is locality — the
+> serial copy streamed 1.7 MB that the placement pass then re-read cold, while each worker now copies the slice it
+> is about to walk. That is a hypothesis with a number attached, not a finding.
+>
+> `PassCosts::seat` is therefore zero on the parallel path and the copy is counted in `place`; `serial_share` now
+> has one serial pass to report rather than two. The consequences above stand for the serial path, where the copy
+> still runs on one thread.
+
 ## Consequences
 
 - The rebuild's serial remainder is `prefix` (0.30 ms, bandwidth-bound per [0055](0055-blocked-prefix-sum.md)) plus
