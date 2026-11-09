@@ -287,3 +287,24 @@ description = "The pool is created once per grid, shuts its threads down on drop
 name        = "task-hygiene"
 weight      = 5
 description = "fmt, clippy with -D warnings over all targets and features, the full test suite and the lint audit are green in the final state of every task, and the commit author is Nick Campbell <s0ma@protonmail.com>."
+
+[[completed]]
+task = "phase-5 T01 scan-subpass-inventory (spawn half)"
+delivered_in = "feat/phase5-spawn-cost"
+note = """
+`examples/spawn_cost.rs` prices three dispatch mechanisms with an empty body and a counting allocator, at 1, 2, 3
+and 6 threads, median of 15 samples of 200 dispatches. At six threads: `thread::scope` per pass 530.6 us and 95
+allocations, one scope with a `Barrier` per pass 51.2 us and ~0 allocations, `bevy_tasks::ComputeTaskPool` 13.3 us
+and 9 allocations.
+The rebuild therefore spends 1.59 ms of its 6.95 ms starting threads - 23%, against the 0.3 ms phase 4's seat
+experiment implied. That estimate was confounded: the parallel seat measured copy plus spawn and the difference
+against the serial copy was attributed to the copy.
+Removing the tax restates the per-pass scaling: clear 5.3x -> 6.7x, count 0.98x -> 1.4x, place 3.2x -> 4.2x. The
+phase 4 conclusion that `count` refuses to scale is corrected to "1.4x, drowned by a dispatch cost 30% the size of
+the pass"; the O(workers x n) re-read is real but is not the whole story.
+`bevy_tasks` is rejected on the allocation count despite being fastest, because the no-allocation suites assert
+zero steady-frame allocations. The barrier shape is adopted as the target for T05, with the constraint that the
+serial scan must sit between barriers and a worker cannot hand back `&mut` mid-closure - so either two scopes per
+rebuild (1.06 ms) or the scan's local pass moved into the workers, which needs T03's fused totals first.
+The scan sub-pass split half of this task is not done; it is carried into T02's design work rather than claimed.
+"""

@@ -53,6 +53,10 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "unsafe_code",
     ): "a counting allocator is the only way to assert zero allocations per frame",
     (
+        "examples/spawn_cost.rs",
+        "unsafe_code",
+    ): "a counting allocator is the only way to price the allocations a dispatch mechanism makes",
+    (
         "tests/tree_no_alloc.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to assert the tree allocates nothing",
