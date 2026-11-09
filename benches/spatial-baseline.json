@@ -3,10 +3,14 @@
   "tolerance": 0.25,
   "caveat": "Recorded on one machine; the gate compares ratios, so run it on the machine that owns this file. See docs/performance.md for what each case is.",
   "cases": {
-    "spatial_build/build/100000": 4784068,
-    "spatial_build/build/1000000": 23753464,
-    "spatial_kernel/steer_integrate_advance/100000": 68532038,
-    "spatial_query/radius_1k_queries/100000": 745400,
-    "spatial_query/radius_1k_queries/1000000": 6709256
+    "spatial_batch/radius_batch_parallel/100000": 301594,
+    "spatial_batch/radius_batch_parallel/1000000": 1071950,
+    "spatial_batch/radius_batch_serial/100000": 767172,
+    "spatial_batch/radius_batch_serial/1000000": 5475377,
+    "spatial_build/build/100000": 4553981,
+    "spatial_build/build/1000000": 23400779,
+    "spatial_kernel/steer_integrate_advance/100000": 65740455,
+    "spatial_query/radius_1k_queries/100000": 701087,
+    "spatial_query/radius_1k_queries/1000000": 4439679
   }
 }

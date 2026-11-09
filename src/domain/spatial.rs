@@ -59,6 +59,13 @@ pub const DEFAULT_MAX_CELLS: u64 = 1 << 20;
 /// spawning a handful of threads; below this threshold the parallel path is slower and noisier.
 const PARALLEL_MIN_BODIES: usize = 4_096;
 
+/// Queries below this stay on the serial path, for the same reason: a batch of a few dozen radius
+/// queries is tens of microseconds and a scope costs more than that.
+const PARALLEL_MIN_QUERIES: usize = 64;
+
+/// Default slots per query in a [`QueryArena`].
+pub const DEFAULT_NEIGHBOUR_CAP: usize = 32;
+
 /// How many workers a grid uses when nobody says otherwise.
 ///
 /// ADR 0054 makes the count configuration rather than behaviour: every count produces the same cells in
@@ -179,6 +186,101 @@ pub struct Neighbour {
     /// Squared distance from the query centre. Squared because every consumer
     /// compares distances and none of them needs the square root.
     pub distance_squared: f32,
+}
+
+/// A flat, reusable result set for many neighbour queries at once.
+///
+/// Each query owns exactly [`QueryArena::cap`] contiguous slots, so query `q` writes
+/// `q * cap .. (q + 1) * cap` and nothing else. That fixed stride is the whole design: the output
+/// offset of every query is known before any work starts, so a batch can be partitioned by query
+/// range with no gather step, no per-query `Vec`, and no ordering rule that a thread count could
+/// violate.
+///
+/// Resizing happens once, in [`SpatialGrid::radius_batch`], against `queries * cap`; after that a
+/// steady frame reuses the same two buffers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryArena {
+    /// `queries * cap` neighbour slots, in query order.
+    slots: Vec<Neighbour>,
+    /// How many slots each query filled.
+    counts: Vec<u32>,
+    /// Slots per query.
+    cap: usize,
+}
+
+impl Default for QueryArena {
+    fn default() -> Self {
+        Self::new(DEFAULT_NEIGHBOUR_CAP)
+    }
+}
+
+impl QueryArena {
+    /// An empty arena holding up to `cap` neighbours per query.
+    #[must_use]
+    pub const fn new(cap: usize) -> Self {
+        Self {
+            slots: Vec::new(),
+            counts: Vec::new(),
+            cap,
+        }
+    }
+
+    /// Slots reserved per query.
+    #[must_use]
+    pub const fn cap(&self) -> usize {
+        self.cap
+    }
+
+    /// How many queries the last batch answered.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.counts.len()
+    }
+
+    /// Whether the last batch answered no queries.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.counts.is_empty()
+    }
+
+    /// The neighbour counts of the last batch, one per query.
+    #[must_use]
+    pub fn counts(&self) -> &[u32] {
+        &self.counts
+    }
+
+    /// How many neighbours query `query` has, or zero if the batch did not reach it.
+    #[must_use]
+    pub fn count(&self, query: usize) -> u32 {
+        self.counts.get(query).copied().unwrap_or(0)
+    }
+
+    /// The neighbours of query `query`, nearest first, ties broken by identifier.
+    ///
+    /// Slots past [`QueryArena::count`] are stale from an earlier batch and are not returned.
+    #[must_use]
+    pub fn neighbours(&self, query: usize) -> &[Neighbour] {
+        let filled = match self.counts.get(query).copied() {
+            Some(filled) => filled as usize,
+            None => return &[],
+        };
+        let Some(start) = query.checked_mul(self.cap) else {
+            return &[];
+        };
+        let Some(end) = start.checked_add(filled.min(self.cap)) else {
+            return &[];
+        };
+        self.slots.get(start..end).unwrap_or(&[])
+    }
+
+    /// Size the buffers for `queries` queries. Allocates only when they must grow.
+    fn begin(&mut self, queries: usize) {
+        let slots = queries.saturating_mul(self.cap);
+        self.slots.clear();
+        self.slots.resize(slots, EMPTY_NEIGHBOUR);
+        self.counts.clear();
+        self.counts.resize(queries, 0);
+    }
 }
 
 /// A uniform grid over a fixed volume.
@@ -399,8 +501,14 @@ impl SpatialGrid {
     /// Group the entries by cell. Call once per tick, after all inserts.
     ///
     /// Cost is `O(cells + n)` on one thread: one pass computing each body's cell, one counting pass,
-    /// one prefix sum over the (budgeted) cell array, one placement pass. No sorting, no allocation
-    /// after the first tick.
+    /// one prefix sum over the (budgeted) cell array, one placement pass. No sorting, and the four
+    /// buffers are reused every tick.
+    ///
+    /// The buffers are not the whole story on the parallel path: `std::thread::scope` boxes one work
+    /// packet per worker, so a parallel rebuild makes a handful of allocator calls per tick (22 for six
+    /// workers on this machine, measured). A frame that must not touch the allocator at all should call
+    /// [`SpatialGrid::with_threads`] with `1`, or keep a worker pool alive across ticks, which is
+    /// recorded as an open follow-up in plan.phase3.toml.
     ///
     /// With [`SpatialGrid::with_threads`] above one, the three `O(n)` passes are partitioned across
     /// workers and the prefix sum stays serial. The result is byte-identical at every thread count,
@@ -725,6 +833,121 @@ impl SpatialGrid {
         });
     }
 
+    /// Answer the same radius query for many centres at once, in one reusable buffer.
+    ///
+    /// This is the shape a crowd needs: every agent asks one question per tick. Each query owns
+    /// exactly [`QueryArena::cap`] slots, so a worker filling its own range of queries writes its own
+    /// slice of the arena and the result is identical at every thread count — the same contract the
+    /// build keeps (ADR 0054).
+    ///
+    /// A query that finds more than `cap` neighbours keeps the nearest `cap`, ordered exactly as
+    /// [`SpatialGrid::radius`] would order them, so truncation is a prefix of the unbounded answer
+    /// rather than an arbitrary subset.
+    pub fn radius_batch(&self, centres: &[Vec3], radius: f32, arena: &mut QueryArena) {
+        arena.begin(centres.len());
+        if radius <= 0.0 || !radius.is_finite() || centres.is_empty() {
+            return;
+        }
+        let radius_squared = radius * radius;
+        let span = num::f32_to_i64((radius / self.cell_size).ceil());
+        let workers = self.batch_workers(centres.len());
+        if workers <= 1 {
+            self.radius_batch_serial(centres, radius_squared, span, arena);
+            return;
+        }
+        self.radius_batch_parallel(centres, radius_squared, span, arena, workers);
+    }
+
+    /// Every query on one thread.
+    fn radius_batch_serial(
+        &self,
+        centres: &[Vec3],
+        radius_squared: f32,
+        span: i64,
+        arena: &mut QueryArena,
+    ) {
+        let cap = arena.cap;
+        for (query, centre) in centres.iter().enumerate() {
+            let Some(window) = query
+                .checked_mul(cap)
+                .and_then(|start| Some(start..start.checked_add(cap)?))
+                .and_then(|range| arena.slots.get_mut(range))
+            else {
+                continue;
+            };
+            let filled = fill_batch_query(self, *centre, radius_squared, span, window);
+            if let Some(count) = arena.counts.get_mut(query) {
+                *count = filled;
+            }
+        }
+    }
+
+    /// Every query, partitioned by query range.
+    ///
+    /// Chunking by query (never by cell) is what keeps the output offsets fixed: a worker's queries
+    /// occupy a contiguous run of the arena, so the slices it writes are disjoint by construction and
+    /// the arena needs no lock, no atomic cursor and no second pass.
+    #[cfg(feature = "threads")]
+    fn radius_batch_parallel(
+        &self,
+        centres: &[Vec3],
+        radius_squared: f32,
+        span: i64,
+        arena: &mut QueryArena,
+        workers: usize,
+    ) {
+        let cap = arena.cap;
+        if cap == 0 || centres.is_empty() {
+            return;
+        }
+        let per = centres.len().div_ceil(workers);
+        let grid = self;
+        let QueryArena { slots, counts, .. } = arena;
+        thread::scope(|scope| {
+            let chunks = centres
+                .chunks(per)
+                .zip(slots.chunks_mut(per * cap).zip(counts.chunks_mut(per)));
+            for (queries, (slot_chunk, count_chunk)) in chunks {
+                scope.spawn(move || {
+                    for (offset, centre) in queries.iter().enumerate() {
+                        let Some(window) = offset
+                            .checked_mul(cap)
+                            .and_then(|start| Some(start..start.checked_add(cap)?))
+                            .and_then(|range| slot_chunk.get_mut(range))
+                        else {
+                            continue;
+                        };
+                        let filled = fill_batch_query(grid, *centre, radius_squared, span, window);
+                        if let Some(count) = count_chunk.get_mut(offset) {
+                            *count = filled;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// Without the `threads` feature there is nothing to partition onto.
+    #[cfg(not(feature = "threads"))]
+    fn radius_batch_parallel(
+        &self,
+        centres: &[Vec3],
+        radius_squared: f32,
+        span: i64,
+        arena: &mut QueryArena,
+        _workers: usize,
+    ) {
+        self.radius_batch_serial(centres, radius_squared, span, arena);
+    }
+
+    /// Queries a batch of this size may spread across.
+    fn batch_workers(&self, queries: usize) -> usize {
+        if !cfg!(feature = "threads") || queries < PARALLEL_MIN_QUERIES {
+            return 1;
+        }
+        self.threads.max(1).min(queries)
+    }
+
     /// Append the `k` nearest agents, ordered by distance then identifier.
     ///
     /// The search starts one cell wide and doubles until it has `k` candidates
@@ -808,6 +1031,115 @@ impl SpatialGrid {
 }
 
 /// Inclusive cell bounds for a query.
+/// A slot that has never been filled.
+///
+/// The arena is sized by resizing rather than by growing per query, which needs some value to fill
+/// with. This one is never observable: [`QueryArena::neighbours`] slices to the count each query
+/// wrote, so no caller can read a slot that was not filled by this batch.
+const EMPTY_NEIGHBOUR: Neighbour = Neighbour {
+    id: NpcId::unique(0),
+    position: Vec3::ZERO,
+    velocity: Vec3::ZERO,
+    distance_squared: f32::INFINITY,
+};
+
+/// Fill one query's slots with the nearest `slots.len()` agents within `radius_squared`.
+///
+/// Returns how many slots were filled. The bounded set is maintained without a heap: a candidate
+/// either lands in a free slot or replaces the current worst, and the worst is only recomputed when
+/// a replacement happens — which becomes rarer as the bound tightens. The final sort orders by
+/// distance then identifier, the same rule the unbounded [`SpatialGrid::radius`] uses, so truncating
+/// its answer to `cap` yields exactly this.
+fn fill_batch_query(
+    grid: &SpatialGrid,
+    centre: Vec3,
+    radius_squared: f32,
+    span: i64,
+    slots: &mut [Neighbour],
+) -> u32 {
+    let cap = slots.len();
+    if cap == 0 {
+        return 0;
+    }
+    let mut filled = 0_usize;
+    let mut worst = 0_usize;
+    let bounds = grid.cell_bounds(centre, span);
+    for z in bounds.min_z..=bounds.max_z {
+        for y in bounds.min_y..=bounds.max_y {
+            for x in bounds.min_x..=bounds.max_x {
+                let cell = num::i64_to_u32(
+                    (z * i64::from(grid.dims[1]) + y) * i64::from(grid.dims[0]) + x,
+                );
+                for index in grid.cell_window(cell) {
+                    let Some(entry) = grid.entries.get(*index as usize) else {
+                        continue;
+                    };
+                    let distance_squared = entry.position.distance_squared(centre);
+                    if distance_squared > radius_squared {
+                        continue;
+                    }
+                    let candidate = Neighbour {
+                        id: entry.id,
+                        position: entry.position,
+                        velocity: entry.velocity,
+                        distance_squared,
+                    };
+                    if filled < cap {
+                        if let Some(slot) = slots.get_mut(filled) {
+                            *slot = candidate;
+                        }
+                        filled += 1;
+                        // The new slot is the worst one if it is farther than the current worst;
+                        // `worst` still points at a previous element here, never at itself.
+                        if let Some(current) = slots.get(worst)
+                            && !nearer(&candidate, current)
+                        {
+                            worst = filled - 1;
+                        }
+                        continue;
+                    }
+                    let Some(current_worst) = slots.get(worst).copied() else {
+                        continue;
+                    };
+                    if !nearer(&candidate, &current_worst) {
+                        continue;
+                    }
+                    if let Some(slot) = slots.get_mut(worst) {
+                        *slot = candidate;
+                    }
+                    worst = slots
+                        .iter()
+                        .enumerate()
+                        .max_by(|left, right| {
+                            left.1
+                                .distance_squared
+                                .total_cmp(&right.1.distance_squared)
+                                .then_with(|| left.1.id.cmp(&right.1.id))
+                        })
+                        .map_or(0, |(index, _)| index);
+                }
+            }
+        }
+    }
+    if let Some(window) = slots.get_mut(..filled) {
+        window.sort_unstable_by(|left, right| {
+            left.distance_squared
+                .total_cmp(&right.distance_squared)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+    num::usize_to_u32(filled)
+}
+
+/// Whether `candidate` should displace `current` in a bounded set: nearer first, then lower identity.
+fn nearer(candidate: &Neighbour, current: &Neighbour) -> bool {
+    candidate
+        .distance_squared
+        .total_cmp(&current.distance_squared)
+        .then_with(|| candidate.id.cmp(&current.id))
+        .is_lt()
+}
+
 struct CellBounds {
     min_x: i64,
     min_y: i64,
@@ -1183,6 +1515,120 @@ mod tests {
                 "placement order differs at {threads} threads"
             );
         }
+    }
+
+    /// Bodies on a deterministic spiral, spread across the whole volume.
+    fn batch_fixture(count: u32) -> SpatialGrid {
+        let config =
+            SpatialGridConfig::try_new(Vec3::splat(-200.0), Vec3::splat(200.0), 5.0).or_die();
+        let mut grid = SpatialGrid::new(config).or_die();
+        grid.extend_from((0..count).map(|index| {
+            let step = num::u32_to_f32(index);
+            let ring = (step * 0.7).sin() * 180.0;
+            (
+                NpcId::unique(index),
+                Vec3::new(
+                    ring,
+                    (step * 0.13).cos() * 20.0,
+                    (step * 0.31).sin() * 180.0,
+                ),
+                Vec3::new(step * 0.01, 0.0, -step * 0.01),
+            )
+        }));
+        grid.build();
+        grid
+    }
+
+    fn batch_centres(count: usize) -> Vec<Vec3> {
+        (0..count)
+            .map(|index| {
+                let step = num::u32_to_f32(num::usize_to_u32(index));
+                Vec3::new(
+                    (step * 1.7).sin() * 150.0,
+                    (step * 0.9).cos() * 12.0,
+                    (step * 2.3).cos() * 150.0,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_is_the_truncated_single_query_answer() {
+        // The bounded set has to be the nearest `cap` by (distance, identity), not merely "some cap of
+        // them": a consumer comparing a batch against a single query must get a prefix, not a sample.
+        let grid = batch_fixture(10_000);
+        let centres = batch_centres(400);
+        let radius = 14.0;
+        let mut arena = QueryArena::new(32);
+        grid.radius_batch(&centres, radius, &mut arena);
+        assert_eq!(arena.len(), centres.len());
+        let mut single = Vec::new();
+        for (query, centre) in centres.iter().enumerate() {
+            grid.radius(*centre, radius, &mut single);
+            let expected = single.len().min(arena.cap());
+            assert_eq!(
+                arena.count(query) as usize,
+                expected,
+                "query {query} counted a different number of neighbours"
+            );
+            for (position, neighbour) in arena.neighbours(query).iter().enumerate() {
+                let reference = single.get(position).or_die();
+                assert_eq!(
+                    neighbour.id, reference.id,
+                    "query {query} neighbour {position} differs"
+                );
+                assert!(
+                    neighbour
+                        .distance_squared
+                        .total_cmp(&reference.distance_squared)
+                        .is_eq(),
+                    "query {query} neighbour {position} has a different distance"
+                );
+                assert_eq!(neighbour.position, reference.position);
+            }
+        }
+    }
+
+    #[test]
+    fn a_batch_is_identical_at_every_thread_count() {
+        let grid = batch_fixture(10_000);
+        let centres = batch_centres(500);
+        let run = |threads: usize| {
+            let mut arena = QueryArena::new(32);
+            grid.clone()
+                .with_threads(threads)
+                .radius_batch(&centres, 14.0, &mut arena);
+            arena
+        };
+        let serial = run(1);
+        assert!(!serial.is_empty());
+        for threads in [2, 3, 8] {
+            let parallel = run(threads);
+            assert_eq!(
+                parallel.counts(),
+                serial.counts(),
+                "counts differ at {threads} threads"
+            );
+            for query in 0..centres.len() {
+                assert_eq!(
+                    parallel.neighbours(query),
+                    serial.neighbours(query),
+                    "query {query} differs at {threads} threads"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_batch_with_no_room_returns_nothing_rather_than_panicking() {
+        let grid = batch_fixture(1_000);
+        let mut arena = QueryArena::new(0);
+        grid.radius_batch(&batch_centres(4), 20.0, &mut arena);
+        assert_eq!(arena.count(0), 0);
+        assert!(arena.neighbours(0).is_empty());
+        // A query index past the batch is answered with an empty slice, not a panic.
+        assert_eq!(arena.count(99), 0);
+        assert!(arena.neighbours(99).is_empty());
     }
 
     #[test]

@@ -1226,3 +1226,32 @@ Three things explain why six workers buy 2.8× rather than 6×, and none of them
 Parity is tested, not assumed: `every_thread_count_builds_identical_windows` builds the same 6,000-body
 fixture at 1, 2, 3 and 8 threads and compares `cell_start` and `order` byte for byte — a query test would
 pass while two cells' windows were swapped, because it only looks at one cell at a time.
+
+### Batched queries, partitioned (T04)
+Every agent asks one neighbourhood question per tick, which is why `radius_batch` exists: it answers the
+whole crowd into one `QueryArena` where query `q` owns slots `q * cap .. (q + 1) * cap`, so the output
+offset of every query is known before any work starts and a batch partitions by query range with no gather
+step and no per-query `Vec`. `cargo bench --bench spatial -- spatial_batch`, 1,000 queries, radius 12 m,
+cap 32:
+
+| Population | Serial | Parallel (6) | Speed-up |
+| ---: | ---: | ---: | ---: |
+| 100,000 | 0.77 ms | 0.30 ms | 2.5× |
+| 1,000,000 | 5.48 ms | 1.07 ms | 5.1× |
+
+The speed-up is better than the rebuild's 2.8× for a structural reason: queries share nothing but the
+read-only grid, so there is no serial prefix sum and no `O(threads × n)` scan — each worker walks its own
+queries. At 100,000 bodies the fixed cost of the scope and the per-query cell walk dominate, which is why
+the ratio is smaller there.
+
+The bounded set is the nearest `cap` by (distance, identity), not an arbitrary subset: `a_batch_is_the_truncated_single_query_answer` compares 400 queries against the unbounded `radius` answer truncated to
+`cap`, element for element. It caught a real bug — the worst-slot bookkeeping had its comparison inverted,
+which returned a correct *set* in the wrong order for queries that saturated.
+
+**Allocation, measured rather than claimed.** The serial batch allocates nothing in steady state
+(`tests/spatial_batch_no_alloc.rs`, counting allocator, zero after warm-up). The parallel batch does not
+make that claim and the test does not pretend it does: `std::thread::scope` boxes one work packet per
+worker, measured at 22 allocator calls for six workers, so the test asserts a bound rather than zero and
+says so. A frame that must not allocate runs the serial path or keeps a pool alive across ticks; the
+persistent pool is the open follow-up recorded in the plan, and the earlier claim in `build`'s own docs
+that the parallel path allocates nothing was corrected when this was measured.
