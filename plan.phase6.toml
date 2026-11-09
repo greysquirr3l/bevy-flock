@@ -250,3 +250,19 @@ its published path is unchanged, and the arrow now points the way the hexagon is
 own perception and keep the contract, because the contract is a number in the core rather than a function of the
 engine.
 """
+
+[[completed]]
+task = "phase-6 T01 core-split-adr (ADR 0058)"
+delivered_in = "docs/core-split-adr"
+note = """
+Writes the contract the extraction is graded against, before any file moves: two crates, the core's module paths
+held still, the facade re-exporting rather than re-implementing, feature forwarding by name with `default` identical
+on both sides, and an exact version pin between them so the type-identity hazard cannot be reached by resolution.
+The dependency table in the ADR is measured, not asserted: ports reads nothing, domain names bevy_math in ten files
+and bevy_ecs in one, behavior in two and one, application in two, two and one (bevy_tasks), and adapters names
+bevy_app in sixteen files and bevy_transform in fourteen. Three files account for the core's entire ECS coupling.
+The ADR deliberately does not predict the post-split node count. It records 186 nodes as the current figure and
+leaves the saving to T04, because a number invented in a decision record is a number nobody re-measures.
+Rejected shapes are recorded with reasons, including the one worth remembering: five crates buys nothing a consumer
+can observe, since Cargo builds a dependency chain in order and only the root gets faster.
+"""
