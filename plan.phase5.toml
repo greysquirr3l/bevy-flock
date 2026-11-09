@@ -457,3 +457,24 @@ today's 1.66, and fusing `clear` into that structure is 8.90. The increment land
 owns; that locality is what the redundancy buys. A bucketing pass (12 MB instead of 24) is the only structure left that
 reduces the bytes without losing it, and it would help `place` more than `count`; it is scoped as its own task.
 """
+
+[[completed]]
+task = "phase-5 bucketing pass for count/place (scoped successor to T06; closed as measured-and-rejected)"
+delivered_in = "perf/t06-clear-reciprocal"
+note = """
+The scoped successor was to scatter bodies into per-worker buckets once so `count` and `place` each scan 12 MB instead of
+24. A standalone probe priced the scatter before any crate change, on the rule that killed the private histograms, and it
+missed the 0.6 ms budget by 4.7x: serial scatter 2.816 ms, padded atomics 3.138, packed atomics 6.434. Writing the same
+4 MB as six sequential streams costs 0.157 ms, so the bytes were never the constraint -- the scatter is latency-bound on a
+loop-carried cursor load at ~2.8 ns per body, which is one cache round trip. Packing six cursors into one 64-byte line
+costs 2.05x over padding them, which is the measured price of false sharing on this shape.
+The read saving was also overestimated by 2.4x: measured 0.573 ms per pass (0.728 -> 0.155), not 1.4. That fixes the
+break-even at a scatter of <= 1.15 ms, against a measured floor of 2.8. With the scatter included the rebuild goes
+4.573 -> 6.243 ms (+1.67) at best. The only dependency-free structure (per-worker per-bucket counts, prefix, contiguous
+writes) lands at 1.2-1.3 ms by the same arithmetic -- break-even, for a new pass, 4 MB of scratch and a merge-order
+determinism argument, resting on an estimate of the kind that has been wrong twice in this file.
+Closed rather than implemented. If `place` is revisited the target is its 1M cursor load-modify-stores, which is the same
+dependency shape and where its 1.975 ms actually goes, not the redundant traffic in front of it. Phase 5's performance
+enhancements end here, at 6.289 -> 4.572 ms (5.02x against the pre-fix serial build, 1.52x against phase 4, 2.67x against
+its own serial path) with two proposed optimisations measured and rejected instead of shipped.
+"""
