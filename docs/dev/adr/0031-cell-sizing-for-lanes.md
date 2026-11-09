@@ -113,7 +113,7 @@ That is the honest answer to the question ADR 0031 opened, and it changes the re
 grid budget is **not** the thing standing between the kernel and its optimum. Moving to 1.4M cells
 is affordable but buys nothing at these populations, because the population that steers is small.
 
-Occupancy, from the same spiral at 100,000 agents ([figure](../images/occupancy-7m-9m.png)):
+Occupancy, from the same spiral at 100,000 agents ([figure](../../images/occupancy-7m-9m.png)):
 
 | cell | buckets | agents/bucket | in blocks | peak |
 | --- | --- | --- | --- | --- |

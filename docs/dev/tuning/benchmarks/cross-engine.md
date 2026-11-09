@@ -108,7 +108,7 @@ printing a one-engine "comparison". Unreal is not automated: its harness lives i
 `benchmarks/unreal/` is the harness: a `UTickableWorldSubsystem` that runs the same fixture in Unreal's own idiom
 (SoA arrays, counting-sort grid rebuild, bounded separation, fixed 60 Hz step) and prints the same JSON line. It is a
 subsystem rather than an actor, so installing it is copying a module into a project; there is no map to build and no
-blueprint to wire. Its [README](../../../benchmarks/unreal/README.md) has the setup, the flags and the build commands.
+blueprint to wire. Its [README](../../../../benchmarks/unreal/README.md) has the setup, the flags and the build commands.
 
 ```text
 UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \

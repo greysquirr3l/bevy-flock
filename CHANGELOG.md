@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The docs and this site were audited against the tree, and eleven links were broken.** Moving `docs/adr` to
+  `docs/dev/adr` and the tuning material deeper left relative links pointing at directories that no longer exist:
+  ADR images, demo captures, the playground README, three charts in the performance journal. Markdown does not
+  complain, so `scripts/check_docs_links.py` now resolves every relative link in `docs/`, the site and the crate
+  READMEs, and runs in CI with a self-test.
+- **Four corrections on the site.** The performance page said "five passes" (there are four since the phase-5 fusion),
+  and its rebuild table labelled the pre-fix six-worker total as a serial reference, turning a 27% wall-clock
+  improvement into a 1.38x story about threads. Both are now stated with the same-binary denominator, and the page
+  gained the same-machine Godot comparison. The install page's second table was missing `bevy-flock-ecs` and had no
+  lead-in; the internals page still ended the ADR index at 0060.
 - **The Unreal side of the cross-engine benchmark exists.** `benchmarks/unreal/` is a `UTickableWorldSubsystem`
   running the W1 fixture in Unreal's idiom: SoA arrays, a counting-sort grid rebuild each tick, bounded separation and
   a fixed 60 Hz step, printed as the same JSON line the other harnesses print. A subsystem means no map, no actor and

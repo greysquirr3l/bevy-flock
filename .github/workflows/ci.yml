@@ -109,6 +109,10 @@ jobs:
       - run: python3 scripts/publish_check.py
       # The drift catalogue is a table in a page; its parser has to be checked without a compiler too.
       - run: python3 scripts/lint_drift.py --self-test
+      # The docs tree was reorganised once and eleven relative links broke silently: Markdown does not complain, so
+      # the links are checked rather than remembered.
+      - run: python3 scripts/check_docs_links.py --self-test
+      - run: python3 scripts/check_docs_links.py
       # The local CI runner reads this file to reproduce these jobs off Actions, so a workflow it
       # can no longer translate is a failure rather than a silently thinner local gate.
       - run: python3 scripts/ci_local.py --check

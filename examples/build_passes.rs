@@ -6,9 +6,12 @@
 //! What each pass of the spatial rebuild costs, at one worker, at the machine's count, and across block counts.
 //!
 //! Phase 3 measured the rebuild at 2.94x on six workers against the query batch's 6.36x, and attributed the
-//! gap to the cell passes. This example is that attribution: it times the five passes separately over the same
-//! 1M fixture the gated baseline uses, so phase 4's blocked scan has a target to beat rather than a total to
-//! argue about.
+//! gap to the cell passes. This example is that attribution: it times the passes separately over the same 1M
+//! fixture the gated baseline uses, so a change has a target to beat rather than a total to argue about.
+//!
+//! There are four passes, not five: clear, count, prefix and place. Phase 5 folded the cursor copy into the
+//! scan and made the scan and the placement one dispatch, so a `seat` row would be a number measured on code
+//! that no longer exists.
 //!
 //! Output is JSON lines: one `meta` record, then one `pass` record per pass and one `total` per run. Every
 //! figure is the median of `REPEATS`, because one scheduler hiccup on a VM should not become a table.

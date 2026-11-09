@@ -266,7 +266,7 @@ it is not the case this format optimises for.
 Captured with `cargo flamegraph` against `examples/profile_band.rs`, which builds the ADR 0021
 layout, 5,000 near agents at 60 Hz, 15,000 mid agents at 20 Hz, 980,000 as density, and runs
 frames without criterion's timing in the way. Artefact:
-[`docs/images/band-1m-flamegraph.svg`](images/band-1m-flamegraph.svg).
+[`docs/images/band-1m-flamegraph.svg`](../../images/band-1m-flamegraph.svg).
 
 ```sh
 cargo flamegraph --profile profiling --example profile_band --output docs/images/band-1m-flamegraph.svg -- 2000
@@ -512,7 +512,7 @@ crate's codegen (one thread) and a task that is 6 crates built in parallel (6 th
 workspace `cargo build` has). Each cell is the median of 2 runs; the largest spread between repeats
 was 8.8%.
 
-![Wall clock and speedup against core count, for one-thread and six-thread tasks](images/scaling-curves.png)
+![Wall clock and speedup against core count, for one-thread and six-thread tasks](../../images/scaling-curves.png)
 
 Shape A on 6 cores (8 one-crate tasks):
 
@@ -768,7 +768,7 @@ reach the frame because tiering caps how many agents steer (about 5,000 of 100,0
 the grid rebuild is a small share. `MAX_CELLS` therefore stays; `SpatialGridConfig::with_cell_budget`
 is the knob for a game that steers more of its crowd.
 
-![Occupancy of the 7 m and 9 m grids at 100,000 agents](images/occupancy-7m-9m.png)
+![Occupancy of the 7 m and 9 m grids at 100,000 agents](../../images/occupancy-7m-9m.png)
 
 The re-open trigger is enforced: `cargo bench --bench crowd -- flock_frame_cell` then
 `python3 scripts/cell_size_gate.py` (3% warn, 10% fail), which is what CI's `cell-size-gate` job runs.

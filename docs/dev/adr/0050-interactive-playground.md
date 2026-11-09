@@ -56,7 +56,7 @@ constraint is not a sandbox quirk, either: the same is true of CI, of a remote s
 The result, rendered through the client's own `Session` and `Budget` at 120 × 88 pixels and enlarged
 four times without smoothing:
 
-![The procession view in a terminal](../demo/ashfall-play.png)
+![The procession view in a terminal](../../demo/ashfall-play.png)
 
 It is regenerated rather than screenshotted, by `demo/examples/frame_capture.rs`: the client's frame
 minus the status line, at the size the client draws it. `--band 8` is the cross-fade this ADR records
@@ -163,7 +163,7 @@ instances, 7 draws, 5,401,392 triangles.
 | `eight_frames_per_drain` | 7.8932 s (986.6 ms/frame) | 7.8580 - 7.9271 s |
 | `frame_with_readback` | 997.35 ms | 994.51 - 1000.5 ms |
 
-![The same district drawn by wgpu on lavapipe](../demo/ashfall-gpu-district.png)
+![The same district drawn by wgpu on lavapipe](../../demo/ashfall-gpu-district.png)
 
 The same district, 600x375, drawn by `demo-gpu` on `llvmpipe`. Compare it with
 `ashfall-3d-district.png` next to it: the composition and the crowd agree because both read the same
