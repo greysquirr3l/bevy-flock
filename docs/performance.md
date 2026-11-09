@@ -1331,3 +1331,37 @@ about 12 ms rather than 16, and nothing in the batch would have had to change.
 `benches/spatial-baseline.json` is re-recorded with the parallel cases (`spatial_build/build_parallel`,
 `spatial_query/radius_batch_parallel`) beside the serial ones, so the gate protects both paths and a future
 regression has somewhere to appear.
+
+### The rebuild's five passes, and a corrected premise (T01)
+`examples/build_passes.rs` times every pass separately through `SpatialGrid::build_measured`, median of seven
+runs, the same 1M fixture as the gated baseline, on the same six-core aarch64 VM.
+
+| Pass | 1 worker | 6 workers | Scales |
+| --- | ---: | ---: | --- |
+| clear (window starts and counts) | 12.91 ms | 2.46 ms | 5.2x |
+| count (bodies per cell) | 1.68 ms | 2.08 ms | **0.8x** |
+| prefix (the scan) | 0.85 ms | 0.87 ms | serial |
+| place (windows and `order`) | 6.99 ms | 2.23 ms | 3.1x |
+| restore (write cursors) | 0.68 ms | 0.68 ms | serial |
+| **total** | **23.14 ms** | **8.85 ms** | **2.6x** |
+
+Serial share: 6.7% at one worker, 17.6% at six. The fixture holds 421,876 cells, not the 15.6 million an
+earlier draft of these notes assumed — the grid caps its cell array at a budget, which for a 1 km volume at 8 m
+is 75 cells per axis, an effective 13.3 m. That single correction matters more than it looks: the scan was
+being reasoned about as a 15-million-step loop when it is a 422-thousand-step one.
+
+**The premise phase 4 was built on is wrong, and this is the measurement that says so.** Phase 3's analysis
+blamed the prefix sum for the build's 2.94x and predicted that a parallel scan would take the build to 5x. The
+scan is 0.85 ms — 3.7% of the serial rebuild and 9.8% of the parallel one. Even a scan that cost nothing at six
+workers would move the build from 8.85 ms to about 8.0 ms. What actually costs the money is the clear
+(12.91 ms, 5.2x) and place (6.99 ms, 3.1x), and what actually caps the curve is the pair of serial passes at
+1.55 ms plus a count pass that gets *slower* with more workers (1.68 ms to 2.08 ms, 0.8x).
+
+The ceiling is arithmetic, not opinion: with 1.55 ms serial, Amdahl at six workers gives 4.5x on the build
+however good the parallel half becomes. The measured 2.6x is therefore 58% of what the current decomposition
+can ever reach, and a perfect blocked scan buys roughly 0.7 ms of the 6.3 ms still on the table.
+
+So the blocked scan stays in the plan — it is cheap, it is a prerequisite for deleting the cursor restore, and
+it removes a serial pass — but it is no longer the headline. The tasks that follow this measurement are about
+the clear's 30 ns per cell and the count pass's negative scaling, and `build-scaling-gate`'s target has been
+re-derived from the floor above rather than from the 5x guess.
