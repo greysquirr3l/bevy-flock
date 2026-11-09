@@ -314,7 +314,18 @@ pub struct SpatialGrid {
     dims: [u32; 3],
     /// Prefix sums: `cell_start[c]..cell_start[c + 1]` is cell `c`'s window in
     /// `order`. Length is `cell_count() + 1`.
+    ///
+    /// Written by the scan and **not touched afterwards**: `place` advances [`SpatialGrid::cell_cursor`]
+    /// instead, so the window table a caller reads is the one the scan produced rather than a leftover of the
+    /// placement pass (ADR 0056).
     cell_start: Vec<u32>,
+    /// The write cursor `place` advances through each window: a copy of `cell_start`, reused every rebuild.
+    ///
+    /// It exists so that placement does not have to un-advance `cell_start` afterwards. The old shape walked the
+    /// starts up to the ends and then shifted the whole array down by one cell, a serial 421k-step dependency
+    /// chain measured at 0.70 ms of a 7.48 ms build; a `memcpy` over the same bytes is ~0.08 ms because it
+    /// carries no dependency. Length is `cell_count() + 1`.
+    cell_cursor: Vec<u32>,
     /// Indices into `entries`, grouped by cell.
     order: Vec<u32>,
     /// Insertion-ordered agents.
@@ -353,8 +364,11 @@ pub struct PassCosts {
     pub prefix: Duration,
     /// Placing bodies into their windows and filling `order`: `place_cells_*`. Partitions.
     pub place: Duration,
-    /// Restoring the write cursors from the window starts. Serial by construction.
-    pub restore: Duration,
+    /// Copying the window starts into the write cursors `place` advances. One `memcpy`.
+    ///
+    /// Previously a serial `restore` pass that shifted the whole array down by one cell to undo placement's
+    /// cursor advance. The copy does the same job from the other side, and costs a tenth of it (ADR 0056).
+    pub seat: Duration,
     /// Blocks the prefix sum was split into: 1 means the serial reference ran.
     ///
     /// Reported rather than inferred, because "the blocked scan is actually used" is a claim a test can check
@@ -374,31 +388,25 @@ impl PassCosts {
     /// Saturating rather than wrapping: a total that overflowed would read as a fast rebuild.
     #[must_use]
     pub fn total(&self) -> Duration {
-        [
-            self.clear,
-            self.count,
-            self.prefix,
-            self.place,
-            self.restore,
-        ]
-        .into_iter()
-        .fold(Duration::ZERO, |sum, pass| {
-            sum.checked_add(pass).unwrap_or(Duration::MAX)
-        })
+        [self.clear, self.count, self.prefix, self.seat, self.place]
+            .into_iter()
+            .fold(Duration::ZERO, |sum, pass| {
+                sum.checked_add(pass).unwrap_or(Duration::MAX)
+            })
     }
 
     /// The share of the rebuild that ran on a single thread.
     ///
-    /// `prefix` and `restore` are the serial passes and `clear`, `count` and `place` partition, so this is
-    /// the fraction a blocked scan could in principle recover, times the workers it could use. Zero when the
-    /// rebuild took no measurable time.
+    /// `prefix` and `seat` are the serial passes and `clear`, `count` and `place` partition, so this is the
+    /// fraction a blocked scan or a parallel copy could in principle recover, times the workers it could use.
+    /// Zero when the rebuild took no measurable time.
     #[must_use]
     pub fn serial_share(&self) -> f32 {
         let total = self.total().as_secs_f64();
         if total <= 0.0 {
             return 0.0;
         }
-        let serial = self.prefix.as_secs_f64() + self.restore.as_secs_f64();
+        let serial = self.prefix.as_secs_f64() + self.seat.as_secs_f64();
         num::f64_to_f32(serial / total)
     }
 }
@@ -439,6 +447,7 @@ impl SpatialGrid {
             cell_size,
             dims,
             cell_start: vec![0; cells + 1],
+            cell_cursor: Vec::new(),
             order: Vec::new(),
             entries: Vec::new(),
             threads: default_threads(),
@@ -466,6 +475,7 @@ impl SpatialGrid {
             cell_size: 2.0,
             dims: [1, 1, 1],
             cell_start: vec![0, 0],
+            cell_cursor: Vec::new(),
             order: Vec::new(),
             entries: Vec::new(),
             threads: 1,
@@ -677,16 +687,16 @@ impl SpatialGrid {
         costs.prefix = start.elapsed();
 
         let start = Instant::now();
+        self.seat_cursors();
+        costs.seat = start.elapsed();
+
+        let start = Instant::now();
         if workers <= 1 {
             self.place_cells_serial();
         } else {
             self.place_cells_parallel(workers);
         }
         costs.place = start.elapsed();
-
-        let start = Instant::now();
-        self.restore_cell_start();
-        costs.restore = start.elapsed();
 
         costs.workers = workers;
         costs.bodies = self.entries.len();
@@ -730,9 +740,10 @@ impl SpatialGrid {
     /// The reference scan: one thread, in place, over the whole cell array.
     ///
     /// Counts live at `cell_start[cell + 1]`, so this rotates them into `cell_start[cell + 1] == sum of the
-    /// counts below it`. `place` then walks each window downwards from that end, and `restore_cell_start`
-    /// turns the ends into starts. The blocked scan below must reproduce this array byte for byte, which is
-    /// why this stays in the tree rather than being replaced.
+    /// counts at and below cell`, which leaves `cell_start[cell]` holding where cell `cell`'s window begins.
+    /// `place` fills that window upwards from its start and never reads back through this array. The blocked
+    /// scan below must reproduce this array byte for byte, which is why this stays in the tree rather than
+    /// being replaced.
     fn prefix_cells_serial(&mut self) {
         let cells = self.cell_count();
         for index in 0..cells {
@@ -867,14 +878,14 @@ impl SpatialGrid {
         self.order.resize(self.entries.len(), 0);
         for (index, cell) in self.cells.iter().enumerate() {
             let cell = *cell as usize;
-            let target = match self.cell_start.get(cell).copied() {
+            let target = match self.cell_cursor.get(cell).copied() {
                 Some(target) => target as usize,
                 None => continue,
             };
             if let Some(slot) = self.order.get_mut(target) {
                 *slot = num::usize_to_u32(index);
             }
-            if let Some(cursor) = self.cell_start.get_mut(cell) {
+            if let Some(cursor) = self.cell_cursor.get_mut(cell) {
                 *cursor += 1;
             }
         }
@@ -884,7 +895,7 @@ impl SpatialGrid {
         let cells_in_grid = self.cell_count();
         let bodies = self.entries.len();
         let Self {
-            cell_start,
+            cell_cursor,
             order,
             cells,
             ..
@@ -894,7 +905,7 @@ impl SpatialGrid {
         order.resize(bodies, 0);
         let per = cells_in_grid.div_ceil(workers);
         thread::scope(|scope| {
-            let mut cursor_rest: &mut [u32] = cell_start.as_mut_slice();
+            let mut cursor_rest: &mut [u32] = cell_cursor.as_mut_slice();
             let mut order_rest: &mut [u32] = order.as_mut_slice();
             let mut cursor_at = 0_usize;
             let mut order_at = 0_usize;
@@ -953,17 +964,28 @@ impl SpatialGrid {
         });
     }
 
-    fn restore_cell_start(&mut self) {
-        let cells = self.cell_count();
-        for index in (1..=cells).rev() {
-            let previous = self.cell_start.get(index - 1).copied().unwrap_or(0);
-            if let Some(slot) = self.cell_start.get_mut(index) {
-                *slot = previous;
-            }
-        }
-        if let Some(first) = self.cell_start.get_mut(0) {
-            *first = 0;
-        }
+    /// Give `place` a cursor to advance, so that `cell_start` survives placement untouched.
+    ///
+    /// This is the one `O(cells)` step in the rebuild that runs on a single thread, and it is deliberate. The
+    /// pass it replaces — shifting the ends back down to starts, after placement had walked them up — cost
+    /// 0.68 ms because it read what it had just written: a dependent chain of 421k steps. A `memcpy` over the
+    /// same 1.7 MB carries no such dependency and costs 0.13 ms, which is already about 13 GB/s.
+    ///
+    /// Splitting that copy across six workers was implemented and measured, not assumed away: it came out at
+    /// 0.21 ms, because six `thread::scope` spawns cost more than the copy they share. So this stays serial and
+    /// the pre-condition for revisiting it is written down rather than guessed — a worker pool that is already
+    /// alive across ticks would remove the spawn cost that makes the parallel version lose (ADR 0056).
+    ///
+    /// The buffer is sized on the first rebuild and reused, because a grid's cell count does not change: the
+    /// `resize` below is a no-op after that, so a steady frame neither allocates nor memsets here.
+    fn seat_cursors(&mut self) {
+        let Self {
+            cell_start,
+            cell_cursor,
+            ..
+        } = self;
+        cell_cursor.resize(cell_start.len(), 0);
+        cell_cursor.copy_from_slice(cell_start);
     }
 
     /// Pass one, partitioned by body: each worker writes its own slice of the cell list.
@@ -1804,6 +1826,63 @@ mod tests {
             .iter()
             .flat_map(|value| value.to_ne_bytes())
             .collect()
+    }
+
+    #[test]
+    fn placement_leaves_the_window_table_alone() {
+        // ADR 0056. The old shape let `place` walk `cell_start` up to the window ends and then shifted the whole
+        // array back down, so the table a caller read was a repaired copy of a buffer placement had been writing
+        // to. This test is the postcondition that shape could not state: after a rebuild, every entry of
+        // `cell_start` is the number of bodies in the cells before it, computed here from the bodies alone.
+        let config =
+            SpatialGridConfig::try_new(Vec3::splat(-100.0), Vec3::splat(100.0), 4.0).or_die();
+        let mut grid = SpatialGrid::new(config).or_die();
+        let positions: Vec<Vec3> = (0..2_000)
+            .map(|index| {
+                let step = num::u32_to_f32(num::usize_to_u32(index));
+                Vec3::new(
+                    (step * 0.7).sin() * 90.0,
+                    (step * 0.3).cos() * 90.0,
+                    (step * 0.11).sin() * 90.0,
+                )
+            })
+            .collect();
+        grid.extend_from(positions.iter().enumerate().map(|(index, position)| {
+            (
+                NpcId::unique(num::usize_to_u32(index)),
+                *position,
+                Vec3::ZERO,
+            )
+        }));
+        grid.build();
+
+        let mut expected = vec![0_u32; grid.cell_count() + 1];
+        for position in &positions {
+            let cell = grid.cell_of(*position);
+            if let Some(slot) = expected.get_mut(cell as usize + 1) {
+                *slot += 1;
+            }
+        }
+        for index in 0..grid.cell_count() {
+            let below = expected.get(index).copied().unwrap_or(0);
+            let here = expected.get(index + 1).copied().unwrap_or(0);
+            if let Some(slot) = expected.get_mut(index + 1) {
+                *slot = here + below;
+            }
+        }
+        assert_eq!(
+            grid.cell_start, expected,
+            "the window table is not the scan's output, so placement is still writing through it"
+        );
+        // And the cursor is the scratch that absorbed the advance: each entry ends at its window's end, which is
+        // the value the old shape left in `cell_start` and then had to shift back out.
+        for cell in 0..grid.cell_count() {
+            assert_eq!(
+                grid.cell_cursor.get(cell).copied(),
+                grid.cell_start.get(cell + 1).copied(),
+                "cursor for cell {cell} did not finish at the window end"
+            );
+        }
     }
 
     #[test]

@@ -218,6 +218,31 @@ planned 5x target was arithmetically unreachable; T05's target is re-derived in 
 (`clear-and-count-cost`) inherits the work the measurement actually points at.
 """
 [[completed]]
+task = "phase-4 T04 retire-serial-cell-passes"
+delivered_in = "feat/phase4-t04-cursor-copy"
+note = """
+The cursor restore is gone. Placement now advances `cell_cursor`, a reusable copy of the window table, so
+`cell_start` is written by the scan and never read back through by placement. `PassCosts::restore` is renamed
+`PassCosts::seat` and measures the copy: 0.68 -> 0.11 ms, 6.0x. Build 7.48 -> 6.95 ms at six workers (1.08x, and
+1.27x against the phase 3 baseline); serial share 13.1% -> 5.8%; serial remainder is now
+`O(blocks) + sizeof(cell_start)` = 0.30 ms scan + 0.11 ms memcpy, which puts Amdahl's six-worker cap at 5.5x
+instead of 4.5x. ADR 0056 records the decision, the two rejected shapes (parallelise the shift; store ends and
+shift every query) and the invariant it buys: the window table after a rebuild is the scan's output, which is a
+postcondition with a test (`placement_leaves_the_window_table_alone`) whose expectation is built from body
+positions rather than from the grid's own buffers.
+Deviation, recorded rather than papered over: the copy runs on one thread, against this task's must-have that
+"the rebuild performs no O(cells) work on a single thread except the O(blocks) scan". Splitting it across six
+workers was implemented and measured at 0.21 ms against 0.11 ms serial -- six `thread::scope` spawns cost more
+than the 1.7 MB they share. The condition for revisiting is a worker pool that outlives a tick; until the crate
+has one, the serial copy is the measured-better choice and it is stated as an exception in ADR 0056 and in
+docs/performance.md.
+The clear half of this task was already retired by the parallel count path in phase 3: each worker zeroes its own
+cell range, and what remains in `clear` is the parallel per-body cell computation, not a serial O(cells) sweep.
+Placement output is unchanged byte for byte -- the fill still walks windows upwards in body order -- so the
+equivalence matrix and the parity harness still compare exactly, and the gate baseline is re-recorded with the
+previous numbers left in the doc beside the new ones.
+"""
+[[completed]]
 task = "phase-4 T03 blocked-prefix-sum"
 delivered_in = "feat/phase4-t03-blocked-scan"
 note = """
