@@ -19,6 +19,19 @@ use crate::domain::cost::VirtualCost;
 /// Set when the NPC has decided to speak to the person it noticed.
 pub const KEY_TALK_TO: BlackboardKey = BlackboardKey::new(30);
 
+/// Set when a player character is within notice range.
+///
+/// The perception adapter writes this; these leaves read it. The constant lives here rather than beside the
+/// system that writes it because a behaviour must not depend on an adapter — the arrow points from `adapters` to
+/// `behavior`, and a leaf that imported `crate::adapters::primary::perception` to learn its own inputs inverted it.
+/// A self-contained consumer of this crate can therefore implement its own perception and keep the same contract,
+/// because the contract is a number in the core, not a function of the engine.
+pub const KEY_PLAYER_SEEN: BlackboardKey = BlackboardKey::new(20);
+
+/// The distance to the nearest noticed player, in metres. Absent when nobody is in
+/// range, which is different from zero.
+pub const KEY_PLAYER_DISTANCE: BlackboardKey = BlackboardKey::new(21);
+
 /// Set when the NPC has decided the noticed person is a threat.
 pub const KEY_WARY_OF: BlackboardKey = BlackboardKey::new(31);
 
@@ -36,7 +49,7 @@ pub struct GreetKnown;
 
 impl LeafBehavior for GreetKnown {
     fn tick(&self, ctx: &mut LeafContext<'_>) -> Status {
-        if !ctx.flag(crate::adapters::primary::perception::KEY_PLAYER_SEEN) {
+        if !ctx.flag(KEY_PLAYER_SEEN) {
             return Status::Failure;
         }
         let _ = ctx
@@ -68,11 +81,10 @@ pub struct AvoidKnown;
 
 impl LeafBehavior for AvoidKnown {
     fn tick(&self, ctx: &mut LeafContext<'_>) -> Status {
-        if !ctx.flag(crate::adapters::primary::perception::KEY_PLAYER_SEEN) {
+        if !ctx.flag(KEY_PLAYER_SEEN) {
             return Status::Failure;
         }
-        let Some(distance) = ctx.number(crate::adapters::primary::perception::KEY_PLAYER_DISTANCE)
-        else {
+        let Some(distance) = ctx.number(KEY_PLAYER_DISTANCE) else {
             return Status::Failure;
         };
         if distance >= PERSONAL_SPACE {
@@ -116,7 +128,7 @@ impl GreetingGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::primary::perception::{KEY_PLAYER_DISTANCE, KEY_PLAYER_SEEN};
+    use super::{KEY_PLAYER_DISTANCE, KEY_PLAYER_SEEN};
     use crate::behavior::blackboard::{Blackboard, Value};
     use crate::domain::ids::NpcId;
     use crate::domain::tick::Tick;
