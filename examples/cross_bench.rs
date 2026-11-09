@@ -16,6 +16,7 @@
 use bevy_app::prelude::*;
 use bevy_flock::adapters::primary::plugin::{CrowdPreset, FlockConfig, FlockPlugin};
 use bevy_flock::domain::ids::SimSeed;
+use bevy_flock::domain::num;
 use bevy_flock::domain::population::{PopulationMode, PopulationSize};
 use std::time::Instant;
 
@@ -65,14 +66,14 @@ fn args() -> Args {
     parsed
 }
 
-/// Nearest-rank percentile over a sorted slice, the definition the other harnesses use.
-fn percentile(sorted: &[f64], fraction: f64) -> f64 {
+/// Nearest-rank percentile over a sorted slice, taking the rank as an exact fraction so the arithmetic stays integral:
+/// `ceil(numerator * n / denominator)` is `(numerator * n + denominator - 1) / denominator`, with nothing cast.
+fn percentile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
     if sorted.is_empty() {
         return 0.0;
     }
-    let rank = (fraction * sorted.len() as f64).ceil() as usize;
-    let index = rank.saturating_sub(1).min(sorted.len() - 1);
-    sorted.get(index).copied().unwrap_or(0.0)
+    let rank = (numerator * sorted.len()).div_ceil(denominator).max(1);
+    sorted.get(rank - 1).copied().unwrap_or(0.0)
 }
 
 fn machine() -> String {
@@ -90,7 +91,7 @@ fn machine() -> String {
                 })
         })
         .unwrap_or_else(|| "unknown cpu".to_owned());
-    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     format!("{cpu}, {cores} threads")
 }
 
@@ -118,18 +119,17 @@ fn run(agents: usize, ticks: usize, warmup: usize, json: bool) {
     }
     samples.sort_by(f64::total_cmp);
 
-    let median = percentile(&samples, 0.50);
-    let p95 = percentile(&samples, 0.95);
-    let p99 = percentile(&samples, 0.99);
+    let median = percentile(&samples, 50, 100);
+    let p95 = percentile(&samples, 95, 100);
+    let p99 = percentile(&samples, 99, 100);
     let max = samples.last().copied().unwrap_or(0.0);
-    let median_ticks = median.round() as usize;
     let over = samples.iter().filter(|sample| **sample > BUDGET_MS).count();
+    // Percentages as integer ratios so no count is widened to f64 to divide by another count.
     let over_pct = if samples.is_empty() {
         0.0
     } else {
-        over as f64 * 100.0 / samples.len() as f64
+        num::usize_to_f64(over * 1000 / samples.len()) / 10.0
     };
-    let _ = median_ticks;
 
     if json {
         println!(
@@ -147,14 +147,14 @@ fn run(agents: usize, ticks: usize, warmup: usize, json: bool) {
             p99,
             max,
             over_pct,
-            median * 1e6 / agents as f64,
+            median * 1e6 / num::usize_to_f64(agents),
             machine(),
         );
     } else {
         println!(
             "{agents} agents: median {median:.3} ms, p95 {p95:.3}, p99 {p99:.3}, max {max:.3}, \
              {over_pct:.2}% over {BUDGET_MS} ms, {:.0} ns/agent",
-            median * 1e6 / agents as f64
+            median * 1e6 / num::usize_to_f64(agents)
         );
     }
 }
