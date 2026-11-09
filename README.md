@@ -1,4 +1,5 @@
 # bevy-flock
+
 <img src="docs/demo/bevy-flock-logo.png" width="320" height="320" align="right" alt="bevy-flock: a ring of ink-wash cranes">
 
 **Deterministic crowd and NPC simulation for Bevy.** One NPC or a million, with
@@ -17,7 +18,7 @@ That is a running crowd of 2,000 people, each with their own personality, their
 own random stream, and a spatial index built under them. No assets, no window, no
 GPU.
 
-**Docs:** [greysquirr3l.github.io/bevy-flock](https://greysquirr3l.github.io/bevy-flock/) ·
+**Documentation:** [Read the bevy-flock docs](https://greysquirr3l.github.io/bevy-flock/) ·
 **Internals:** [`docs/dev/`](docs/dev) · **Book:** [`docs/book/`](docs/book) ·
 **Crates:** [`bevy-flock`](https://crates.io/crates/bevy-flock),
 [`bevy-flock-core`](https://crates.io/crates/bevy-flock-core)
@@ -95,8 +96,8 @@ claim, measure your own before quoting these.
 | 1,000,000-inhabitant band frame, wide kernel | 3.78 ms | < 6 ms |
 | 1,000,000-inhabitant band frame, scalar | 4.75 ms | < 6 ms |
 | 100,000 with 5,000 manifested | 3.37 ms | < 8 ms |
-| 1,000,000-body spatial rebuild, 6 workers | 4.572 ms |, |
-| Per agent | 32 B wide / 28 B scalar |, |
+| 1,000,000-body spatial rebuild, 6 workers | 4.572 ms | |
+| Per agent | 32 B wide / 28 B scalar | |
 | Steady-state allocations over 60 frames | 0 | 0 |
 
 Every number, including the optimisations that were measured and rejected, is in
@@ -115,7 +116,7 @@ by a test, not by review.
 
 ## Where the documentation lives
 
-- **The site**, [greysquirr3l.github.io/bevy-flock](https://greysquirr3l.github.io/bevy-flock/):
+- **The site**, [getting started, guides, and reference](https://greysquirr3l.github.io/bevy-flock/):
   install, first crowd, concepts, guides, reference. Start here.
 - **The book**, [`docs/book/`](docs/book), deeper and older, built with mdBook.
 - **`docs/dev/`**, ADRs, tuning journals, gates, benchmark harnesses. Written for whoever

@@ -30,6 +30,11 @@
 //! what the equations always meant: a test pins the old bias so the difference stays visible
 //! rather than unexplained.
 
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "Keep explicit multiply/add rounding for deterministic simulation arithmetic."
+)]
+
 use bevy_math::Vec3;
 use bevy_tasks::{ComputeTaskPool, TaskPool};
 #[cfg(feature = "simd")]

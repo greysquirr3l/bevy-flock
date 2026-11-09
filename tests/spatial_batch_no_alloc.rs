@@ -134,7 +134,7 @@ fn a_parallel_batch_pays_a_bounded_amount_for_its_workers() {
     // deliberately loose enough to survive a stdlib change and tight enough to catch a per-query
     // allocation, which is the regression that would matter: 500 queries would blow past it at once.
     let (grid, centres) = fixture();
-    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let workers = 6;
     let grid = grid.with_threads(workers);
     let mut arena = QueryArena::new(32);
     grid.radius_batch(&centres, 14.0, &mut arena);

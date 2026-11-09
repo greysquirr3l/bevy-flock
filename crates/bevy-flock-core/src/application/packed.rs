@@ -15,6 +15,11 @@
 //! keeping the kernel pure is what makes it testable without a world and benchmarkable at
 //! a population no ECS would survive.
 
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "Keep explicit multiply/add rounding for deterministic simulation arithmetic."
+)]
+
 use crate::domain::num;
 use core::f32::consts::TAU;
 #[cfg(feature = "simd")]
