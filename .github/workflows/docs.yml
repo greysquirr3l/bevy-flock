@@ -13,9 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # No version pin here: pnpm/action-setup reads packageManager from site/package.json, so the lockfile and the
-      # tool that wrote it can never drift apart.
+      # No version pin here: the action reads `packageManager` from the manifest, so the lockfile and the tool that
+      # wrote it cannot drift apart. It looks for `package.json` at the repository root by default, and this repository
+      # keeps the site in `site/`, which is why `package_json_file` is not optional: without it the action fails with
+      # "No pnpm version is specified" before a single page is built, and this whole job becomes decoration.
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: site/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
