@@ -349,3 +349,26 @@ and a worker that runs nothing leaves the arrays as the schedule would have.
 PassCosts goes from five rows to four and the seat field is deleted rather than left at zero; the inventory example
 loses its row in the same commit, since a stale row is worse than no row.
 """
+
+[[completed]]
+task = "phase-5 T03 fused-count-and-scan"
+delivered_in = "feat/phase5-t03-fusion"
+note = """
+Built as ADR 0057 decided, and the ADR's own revert clause was the thing to watch rather than the mechanism: the
+count pass now totals each block from the window it just wrote, the block-local scan writes cell_start and
+cell_cursor from one register, seat_cursors and PassCosts::seat are deleted, and the rebuild reports four passes
+instead of five.
+The accumulate landed where the ADR predicted it would not hurt and did not: count at six workers moved 1.734 to
+1.772 ms because each worker walks a slice it just wrote, hot in L2, instead of reading the totals back on one
+thread. The read that left prefix is real but small — 0.296 to 0.238 ms — so the total is a wash: 6.758 to 6.814 ms
+over six alternating pairs, inside a fixture whose own spread is 8%. Kept for what it removes, not for what it
+saves, and said so in the ADR rather than in a commit message.
+Two regressions were introduced during the work and removed before it landed, both recorded in performance.md: a
+1.7 MB memset of the cursor table (0.3 ms to prepare memory the scan overwrites anyway), and routing a single
+worker through the blocked scan, which cost 1.02 ms against 0.42 ms until the serial scan caught up to the blocked
+one's zipped-slice access pattern.
+Parity is unchanged: 4 thread counts x 4 block counts byte-identical, placement still leaves the window table
+alone, and the no-allocation tests still pass because the cursor is sized once and never cleared. A new test
+recounts every block total from the cell list itself, because a block boundary off by one shifts every later
+window while the grand total still adds up.
+"""

@@ -42,12 +42,11 @@ const BODIES: usize = 1_000_000;
 const REPEATS: usize = 7;
 
 /// The named getters, so adding a sixth pass to `PassCosts` cannot leave this inventory quietly incomplete.
-const PASSES: [(&str, fn(&PassCosts) -> Duration); 5] = [
+const PASSES: [(&str, fn(&PassCosts) -> Duration); 4] = [
     ("clear", |costs| costs.clear),
     ("count", |costs| costs.count),
     ("prefix", |costs| costs.prefix),
     ("place", |costs| costs.place),
-    ("seat", |costs| costs.seat),
 ];
 
 /// A body's position: a golden-angle spiral inside the volume, so density is even and no cell is empty by

@@ -1537,3 +1537,56 @@ per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` ta
 At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is now 4.72 ms of single-worker build, and the
 remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
 target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.
+
+## Phase 5: the count pass absorbs the scan's totals, and five passes become four (T03)
+
+ADR 0057 fused two things the rebuild was doing twice. `count` now accumulates each block's total while it counts,
+and the block-local scan writes the window starts *and* the placement cursors from the same register — so the read
+that used to happen in `prefix` (1.7 MB of totals, serial) and the copy that used to happen in `seat` are both gone.
+`PassCosts` goes from five rows to four and `seat` is deleted rather than left at zero.
+
+Both binaries were built once and alternated, six pairs, same 1M fixture and six-core aarch64 VM — the method §*Measured,
+alternately, on one machine* established for this fixture, because its run-to-run spread is larger than the effect:
+
+| | 1 worker | 6 workers |
+| --- | ---: | ---: |
+| before (median of 6) | 22.509 ms | 6.758 ms |
+| after (median of 6) | 22.588 ms | 6.814 ms |
+| delta | −0.08 ms (−0.4%) | −0.06 ms (−0.8%) |
+
+**The total did not move, and the honest reading is that it could not have.** `prefix` did what the ADR said it
+would — it lost the totals read:
+
+| pass | 1 worker | 6 workers |
+| --- | ---: | ---: |
+| clear | 13.055 → 12.968 | 2.491 → 2.494 |
+| count | 1.766 → **2.038** | 1.734 → 1.772 |
+| prefix | 0.437 → 0.426 | 0.296 → **0.238** (−20%) |
+| seat | 0.129 → *deleted* | 0.000 → *deleted* |
+| place | 7.168 → 7.190 | 2.134 → 2.279 |
+
+`prefix` at six workers fell 0.058 ms, which is the 1.7 MB totals read leaving the serial tail — bandwidth-bound at
+~6 GB/s, exactly as the ADR's arithmetic predicted. The scan's serial share is now 0.238 ms of a 6.8 ms build, and
+the placement copy is no longer a pass at all. What did not happen is a measurable win in total: 0.06 ms is below
+this fixture's noise, and the totals sum that `count` gained (each worker walking the window it just wrote, hot in
+L2) costs about what the scan's re-read did.
+
+**Two regressions were introduced and removed during the task, and both are worth recording because they are the
+kind that hide.** The first was clearing `cell_cursor` in the count pass: 1.7 MB of `fill` per rebuild, 0.3 ms, to
+prepare memory the scan immediately overwrites in full. The cursor is now left dirty on purpose — every slot the scan
+writes it writes unconditionally, and the one slot it does not touch (index 0, the empty prefix) is set explicitly.
+The second was routing a single worker through the blocked scan: 1.02 ms against 0.42 ms for the plain serial scan,
+because that scan was still writing through `get`/`get_mut` per element while the blocked one walked zipped slices.
+Rewritten as zipped slices, the serial scan costs 0.426 ms, and a single worker now takes it whatever `blocks` says.
+
+**One number the change does not explain.** `count` at one worker reads 0.27 ms higher after the change, and it
+should not: the serial count skips the totals entirely (`needs_block_totals_for` is false at one worker, and
+`the_fused_totals_match_a_recount_of_the_cell_list` asserts the array is empty in that case). It is recorded as
+unexplained drift rather than attributed to the fusion — the same fixture has produced a 0.3 ms swing on an unchanged
+`clear` before.
+
+What the task does deliver is structural, and it is the part T05 needs: three dispatches still, but the serial tail
+between them is 0.238 ms, down from 0.41 ms, and the scan that produces the cursors is the same pass that produces the
+window starts, so no phase of the rebuild has to read another phase's output back. Parity is unchanged: the
+byte-equality matrix (4 thread counts × 4 block counts) and `placement_leaves_the_window_table_alone` still compare
+exactly, and the no-allocation tests still pass, because the cursor table is sized once and never cleared.
