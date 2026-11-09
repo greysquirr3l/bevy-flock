@@ -15,10 +15,10 @@
 //! moving. The distance is measured from [`AnimationFocus`], which the game sets to whatever it is
 //! watching: a camera, a listener, a spectator's target. With no focus set, nothing is culled.
 //!
-//! [`NpcTier`]: bevy_flock::adapters::primary::cognition::NpcTier
-use crate::profile::ProfileError;
+//! [`NpcTier`]: crate::adapters::primary::cognition::NpcTier
+use crate::anim::profile::ProfileError;
+use crate::domain::cognition::CognitionTier;
 use bevy_ecs::prelude::{Component, Resource};
-use bevy_flock::domain::cognition::CognitionTier;
 use bevy_math::Vec3;
 
 /// The default distance, in metres, inside which every body animates fully.
@@ -80,7 +80,7 @@ impl LodLevel {
 
 /// The distance band and the cadence a far body steps at.
 ///
-/// This lives inside [`LocomotionProfile`](crate::LocomotionProfile) rather than in a resource
+/// This lives inside [`LocomotionProfile`](crate::anim::LocomotionProfile) rather than in a resource
 /// because it is a property of the artwork and the crowd, not of the run: a rig whose walk cycle is
 /// four metres long can step further out than a one-metre stride before the freeze is visible.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,13 +169,13 @@ impl BlendLod {
     /// # Examples
     ///
     /// ```
-    /// use bevy_flock_anim::{BlendLod, LodLevel};
+    /// use bevy_flock::anim::{BlendLod, LodLevel};
     ///
     /// let lod = BlendLod::try_new(10.0, 50.0, 4)?;
     /// assert_eq!(lod.level(Some(5.0), None), LodLevel::Full);
     /// assert_eq!(lod.level(Some(500.0), None), LodLevel::Paused);
     /// assert_eq!(lod.level(None, None), LodLevel::Full);
-    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// # Ok::<(), bevy_flock::anim::ProfileError>(())
     /// ```
     #[must_use]
     pub fn level(&self, distance: Option<f32>, tier: Option<CognitionTier>) -> LodLevel {
@@ -284,7 +284,7 @@ impl AnimationLod {
 #[cfg(test)]
 mod tests {
     use super::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
-    use bevy_flock::domain::cognition::CognitionTier;
+    use crate::domain::cognition::CognitionTier;
     use bevy_math::Vec3;
 
     #[test]

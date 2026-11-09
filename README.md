@@ -109,11 +109,12 @@ Every number, including the optimisations that were measured and rejected, is in
 | --- | --- |
 | a crowd in a Bevy game | `bevy-flock` |
 | all of it | `bevy-flock = { version = "0.1", features = ["full"] }` |
-| NPCs that walk with skeletons | `bevy-flock-anim` as well |
+| NPCs that walk with skeletons | `bevy-flock` with `features = ["anim"]` |
 | no Bevy in the dependency graph | `bevy-flock-core` alone |
 
-`full` is `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh`. The animation layer is a separate crate because
-it pulls `bevy_animation` and `bevy_asset`, which a headless server should never compile.
+`full` is `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh` + `anim`. The animation layer is a feature rather
+than a crate so that one dependency gets a crowd that walks; it is off by default because it is the only feature that pulls
+`bevy_animation` and `bevy_asset`, which a dedicated server should never compile.
 
 ## Where the documentation lives
 

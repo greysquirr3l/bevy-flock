@@ -87,7 +87,10 @@ simd = ["dep:wide", "bevy-flock-core/simd"]
 # feature table to find out which four switches that is. Deliberately does not include `anim`: the
 # animation layer lives in `bevy-flock-anim`, which depends on this crate, so a re-export would be a
 # cycle. Add that crate separately and the two meet at the component types in the prelude.
-full = ["ecs", "simd", "threads", "memory", "serde", "navmesh"]
+# Skeletal binding: blended clip weights from simulated locomotion, plus gaze and gesture playback.
+# Off by default because it is the only feature that pulls `bevy_animation` and `bevy_asset`.
+anim = ["ecs", "dep:bevy_animation", "dep:bevy_asset", "dep:bevy_reflect"]
+full = ["ecs", "simd", "threads", "memory", "serde", "navmesh", "anim"]
 
 [dependencies]
 # The simulation itself, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
@@ -102,6 +105,12 @@ bevy-flock-core = { version = "0.1.0", path = "crates/bevy-flock-core", default-
 bevy_app = { version = "0.20.1", optional = true }
 bevy_ecs = { version = "0.20.1", optional = true }
 bevy_math = "0.20.1"
+# The animation layer. Optional as a set: `anim` turns all four on, and a build that does not
+# mention the feature never puts `bevy_animation` or `bevy_asset` in the graph, which is what keeps
+# a dedicated server's build time honest.
+bevy_animation = { version = "0.20.1", optional = true }
+bevy_asset = { version = "0.20.1", optional = true }
+bevy_reflect = { version = "0.20.1", optional = true }
 bevy_tasks = { version = "0.20.1", default-features = false }
 bevy_transform = { version = "0.20.1", optional = true }
 
@@ -232,6 +241,24 @@ strip = false
 debug = true
 codegen-units = 1
 lto = "thin"
+
+[[test]]
+name = "anim_no_alloc"
+harness = true
+required-features = ["anim"]
+
+[[bench]]
+name = "anim_binding"
+harness = false
+required-features = ["anim"]
+
+[[example]]
+name = "anim_lod_cost"
+required-features = ["anim"]
+
+[[example]]
+name = "anim_profile_gaze"
+required-features = ["anim"]
 
 [[test]]
 name = "save_compat"

@@ -29,9 +29,8 @@ path = "src/bin/skinned.rs"
 # form that resolves for a reader whose registry cache holds the subcrates but not the
 # umbrella, which is exactly the offline case.
 [dependencies]
-bevy-flock = { path = ".." }
+bevy-flock = { path = "..", features = ["anim"] }
 bevy-flock-demo = { path = "../demo" }
-bevy-flock-anim = { path = "../crates/bevy-flock-anim" }
 bevy_a11y = "0.20.1"
 bevy_animation = "0.20.1"
 bevy_app = "0.20.1"

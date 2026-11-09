@@ -25,9 +25,9 @@
 //! This type does not know what a think is. The caller supplies `cost_of` and runs the
 //! participants it gets back, which keeps the scheduling policy testable without a
 //! world, and keeps the world's opinion of cost — measured, per ADR 0009 — out of the
-//! policy. Wiring it to [`NpcBrain`] is the adapter's job, not this module's.
+//! policy. Wiring it to `NpcBrain` is the adapter's job, not this module's.
 //!
-//! [`NpcBrain`]: crate::adapters::primary::components::NpcBrain
+//! `NpcBrain`: crate::adapters::primary::components::NpcBrain
 
 use core::cmp::Reverse;
 use std::collections::BinaryHeap;

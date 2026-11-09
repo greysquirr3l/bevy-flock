@@ -27,10 +27,19 @@ pub use crate::adapters::primary::gesture::{
 };
 #[cfg(feature = "ecs")]
 pub use crate::adapters::primary::locomotion::{Locomotion, MIN_MOVING_SPEED};
+// The animation layer, when it is compiled in. Same caveat as the rest of the prelude: a name that
+// needs a sentence of explanation stays in its module, and these are names a game imports first.
 #[cfg(feature = "ecs")]
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
     spawn_position,
+};
+#[cfg(feature = "anim")]
+pub use crate::anim::{
+    AnimPlugin, AnimationFocus, AnimationLod, AnimationState, BlendFrame, BlendLod, BlendWeights,
+    ClipBindings, ClipSlot, FootSlide, GazeBone, GazeLimits, GazePlugin, GazeRig, GestureClips,
+    GesturePlayback, GesturePlugin, LocomotionProfile, LodLevel, ProfileError, RootMotion,
+    RootMotionTrace, RootOffset,
 };
 
 pub use crate::behavior::{

@@ -547,7 +547,7 @@ impl StimulusIndex {
 /// the exact predicates has its **centre** inside `observer ± max_limit()`. Insert each record
 /// into the single cell containing its centre, and scan every cell overlapping `observer ±
 /// max_limit()`: the candidate set is a superset of the perceivable records, with no record
-/// visited twice and no predicate weakened. The exact test in [`consider`] then decides, exactly
+/// visited twice and no predicate weakened. The exact test in `consider` then decides, exactly
 /// as it does in the linear scan.
 ///
 /// That is the whole bit-identical argument. Three facts carry it:
@@ -556,7 +556,7 @@ impl StimulusIndex {
 ///    limit, so nothing perceivable is outside the window.
 /// 2. **No duplicates.** A record lives in exactly one cell, so a visitor sees it at most once and
 ///    the bounded insertion cannot count it twice.
-/// 3. **Order irrelevance.** The kept slots are chosen by [`ranks`], a total order over the record
+/// 3. **Order irrelevance.** The kept slots are chosen by `ranks`, a total order over the record
 ///    fields that appear in the result, so the order candidates arrive in cannot change the
 ///    answer. Bucket traversal is still made canonical (row-major cells, ring order within a
 ///    cell) so a run is reproducible to the instruction, but correctness does not depend on it.

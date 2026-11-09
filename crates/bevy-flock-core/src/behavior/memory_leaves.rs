@@ -1,6 +1,6 @@
 //! Leaves that let a behaviour tree read what an NPC remembers.
 //!
-//! The store itself lives in [`crate::domain::memory`] and is gated behind the
+//! The store itself lives in `domain::memory` and is gated behind the
 //! `memory` feature, because a crowd of a million does not need it and should not pay
 //! for it. These leaves are not gated: they read three integers off the blackboard and
 //! do not know where the numbers came from. That is the seam that makes memory

@@ -15,7 +15,7 @@
 //! 3. **No sort.** Cell order is deterministic by construction; the distance sort existed to make
 //!    the old path reproducible, and sums do not need it.
 //!
-//! The model is unchanged: [`desired_for`] is [`crate::domain::steering::desired_velocity`]'s
+//! The model is unchanged: `desired_for` is [`crate::domain::steering::desired_velocity`]'s
 //! arithmetic term for term, including the priority-weighted truncation, the arrival curve and
 //! the jitter floor, and a test holds the two within float noise of each other.
 //!

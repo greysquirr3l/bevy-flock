@@ -24,7 +24,7 @@
 //! A polygon rebuild has to re-triangulate and re-link, which cannot be sliced into "ten cells a
 //! tick" without publishing a mesh that is partly old and partly new. Grid rebuilds can be
 //! sliced, so they can be budgeted. A game that wants polygons keeps its own source and uses
-//! [`crate::domain::navmesh`] for the mesh itself.
+//! `domain::navmesh` for the mesh itself.
 
 use bevy_math::Vec3;
 

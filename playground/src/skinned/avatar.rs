@@ -19,7 +19,7 @@ use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::prelude::*;
 use bevy_flock::domain::num;
 use bevy_flock::prelude::{GazeAim, NpcBundle, NpcGestures, NpcId};
-use bevy_flock_anim::{ClipBindings, LocomotionProfile};
+use bevy_flock::anim::{ClipBindings, LocomotionProfile};
 use bevy_gltf::Gltf;
 use bevy_math::Vec3;
 use bevy_transform::components::Transform;
