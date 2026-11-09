@@ -626,50 +626,7 @@ pub fn build_app(
     let mut app = App::new();
     // Two tuples, not one: `Plugins` is implemented for tuples of at most sixteen, and this list is
     // longer than that because the umbrella crate is not here to hide it. The order is Bevy's own.
-    app.add_plugins((
-        TaskPoolPlugin::default(),
-        LogPlugin::default(),
-        TimePlugin,
-        TransformPlugin,
-        InputPlugin,
-        AccessibilityPlugin,
-        FrameCountPlugin,
-    ));
-    app.add_plugins((
-        WindowPlugin {
-            primary_window: Some(Window {
-                title: format!(
-                    "Ashfall playground — {} — {}x{}",
-                    options.backend.name(),
-                    options.width,
-                    options.height
-                ),
-                resolution: WindowResolution::new(options.width, options.height),
-                ..Window::default()
-            }),
-            ..WindowPlugin::default()
-        },
-        AssetPlugin::default(),
-        ImagePlugin::default(),
-        // Cameras and visibility propagation. Without it every entity keeps the `ViewVisibility`
-        // it was spawned with, which is false, and a perfectly lit city draws nothing at all.
-        CameraPlugin,
-        // `Assets<Mesh>`, which `VolumetricFogPlugin` reaches for in its own `build`, before any
-        // render pipeline exists to have made one.
-        MeshPlugin,
-        // `GlobalAmbientLight`, which `PbrPlugin` reads: without it a lit scene panics on its first
-        // frame with a resource whose name Bevy cannot print.
-        LightPlugin,
-        RenderPlugin {
-            render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
-                backends: Some(options.backend.mask()),
-                ..WgpuSettings::default()
-            })),
-            ..RenderPlugin::default()
-        },
-        CorePipelinePlugin,
-        PbrPlugin::default(),
-    ));
+    add_render_plugins(&mut app, options);
     // Last, and alone: it installs the event loop, and anything added after it never sees a frame.
     app.add_plugins(WinitPlugin::default());
 
@@ -1014,5 +971,82 @@ mod tests {
             }
             other => unreachable!("the playground draws linear fog, not {other:?}"),
         }
+    }
+}
+
+/// The renderer plugin set, extracted so a test can build it without a window, a crowd or an asset directory.
+///
+/// Every entry here is load-bearing and most of them are load-bearing in a way that only shows at runtime: `CameraPlugin`
+/// supplies the projection components a camera needs, `MeshPlugin` the `Assets<Mesh>` that volumetric fog reaches for,
+/// `LightPlugin` the ambient light `PbrPlugin` reads, and `GltfPlugin` the `GltfExtensionHandlers` that `PbrPlugin`
+/// *writes* during `build`. Leave any one out and the app panics while plugins are being added, with a message that names
+/// nothing. That is why this is a function with a test rather than a tuple inline in `run`.
+fn add_render_plugins(app: &mut App, options: &Options) {
+    app.add_plugins((
+        TaskPoolPlugin::default(),
+        LogPlugin::default(),
+        TimePlugin,
+        TransformPlugin,
+        InputPlugin,
+        AccessibilityPlugin,
+        FrameCountPlugin,
+    ));
+    app.add_plugins((
+        WindowPlugin {
+            primary_window: Some(Window {
+                title: format!(
+                    "Ashfall playground — {} — {}x{}",
+                    options.backend.name(),
+                    options.width,
+                    options.height
+                ),
+                resolution: WindowResolution::new(options.width, options.height),
+                ..Window::default()
+            }),
+            ..WindowPlugin::default()
+        },
+        AssetPlugin::default(),
+        ImagePlugin::default(),
+        // Cameras and visibility propagation. Without it every entity keeps the `ViewVisibility`
+        // it was spawned with, which is false, and a perfectly lit city draws nothing at all.
+        CameraPlugin,
+        // `Assets<Mesh>`, which `VolumetricFogPlugin` reaches for in its own `build`, before any
+        // render pipeline exists to have made one.
+        MeshPlugin,
+        // `GlobalAmbientLight`, which `PbrPlugin` reads: without it a lit scene panics on its first
+        // frame with a resource whose name Bevy cannot print.
+        LightPlugin,
+        RenderPlugin {
+            render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
+                backends: Some(options.backend.mask()),
+                ..WgpuSettings::default()
+            })),
+            ..RenderPlugin::default()
+        },
+        CorePipelinePlugin,
+        // `GltfExtensionHandlers`, which `PbrPlugin::build` pushes its PBR extension handler into
+        // before any frame is drawn. Every other resource in this list is one a plugin *reads*; this
+        // one is a resource a plugin *writes* during build, so its absence is a panic inside
+        // `bevy_pbr::gltf::add_gltf` rather than a missing feature — and the panic names nothing,
+        // because Bevy's resource names are behind its `debug` feature. The demo loads `.glb` avatars,
+        // so the loader was needed anyway; it just was not obvious that PBR could not be built without
+        // it.
+        bevy_gltf::GltfPlugin::default(),
+        PbrPlugin::default(),
+    ));
+}
+
+#[cfg(test)]
+mod render_plugin_tests {
+    use super::{Options, add_render_plugins};
+
+    /// Adding the renderer plugins must not panic. This is the test that was missing when a reader first ran the
+    /// playground on a Mac: `PbrPlugin::build` pushed its PBR glTF handler into `GltfExtensionHandlers`, a resource only
+    /// `bevy_gltf::GltfPlugin` creates, and nothing in CI had ever constructed the app to notice.
+    #[test]
+    fn the_renderer_plugin_set_builds() {
+        let mut app = bevy_app::App::new();
+        super::add_render_plugins(&mut app, &super::Options::default());
+        app.finish();
     }
 }
