@@ -87,7 +87,8 @@
 //! feature rather than a second package because a layer you have to discover in another crate is a
 //! layer half the games never add. It is off by default because it is the only feature that pulls
 //! `bevy_animation` and `bevy_asset`, which a dedicated server should never compile. The old
-//! `bevy-flock-anim` package still exists as a re-export shim for 0.x compatibility.
+//! `bevy-flock-anim` package is a real crate rather than a shim: it depends on `bevy-flock-ecs`, which
+//! is what lets this facade offer it as a feature at all.
 //!
 //! Optional integrations (avian physics, instanced rendering, replication,
 //! inspectors) land behind their own features; none is required to run a crowd.
@@ -95,35 +96,26 @@
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// The steering kernels are compared bit for bit across the scalar, SIMD and threaded roads, so the
-// arithmetic is deliberately left unfused: `a * b + c` rounds twice where `a.mul_add(b, c)` rounds
-// once, and fusing one road but not another is a one-ulp divergence the parity tests catch. The
-// manifest allows the lint crate-wide; this attribute states the same decision in the source, where
-// it outranks the lint flags an editor appends to the command line.
-#![expect(
-    clippy::suboptimal_flops,
-    reason = "the steering roads are compared bit for bit, and fusion rounds once where the unfused form rounds twice"
-)]
 
-// The engine-facing half. Everything in here knows about Bevy; nothing outside it does. Gated on `ecs` so the
-// simulation half can be built with `--no-default-features` and no `bevy_ecs` in the graph at all, which is the
-// boundary ADR 0058 describes and the reason `bevy-flock-core` exists as a crate of its own.
+// The engine-facing half, re-exported rather than declared. It lives in `bevy-flock-ecs`, which is the only crate
+// that names `bevy_ecs`; gating it here is what keeps `--no-default-features` free of the engine entirely, which is
+// the boundary ADR 0058 and ADR 0062 describe. The paths do not move: `bevy_flock::adapters::primary::…` and
+// `bevy_flock::boids::…` still resolve, because a re-export is a path.
 #[cfg(feature = "ecs")]
-pub mod adapters;
+pub use bevy_flock_ecs::{adapters, boids};
+
 /// Animation binding: turns simulated locomotion into blended clip weights.
 ///
-/// Behind the `anim` feature, because it is the only layer in this crate that needs
-/// `bevy_animation` and `bevy_asset`.
+/// Behind the `anim` feature, because it is the only layer in the graph that needs `bevy_animation` and
+/// `bevy_asset`. The code is in `bevy-flock-anim`, which depends on `bevy-flock-ecs`; the facade re-exports it so a
+/// game reaches it through the crate it already depends on.
 #[cfg(feature = "anim")]
-pub mod anim;
-// The ECS systems that drive the simulation. Like `adapters`, this is engine code: the core exposes
-// `boids::BoidsParams`-shaped data and the systems that read it live on this side of the boundary.
-#[cfg(feature = "ecs")]
-pub mod boids;
+pub use bevy_flock_anim as anim;
+
 pub mod prelude;
 
 #[cfg(feature = "ecs")]
-pub use adapters::primary::{
+pub use bevy_flock_ecs::adapters::primary::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockStats,
 };
 // The simulation, re-exported rather than reimplemented: every path a reader has in their code keeps working, and

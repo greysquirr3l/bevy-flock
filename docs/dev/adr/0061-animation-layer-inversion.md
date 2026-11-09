@@ -1,6 +1,6 @@
 # ADR 0061: The animation layer inverts into a feature
 
-**Status:** accepted
+**Status:** superseded by [ADR 0062](0062-three-crate-layering.md)
 **Date:** 2026-11-09
 **Supersedes part of:** ADR 0052 (which placed the binding layer in its own crate)
 
@@ -30,9 +30,10 @@ full = ["ecs", "simd", "threads", "memory", "serde", "navmesh", "anim"]
 ```
 
 `bevy-flock-anim` becomes a four-line re-export shim so an existing `use bevy_flock_anim::AnimPlugin`
-keeps compiling. It carries no logic, no tests and no dependency beyond `bevy-flock` with the
-feature on. It is retired at 1.0, not at 0.2: removing a path that already compiles in somebody's
-game is a semver break, and not one worth taking for tidiness.
+keeps compiling. **ADR 0062 removed that shim**, because the layer's real home is a crate that depends
+on `bevy-flock-ecs` rather than on the facade, and the project had no consumers to protect. The
+paragraph stays here as the record of what was decided while the facade was still the only place the
+layer could live.
 
 The alternative that looked cleanest on paper was a third crate between core and facade
 (`bevy-flock-ecs` holding the adapters, with `bevy-flock-core` below and the animation layer beside

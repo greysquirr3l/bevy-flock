@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use bevy_app::App;
-//! use bevy_flock::prelude::*;
+//! use bevy_flock_ecs::prelude::*;
 //! use bevy_math::Vec3;
 //!
 //! let mut app = App::new();

@@ -49,7 +49,7 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "suboptimal_flops",
     ): "the packed kernel is compared bit for bit against the wide road, so fusion is a divergence",
     (
-        "src/anim/mod.rs",
+        "crates/bevy-flock-anim/src/lib.rs",
         "suboptimal_flops",
     ): "animation blends and root-motion traces must preserve unfused deterministic rounding",
     (
@@ -57,7 +57,7 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "unsafe_code",
     ): "a counting allocator is the only way to report steady-state allocation",
     (
-        "tests/anim_no_alloc.rs",
+        "crates/bevy-flock-anim/tests/no_alloc.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to observe an allocation; confined to one test binary",
     (
@@ -172,6 +172,7 @@ NUM_MODULES = frozenset({"src/domain/num.rs", "crates/bevy-flock-core/src/domain
 CRATE_ROOTS = {
     "src/lib.rs": "Cargo.toml",
     "crates/bevy-flock-anim/src/lib.rs": "crates/bevy-flock-anim/Cargo.toml",
+    "crates/bevy-flock-ecs/src/lib.rs": "crates/bevy-flock-ecs/Cargo.toml",
     "demo/src/lib.rs": "demo/Cargo.toml",
     "examples/build_passes.rs": "Cargo.toml",
     "examples/scaling_sweep.rs": "Cargo.toml",
@@ -218,6 +219,7 @@ SEARCH = (
 MANIFESTS = (
     "Cargo.toml",
     "crates/bevy-flock-anim/Cargo.toml",
+    "crates/bevy-flock-ecs/Cargo.toml",
     "demo/Cargo.toml",
     "demo-gpu/Cargo.toml",
     "playground/Cargo.toml",

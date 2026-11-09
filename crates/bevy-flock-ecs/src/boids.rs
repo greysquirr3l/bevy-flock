@@ -15,15 +15,16 @@
 //!
 //! # Using it
 //!
-//! [`crate::FlockPlugin`] adds this plugin for you. Add it by hand only when a
+//! [`FlockPlugin`](crate::adapters::primary::plugin::FlockPlugin) adds this plugin for you. Add it by hand only when a
 //! game owns its own spawning and wants steering without the crowd layer — and
 //! add it *before* `FlockPlugin`, which detects it and leaves its configuration
 //! alone rather than panicking on a duplicate plugin.
 //!
 //! ```
 //! use bevy_app::App;
-//! use bevy_flock::boids::BoidsPlugin;
-//! use bevy_flock::prelude::*;
+//! use bevy_flock_core::domain::ids::NpcId;
+//! use bevy_flock_ecs::boids::BoidsPlugin;
+//! use bevy_flock_ecs::prelude::*;
 //!
 //! let mut app = App::new();
 //! app.add_plugins(BoidsPlugin::default());
@@ -369,7 +370,7 @@ impl Default for FlockSpatialGrid {
 
 /// Adds the boids systems.
 ///
-/// Added automatically by [`crate::FlockPlugin`]; usable on its own when a game
+/// Added automatically by [`FlockPlugin`](crate::adapters::primary::plugin::FlockPlugin); usable on its own when a game
 /// owns its own spawning and only wants steering.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BoidsPlugin {

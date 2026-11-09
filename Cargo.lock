@@ -205,30 +205,37 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "bevy-flock"
 version = "0.1.0"
 dependencies = [
+ "bevy-flock-anim",
  "bevy-flock-core",
- "bevy_animation",
+ "bevy-flock-ecs",
  "bevy_app",
- "bevy_asset",
  "bevy_ecs",
  "bevy_math",
- "bevy_reflect",
  "bevy_tasks",
  "bevy_transform",
  "criterion",
  "libm",
  "proptest",
- "ron 0.9.0",
- "serde",
  "smallvec",
- "thiserror 2.0.21",
- "wide",
 ]
 
 [[package]]
 name = "bevy-flock-anim"
 version = "0.1.0"
 dependencies = [
- "bevy-flock",
+ "bevy-flock-core",
+ "bevy-flock-ecs",
+ "bevy_animation",
+ "bevy_app",
+ "bevy_asset",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_transform",
+ "criterion",
+ "libm",
+ "proptest",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -244,6 +251,22 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.21",
  "wide",
+]
+
+[[package]]
+name = "bevy-flock-ecs"
+version = "0.1.0"
+dependencies = [
+ "bevy-flock-core",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_tasks",
+ "bevy_transform",
+ "libm",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

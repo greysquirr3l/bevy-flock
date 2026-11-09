@@ -346,7 +346,7 @@ impl FlockStats {
 ///
 /// ```
 /// use bevy_app::App;
-/// use bevy_flock::prelude::*;
+/// use bevy_flock_ecs::prelude::*;
 ///
 /// let mut app = App::new();
 /// app.add_plugins(FlockPlugin::default());

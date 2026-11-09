@@ -19,8 +19,8 @@
 //! the honest answer to "how far did this body move without taking a step".
 use bevy_ecs::prelude::Component;
 
-use crate::anim::binding::BlendFrame;
-use crate::anim::profile::{ClipSlot, LocomotionProfile};
+use crate::binding::BlendFrame;
+use crate::profile::{ClipSlot, LocomotionProfile};
 
 /// The fastest a body's foot slide has been, and how far it has slid in total.
 ///
@@ -91,8 +91,8 @@ pub fn slide_per_tick(
 #[cfg(test)]
 mod tests {
     use super::{FootSlide, slide_per_tick};
-    use crate::anim::binding::BlendFrame;
-    use crate::anim::profile::LocomotionProfile;
+    use crate::binding::BlendFrame;
+    use crate::profile::LocomotionProfile;
 
     fn profile() -> LocomotionProfile {
         LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)
@@ -116,8 +116,8 @@ mod tests {
         for speed in [0.4_f32, 1.4, 2.0, 3.7, 5.0, 9.0] {
             let mut frame = BlendFrame::default();
             frame.fill(&profile, speed, 0.0);
-            if frame.weight(crate::anim::profile::ClipSlot::Walk)
-                + frame.weight(crate::anim::profile::ClipSlot::Run)
+            if frame.weight(crate::profile::ClipSlot::Walk)
+                + frame.weight(crate::profile::ClipSlot::Run)
                 < 0.999
             {
                 continue;
@@ -132,7 +132,7 @@ mod tests {
         let profile = profile();
         let mut frame = BlendFrame::default();
         frame.fill(&profile, profile.walk_speed(), 0.0);
-        let settled = frame.weight(crate::anim::profile::ClipSlot::Walk) * 0.5;
+        let settled = frame.weight(crate::profile::ClipSlot::Walk) * 0.5;
         assert!((settled - 0.5).abs() < 1e-6);
         let mut settled = frame;
         settled.scale_stride(0.5);

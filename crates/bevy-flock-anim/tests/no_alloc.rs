@@ -15,11 +15,11 @@ use bevy_animation::AnimationPlayer;
 use bevy_animation::graph::AnimationNodeIndex;
 use bevy_asset::Assets;
 use bevy_ecs::prelude::{Schedule, World};
-use bevy_flock::anim::{
+use bevy_flock_anim::{
     AnimationFocus, ClipBindings, LocomotionProfile, RootMotion, RootMotionTrace, RootOffset,
     apply_locomotion_blend, apply_root_motion,
 };
-use bevy_flock::prelude::Locomotion;
+use bevy_flock_ecs::prelude::Locomotion;
 use bevy_transform::prelude::Transform;
 
 /// Counts every allocation the process makes.

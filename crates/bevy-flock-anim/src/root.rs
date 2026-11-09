@@ -8,10 +8,10 @@
 //! So the choice is explicit, per profile, and the default is the one that keeps a deterministic
 //! replay intact:
 //!
-//! * [`crate::anim::profile::RootMotion::Simulation`] — the simulation owns movement. The clip's translation is **dropped**
+//! * [`crate::profile::RootMotion::Simulation`] — the simulation owns movement. The clip's translation is **dropped**
 //!   on the tick it arrives, so a game that ships a root-motion clip without opting in gets a body
 //!   that walks where the steering put it, not twice as far.
-//! * [`crate::anim::profile::RootMotion::Clip`] — the clip owns movement. The translation is quantised to
+//! * [`crate::profile::RootMotion::Clip`] — the clip owns movement. The translation is quantised to
 //!   [`QUANTUM_METRES`], added to the body's transform, and added to the locomotion's distance
 //!   walked, so the next tick's steering starts from where the clip left the body instead of
 //!   dragging it back.
@@ -24,16 +24,16 @@
 //! Extraction itself stays outside this crate: Bevy owns the skeleton, so the game's animation
 //! bridge reads the root joint and calls [`RootOffset::report`]. What this module owns is the
 //! decision — apply once, or drop — and the trace that proves which happened.
-use crate::domain::num;
-use crate::prelude::Locomotion;
+use bevy_flock_core::domain::num;
+use bevy_flock_ecs::prelude::Locomotion;
 use bevy_ecs::prelude::{Component, Query, Res, ResMut, Resource};
 use bevy_math::{Vec2, Vec3};
 use bevy_transform::prelude::Transform;
 
-use crate::anim::binding::ClipBindings;
+use crate::binding::ClipBindings;
 use bevy_asset::Assets;
 
-use crate::anim::profile::LocomotionProfile;
+use crate::profile::LocomotionProfile;
 
 /// The finest translation a clip can contribute in one tick: one micrometre.
 ///
@@ -201,10 +201,10 @@ pub fn apply_root_motion(
 #[cfg(test)]
 mod tests {
     use super::{QUANTUM_METRES, RootMotionTrace, RootOffset, apply_root_motion, quantise};
-    use crate::anim::binding::ClipBindings;
-    use crate::anim::profile::LocomotionProfile;
-    use crate::domain::num;
-    use crate::prelude::Locomotion;
+    use crate::binding::ClipBindings;
+    use crate::profile::LocomotionProfile;
+    use bevy_flock_core::domain::num;
+    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_animation::graph::AnimationNodeIndex;
     use bevy_asset::Assets;
     use bevy_ecs::prelude::{Entity, World};
@@ -220,9 +220,9 @@ mod tests {
         let mut world = World::new();
         let mut assets = Assets::<LocomotionProfile>::default();
         let mode = if extracts {
-            crate::anim::profile::RootMotion::Clip
+            crate::profile::RootMotion::Clip
         } else {
-            crate::anim::profile::RootMotion::Simulation
+            crate::profile::RootMotion::Simulation
         };
         let profile = LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0).map_or_else(
             |_| unreachable!("the fixture profile is valid"),
@@ -275,7 +275,7 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("the fixture profile is valid"));
         assert_eq!(
             profile.root_motion(),
-            crate::anim::profile::RootMotion::Simulation
+            crate::profile::RootMotion::Simulation
         );
         assert!(!profile.root_motion().extracts());
     }

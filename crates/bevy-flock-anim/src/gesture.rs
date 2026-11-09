@@ -7,20 +7,20 @@
 //!
 //! # Why the locomotion weights do not need restoring
 //!
-//! [`crate::anim::apply_locomotion_blend`] is a pure write: every tick it recomputes and assigns the
+//! [`crate::apply_locomotion_blend`] is a pure write: every tick it recomputes and assigns the
 //! weights of the nodes it names. A gesture node is not one of those nodes, so the two systems never
 //! fight, and a gesture cannot leave a locomotion weight anywhere but where the blend put it. That
-//! is the whole reason [`crate::anim::ClipBindings`] leaves unnamed animations alone, and it is what the
+//! is the whole reason [`crate::ClipBindings`] leaves unnamed animations alone, and it is what the
 //! `a_gesture_leaves_the_locomotion_weights_exactly_as_the_blend_wrote_them` test pins.
 
-use crate::prelude::{GestureKind, NpcGestures};
+use bevy_flock_ecs::prelude::{GestureKind, NpcGestures};
 use bevy_animation::AnimationPlayer;
 use bevy_animation::graph::AnimationNodeIndex;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::{Component, Query};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 
-use crate::anim::binding::ClipBindings;
+use crate::binding::ClipBindings;
 
 /// Which clip node in the game's graph plays each gesture.
 ///
@@ -100,7 +100,7 @@ impl GesturePlayback {
 
 /// Start, weight and stop gesture clips from the cues the core writes.
 ///
-/// Ordered after [`crate::anim::apply_locomotion_blend`] so a gesture's weight lands on the same tick as
+/// Ordered after [`crate::apply_locomotion_blend`] so a gesture's weight lands on the same tick as
 /// the pose underneath it. The two write disjoint nodes; doing them in that order keeps the reader's
 /// model of the frame — blend first, then the thing on top — the same as the schedule's.
 pub fn play_gestures(
@@ -155,7 +155,7 @@ impl Plugin for GesturePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            play_gestures.after(crate::anim::binding::apply_locomotion_blend),
+            play_gestures.after(crate::binding::apply_locomotion_blend),
         );
     }
 }
@@ -163,12 +163,14 @@ impl Plugin for GesturePlugin {
 #[cfg(test)]
 mod tests {
     use super::{GestureClips, GesturePlayback, play_gestures};
-    use crate::adapters::primary::cognition::NpcBlackboard;
-    use crate::anim::binding::{ClipBindings, apply_locomotion_blend, fixture_profile};
-    use crate::anim::profile::LocomotionProfile;
-    use crate::prelude::{
-        GestureChannel, GestureConfig, GestureKind, Locomotion, Npc, NpcGestures, NpcId, SimClock,
-        advance_gestures, collect_gesture_requests, request_gesture,
+    use bevy_flock_ecs::adapters::primary::cognition::NpcBlackboard;
+    use crate::binding::{ClipBindings, apply_locomotion_blend, fixture_profile};
+    use crate::profile::LocomotionProfile;
+    use bevy_flock_core::application::SimClock;
+    use bevy_flock_core::domain::ids::NpcId;
+    use bevy_flock_ecs::prelude::{
+        GestureChannel, GestureConfig, GestureKind, Locomotion, Npc, NpcGestures, advance_gestures,
+        collect_gesture_requests, request_gesture,
     };
     use bevy_animation::AnimationPlayer;
     use bevy_animation::graph::AnimationNodeIndex;
@@ -210,7 +212,7 @@ mod tests {
         let mut assets = Assets::<LocomotionProfile>::default();
         let profile = assets.add(fixture_profile());
         world.insert_resource(assets);
-        world.init_resource::<crate::anim::lod::AnimationFocus>();
+        world.init_resource::<crate::lod::AnimationFocus>();
 
         let body = world
             .spawn((

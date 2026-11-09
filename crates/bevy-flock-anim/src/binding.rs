@@ -29,9 +29,9 @@
 //! same pose, which is what makes the animation independent of frame rate rather than merely
 //! similar at two frame rates. Nothing in this path reads `Time`.
 
-use crate::adapters::primary::cognition::NpcTier;
-use crate::application::SimClock;
-use crate::prelude::Locomotion;
+use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
+use bevy_flock_core::application::SimClock;
+use bevy_flock_ecs::prelude::Locomotion;
 use bevy_animation::graph::{
     AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, AnimationNodeType,
 };
@@ -43,11 +43,11 @@ use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::SystemParam;
 use bevy_transform::prelude::Transform;
 
-use crate::anim::lod::AnimationFocus;
-use crate::anim::profile::{ClipSlot, LocomotionProfile};
-use crate::anim::root::{RootMotionTrace, apply_root_motion};
-use crate::anim::slide::slide_per_tick;
-use crate::anim::state::AnimationState;
+use crate::lod::AnimationFocus;
+use crate::profile::{ClipSlot, LocomotionProfile};
+use crate::root::{RootMotionTrace, apply_root_motion};
+use crate::slide::slide_per_tick;
+use crate::state::AnimationState;
 
 /// The four nodes of a game's animation graph that a crowd drives.
 ///
@@ -60,7 +60,7 @@ use crate::anim::state::AnimationState;
 /// ```
 /// use bevy_animation::graph::AnimationNodeIndex;
 /// use bevy_asset::Handle;
-/// use bevy_flock::anim::{ClipBindings, LocomotionProfile};
+/// use bevy_flock_anim::{ClipBindings, LocomotionProfile};
 ///
 /// # let profile: Handle<LocomotionProfile> = Handle::default();
 /// let bindings = ClipBindings::new(
@@ -71,7 +71,7 @@ use crate::anim::state::AnimationState;
 /// )
 /// .with_turn_in_place(AnimationNodeIndex::new(3));
 ///
-/// assert!(bindings.node(bevy_flock::anim::ClipSlot::Run).is_some());
+/// assert!(bindings.node(bevy_flock_anim::ClipSlot::Run).is_some());
 /// ```
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct ClipBindings {
@@ -455,11 +455,11 @@ pub(crate) fn fixture_profile() -> LocomotionProfile {
 #[cfg(test)]
 mod tests {
     use super::{BlendFrame, ClipBindings, apply_locomotion_blend, fixture_profile};
-    use crate::adapters::primary::cognition::NpcTier;
-    use crate::anim::lod::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
-    use crate::anim::profile::{ClipSlot, LocomotionProfile};
-    use crate::domain::cognition::CognitionTier;
-    use crate::prelude::Locomotion;
+    use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
+    use crate::lod::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
+    use crate::profile::{ClipSlot, LocomotionProfile};
+    use bevy_flock_core::domain::cognition::CognitionTier;
+    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_animation::graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex};
     use bevy_animation::{AnimationClip, AnimationPlayer};
     use bevy_asset::{Assets, Handle};
@@ -482,7 +482,7 @@ mod tests {
         let mut assets = Assets::<LocomotionProfile>::default();
         let handle = assets.add(fixture_profile());
         world.insert_resource(assets);
-        world.insert_resource(crate::application::SimClock::default());
+        world.insert_resource(bevy_flock_core::application::SimClock::default());
         world.init_resource::<AnimationFocus>();
 
         let nodes = [index(0), index(1), index(2), index(3)];
@@ -528,7 +528,7 @@ mod tests {
     /// through `run_system_once` gets fresh `Local` state every call, so the tick has to live in the
     /// world, exactly as it does in a game.
     fn run(world: &mut World) {
-        if let Some(mut clock) = world.get_resource_mut::<crate::application::SimClock>() {
+        if let Some(mut clock) = world.get_resource_mut::<bevy_flock_core::application::SimClock>() {
             clock.advance();
         }
         if world.run_system_once(apply_locomotion_blend).is_err() {
@@ -760,8 +760,8 @@ mod tests {
 
     fn lod_of(world: &World, entity: Entity) -> AnimationLod {
         world
-            .get::<crate::anim::state::AnimationState>(entity)
-            .map(crate::anim::state::AnimationState::lod)
+            .get::<crate::state::AnimationState>(entity)
+            .map(crate::state::AnimationState::lod)
             .unwrap_or_default()
     }
 
@@ -955,11 +955,11 @@ mod tests {
     fn world_with_windows(start: u32, stop: u32) -> (World, [AnimationNodeIndex; 4], Entity) {
         let mut world = World::new();
         let mut assets = Assets::<LocomotionProfile>::default();
-        let windows = crate::anim::settle::BlendWindows::try_new(start, stop)
+        let windows = crate::settle::BlendWindows::try_new(start, stop)
             .unwrap_or_else(|_| unreachable!("the fixture windows are valid"));
         let handle = assets.add(fixture_profile().with_windows(windows));
         world.insert_resource(assets);
-        world.insert_resource(crate::application::SimClock::default());
+        world.insert_resource(bevy_flock_core::application::SimClock::default());
         world.init_resource::<AnimationFocus>();
         let nodes = [index(0), index(1), index(2), index(3)];
         let bindings =
@@ -1011,7 +1011,7 @@ mod tests {
         steady(&mut fast, fast_body, 1.4);
         for _ in 0..3 {
             run(&mut slow);
-            if let Some(mut clock) = fast.get_resource_mut::<crate::application::SimClock>() {
+            if let Some(mut clock) = fast.get_resource_mut::<bevy_flock_core::application::SimClock>() {
                 for _ in 0..9 {
                     clock.advance();
                 }
@@ -1062,8 +1062,8 @@ mod tests {
             run(&mut world);
         }
         let slide = world
-            .get::<crate::anim::state::AnimationState>(body)
-            .map(crate::anim::state::AnimationState::slide)
+            .get::<crate::state::AnimationState>(body)
+            .map(crate::state::AnimationState::slide)
             .unwrap_or_default();
         assert_eq!(slide.ticks(), 300, "every tick is measured");
         assert!(

@@ -8,7 +8,7 @@
 //!
 //! Two rules make the numbers usable rather than merely present:
 //!
-//! * **No wall clock.** The derivation takes the tick's fixed delta from [`FlockConfig`](crate::FlockConfig), never
+//! * **No wall clock.** The derivation takes the tick's fixed delta from [`FlockConfig`](crate::adapters::primary::plugin::FlockConfig), never
 //!   `Time<Virtual>`. A replay at a different frame rate computes the same speed, the same turn rate
 //!   and the same distance, which is what lets an animation replay at all (ADR 0052).
 //! * **No unit vectors from zero.** A body below [`MIN_MOVING_SPEED`] has no travel direction, so
@@ -46,7 +46,7 @@ pub const MIN_MOVING_SPEED: f32 = 0.05;
 /// # Example
 ///
 /// ```
-/// use bevy_flock::prelude::Locomotion;
+/// use bevy_flock_ecs::prelude::Locomotion;
 /// use bevy_math::Vec2;
 ///
 /// // A body walking at 1.4 m/s for a tenth of a second.

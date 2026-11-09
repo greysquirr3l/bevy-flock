@@ -27,8 +27,8 @@
 //! writing a blackboard slot, with [`request_gesture`]:
 //!
 //! ```
-//! use bevy_flock::behavior::Blackboard;
-//! use bevy_flock::prelude::{GestureKind, request_gesture};
+//! use bevy_flock_core::behavior::Blackboard;
+//! use bevy_flock_ecs::prelude::{GestureKind, request_gesture};
 //!
 //! # let mut board = Blackboard::default();
 //! request_gesture(&mut board, GestureKind::Wave);

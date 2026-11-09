@@ -1,0 +1,77 @@
+[package]
+name = "bevy-flock-ecs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
+description = "The Bevy-facing half of bevy-flock: the plugin, components and systems, on top of the engine-free simulation core."
+repository = "https://github.com/greysquirr3l/bevy-flock"
+homepage = "https://github.com/greysquirr3l/bevy-flock"
+documentation = "https://docs.rs/bevy-flock-ecs"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bevy", "crowd", "npc", "ecs", "gamedev"]
+categories = ["game-development", "simulation"]
+
+[features]
+default = ["simd", "threads"]
+# Social memory: an opt-in store, so a game that never remembers anyone does not pay for the rows.
+memory = ["bevy-flock-core/memory"]
+# Serialisation of blueprints, snapshots and authored behaviour trees.
+serde = ["dep:serde", "smallvec/serde", "bevy-flock-core/serde", "bevy_math/serialize"]
+# Steering on the ECS task pool (ADR 0044).
+threads = ["bevy_tasks/multi_threaded", "bevy-flock-core/threads"]
+# Four agents at a time through `wide::f32x4` (ADR 0023, ADR 0030).
+simd = ["bevy-flock-core/simd"]
+# A polygon navmesh with derived adjacency, for the navigation adapter.
+navmesh = ["bevy-flock-core/navmesh"]
+
+[dependencies]
+# The simulation, with no engine of its own. This crate is the half that adds one.
+bevy-flock-core = { version = "0.1.0", path = "../bevy-flock-core", features = ["ecs"] }
+bevy_app = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_transform = "0.20.1"
+# The task pool the ECS scheduler already uses; naming it directly is what lets one frame of
+# steering claim the other cores (ADR 0044).
+bevy_tasks = { version = "0.20.1", default-features = false }
+serde = { version = "1.0", features = ["derive"], optional = true }
+smallvec = "1.16"
+thiserror = "2.0"
+libm = "0.2"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+suboptimal_flops = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"
+todo = "deny"
+unimplemented = "deny"
+needless_pass_by_value = "deny"
+cast_precision_loss = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+float_cmp = "deny"
+missing_const_for_fn = "deny"
+significant_drop_tightening = "deny"

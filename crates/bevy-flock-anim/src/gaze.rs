@@ -17,7 +17,7 @@
 //! That is the contract the release test pins: an entity whose gaze was applied for a hundred ticks
 //! and then released ends bit-identical to one that never looked anywhere.
 
-use crate::prelude::GazeAim;
+use bevy_flock_ecs::prelude::GazeAim;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::{Component, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
@@ -178,14 +178,14 @@ pub struct GazePlugin;
 
 impl Plugin for GazePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, apply_gaze.after(crate::prelude::resolve_gaze));
+        app.add_systems(Update, apply_gaze.after(bevy_flock_ecs::prelude::resolve_gaze));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{GazeBone, GazeLimits, GazeRig, apply_gaze, look_angles, split_yaw};
-    use crate::prelude::GazeAim;
+    use bevy_flock_ecs::prelude::GazeAim;
     use bevy_ecs::prelude::{Entity, World};
     use bevy_ecs::system::RunSystemOnce;
     use bevy_math::{Quat, Vec3};

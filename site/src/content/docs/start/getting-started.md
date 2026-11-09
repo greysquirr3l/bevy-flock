@@ -48,15 +48,24 @@ Four crates, three of them optional. The first row is the one almost everybody n
 | NPCs that walk, gesture and look with skeletons | `bevy-flock` with `features = ["anim"]` |
 | a server, replay tool or test harness with no Bevy in the graph | `bevy-flock-core` alone |
 
-`full` turns on `ecs`, `simd`, `threads`, `memory`, `serde`, `navmesh` and `anim`. The animation layer is a feature
-rather than a second crate because a dependency that has to be discovered in a separate package is a dependency half the
-games never add. It stays off by default because it is the only feature that pulls `bevy_animation` and `bevy_asset`.
+`full` turns on `ecs`, `simd`, `threads`, `memory`, `serde`, `navmesh` and `anim`. The animation layer is its own crate
+(`bevy-flock-anim`) because it is the only part of the graph that pulls `bevy_animation` and `bevy_asset`, but you never
+depend on it directly: `features = ["anim"]` is the switch, and the facade re-exports it at `bevy_flock::anim`.
+
+There are four crates in the repository and you depend on one of them:
+
+| crate | what it is | when you name it |
+| --- | --- | --- |
+| `bevy-flock` | the facade: re-exports plus the prelude | always |
+| `bevy-flock-ecs` | the plugin, components and systems | only if you want the ECS half without the facade |
+| `bevy-flock-anim` | clip blending, gaze, gestures, root motion | only if you want the animation without the crowd |
+| `bevy-flock-core` | the simulation, with no engine in its graph | only for a headless server or a custom driver |
 
 | crate | engine in the graph | what it is |
 | --- | --- | --- |
 | `bevy-flock` | Bevy | the plugin, components, systems and the re-exported simulation |
 | `bevy-flock-core` | none | the same simulation without an engine, for servers and replays |
-| `bevy-flock-anim` | Bevy plus `bevy_animation` | a re-export shim kept for 0.x compatibility; new code uses the `anim` feature |
+| `bevy-flock-anim` | `bevy-flock-ecs` plus `bevy_animation` | where the animation layer lives; a game reaches it through `features = ["anim"]` |
 
 `bevy-flock` re-exports the core, so `bevy_flock::domain::…` and `bevy_flock::behavior::…` resolve whichever you depend
 on. Name `bevy-flock-core` directly only when you want no Bevy in your dependency graph at all.
