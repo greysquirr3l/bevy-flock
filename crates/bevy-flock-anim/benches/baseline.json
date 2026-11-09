@@ -1,0 +1,20 @@
+{
+  "machine": "unknown (6 cores)",
+  "tolerance": 0.25,
+  "caveat": "Recorded on one machine; the gate compares ratios, so run it on the machine that owns this file. See docs/performance.md for what each case is.",
+  "cases": {
+    "binding/culling/beyond_far/10000": 278271,
+    "binding/culling/beyond_far/2000": 57092,
+    "binding/culling/inside_band/10000": 933064,
+    "binding/culling/inside_band/2000": 186772,
+    "binding/gaze/2_000_bodies": 364083,
+    "binding/root_motion/every_body_reports/10000": 175071,
+    "binding/root_motion/every_body_reports/2000": 35889,
+    "binding/root_motion/no_report/10000": 28182,
+    "binding/root_motion/no_report/2000": 6861,
+    "binding/weights/no_culling/10000": 902731,
+    "binding/weights/no_culling/2000": 179367,
+    "binding/weights/plaza_edge/10000": 940665,
+    "binding/weights/plaza_edge/2000": 185724
+  }
+}

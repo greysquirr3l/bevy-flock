@@ -121,6 +121,35 @@ metres per tick a body has travelled that its stride clips did not account for, 
 prints the peak in its headless summary. The number is not decoration: a straight walk reports under
 a millimetre over 300 ticks, and a body half way into its start reports the half of its motion its
 legs are not carrying.
+## Root motion, decided rather than hoped for
+
+A walk cycle that translates its own root is a rigging convenience, and getting it wrong is the same
+bug in both directions: the body travels twice as far as its legs, or the legs cycle in place while
+the steering slides it. So the profile states who owns movement, and the default is the one that keeps
+a deterministic replay intact:
+
+```rust
+use bevy_flock_anim::{LocomotionProfile, RootMotion};
+
+// The simulation owns movement (the default): any reported clip translation is dropped on arrival.
+let simulation = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?;
+assert!(!simulation.root_motion().extracts());
+
+// The clip owns movement: translation moves the body and advances its walk phase.
+let clip = simulation.with_root_motion(RootMotion::Clip);
+```
+
+Extraction stays outside the crate, because Bevy owns the skeleton: your animation bridge reads the
+root joint and calls `RootOffset::report(world_translation)`. What the crate owns is the decision —
+apply exactly once, or drop — plus `RootMotionTrace`, which counts what happened and digests the
+applied offsets so two runs can be compared. Each tick's offset is snapped to a micrometre
+(`QUANTUM_METRES`) before it is applied, so a thousand inexact `f32` sums produce the same transform
+twice: `two_runs_of_the_same_clips_produce_the_same_transform_and_digest` runs 240 non-round offsets
+through the system and compares the bits.
+
+Consuming the report rather than reading it is what prevents double movement when a game leaves the
+bridge writing while the simulation also integrates: the offset exists for exactly one tick, and in
+simulation mode that tick ends with it dropped (`simulation_mode_drops_the_offset_and_leaves_the_body_where_steering_put_it`).
 ## Licence
 
 MIT OR Apache-2.0.

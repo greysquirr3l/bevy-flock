@@ -16,7 +16,10 @@ use bevy_animation::graph::AnimationNodeIndex;
 use bevy_asset::Assets;
 use bevy_ecs::prelude::{Schedule, World};
 use bevy_flock::prelude::Locomotion;
-use bevy_flock_anim::{AnimationFocus, ClipBindings, LocomotionProfile, apply_locomotion_blend};
+use bevy_flock_anim::{
+    AnimationFocus, ClipBindings, LocomotionProfile, RootMotion, RootMotionTrace, RootOffset,
+    apply_locomotion_blend, apply_root_motion,
+};
 use bevy_transform::prelude::Transform;
 
 /// Counts every allocation the process makes.
@@ -155,4 +158,61 @@ fn the_binding_does_not_allocate_with_a_thousand_bodies() {
         observed, 0,
         "{observed} allocation(s) over ten passes of a thousand bodies"
     );
+}
+
+/// The reconciler's steady state: six hundred ticks of a clip that reports translation every tick.
+///
+/// Six hundred is ten seconds at the simulation's sixty ticks, which is long enough for a lazily built
+/// buffer or a growing map to appear. The trace counts in `u64`, the offsets are `Copy`, and the only
+/// map involved belongs to the asset store, which is warm before the counter is read.
+#[test]
+fn the_root_reconciler_does_not_allocate_over_six_hundred_ticks() {
+    let mut world = World::new();
+    let mut assets = Assets::<LocomotionProfile>::default();
+    let extracting = profile().with_root_motion(RootMotion::Clip);
+    let handle = assets.add(extracting);
+    world.insert_resource(assets);
+    world.init_resource::<RootMotionTrace>();
+    let bindings = ClipBindings::new(
+        handle,
+        AnimationNodeIndex::new(0),
+        AnimationNodeIndex::new(1),
+        AnimationNodeIndex::new(2),
+    );
+    let body = world
+        .spawn((
+            Locomotion::default(),
+            Transform::default(),
+            RootOffset::default(),
+            bindings,
+        ))
+        .id();
+    let mut schedule = Schedule::default();
+    schedule.add_systems(apply_root_motion);
+    if schedule.initialize(&mut world).is_err() {
+        unreachable!("a single-system schedule always builds");
+    }
+    for _ in 0..8 {
+        if let Some(mut offset) = world.get_mut::<RootOffset>(body) {
+            offset.report(bevy_math::Vec3::new(0.021, 0.0, -0.011));
+        }
+        schedule.run(&mut world);
+    }
+    let before = allocations();
+    for _ in 0..600 {
+        if let Some(mut offset) = world.get_mut::<RootOffset>(body) {
+            offset.report(bevy_math::Vec3::new(0.021, 0.0, -0.011));
+        }
+        schedule.run(&mut world);
+    }
+    let observed = allocations() - before;
+    assert_eq!(
+        observed, 0,
+        "{observed} allocation(s) over 600 reconciler passes"
+    );
+    let trace = world
+        .get_resource::<RootMotionTrace>()
+        .copied()
+        .unwrap_or_default();
+    assert_eq!(trace.applied(), 608, "every reported tick was applied");
 }

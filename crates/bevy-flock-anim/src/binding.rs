@@ -36,6 +36,7 @@ use bevy_animation::{ActiveAnimation, AnimationClip, AnimationPlayer};
 use bevy_app::{App, Plugin, Update};
 use bevy_asset::{AssetApp, Assets, Handle};
 use bevy_ecs::prelude::{Commands, Component, Entity, Local, Query, Res};
+use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::SystemParam;
 use bevy_flock::adapters::primary::cognition::NpcTier;
 use bevy_flock::application::SimClock;
@@ -44,6 +45,7 @@ use bevy_transform::prelude::Transform;
 
 use crate::lod::AnimationFocus;
 use crate::profile::{ClipSlot, LocomotionProfile};
+use crate::root::{RootMotionTrace, apply_root_motion};
 use crate::slide::slide_per_tick;
 use crate::state::AnimationState;
 
@@ -426,7 +428,17 @@ impl Plugin for AnimPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<LocomotionProfile>()
             .init_resource::<AnimationFocus>()
-            .add_systems(Update, apply_locomotion_blend);
+            .init_resource::<RootMotionTrace>()
+            // The reconciler runs after the blend so a bridge that reports an offset during the
+            // animation pass has it consumed on the same tick it was produced.
+            .add_systems(
+                Update,
+                (
+                    apply_locomotion_blend,
+                    apply_root_motion,
+                )
+                    .chain(),
+            );
     }
 }
 

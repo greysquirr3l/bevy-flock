@@ -1057,3 +1057,44 @@ Two rules make the measurement trustworthy. Slide is metres per **simulation tic
 never a frame delta, so the same walk measured at 20 fps and at 240 fps reports the same number. And
 the ease is a fixed fraction of the window per tick, so `the_window_counts_ticks_rather_than_seconds`
 drives the same body at 1 tick and at 10 ticks per pass and requires the identical weight.
+
+## The binding envelope (T10)
+`cargo bench -p bevy-flock-anim --bench binding` is the measurement; `crates/bevy-flock-anim/benches/baseline.json`
+is the committed record; `python3 scripts/bench_gate.py` fails a build on a 25% regression against it.
+Every case runs the real systems on a real `World`, because a micro-benchmark of `blend()` on its own
+misses the query iteration, the asset lookups and the state writes, which is where the surprises are.
+
+Machine: a six-core x86-64 sandbox VM (no model string exposed), `[profile.bench]` with
+`codegen-units = 1` and `lto = "thin"`. Criterion's bencher output, median of a normal run:
+
+| Case | 2,000 bodies | 10,000 bodies |
+| ---- | -----------: | ------------: |
+| `weights/no_culling` — the blend with the LOD band switched off | 182 µs | 922 µs |
+| `weights/plaza_edge` — the blend with the camera on the plaza edge | 190 µs | 941 µs |
+| `culling/inside_band` — every body inside the near band | 187 µs | 935 µs |
+| `culling/beyond_far` — every body paused | 57 µs | 278 µs |
+| `gaze/2_000_bodies` — two bones solved per body | 363 µs | — |
+| `root_motion/no_report` — the reconciler with nothing to reconcile | 6.8 µs | 28 µs |
+| `root_motion/every_body_reports` — every body reports a clip offset | 36 µs | 175 µs |
+
+That is 91 ns per body for the blend and 181 ns per body for the gaze solve, at 2,000 bodies.
+
+**The plan's ceiling is missed, and this section says so rather than rounding it.** T10 asked for the
+bindings plus gaze under 0.3 ms at 2,000 bodies; the measured pair is 0.55 ms, 82% over. The gap is
+not in the arithmetic — 2,000 bodies of quaternion work is microseconds — it is in the two per-bone
+`get_mut` calls the gaze solve makes through a sparse set, one cache miss each, and in the four
+hash-map lookups the blend does to find its animation nodes. Both are data-layout problems, both are
+fixable, and neither is fixed here: doing it properly means writing the aim onto the bones during
+resolve instead of looking the bones up, and caching node handles in `AnimationState`, which is a
+change to two public entry points and belongs in its own measured pass.
+
+What the envelope does meet: 0.10 ms per 1,000 bodies for the blend, which is 6% of a 16.6 ms frame
+at 10,000, and 0.028 ms at 10,000 for the reconciler when no clip carries translation. The ceiling
+stands as the target for the follow-up task rather than being quietly rewritten to whatever the code
+happens to do.
+
+Two rules keep the gate honest. The baseline records the machine it was taken on and the gate compares
+ratios, so a slower runner fails everything and the fix is a new baseline on that runner, stated in the
+commit. And the allocation test is a test, not a benchmark: `tests/no_alloc.rs` counts allocations over
+600 ticks of the blend and 600 of the reconciler and fails on the first `Vec`, which is the regression
+a timing threshold would catch a release later.

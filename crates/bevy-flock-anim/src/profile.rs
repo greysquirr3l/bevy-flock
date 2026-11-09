@@ -104,6 +104,31 @@ pub enum ProfileError {
     },
 }
 
+/// Who moves a body whose clip carries its own translation.
+///
+/// The flag exists because both answers are defensible and only one of them can be the default. A
+/// simulation-driven crowd wants [`RootMotion::Simulation`]: the steering solution is the ground truth
+/// and a clip that translates its root is a rigging artifact to be dropped. A game built around
+/// mocap wants [`RootMotion::Clip`]: the clip's translation *is* the movement, and the steering target
+/// has to follow it. Choosing neither and letting both run is the one wrong answer, and it is what
+/// happens by accident when nobody decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RootMotion {
+    /// The simulation owns movement: reported clip translation is dropped on arrival.
+    #[default]
+    Simulation,
+    /// The clip owns movement: reported translation moves the body and advances its walk phase.
+    Clip,
+}
+
+impl RootMotion {
+    /// Whether a reported offset moves the body.
+    #[must_use]
+    pub const fn extracts(self) -> bool {
+        matches!(self, Self::Clip)
+    }
+}
+
 /// How a body's motion maps onto the four clip slots.
 ///
 /// Construct one with [`LocomotionProfile::try_new`]: every field is validated once, at the
@@ -121,6 +146,7 @@ pub struct LocomotionProfile {
     turn_full: f32,
     lod: BlendLod,
     windows: BlendWindows,
+    root_motion: RootMotion,
 }
 
 impl LocomotionProfile {
@@ -150,6 +176,25 @@ impl LocomotionProfile {
         self.lod
     }
 
+    /// Who moves the body when a clip carries its own translation.
+    pub const fn root_motion(&self) -> RootMotion {
+        self.root_motion
+    }
+    /// Choose who owns movement, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{LocomotionProfile, RootMotion};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_root_motion(RootMotion::Clip);
+    /// assert!(profile.root_motion().extracts());
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_root_motion(mut self, root_motion: RootMotion) -> Self {
+        self.root_motion = root_motion;
+        self
+    }
     /// How long this body takes to pick up its stride and to put it down, in ticks.
     ///
     /// Zero ticks for both — the default — means the pose follows the simulation exactly on the tick
@@ -241,6 +286,7 @@ impl LocomotionProfile {
             turn_full,
             lod: BlendLod::default(),
             windows: BlendWindows::immediate(),
+            root_motion: RootMotion::Simulation,
         })
     }
 
