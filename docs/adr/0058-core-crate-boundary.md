@@ -157,3 +157,31 @@ and `cargo build -p bevy-flock-core` with no Bevy app in the graph.
 
 Two modules added by phases 2-5 were not in the original module list and are confirmed inside the boundary rather than
 outside it: `domain/continuum.rs` and `domain/cognition.rs`, both engine-free.
+
+### Why the derives are gated rather than moved
+
+The audit above found three `bevy_ecs` mentions in the core layers, all `Resource` derives. Three mechanisms were
+tried against the real compiler, and only one survives:
+
+1. **A hand-written `impl Resource` in the adapter.** Fails. In Bevy 0.20 `Resource` is `trait Resource: Component {}`,
+   so a resource needs *both* impls — and even with a hand-written `Component` (`STORAGE_TYPE = Table`,
+   `Mutability = Mutable`), `App::insert_resource` followed by a `Res<SimClock>` parameter fails system validation with
+   "Resource does not exist". Whatever `#[derive(Resource)]` registers is not reproducible from the public surface.
+2. **Newtype wrappers in the adapter** (`struct Clock(SimClock)`). Works, but moves every system signature in the
+   adapter from `Res<SimClock>` to `Res<Clock>` and every `&store` passed to a domain function to `&*store`: nine files
+   and roughly 170 mechanical edits, for a boundary that is about which crate *names* the trait rather than which type a
+   system borrows.
+3. **Gate the derive behind a feature.** Adopted. Each type carries
+   `#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]`, the facade enables `ecs` by default, and the
+   core crate will depend on the facade with `default-features = false` and get a graph with no `bevy_ecs` in it.
+
+The gate is enforced rather than asserted: `core_mentions_of_the_engine_are_feature_gated` in `tests/core_boundary.rs`
+fails if any `bevy_ecs` token in a core file is not on a line naming `feature = "ecs"`. A bare derive would compile,
+pass the ledger check, and silently put the engine back in the core's graph — so the ledger alone was not enough.
+
+`advance_clock` moved with the decision: it is a system, not a value, so it now lives in `src/adapters/primary/clock.rs`
+and `application` has no `bevy_ecs` type in any signature.
+
+**Still open for T02:** `--no-default-features` does not yet build, because the adapter modules themselves need the engine.
+Gating `pub mod adapters` on the same `ecs` feature is what turns the facade into a crate that can be depended on as a
+core-only library, and it is the last thing standing between the boundary as documented and the boundary as built.

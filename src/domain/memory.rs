@@ -503,7 +503,7 @@ impl NpcMemories {
 /// growing, because a crowd simulation that allocates under load is a crowd
 /// simulation that hitches.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "memory", derive(bevy_ecs::prelude::Resource))]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]
 pub struct MemoryStore {
     subjects: u16,
     capacity: u32,

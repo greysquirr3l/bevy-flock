@@ -141,7 +141,8 @@ pub enum DirectiveKind {
 ///
 /// Ordered storage rather than a hash map: iteration order feeds simulation, and
 /// a hash map's order is exactly the thing that breaks a replay.
-#[derive(Default, bevy_ecs::prelude::Resource)]
+#[derive(Default)]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]
 pub struct FlockRegistry {
     leaves: Vec<LeafEntry>,
     names: BTreeMap<String, u32>,

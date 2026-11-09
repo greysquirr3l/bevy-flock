@@ -39,7 +39,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 # steering pass at every cell size measured (ADR 0031), and a stride scheduler only pays for the
 # frames it can afford, so a default build should not leave that on the table. Turn it off if the
 # per-frame structure-of-arrays copy does not suit your density: `default-features = false`.
-default = ["simd", "threads"]
+default = ["simd", "threads", "ecs"]
+# The ECS integration: the three core types a Bevy system lends itself as (`SimClock`, `FlockRegistry`,
+# `MemoryStore`) carry `#[cfg_attr(feature = "ecs", derive(Resource))]` rather than a bare derive, so the
+# simulation half of this crate can be built without the engine knowing it exists. On by default, because a
+# Bevy game is the reason it exists. `bevy-flock-core` will depend on this crate with `default-features = false`
+# and get a dependency graph with no `bevy_ecs` at all -- that is the boundary test in docs/adr/0058.
+ecs = []
 # Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
 memory = []

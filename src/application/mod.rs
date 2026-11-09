@@ -19,8 +19,6 @@ pub mod packed;
 pub mod schedule;
 pub mod tiered;
 
-use bevy_ecs::prelude::*;
-
 use crate::domain::tick::{Tick, TicksPerSecond};
 
 /// The logical clock the simulation advances.
@@ -29,7 +27,8 @@ use crate::domain::tick::{Tick, TicksPerSecond};
 /// a plain domain type. It is advanced by the simulation, never by wall-clock
 /// elapsed time — a frame that takes 40 ms must not skip a tick, because a replay
 /// would take a different path through the world.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]
 pub struct SimClock {
     /// The tick currently being simulated.
     pub tick: Tick,
@@ -63,14 +62,6 @@ impl Default for SimClock {
     fn default() -> Self {
         Self::new(TicksPerSecond::SIXTY)
     }
-}
-
-/// Advance the simulation clock by one tick.
-///
-/// Runs last in the frame so every system that reads `clock.tick` sees the tick
-/// they are actually simulating.
-pub fn advance_clock(mut clock: ResMut<SimClock>) {
-    clock.advance();
 }
 
 #[cfg(test)]
