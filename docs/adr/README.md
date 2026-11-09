@@ -79,3 +79,7 @@ replay.
 | [0049](0049-row-major-neighbour-broadcast.md) | Row-major neighbour broadcast; the lint spine cost 19% until the bound left the loop | Accepted |
 | [0050](0050-interactive-playground.md) | Explore the playground in a terminal; software rasteriser against wgpu on the CPU | Accepted |
 | [0051](0051-temperament-drives-behaviour.md) | Personality reaches the simulation: multiplicative steering bias, burst needs decay, archetype presets | Accepted |
+| [0052](0052-animation-binding-contract.md) | The animation binding contract: clip slots, blend weights and the settle window | Accepted |
+| [0053](0053-root-motion-contract.md) | Root motion is a decision the profile records, not a vector the clip hides | Accepted |
+| [0054](0054-parallel-spatial-partitioning.md) | What a parallel spatial build may not change: nine invariants and one arena | Accepted |
+| [0055](0055-blocked-prefix-sum.md) | A blocked prefix sum over cell blocks, and the measurement that demoted it | Accepted |

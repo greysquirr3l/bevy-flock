@@ -55,8 +55,17 @@ For `b` blocks over `n` cells:
 3. **Scan inside each block, in parallel.** Each block writes its own exclusive prefix sums starting from
    `block_base[b]`. Work: O(n / workers).
 
-Total single-threaded work falls from O(n) to O(b). For this fixture, n = 421,876 and b = 1,024, so the serial
-step drops from 421,876 additions to 1,023.
+Total single-threaded work falls from O(n) to O(b).
+
+The worked arithmetic, for the 1 km fixture at 8 m: n = 421,876 cells and b = 1,024 blocks, so a block is
+412 cells (`n / b`, with the first `n mod b` = 164 blocks taking 413). The serial step is 1,023 additions over
+`u32` block totals instead of 421,876 additions over the cell array — a factor of 412 less serial work, and
+1,023 additions is under a microsecond on any core this library supports. Two block-total arrays of `b`
+`u32`s cost 8 KB, which is not worth a paragraph of justification against a 1.7 MB cell array.
+
+The remainder rule is part of the contract, not an implementation detail: the first `n mod b` blocks take one
+extra cell and the rest take `n / b`. Two implementers who differ on that produce different `block_base`
+values, and therefore different `cell_start`, while both claiming to follow this ADR.
 
 ### 3. The serial path stays as the reference
 
@@ -76,16 +85,78 @@ deletion safe — `cell_start` and the cursor array can no longer drift apart be
 ADR 0054 banned a shared atomic cursor. A blocked scan obeys it for a stronger reason than discipline: each
 block writes a disjoint range and the range comes from `block_base`, so there is no contention to lose.
 
+### 6. The block count derives from the cell count, never from the worker count
+
+`blocks` is computed from `n` alone — `n.div_ceil(CELLS_PER_BLOCK)`, clamped to `[1, MAX_BLOCKS]`, with
+`CELLS_PER_BLOCK = 4_096` and `MAX_BLOCKS = 4_096` as the starting constants — and then a caller may override it
+through `with_blocks`, exactly as `with_threads` overrides the worker count. It is never derived from `workers`.
+
+This is the rule that keeps the determinism promise honest. If `blocks` followed `workers`, then changing the
+thread count would change the decomposition, and the only thing standing between that and a changed snapshot
+would be the claim that the scan is associative. The scan is not required to be associative: it is required to
+be *identical*, and the cheapest way to guarantee identical is to make the decomposition independent of the
+thing being scaled. `workers` decides who computes which block; it never decides where a block starts.
+
+The consequence is that the output depends on `(n, blocks)` and nothing else, which is precisely the property
+the acceptance test below can check exhaustively over the block sizes it uses.
+
+### 7. Small grids keep the serial scan
+
+Below `PARALLEL_MIN_CELLS = 65_536` (the constant the build already uses to decide whether to partition at all),
+`blocks` is 1 and the serial scan runs, regardless of what the caller asked for. Two reasons: the O(b) serial
+step stops being negligible when `b` is a meaningful fraction of `n`, and a 4,000-cell grid is not where anyone's
+frame time goes. The override is clamped rather than honoured so that a caller cannot accidentally make a small
+grid slower and then report it as a regression in this library.
+
+### 8. What ADR 0054's invariants mean here
+
+Restated against this design, because the ADR is only useful if its promises are checkable in the code it
+authorises:
+
+- **Neighbourhood membership** is unchanged: membership is decided by `cell_start` and `count`, and both are
+  produced by a scan whose only freedom is *who* adds the numbers.
+- **Neighbour order** is unchanged: `order` is filled by `place` in cell order over contiguous windows, and the
+  blocked scan produces the same windows.
+- **The RNG stream per body** is untouched: no pass in this design draws random numbers, and the order bodies
+  are placed is `entries` order, not worker completion order.
+- **The centroid float sum** is untouched: it happens in the steering kernel, not the rebuild, and this ADR does
+  not move any float addition.
+- **No shared mutable cursor**: §5.
+
 ## Acceptance
 
 A task implementing this ADR is not done until:
 
 - `cell_start` and `order` compare **byte for byte** against the serial scan at 1, 2, 3 and 8 workers across
-  block counts {1, 128, 1024, 16384}, in a test that compares bytes rather than element-wise equality.
+  block counts {1, 128, 1024, 16384}, in a test that compares bytes rather than element-wise equality. Byte
+  comparison, not element-wise: element-wise equality would let a difference in the padding between arrays pass.
+- `blocks = 1` is asserted to route to the serial scan, so the test above fails loudly if the reference path is
+  removed rather than silently comparing the blocked path with itself.
 - `tests/spatial_parity.rs` still passes unchanged at 2,000 ticks: the integration-level proof that no
   neighbourhood moved.
-- `examples/build_passes.rs` reports the new `prefix` and `restore` costs beside the old ones, so the 0.7 ms
-  prediction is falsifiable in public.
+- `examples/build_passes.rs` reports the new `prefix` and `restore` costs beside the old ones, so the prediction
+  below is falsifiable in public.
+
+### The prediction this ADR is judged by
+
+Written before the implementation, from the T01 measurements (1M bodies, 421,876 cells, six aarch64 cores):
+
+| Quantity | Today | Predicted after |
+| --- | ---: | ---: |
+| `prefix` at 6 workers | 0.87 ms | ≤ 0.10 ms |
+| `restore` at 6 workers | 0.68 ms | 0 ms (deleted, §4) |
+| serial floor at 6 workers | 1.55 ms | ≤ 0.10 ms |
+| Amdahl ceiling at 6 workers | 4.5x | 5.6x |
+| build total at 6 workers | 8.85 ms | 8.85 - 1.45 = 7.40 ms, i.e. 1.2x, if the parallel half is unchanged |
+
+The last row is the honest one: deleting 1.45 ms of a 8.85 ms rebuild cannot produce more than a 1.2x
+improvement on its own, and 5.6x is a ceiling on a build whose `count` pass is currently 0.8x with workers.
+A task that lands this ADR and reports "no change to total" is not a failure — but it has to report the passes,
+and a `prefix` above 0.10 ms at six workers is.
+
+If `prefix` lands above 0.10 ms, the cause is almost certainly the O(b) step being run with `b` too small to hide
+its own loop overhead, and the fix is to sweep `blocks` rather than to distrust the design. That sweep is part of
+the implementing task, not a follow-up.
 
 ## Consequences
 
@@ -94,7 +165,11 @@ A task implementing this ADR is not done until:
   improves. It will not improve on its own: `count` is 0.8x with workers today, and that has to be fixed
   separately.
 - The `blocks` knob becomes configuration that must not change output, joining `workers` in the same rule: a
-  setting may change cost, never behaviour.
+  setting may change cost, never behaviour. Unlike `workers`, it is derived from `n` when unset, so a caller who
+  never touches it still gets a decomposition that does not depend on the machine.
+- This ADR does not fix the build. It removes 1.45 ms of a 8.85 ms rebuild and raises the ceiling from 4.5x to
+  5.6x; the pass that stops the build reaching that ceiling is `count`, which is 0.8x with workers today. Anyone
+  reading this ADR for a headline number should read `clear-and-count-cost` instead.
 - The phase's target moves. `build-scaling-gate` now measures against the floor this ADR computes rather than
   the 5x guess, and it has to state which pass stopped it if the total lands above the prediction.
 
