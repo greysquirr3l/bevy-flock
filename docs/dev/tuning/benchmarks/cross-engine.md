@@ -71,16 +71,37 @@ fixture's 1000 and 100.
 
 ## Running the Godot side
 
-`benchmarks/godot/cross_bench.gd` is a self-contained `Node` script implementing the same fixture in pure GDScript:
-`PackedVector2Array` positions, a shared goal, a per-tick loop that advances every agent, times each measured tick and
-prints the same JSON line.
+`benchmarks/godot/` is a committed Godot project, so there is no manual setup and no inspector editing:
 
-1. New Godot 4.6 project, copy `cross_bench.gd` in, attach it to the scene root.
-2. Set `agents` in the inspector (`10_000`), run with the scene focused, not in-editor-debug (debug builds are not
-   results; export a release template or run `--headless` with a release build).
-3. `godot --headless --quit-after 1200 res://main.tscn` prints the JSON line to stdout.
+```text
+godot --headless --path benchmarks/godot -- --agents 10000 --ticks 1000 --warmup 100
+```
 
-Report the engine version and the CPU exactly as Godot's own `OS.get_processor_name()` returns them, do not retype it.
+Every parameter the fixture needs is a command-line flag (`agents`, `ticks`, `warmup`, `budget_ms`, `seed`, `mode`),
+because a headless run cannot touch the inspector and a fixture that requires editing a scene is a fixture that two
+people will run differently.
+
+`--mode` selects the workload, and the difference is the whole point of the comparison:
+
+- `array` (default): one pass over a `PackedVector2Array` of positions, no spatial index. This is a **lower bound for
+  Godot**, not a like-for-like row: the Rust side rebuilds its index inside the tick and this does not.
+
+- `grid`: the same pass plus a uniform-grid rebuild into a `Dictionary` of arrays. This is the like-for-like row, and
+  it is what makes the comparison say something about the design rather than about GDScript's loop speed.
+
+The row's `engine` field carries the mode (`godot-array`, `godot-grid`), because two rows called `godot` at the same
+agent count, measuring different work, make an ambiguous table.
+
+## Running both sides at once
+
+```text
+cargo build --release --example cross_bench
+python3 scripts/cross_bench.py --agents 10000,100000
+```
+
+The runner passes identical arguments to each harness, writes one JSONL file per engine under `target/cross-bench/`,
+and hands them to `scripts/compare_benchmarks.py`. It skips an engine that is not installed and says so, rather than
+printing a one-engine "comparison". Unreal is not automated: its harness lives in a UE project, not in this repository.
 
 ## Running the Unreal side
 
@@ -98,22 +119,60 @@ Mass Entity is the fair comparison, and the fixture is small enough to build in 
 If the intent is to test Unreal's *shipping* crowd stack rather than a harness someone wrote in an afternoon, say so in
 `notes` and quote the engine's own stat captures (`stat unit`, `stat MassEntity`) alongside.
 
+## A same-machine result
+
+2026-11-09, one machine, one command (`python3 scripts/cross_bench.py --agents 10000,100000`), 1000 measured ticks
+and 100 warm-up ticks per row, Godot 4.7.2 and bevy-flock 0.1.0:
+
+| agents | engine | median | p95 | p99 | max | over 16.6 ms | ns/agent |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | godot-array | 3.044 ms | 3.077 | 3.095 | 3.161 | 0.00% | 304 |
+| 10,000 | bevy-flock | 5.661 ms | 5.930 | 6.263 | 12.018 | 0.00% | 566 |
+| 10,000 | godot-grid | 13.976 ms | 14.997 | 15.367 | 15.774 | 0.00% | 1398 |
+| 100,000 | godot-array | 30.636 ms | 30.871 | 30.937 | 44.163 | 100.00% | 306 |
+| 100,000 | bevy-flock | 46.977 ms | 49.440 | 53.532 | 67.496 | 100.00% | 470 |
+| 100,000 | godot-grid | 118.071 ms | 135.494 | 142.826 | 163.934 | 100.00% | 1181 |
+
+`machine: unknown cpu, 6 threads` is what both harnesses report on the aarch64 sandbox VM this ran on, whose
+`/proc/cpuinfo` has no model line. Both implement the same fallback deliberately: if the two strings differed, the
+comparator would refuse the table, and the refusal is the feature.
+
+What it says:
+
+- **Against a bare GDScript loop we are slower**, 1.9x at 10k and 1.5x at 100k in ns per agent. That row does one pass
+  over an array and no indexing at all, so this is the price of the work we do that it does not.
+
+- **Against a GDScript loop that rebuilds a spatial structure we are 2.5x faster** at both counts. That is the
+  comparison about design rather than about language: the same work, two implementations.
+
+- **The tails are tighter than the ratios suggest.** Our p99 sits 10 to 14% above the median; the Godot grid row is
+  10% above at 10k and 21% above at 100k, because a GDScript rebuild pays garbage collection and dictionary growth that
+  the counting sort does not.
+
+- **At 100,000 agents every row is over budget on this hardware**, including ours. That is a statement about a 6-core
+  VM without SIMD-friendly clocks, not a hidden claim that 100k is playable here.
+
+What it does not say: nothing in this table is a claim that Bevy is faster than Godot, or the reverse. Each row runs a
+harness someone wrote in an afternoon, in that engine's own idiom, against a shared fixture.
+
 ## Reading the result
 
-The published numbers in `docs/dev/tuning/performance.md` are the reference points:
+The vendor-published numbers are a different machine and stay labelled as such. They are reference points, not
+comparisons; the table above is the comparison:
 
 | system | workload | published | ns per agent |
 | --- | --- | ---: | ---: |
-| Godot 4.6, shared flow field (Ryzen 5 2600X, GDScript) | 10,000 2D agents | 5.022 ms median | 502 |
+| Godot 4.x, shared flow field (Ryzen 5 2600X, GDScript), vendor-published | 10,000 2D agents | 5.022 ms median | 502 |
 | same | 20,000 | 9.541 ms | 477 |
 | UE5 Mass Entity (community claim) | 100,000 agents, collision + pathfinding | ~10 ms | ~100 |
-| bevy-flock, this harness, this sandbox | 10,000 | 5.467 ms median | 547 |
-| bevy-flock, this harness, this sandbox | 100,000 | 45.958 ms median | 460 |
+| bevy-flock, this harness, this sandbox (2026-11-09 re-run) | 10,000 | 5.661 ms median | 566 |
+| bevy-flock, this harness, this sandbox (2026-11-09 re-run) | 100,000 | 46.977 ms median | 470 |
 
 Two rules for anyone extending that table:
 
 - **Never compare across machines.** Re-run the other engine's harness on the machine in question, or label the row
   "vendor-published, different machine".
+
 - **Never quote `ns_per_agent` alone.** It is a convenience for reading the scaling shape; at 10k the per-agent cost is
   dominated by index rebuilds that amortise later, and at 1M by memory bandwidth. The six statistics are the result, and
   `ns_per_agent` is a gloss on one of them.

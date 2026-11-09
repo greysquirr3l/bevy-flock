@@ -1,0 +1,22 @@
+; The Godot side of docs/dev/tuning/benchmarks/cross-engine.md.
+;
+; Committed so the fixture needs no manual project creation: one command runs one agent count.
+;
+;   godot --headless --path benchmarks/godot -- --agents 10000 --ticks 1000
+;
+; `--quit-after` is not needed: the script reports and calls get_tree().quit() itself, so a run cannot be
+; cut short mid-sample and cannot hang waiting for a timer.
+
+config_version=5
+
+[application]
+
+config/name="bevy-flock cross-engine bench"
+config/description="The W1 fixed-tick crowd fixture, in pure GDScript, for the same-machine comparison."
+run/main_scene="res://main.tscn"
+
+[physics]
+
+; Fixed tick, matching the Rust fixture's fixed step. Godot passes this value as `delta` in _physics_process,
+; so the workload advances the same distance per tick regardless of how long the tick took.
+common/physics_ticks_per_second=60
