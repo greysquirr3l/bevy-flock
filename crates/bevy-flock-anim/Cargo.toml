@@ -4,19 +4,48 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
-description = "Compatibility shim: the animation layer moved into bevy-flock behind the `anim` feature."
+description = "Blended clip weights, gaze and gesture playback for bevy-flock crowds: the layer that makes a simulated crowd look alive."
 repository = "https://github.com/greysquirr3l/bevy-flock"
 homepage = "https://github.com/greysquirr3l/bevy-flock"
-documentation = "https://docs.rs/bevy-flock/latest/bevy_flock/anim/"
+documentation = "https://docs.rs/bevy-flock-anim"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bevy", "animation", "crowd", "npc", "gamedev"]
 categories = ["game-development", "animation"]
 
 [dependencies]
-# The layer itself. No other dependency: this package owns no code, so it must not own a version
-# constraint either. `anim` is the feature that used to be the whole reason to depend on this crate.
-bevy-flock = { version = "0.1.0", path = "../..", default-features = false, features = ["anim"] }
+# The ECS half, not the facade. The layer reads `Locomotion`, `GazeAim`, `NpcGestures`, `NpcTier` and the
+# blackboard, all of which live there; depending on the facade instead would be the cycle this crate was
+# split out of in ADR 0062.
+bevy-flock-ecs = { version = "0.1.0", path = "../bevy-flock-ecs", default-features = false }
+# The simulation types the layer reads (`SimClock`, `CognitionTier`, the deterministic numeric helpers).
+bevy-flock-core = { version = "0.1.0", path = "../bevy-flock-core", default-features = false }
+bevy_animation = "0.20.1"
+bevy_app = "0.20.1"
+bevy_asset = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_reflect = "0.20.1"
+bevy_transform = "0.20.1"
+thiserror = "2.0"
+libm = "0.2"
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+proptest = "1.12"
+
+[[bench]]
+name = "binding"
+harness = false
+
+[[test]]
+name = "no_alloc"
+
+[[example]]
+name = "lod_cost"
+
+[[example]]
+name = "profile_gaze"
 
 [lints.rust]
 unsafe_code = "deny"

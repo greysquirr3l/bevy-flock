@@ -17,12 +17,12 @@ use std::time::Instant;
 
 use bevy_ecs::prelude::{ChildOf, Entity, Query, With, World};
 use bevy_ecs::system::RunSystemOnce;
-use bevy_flock::domain::num;
-use bevy_flock::prelude::GazeAim;
+use bevy_flock_ecs::domain::num;
+use bevy_flock_ecs::prelude::GazeAim;
 use bevy_math::{EulerRot, Quat, Vec3};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
-use bevy_flock::anim::{GazeBone, GazeLimits, GazeRig, apply_gaze, look_angles, split_yaw};
+use bevy_flock_anim::{GazeBone, GazeLimits, GazeRig, apply_gaze, look_angles, split_yaw};
 
 /// Bodies in the fixture: the plaza, and the number the 0.3 ms ceiling names.
 const BODIES: usize = 2_000;

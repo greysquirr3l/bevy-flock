@@ -51,85 +51,58 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# The transposed crowd kernel (ADR 0030) is on by default: at 100,000 agents it is 19-31% off a
-# steering pass at every cell size measured (ADR 0031), and a stride scheduler only pays for the
-# frames it can afford, so a default build should not leave that on the table. Turn it off if the
-# per-frame structure-of-arrays copy does not suit your density: `default-features = false`.
+# The transposed crowd kernel (ADR 0030) is on by default: at 100,000 agents it is 19-31% off a steering
+# pass at every cell size measured (ADR 0031), and a stride scheduler only pays for the frames it can
+# afford, so a default build should not leave that on the table. `default-features = false` gives the
+# simulation alone: no engine, no `bevy_ecs`, nothing this facade re-exports from an adapter crate.
 default = ["simd", "threads", "ecs"]
-# The ECS integration: the three core types a Bevy system lends itself as (`SimClock`, `FlockRegistry`,
-# `MemoryStore`) carry `#[cfg_attr(feature = "ecs", derive(Resource))]` rather than a bare derive, so the
-# simulation half of this crate can be built without the engine knowing it exists. On by default, because a
-# Bevy game is the reason it exists. `bevy-flock-core` will depend on this crate with `default-features = false`
-# and get a dependency graph with no `bevy_ecs` at all -- that is the boundary test in docs/adr/0058.
-ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_transform", "bevy-flock-core/ecs"]
-# Social memory: an opt-in store so a game that never remembers anyone does not
-# pay for the rows. Off by default and dependency-free.
-memory = ["bevy-flock-core/memory"]
-
-# Serialisation of NPC blueprints, simulation snapshots and authored behaviour
-# trees. Off by default: a server that only simulates should not pay for serde.
-serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy-flock-core/serde", "bevy_math/serialize"]
-# A polygon navmesh with derived adjacency, area costs and a string-pulled route: the shape a
-# level with doorways actually needs, where a cell grid has to over-block or let agents clip the
-# frame. Off by default because a game whose levels are open ground does not need it, and it is
-# the largest single module in the domain.
-navmesh = ["bevy-flock-core/navmesh"]
-# Steering on the ECS task pool (ADR 0044): the frame is cut into slices, one per worker.
-# On by default because it is the only lever that scales with cores rather than with lanes;
-# `default-features = false` gives a single-threaded, dependency-light build for a
-# deterministic replay harness or a single-core runner.
-threads = ["bevy_tasks/multi_threaded", "bevy-flock-core/threads"]
-# Four agents at a time through `wide::f32x4`: the band kernel's blocks (ADR 0023) and the crowd
-# kernel's transposed blocks (ADR 0030). On by default since ADR 0031 measured it winning at every
-# density and population tested; the only cost is the `wide` dependency.
-simd = ["dep:wide", "bevy-flock-core/simd"]
-# Everything the crate can do, for a game that wants the whole engine and would rather not read a
-# feature table to find out which four switches that is. Deliberately does not include `anim`: the
-# animation layer lives in `bevy-flock-anim`, which depends on this crate, so a re-export would be a
-# cycle. Add that crate separately and the two meet at the component types in the prelude.
-# Skeletal binding: blended clip weights from simulated locomotion, plus gaze and gesture playback.
-# Off by default because it is the only feature that pulls `bevy_animation` and `bevy_asset`.
-anim = ["ecs", "dep:bevy_animation", "dep:bevy_asset", "dep:bevy_reflect"]
+# The Bevy integration: `bevy-flock-ecs` carries the plugin, components and systems, and this feature is the
+# dependency edge to it. Off with `--no-default-features`, which is what makes the published facade usable
+# as a headless simulation library with `bevy_flock::domain` and nothing else in the graph (ADR 0058, ADR 0062).
+ecs = ["dep:bevy-flock-ecs"]
+# Social memory: an opt-in store so a game that never remembers anyone does not pay for the rows.
+memory = ["bevy-flock-core/memory", "bevy-flock-ecs?/memory"]
+# Serialisation of blueprints, snapshots and authored behaviour trees.
+serde = ["bevy-flock-core/serde", "bevy-flock-ecs?/serde"]
+# A polygon navmesh with derived adjacency, area costs and a string-pulled route.
+navmesh = ["bevy-flock-core/navmesh", "bevy-flock-ecs?/navmesh"]
+# Steering on the ECS task pool (ADR 0044).
+threads = ["bevy-flock-core/threads", "bevy-flock-ecs?/threads"]
+# Four agents at a time through `wide::f32x4` (ADR 0023, ADR 0030).
+simd = ["bevy-flock-core/simd", "bevy-flock-ecs?/simd"]
+# The animation layer, which is `bevy-flock-anim`: blended clip weights from simulated locomotion, gaze and
+# gesture playback. Off by default because it is the only part of the graph that pulls `bevy_animation` and
+# `bevy_asset`. It needs `ecs`, because the layer reads components that only exist there.
+anim = ["dep:bevy-flock-anim", "ecs"]
+# Everything, for a game that wants the whole engine and would rather not read a feature table to find out
+# which seven switches that is.
 full = ["ecs", "simd", "threads", "memory", "serde", "navmesh", "anim"]
 
 [dependencies]
-# The simulation itself, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
-# `application` is here, moved rather than copied, so a headless server can depend on the core alone.
+# The simulation, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
+# `application` is there, moved rather than copied, so a headless server can depend on the core alone.
 bevy-flock-core = { version = "0.1.0", path = "crates/bevy-flock-core", default-features = false }
-# Bevy 0.20 splits the engine finely enough that the simulation core needs only
-# these five crates. `bevy_transform` is the ECS transform graph (also used by
-# physics), not a rendering crate: no GPU, window or asset type reaches this
-# crate through it. `bevy_tasks` is the task pool the ECS scheduler already uses;
-# naming it directly is what lets one frame of steering claim the other cores
-# (ADR 0044), and it adds nothing to the dependency graph that was not there.
-bevy_app = { version = "0.20.1", optional = true }
-bevy_ecs = { version = "0.20.1", optional = true }
-bevy_math = "0.20.1"
-# The animation layer. Optional as a set: `anim` turns all four on, and a build that does not
-# mention the feature never puts `bevy_animation` or `bevy_asset` in the graph, which is what keeps
-# a dedicated server's build time honest.
-bevy_animation = { version = "0.20.1", optional = true }
-bevy_asset = { version = "0.20.1", optional = true }
-bevy_reflect = { version = "0.20.1", optional = true }
-bevy_tasks = { version = "0.20.1", default-features = false }
-bevy_transform = { version = "0.20.1", optional = true }
-
-smallvec = "1.16"
-thiserror = "2.0"
-# Transcendental functions come from libm, not std, because std's sin/cos/atan2
-# delegate to the platform libm and differ in the last bits between operating
-# systems. Determinism across platforms is a documented guarantee (ADR 0004).
-libm = "0.2"
-serde = { version = "1.0", features = ["derive"], optional = true }
-# RON is how a designer authors a behaviour tree without recompiling. Optional for
-# the same reason serde is: a headless server that builds trees in code should not
-# carry a parser for a format it never reads.
-ron = { version = "0.9", optional = true }
-wide = { version = "1.7", default-features = false, optional = true }
+# The Bevy half: the plugin, the components and the systems. It owns every `bevy_ecs` import in the workspace,
+# and the facade re-exports it at the paths a game already uses (`bevy_flock::adapters::primary::…`).
+bevy-flock-ecs = { version = "0.1.0", path = "crates/bevy-flock-ecs", default-features = false, optional = true }
+# The animation layer, which depends on the ECS half rather than on this crate. That direction is what lets a
+# facade feature offer it at all (ADR 0061, ADR 0062).
+bevy-flock-anim = { version = "0.1.0", path = "crates/bevy-flock-anim", optional = true }
 
 [dev-dependencies]
+# This crate's own tests, examples and benches drive the real plugin, so they name the engine crates the ECS half
+# uses. Dev-dependencies on purpose: none of them reach a consumer's graph.
+bevy_app = "0.20.1"
+bevy_ecs = "0.20.1"
+bevy_math = "0.20.1"
+bevy_transform = "0.20.1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 proptest = "1.12"
+# The examples reach for these directly: `libm` for the platform-independent trigonometry the simulation
+# itself uses, `bevy_tasks` to show what a frame of steering costs when it claims the pool.
+libm = "0.2"
+smallvec = "1.16"
+bevy_tasks = { version = "0.20.1", default-features = false }
 
 [[bench]]
 name = "crowd"
@@ -242,23 +215,9 @@ debug = true
 codegen-units = 1
 lto = "thin"
 
-[[test]]
-name = "anim_no_alloc"
-harness = true
-required-features = ["anim"]
 
-[[bench]]
-name = "anim_binding"
-harness = false
-required-features = ["anim"]
 
-[[example]]
-name = "anim_lod_cost"
-required-features = ["anim"]
 
-[[example]]
-name = "anim_profile_gaze"
-required-features = ["anim"]
 
 [[test]]
 name = "save_compat"

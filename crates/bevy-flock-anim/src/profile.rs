@@ -9,8 +9,8 @@
 //! no state and allocates nothing: the same two numbers always produce the same four weights, which
 //! is what lets a replay animate identically at 20 frames a second and at 200.
 
-use crate::anim::lod::BlendLod;
-use crate::anim::settle::BlendWindows;
+use crate::lod::BlendLod;
+use crate::settle::BlendWindows;
 use bevy_asset::Asset;
 use bevy_reflect::TypePath;
 use thiserror::Error;
@@ -197,12 +197,12 @@ impl LocomotionProfile {
     /// Choose who owns movement, keeping every other number.
     ///
     /// ```
-    /// use bevy_flock::anim::{LocomotionProfile, RootMotion};
+    /// use bevy_flock_anim::{LocomotionProfile, RootMotion};
     ///
     /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
     ///     .with_root_motion(RootMotion::Clip);
     /// assert!(profile.root_motion().extracts());
-    /// # Ok::<(), bevy_flock::anim::ProfileError>(())
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
     /// ```
     #[must_use]
     pub const fn with_root_motion(mut self, root_motion: RootMotion) -> Self {
@@ -220,12 +220,12 @@ impl LocomotionProfile {
     /// Replace the settle windows, keeping every other number.
     ///
     /// ```
-    /// use bevy_flock::anim::{BlendWindows, LocomotionProfile};
+    /// use bevy_flock_anim::{BlendWindows, LocomotionProfile};
     ///
     /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
     ///     .with_windows(BlendWindows::try_new(6, 8)?);
     /// assert_eq!(profile.windows().start_ticks(), 6);
-    /// # Ok::<(), bevy_flock::anim::ProfileError>(())
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
     /// ```
     #[must_use]
     pub const fn with_windows(mut self, windows: BlendWindows) -> Self {
@@ -235,12 +235,12 @@ impl LocomotionProfile {
     /// Replace the LOD band, keeping every other number.
     ///
     /// ```
-    /// use bevy_flock::anim::{BlendLod, LocomotionProfile};
+    /// use bevy_flock_anim::{BlendLod, LocomotionProfile};
     ///
     /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
     ///     .with_lod(BlendLod::disabled());
     /// assert_eq!(profile.lod(), BlendLod::disabled());
-    /// # Ok::<(), bevy_flock::anim::ProfileError>(())
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
     /// ```
     #[must_use]
     pub const fn with_lod(mut self, lod: BlendLod) -> Self {

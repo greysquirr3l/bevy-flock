@@ -604,7 +604,7 @@ fn reaction_of(
 
 /// Adds the same-frame interaction layer, gated on the `memory` feature.
 ///
-/// Opt-in rather than part of [`FlockPlugin`](crate::FlockPlugin): it needs a social-memory store
+/// Opt-in rather than part of [`FlockPlugin`](crate::adapters::primary::plugin::FlockPlugin): it needs a social-memory store
 /// to record into, and a game that has not enrolled its NPCs would be paying for resources and a
 /// system it never reads. Adding both plugins in either order works — the interaction system runs
 /// in [`FlockSet::Perception`], after the memory bridge's own perception pass.

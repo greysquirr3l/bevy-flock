@@ -1,7 +1,7 @@
 # bevy-flock-anim
 
-**This package is a compatibility shim.** The animation layer it used to contain now lives in
-[`bevy-flock`](https://crates.io/crates/bevy-flock) behind the `anim` feature.
+Blended clip weights, gaze and gesture playback for [`bevy-flock`](https://crates.io/crates/bevy-flock)
+crowds: the layer that turns a simulated crowd into one that looks alive.
 
 ```toml
 [dependencies]
@@ -14,10 +14,23 @@ use bevy_flock::prelude::*;
 app.add_plugins((FlockPlugin::default(), AnimPlugin));
 ```
 
-Why the split was inverted: `bevy-flock-anim` depended on `bevy-flock`, so `bevy-flock` could not
-offer the layer as a feature without a dependency cycle. Anything a game needs to reach should be
-reachable from the one crate a game depends on, which is now the case. See
-[ADR 0061](https://github.com/greysquirr3l/bevy-flock/blob/main/docs/dev/adr/0061-animation-layer-inversion.md).
+That is the path a game takes. This crate is where the code lives, and it exists separately for one
+reason: it is the only part of the graph that needs `bevy_animation` and `bevy_asset`, and a dedicated
+server should never compile either. It depends on `bevy-flock-ecs`, not on the facade, so the facade
+can offer it as a feature without a cycle.
 
-Existing code keeps working, because this crate re-exports every item the old one exported. It is
-published for the 0.x line and retires at 1.0.
+What it does:
+
+- **Locomotion blending.** One `LocomotionProfile` of authored numbers (walk speed, run speed, stride,
+  turn band) becomes four clip weights, with foot-slide correction against the simulated velocity
+  rather than against the animation's own root motion.
+- **Gaze.** A limited cone per rig, with the bone sparse-set solve that ADR 0045 profiles.
+- **Gestures.** A channel on the blackboard; a behaviour leaf asks for one and this layer plays it,
+  without the simulation ever seeing an `AnimationPlayer`.
+- **Root motion.** The trace that keeps a bevy-flock root contract: the simulation owns the position,
+  and the animation follows.
+
+The layer never owns your skeleton. `ClipBindings` maps four names onto nodes in *your* graph, so a
+rigged character you already have is a configuration, not a rewrite. See
+[ADR 0062](https://github.com/greysquirr3l/bevy-flock/blob/main/docs/dev/adr/0062-three-crate-layering.md)
+for why this is a crate rather than a module in the facade.

@@ -91,7 +91,9 @@ impl Default for GazeConfig {
 ///
 /// ```
 /// use bevy_ecs::prelude::Entity;
-/// use bevy_flock::prelude::{GazeConfig, GazeTarget, SimClock, Tick};
+/// use bevy_flock_core::application::SimClock;
+/// use bevy_flock_core::domain::tick::Tick;
+/// use bevy_flock_ecs::prelude::{GazeConfig, GazeTarget};
 ///
 /// # let somebody = Entity::PLACEHOLDER;
 /// let mut gaze = GazeTarget::new();

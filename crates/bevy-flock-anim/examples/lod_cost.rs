@@ -16,15 +16,15 @@ use bevy_animation::graph::AnimationNodeIndex;
 use bevy_asset::Assets;
 use bevy_ecs::prelude::World;
 use bevy_ecs::schedule::Schedule;
-use bevy_flock::adapters::primary::cognition::NpcTier;
-use bevy_flock::application::SimClock;
-use bevy_flock::domain::cognition::CognitionTier;
-use bevy_flock::domain::num;
-use bevy_flock::prelude::Locomotion;
+use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
+use bevy_flock_ecs::application::SimClock;
+use bevy_flock_ecs::domain::cognition::CognitionTier;
+use bevy_flock_ecs::domain::num;
+use bevy_flock_ecs::prelude::Locomotion;
 use bevy_math::{Vec2, Vec3};
 use bevy_transform::prelude::Transform;
 
-use bevy_flock::anim::{
+use bevy_flock_anim::{
     AnimationFocus, AnimationLod, BlendLod, ClipBindings, LocomotionProfile, LodLevel,
     apply_locomotion_blend,
 };

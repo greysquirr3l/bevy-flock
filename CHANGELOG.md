@@ -8,7 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The animation layer is a `bevy-flock` feature now.** `features = ["anim"]` (and therefore
   `features = ["full"]`) turns on blended clip weights, gaze and gesture playback. Before this the layer lived in
   `bevy-flock-anim`, which depended on `bevy-flock`, so a feature could never include it: Cargo rejects the cycle. The
-  old package remains as a re-export shim so `use bevy_flock_anim::AnimPlugin;` keeps compiling, and it retires at 1.0.
+  layer is a real crate again, this time depending on `bevy-flock-ecs` rather than on the facade, so there is no
+  compatibility shim to carry (ADR 0062).
   See ADR 0061.
 - **The animation bench, baseline and no-allocation test moved with the code**, to `benches/anim_binding.rs`,
   `benches/anim-baseline.json` and `tests/anim_no_alloc.rs`. The CI gate reads the new baseline path.

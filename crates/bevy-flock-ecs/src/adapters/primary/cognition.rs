@@ -29,7 +29,7 @@
 //!
 //! The scheduler will not let one participant think twice on the same tick. Two
 //! [`Update`](bevy_app::Update) passes without the clock advancing are one tick of thinking
-//! followed by silence: healthy brains, `chosen: 0`. [`FlockPlugin`](crate::FlockPlugin) advances the clock in
+//! followed by silence: healthy brains, `chosen: 0`. [`FlockPlugin`](crate::adapters::primary::plugin::FlockPlugin) advances the clock in
 //! [`FlockSet::AdvanceTick`], so this only bites a test or a game that drives the systems
 //! itself.
 //!

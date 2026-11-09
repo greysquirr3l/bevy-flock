@@ -20,8 +20,11 @@ GPU.
 
 **Documentation:** [Read the bevy-flock docs](https://greysquirr3l.github.io/bevy-flock/) ·
 **Internals:** [`docs/dev/`](docs/dev) · **Book:** [`docs/book/`](docs/book) ·
-**Crates:** [`bevy-flock`](https://crates.io/crates/bevy-flock),
-[`bevy-flock-core`](https://crates.io/crates/bevy-flock-core)
+**Crates:** [`bevy-flock`](https://crates.io/crates/bevy-flock) is the one you depend on. Behind it,
+in dependency order: [`bevy-flock-ecs`](https://crates.io/crates/bevy-flock-ecs) (the plugin and
+components), [`bevy-flock-anim`](https://crates.io/crates/bevy-flock-anim) (the animation layer) and
+[`bevy-flock-core`](https://crates.io/crates/bevy-flock-core) (the simulation, with no engine in its
+graph)
 
 ---
 

@@ -12,11 +12,11 @@
 //!
 //! A window of zero ticks — the default for both start and stop — snaps, so an app that never
 //! authors one gets exactly the blend the simulation describes.
-use crate::domain::num;
+use bevy_flock_core::domain::num;
 use bevy_ecs::prelude::Component;
 
-use crate::anim::binding::BlendFrame;
-use crate::anim::profile::ProfileError;
+use crate::binding::BlendFrame;
+use crate::profile::ProfileError;
 
 /// How many ticks a body takes to pick up its stride, and to put it down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -163,9 +163,9 @@ impl Settle {
 #[cfg(test)]
 mod tests {
     use super::{BlendWindows, Settle};
-    use crate::anim::binding::BlendFrame;
-    use crate::anim::profile::{ClipSlot, LocomotionProfile};
-    use crate::domain::num;
+    use crate::binding::BlendFrame;
+    use crate::profile::{ClipSlot, LocomotionProfile};
+    use bevy_flock_core::domain::num;
 
     fn profile(windows: BlendWindows) -> LocomotionProfile {
         LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0).map_or_else(

@@ -89,3 +89,4 @@ replay.
 | [0059](0059-worker-pool-ownership.md) | Who owns the buffers a parked worker writes: two scopes now, one `unsafe` module only if it is earned | Accepted |
 | [0060](0060-build-5x-gate.md) | Is the 5x build gate reachable, and what would it take | Proposed |
 | [0061](0061-animation-layer-inversion.md) | The animation layer inverts into a feature | accepted |
+| [0062](0062-three-crate-layering.md) | Four crates, one direction, and nothing in `src/` but re-exports | accepted |
