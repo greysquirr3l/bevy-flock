@@ -1024,6 +1024,29 @@ impl SpatialGrid {
     /// Returns `(prefix, place)`. The two phases no longer have a boundary between them, so `prefix` is the longest
     /// worker's own scan and `place` is the rest of the dispatch: what the attribution loses in exactness it keeps in
     /// comparability, since both rows still sum to the dispatch.
+    // Without the `threads` feature there is exactly one worker, so the dispatch in `build_measured` never reaches
+    // these. They exist so that dispatch reads the same on both sides of the feature instead of duplicating every
+    // call site behind `cfg` and having the two drift apart.
+    #[cfg(not(feature = "threads"))]
+    fn fill_cells_parallel(&mut self, _workers: usize) {
+        self.fill_cells_serial();
+    }
+
+    #[cfg(not(feature = "threads"))]
+    fn count_cells_parallel(&mut self, _workers: usize) {
+        self.count_cells_serial();
+    }
+
+    #[cfg(not(feature = "threads"))]
+    fn scan_and_place_parallel(&mut self, _workers: usize, _blocks: usize) -> (Duration, Duration) {
+        let start = Instant::now();
+        self.prefix_cells_serial();
+        let prefix = start.elapsed();
+        let place = Instant::now();
+        self.place_cells_serial();
+        (prefix, place.elapsed())
+    }
+
     #[cfg(feature = "threads")]
     fn scan_and_place_parallel(&mut self, workers: usize, blocks: usize) -> (Duration, Duration) {
         /// Workers are bounded by cores in practice; a longer list than this simply stops recording samples.
@@ -1122,6 +1145,14 @@ impl SpatialGrid {
     ///
     /// Returns the wall time of the whole dispatch, spawn included, so the figure is comparable with `clear` and
     /// `count`, which are timed the same way.
+    #[cfg(not(feature = "threads"))]
+    fn place_cells_parallel(&mut self, _workers: usize) -> Duration {
+        let start = Instant::now();
+        self.place_cells_serial();
+        start.elapsed()
+    }
+
+    #[cfg(feature = "threads")]
     fn place_cells_parallel(&mut self, workers: usize) -> Duration {
         let cells_in_grid = self.cell_count();
         let bodies = self.entries.len();
@@ -1318,10 +1349,14 @@ impl SpatialGrid {
         });
     }
 
-    /// Without the `threads` feature there is nothing to partition onto.
+    /// Without the `threads` feature there is nothing to partition onto: the four passes run in order, which is
+    /// exactly what `build_measured` does at one worker.
     #[cfg(not(feature = "threads"))]
     fn build_parallel(&mut self, _workers: usize) {
-        self.build_serial();
+        self.fill_cells_serial();
+        self.count_cells_serial();
+        self.prefix_cells_serial();
+        self.place_cells_serial();
     }
 
     /// The entry indices in one cell.

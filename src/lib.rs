@@ -81,9 +81,16 @@
     reason = "the steering roads are compared bit for bit, and fusion rounds once where the unfused form rounds twice"
 )]
 
+// The engine-facing half. Everything in here knows about Bevy; nothing outside it does. Gated on `ecs` so the
+// simulation half of the crate can be built with `--no-default-features` and no `bevy_ecs` in the graph at all --
+// which is the boundary ADR 0058 describes and `bevy-flock-core` will depend on.
+#[cfg(feature = "ecs")]
 pub mod adapters;
 pub mod application;
 pub mod behavior;
+// The ECS systems that drive the simulation. Like `adapters`, this is engine code: the core exposes
+// `boids::BoidsParams`-shaped data and the systems that read it live on this side of the boundary.
+#[cfg(feature = "ecs")]
 pub mod boids;
 pub mod domain;
 pub mod error;
@@ -92,6 +99,7 @@ pub mod prelude;
 #[doc(hidden)]
 pub mod testkit;
 
+#[cfg(feature = "ecs")]
 pub use adapters::primary::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockStats,
 };
