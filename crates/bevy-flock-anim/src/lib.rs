@@ -65,6 +65,10 @@
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "animation blends and root-motion traces must preserve unfused deterministic rounding"
+)]
 
 pub mod binding;
 pub mod gaze;

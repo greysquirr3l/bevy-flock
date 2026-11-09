@@ -13,7 +13,7 @@ its own package with its own lock file, not a member of the library's workspace,
 be given its manifest rather than its name.
 
 | Control | |
-|---|---|
+| --- | --- |
 | `W` `A` `S` `D` | move |
 | `Q` / `E` | down / up |
 | shift | sprint |
@@ -32,7 +32,7 @@ different rasteriser, different shading model, different anti-aliasing.*
 ## Flags
 
 | Flag | |
-|---|---|
+| --- | --- |
 | `--view NAME` | open at `district`, `street`, `hero`, `skyline` or `procession` |
 | `--frames N` | draw N frames, print the timing summary, exit |
 | `--capture PATH` | write the last frame to `PATH` as a BMP, then exit |
@@ -122,6 +122,7 @@ cargo run --release --manifest-path playground/Cargo.toml -- \
 ```
 
 ## The skinned district: rigged avatars, or 2,000 mannequins
+
 `ashfall-playground` draws boxes. `skinned` draws people, two ways.
 
 `--rig avatar` (the default) loads the three Ashfall characters out of `demo/assets/npcs/rigged` —
@@ -130,9 +131,11 @@ walk and run recorded onto it as separate GLBs. Bevy's glTF loader builds the sc
 the skin and the clip assets; the example's only glue is rewriting each bone's `AnimatedBy` to the
 body that owns it, so the blend, the gesture channel and the motion gate all see one entity per NPC
 rather than one per character plus one per bone.
+
 ```sh
 cargo run --release -p bevy-flock-playground --bin skinned -- --rig avatar --npc 300
 ```
+
 ![Forty rigged avatars circling the monolith](../docs/demo/ashfall-skinned-avatars.png)
 *40 rigged avatars, 140 frames, 1280x800, captured on `llvmpipe` under Xvfb. Twelve thousand
 triangles and 24 bones each, with the shipped idle/walk/run blend driving the legs.*
@@ -141,15 +144,17 @@ triangles and 24 bones each, with the shipped idle/walk/run blend driving the le
 and the two pivots gaze turns — with a mesh, an `AnimationPlayer` and seven clips authored in code at
 startup. Nothing is loaded from disk, so a checkout with no generated assets still has a crowd, and
 the count goes to 2,000 and beyond.
+
 ```sh
 cargo run --release -p bevy-flock-playground --bin skinned -- --rig mannequin --npc 2000
 ```
+
 ![Two thousand skinned bodies around the monolith](../docs/demo/ashfall-skinned-district.png)
 *2,000 mannequins, 200 frames, 1280x800, captured on `llvmpipe` under Xvfb. Each body is ten
 thousand vertices of skinned geometry and one blend tree of seven clips.*
 
 | Flag | |
-|---|---|
+| --- | --- |
 | `--rig NAME` | `avatar` (default) or `mannequin`; falls back to `mannequin` when the GLBs are missing |
 | `--npc N` | bodies to spawn: default 300 avatars, 2000 mannequins |
 | `--radius M` | plaza radius in metres, default 22 |
@@ -172,6 +177,7 @@ fails unless a gesture cue reached a clip and a body aimed its gaze. An avatar r
 walk and run and nothing that maps a gesture cue onto them, so the gate asks each rig only for what
 that rig can prove. Every failure is named on its own line, because "nothing moved" sends the reader
 to the wrong file when the real problem was that no gesture was ever requested:
+
 ```sh
 xvfb-run -a ./target/debug/skinned --rig mannequin --frames 200 --npc 2000 --assert-motion
 # skinned: 200 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.494 m

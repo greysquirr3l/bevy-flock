@@ -1,3 +1,8 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "benchmark fixtures must preserve unfused deterministic rounding"
+)]
+
 //! What each pass of the spatial rebuild costs, at one worker, at the machine's count, and across block counts.
 //!
 //! Phase 3 measured the rebuild at 2.94x on six workers against the query batch's 6.36x, and attributed the

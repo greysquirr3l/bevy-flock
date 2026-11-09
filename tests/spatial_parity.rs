@@ -1,3 +1,8 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "parity fixtures must preserve unfused deterministic rounding"
+)]
+
 //! Serial-versus-parallel parity over long runs (phase 3, T05).
 //!
 //! The partitioned build and the partitioned batch are only worth having if a frame cannot tell which
