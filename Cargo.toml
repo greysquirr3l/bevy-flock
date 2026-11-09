@@ -45,7 +45,7 @@ default = ["simd", "threads", "ecs"]
 # simulation half of this crate can be built without the engine knowing it exists. On by default, because a
 # Bevy game is the reason it exists. `bevy-flock-core` will depend on this crate with `default-features = false`
 # and get a dependency graph with no `bevy_ecs` at all -- that is the boundary test in docs/adr/0058.
-ecs = []
+ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_transform"]
 # Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
 memory = []
@@ -75,11 +75,11 @@ simd = ["dep:wide"]
 # crate through it. `bevy_tasks` is the task pool the ECS scheduler already uses;
 # naming it directly is what lets one frame of steering claim the other cores
 # (ADR 0044), and it adds nothing to the dependency graph that was not there.
-bevy_app = "0.20.1"
-bevy_ecs = "0.20.1"
+bevy_app = { version = "0.20.1", optional = true }
+bevy_ecs = { version = "0.20.1", optional = true }
 bevy_math = "0.20.1"
 bevy_tasks = { version = "0.20.1", default-features = false }
-bevy_transform = "0.20.1"
+bevy_transform = { version = "0.20.1", optional = true }
 
 smallvec = "1.16"
 thiserror = "2.0"
