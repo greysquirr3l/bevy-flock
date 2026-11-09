@@ -329,3 +329,67 @@ serial pass. The serial path is unchanged and still seats before it places.
 The dispatch count is unchanged at three, so T05's evaluation criterion ("the spawn cost is gone from the inventory
 rather than moved to a different row") is NOT met and the pool remains the way to meet it.
 """
+
+[[completed]]
+task = "phase-5 T02 fused-scan-adr (ADR 0057)"
+delivered_in = "docs/phase5-t02-adr"
+note = """
+Fixes the fusion before building it, and had to be written against the tree as it stands rather than against the
+task text: the seat half of T03 was already delivered by #25, so the seat is no longer a pass to delete but a copy
+inside the place dispatch to delete, which the scan can do for free because it computes each window start anyway.
+The arithmetic is pinned with the +1 the code actually uses (counts live at cell_start[c + 1]) and worked through
+for block 0, so T03 can be implemented without re-deriving the scan: block totals accumulated in count, bases as a
+serial O(blocks) running sum, block-local scan writing both arrays from one register.
+Says which half is expected to pay (1.7 MB of serial totals read leaves the rebuild) and which is expected to cost
+(a per-block accumulate inside the pass that scales 0.98x), and commits to reverting on measurement rather than to
+the mechanism, with ADR 0055's demotion as the precedent for what that means in practice.
+Determinism under the coming worker pool gets its own section, because the pool is what makes 'which worker wakes
+first' a real question: one writer per block total by block range, bases after the join, scans over disjoint spans,
+and a worker that runs nothing leaves the arrays as the schedule would have.
+PassCosts goes from five rows to four and the seat field is deleted rather than left at zero; the inventory example
+loses its row in the same commit, since a stale row is worse than no row.
+"""
+
+[[completed]]
+task = "phase-5 T03 fused-count-and-scan"
+delivered_in = "feat/phase5-t03-fusion"
+note = """
+Built as ADR 0057 decided, and the ADR's own revert clause was the thing to watch rather than the mechanism: the
+count pass now totals each block from the window it just wrote, the block-local scan writes cell_start and
+cell_cursor from one register, seat_cursors and PassCosts::seat are deleted, and the rebuild reports four passes
+instead of five.
+The accumulate landed where the ADR predicted it would not hurt and did not: count at six workers moved 1.734 to
+1.772 ms because each worker walks a slice it just wrote, hot in L2, instead of reading the totals back on one
+thread. The read that left prefix is real but small — 0.296 to 0.238 ms — so the total is a wash: 6.758 to 6.814 ms
+over six alternating pairs, inside a fixture whose own spread is 8%. Kept for what it removes, not for what it
+saves, and said so in the ADR rather than in a commit message.
+Two regressions were introduced during the work and removed before it landed, both recorded in performance.md: a
+1.7 MB memset of the cursor table (0.3 ms to prepare memory the scan overwrites anyway), and routing a single
+worker through the blocked scan, which cost 1.02 ms against 0.42 ms until the serial scan caught up to the blocked
+one's zipped-slice access pattern.
+Parity is unchanged: 4 thread counts x 4 block counts byte-identical, placement still leaves the window table
+alone, and the no-allocation tests still pass because the cursor is sized once and never cleared. A new test
+recounts every block total from the cell list itself, because a block boundary off by one shifts every later
+window while the grand total still adds up.
+"""
+
+[[completed]]
+task = "phase-5 T04 block-constant sweep"
+delivered_in = "feat/phase5-t03-fusion"
+note = """
+The sweep refuted the doubt it was commissioned to settle. 4096 cells per block is 103 blocks at the benchmark's
+421,876 cells, which is 17 per worker on six cores and was recorded as 'probably too few'; the measured walls are at
+1.3 blocks per worker (8 blocks, where the last block is a tail five workers watch and prefix pays 0.285 ms against
+0.23) and at 103 cells per block (4096 blocks, where the per-block overhead moves into count, 1.98 against 1.85 ms,
+and costs the total 0.3 ms). Everything from 32 to 2048 blocks is inside the fixture's noise, so the constant stands.
+What justifies it is bytes rather than blocks: a 16 KB window slice with the cursor slice beside it is 32 KB, which
+is L1-sized on both cache geometries the crate targets, and that is the property to re-check on a machine with
+different caches, not the block count.
+The harness gained --bodies so the sweep could run at two populations; the pass mix changes with population because
+clear, count and place walk bodies while the scan walks cells, and at 100k bodies the scan is a sixth of the rebuild.
+The derivation moved into a free function (derived_blocks) so a test can pin the constant, its byte size and the
+block count at seven cell counts. Written as cells.div_ceil(CELLS_PER_BLOCK) the assertion would have moved with the
+constant and proved only that it is self-consistent.
+The sweep also bounds what this task could ever win: prefix is 0.22-0.28 ms of a 6.7 ms rebuild at every setting, so
+no choice of constant moves the total beyond noise. The 5x gate hinges on the dispatch tax, which is T05.
+"""

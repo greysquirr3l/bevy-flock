@@ -1537,3 +1537,96 @@ per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` ta
 At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is now 4.72 ms of single-worker build, and the
 remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
 target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.
+
+## Phase 5: the count pass absorbs the scan's totals, and five passes become four (T03)
+
+ADR 0057 fused two things the rebuild was doing twice. `count` now accumulates each block's total while it counts,
+and the block-local scan writes the window starts *and* the placement cursors from the same register — so the read
+that used to happen in `prefix` (1.7 MB of totals, serial) and the copy that used to happen in `seat` are both gone.
+`PassCosts` goes from five rows to four and `seat` is deleted rather than left at zero.
+
+Both binaries were built once and alternated, six pairs, same 1M fixture and six-core aarch64 VM — the method §*Measured,
+alternately, on one machine* established for this fixture, because its run-to-run spread is larger than the effect:
+
+| | 1 worker | 6 workers |
+| --- | ---: | ---: |
+| before (median of 6) | 22.509 ms | 6.758 ms |
+| after (median of 6) | 22.588 ms | 6.814 ms |
+| delta | −0.08 ms (−0.4%) | −0.06 ms (−0.8%) |
+
+**The total did not move, and the honest reading is that it could not have.** `prefix` did what the ADR said it
+would — it lost the totals read:
+
+| pass | 1 worker | 6 workers |
+| --- | ---: | ---: |
+| clear | 13.055 → 12.968 | 2.491 → 2.494 |
+| count | 1.766 → **2.038** | 1.734 → 1.772 |
+| prefix | 0.437 → 0.426 | 0.296 → **0.238** (−20%) |
+| seat | 0.129 → *deleted* | 0.000 → *deleted* |
+| place | 7.168 → 7.190 | 2.134 → 2.279 |
+
+`prefix` at six workers fell 0.058 ms, which is the 1.7 MB totals read leaving the serial tail — bandwidth-bound at
+~6 GB/s, exactly as the ADR's arithmetic predicted. The scan's serial share is now 0.238 ms of a 6.8 ms build, and
+the placement copy is no longer a pass at all. What did not happen is a measurable win in total: 0.06 ms is below
+this fixture's noise, and the totals sum that `count` gained (each worker walking the window it just wrote, hot in
+L2) costs about what the scan's re-read did.
+
+**Two regressions were introduced and removed during the task, and both are worth recording because they are the
+kind that hide.** The first was clearing `cell_cursor` in the count pass: 1.7 MB of `fill` per rebuild, 0.3 ms, to
+prepare memory the scan immediately overwrites in full. The cursor is now left dirty on purpose — every slot the scan
+writes it writes unconditionally, and the one slot it does not touch (index 0, the empty prefix) is set explicitly.
+The second was routing a single worker through the blocked scan: 1.02 ms against 0.42 ms for the plain serial scan,
+because that scan was still writing through `get`/`get_mut` per element while the blocked one walked zipped slices.
+Rewritten as zipped slices, the serial scan costs 0.426 ms, and a single worker now takes it whatever `blocks` says.
+
+**One number the change does not explain.** `count` at one worker reads 0.27 ms higher after the change, and it
+should not: the serial count skips the totals entirely (`needs_block_totals_for` is false at one worker, and
+`the_fused_totals_match_a_recount_of_the_cell_list` asserts the array is empty in that case). It is recorded as
+unexplained drift rather than attributed to the fusion — the same fixture has produced a 0.3 ms swing on an unchanged
+`clear` before.
+
+What the task does deliver is structural, and it is the part T05 needs: three dispatches still, but the serial tail
+between them is 0.238 ms, down from 0.41 ms, and the scan that produces the cursors is the same pass that produces the
+window starts, so no phase of the rebuild has to read another phase's output back. Parity is unchanged: the
+byte-equality matrix (4 thread counts × 4 block counts) and `placement_leaves_the_window_table_alone` still compare
+exactly, and the no-allocation tests still pass, because the cursor table is sized once and never cleared.
+
+## Picking `CELLS_PER_BLOCK` from a sweep (T04)
+
+`CELLS_PER_BLOCK = 4096` was inherited from ADR 0055 with a doubt attached: at 421,876 cells it is 103 blocks, which
+at six workers is 17 blocks per worker, and the task text said that was "probably too few". The harness gained a
+`--bodies` knob so the sweep could run at more than the million-body fixture, since the passes that walk bodies
+(`clear`, `count`, `place`) and the one that walks cells (`prefix`) change their mix with population.
+
+Two populations, nine block counts, six workers, medians of seven runs each; `cells/block` is what the block count
+implies, and the derived constant is `cells.div_ceil(blocks)`:
+
+| blocks | cells/block | prefix, 1M | total, 1M | prefix, 100k | total, 100k |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 52,735 | 0.285 ms | 6.88 ms | 0.269 ms | 1.37 ms |
+| 16 | 26,367 | 0.245 ms | 6.69 ms | 0.220 ms | 1.30 ms |
+| 32 | 13,184 | 0.263 ms | 6.84 ms | 0.216 ms | 1.30 ms |
+| 64 | 6,592 | 0.228 ms | 6.75 ms | 0.214 ms | 1.35 ms |
+| **103** | **4,096** | **0.237 ms** | **6.71 ms** | **0.198 ms** | **1.30 ms** |
+| 128 | 3,296 | 0.236 ms | 6.72 ms | 0.195 ms | 1.28 ms |
+| 256 | 1,648 | 0.227 ms | 6.67 ms | 0.216 ms | 1.33 ms |
+| 512 | 824 | 0.231 ms | 6.68 ms | 0.203 ms | 1.30 ms |
+| 1,024 | 412 | 0.222 ms | 6.69 ms | 0.214 ms | 1.31 ms |
+| 2,048 | 206 | 0.234 ms | 6.75 ms | 0.216 ms | 1.41 ms |
+| 4,096 | 103 | 0.244 ms | **6.99 ms** | 0.213 ms | 1.40 ms |
+
+**Both walls are visible, and the constant is between them.** At 8 blocks — 1.3 per worker — `prefix` costs 0.285 ms
+against 0.23 in the middle: the last block is a tail that five workers watch. At 4096 blocks — 103 cells each — the
+per-block overhead arrives in `count` rather than the scan (1.98 ms against 1.85 at 1M, 0.50 against 0.37 at 100k)
+and the total pays 0.3 ms. Between roughly 32 and 2048 blocks everything is inside the fixture's noise.
+
+**The doubt was wrong.** 17 blocks per worker is not too few; the degradation starts an order of magnitude below it,
+around 1.3 blocks per worker. What the constant actually rests on is bytes: 4096 cells is a 16 KB window slice, and
+the scan writes the cursor slice beside it, so a block touches 32 KB — L1-sized on both the x86 and Apple-silicon
+cache geometries this crate targets, which is what keeps the local scan's forward walk and its totals read in cache.
+The test `the_block_constant_is_pinned_by_its_bytes_and_its_table` asserts both the value and its byte size, and
+derived block counts at seven cell counts, so an edit to the constant fails a test that points back at this table.
+
+The sweep also says what the block constant *cannot* buy: `prefix` is 0.22–0.28 ms of a 6.7 ms rebuild at every
+setting, so no choice here moves the total by more than noise. The 5x gate does not hinge on it — the dispatch tax
+does (§*What a thread hand-off costs*), which is what T05 is for.
