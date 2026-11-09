@@ -187,9 +187,12 @@ Read it as 2.5x faster than a GDScript loop that rebuilds a grid, and 1.9x / 1.5
 at all. The `array` row exists so the fast-looking comparison is visible next to the fair one rather than left to
 whoever reads the table.
 
-The Unreal row is the remaining gap. It needs UE5 and a C++ project on a machine of its own; the recipe is in
-`cross-engine.md`, and `UnrealEditor-Cmd` has nothing to run against in this sandbox. The Godot fixture is now a
-committed project with CLI parameters, so the day UE5 is available the gap is one harness, not one setup afternoon.
+The Unreal row is the remaining gap, and the harness for it now exists: `benchmarks/unreal/` is a
+`UTickableWorldSubsystem` running the same fixture, with its setup, flags and build commands in its README, and
+`scripts/cross_bench.py --engines unreal --unreal-cmd ...` drives it and parses the row (proved by
+`scripts/cross_bench.py --self-test`, which runs the whole path against a fake command). It has not been compiled
+against a real engine, because UE5 does not fit in this sandbox, so the first build is expected to need small version
+fixes. What is left is one `UnrealEditor-Cmd` run on a machine with UE5 installed.
 
 ## 8. Release mechanics
 

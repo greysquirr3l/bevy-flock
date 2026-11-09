@@ -34,12 +34,17 @@ def rows(paths: list[str]) -> list[dict]:
         text = pathlib.Path(path).read_text()
         for line in text.splitlines():
             line = line.strip()
-            # Harnesses may prefix their line with a tag so a noisy log stays readable.
-            if not line or not line.lstrip("crossbench ").startswith("{"):
-                continue
-            payload = line.split("{", 1)[-1]
+            # A harness may print the object bare, or tag it so a noisy log stays readable, or have the engine put its
+            # own log prefix in front of the tag. All three are the same row.
+            if line.startswith("{"):
+                payload = line
+            else:
+                marker = line.find("crossbench {")
+                if marker < 0:
+                    continue
+                payload = line[marker + len("crossbench ") :]
             try:
-                row = json.loads("{" + payload)
+                row = json.loads(payload)
             except json.JSONDecodeError:
                 continue
             missing = [key for key in REQUIRED if key not in row]
