@@ -329,3 +329,23 @@ serial pass. The serial path is unchanged and still seats before it places.
 The dispatch count is unchanged at three, so T05's evaluation criterion ("the spawn cost is gone from the inventory
 rather than moved to a different row") is NOT met and the pool remains the way to meet it.
 """
+
+[[completed]]
+task = "phase-5 T02 fused-scan-adr (ADR 0057)"
+delivered_in = "docs/phase5-t02-adr"
+note = """
+Fixes the fusion before building it, and had to be written against the tree as it stands rather than against the
+task text: the seat half of T03 was already delivered by #25, so the seat is no longer a pass to delete but a copy
+inside the place dispatch to delete, which the scan can do for free because it computes each window start anyway.
+The arithmetic is pinned with the +1 the code actually uses (counts live at cell_start[c + 1]) and worked through
+for block 0, so T03 can be implemented without re-deriving the scan: block totals accumulated in count, bases as a
+serial O(blocks) running sum, block-local scan writing both arrays from one register.
+Says which half is expected to pay (1.7 MB of serial totals read leaves the rebuild) and which is expected to cost
+(a per-block accumulate inside the pass that scales 0.98x), and commits to reverting on measurement rather than to
+the mechanism, with ADR 0055's demotion as the precedent for what that means in practice.
+Determinism under the coming worker pool gets its own section, because the pool is what makes 'which worker wakes
+first' a real question: one writer per block total by block range, bases after the join, scans over disjoint spans,
+and a worker that runs nothing leaves the arrays as the schedule would have.
+PassCosts goes from five rows to four and the seat field is deleted rather than left at zero; the inventory example
+loses its row in the same commit, since a stale row is worse than no row.
+"""

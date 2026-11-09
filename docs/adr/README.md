@@ -84,3 +84,4 @@ replay.
 | [0054](0054-parallel-spatial-partitioning.md) | What a parallel spatial build may not change: nine invariants and one arena | Accepted |
 | [0055](0055-blocked-prefix-sum.md) | A blocked prefix sum over cell blocks, and the measurement that demoted it | Accepted |
 | [0056](0056-placement-cursor-is-a-copy.md) | The placement cursor is a copy, not the window table | Accepted |
+| [0057](0057-fused-count-and-scan.md) | The count pass absorbs the scan's totals, and the scan seats its own cursors | Accepted |
