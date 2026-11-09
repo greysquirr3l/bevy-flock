@@ -207,6 +207,26 @@ evaluation_criteria = [
 ]
 
 [[completed]]
+task = "phase-3 T01 serial-baseline"
+delivered_in = "feat/phase3-t01-t02"
+note = """
+`benches/spatial.rs` splits build, query and kernel; `benches/spatial-baseline.json` records them and
+`scripts/bench_gate.py` now takes `--crate`/`--bench`/`--baseline` so both crates share one gate. At 1M:
+47.2 ms to rebuild every body into cells, 6.5 µs per radius query, 677 ns per body for the scalar
+reference kernel at 100k. docs/performance.md states what each number is and is not.
+"""
+
+[[completed]]
+task = "phase-3 T02 parallel-contract-adr"
+delivered_in = "feat/phase3-t01-t02"
+note = """
+ADR 0054: nine invariants a parallel build may not change, each with the test that holds it. Cell
+membership stays pure, neighbour membership is public while order stays a stable internal property, the
+merge runs in cell order with a shared atomic cursor banned, and thread count is configuration that
+cannot change behaviour.
+"""
+
+[[completed]]
 task = "phase-2 T01-T11"
 delivered_in = "feat/phase2-anim-t07-11"
 note = """

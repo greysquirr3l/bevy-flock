@@ -1124,3 +1124,43 @@ ratios, so a slower runner fails everything and the fix is a new baseline on tha
 commit. And the allocation test is a test, not a benchmark: `tests/no_alloc.rs` counts allocations over
 600 ticks of the blend and 600 of the reconciler and fails on the first `Vec`, which is the regression
 a timing threshold would catch a release later.
+
+## The serial spatial path (phase 3 baseline)
+Phase 3 replaces the single-threaded grid, so it needs the serial cost split into its pieces before a
+thread exists: a parallel build that halves the index and leaves the query alone is a different result
+from the reverse, and a frame time cannot tell them apart. `cargo bench --bench spatial` measures the
+three, `benches/spatial-baseline.json` records them, and `python3 scripts/bench_gate.py --crate .
+--bench spatial --baseline benches/spatial-baseline.json` gates them at 25%.
+
+Same machine as the animation envelope: six-core x86-64 sandbox VM, `[profile.bench]` with
+`codegen-units = 1` and `lto = "thin"`, one thread.
+
+| Case | Population | Time | Per body |
+| ---- | ---------: | ---: | -------: |
+| `spatial_build/build` — full rebuild of every body | 100,000 | 6.7 ms | 67 ns |
+| | 1,000,000 | 47.2 ms | 47 ns |
+| `spatial_query/radius_1k_queries` — 1,000 radius-12 m queries | 100,000 | 0.70 ms | 0.70 µs/query |
+| | 1,000,000 | 6.5 ms | 6.5 µs/query |
+| `spatial_kernel/steer_integrate_advance` — the scalar reference kernel | 100,000 | 67.7 ms | 677 ns |
+
+Two things to read carefully, because both invite a wrong conclusion.
+
+**The 47 ms build is not the frame.** The published million-body frame (4.75 ms) is the banded continuum,
+where ambient bodies are *not* individually indexed: roughly 5,000 manifested bodies sit in the grid and
+the rest are handled as a field. This benchmark deliberately measures the worst case — every one of a
+million bodies rebuilt into cells every tick — because that is the case a naive parallel port would be
+asked to speed up, and because it is the ceiling a game hits the moment it decides every body matters.
+Comparing 47 ms against 4.75 ms and concluding the crate regressed would be comparing a full rebuild with
+an incremental band.
+
+**The 677 ns kernel is the scalar reference, not the SIMD road.** `application::packed` is what the serial
+ECS path was measured against in ADR 0020; the million-body kernel is `benches/crowd.rs`. A scalar run at
+1M takes six seconds per iteration, which is why the case stops at 100k — a measurement nobody will wait
+for is a measurement nobody acts on. It stays in the gate because the three numbers together are the
+budget, and because a regression in the reference path is a regression in the fallback every
+non-SIMD target uses.
+
+The query number is the one that should move first. At 6.5 µs per query for a 1,000-query pass over a
+million bodies, the query is where a manifest tier spends its time, and it is embarrassingly parallel in a
+way the build is not: each query is independent, and the only ordering constraint is the deterministic
+gather into the shared arena (ADR 0054, invariant 4).

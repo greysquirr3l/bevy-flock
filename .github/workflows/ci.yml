@@ -318,6 +318,12 @@ jobs:
       # The newer benches: cognition (the scheduler), groups, flow fields and the
       # replication wire format. They compile here and are run on demand locally.
       - run: cargo bench --locked --all-features --benches --no-run
+      # A smoke test of the gate itself, not a performance gate: comparing each committed baseline
+      # against itself proves the script runs, that the file parses, and that the case names in it are
+      # the ones the script looks for. A real comparison needs the machine that recorded the baseline;
+      # a shared runner measures the runner, which is why this is a self-check and says so.
+      - run: python3 scripts/bench_gate.py --check crates/bevy-flock-anim/benches/baseline.json
+      - run: python3 scripts/bench_gate.py --baseline benches/spatial-baseline.json --check benches/spatial-baseline.json
   examples:
     name: Examples run
     runs-on: ubuntu-latest
