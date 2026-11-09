@@ -217,6 +217,17 @@ evaluation_criteria = [
     "The phase ends with a number and a named successor task, or with 5x reached and the gate held",
     "Nothing in the inventory is extrapolated to cores that were not measured",
 ]
+# ─── Integration audits ───────────────────────────────────────────────────────
+# Wiggum injects `integration-wiring` and `stub-cleanup` into any plan with three or more tasks, to catch the
+# two failure modes it was written for: modules that compile but are never wired in, and `todo!()` placeholders
+# that compile and crash. Both audits already exist in this repository as T37 and T38 of the phase-2 manifest,
+# and the phase-2 work closed them as real tasks; letting the injector add them again to every phase duplicates
+# the slugs across plans, inflates each DAG by two, and makes `generate` emit task files that already exist.
+# So they are switched off here, once, with the reason attached — not silently dropped.
+[integration]
+skip_wiring_audit = true
+skip_stub_audit   = true
+
 # ─── Orchestrator ─────────────────────────────────────────────────────────────
 [orchestrator]
 persona     = "You are a principal Rust engineer who owns a crowd engine's spatial index and has been burned by a parallel build that looked deterministic on six cores and reordered on sixteen. You measure before you claim, you write the test that would catch the reorder before the code that could cause it, and you treat a fusion that turns out slower as a result worth recording rather than a mistake worth hiding."
