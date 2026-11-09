@@ -1534,7 +1534,8 @@ Removing a whole dispatch needs the body-cell pass and the count pass to share o
 first writes slices of the cell list that the second reads in full. That is a different design (atomics per body, or
 per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` task, not this one.
 
-At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is now 4.72 ms of single-worker build, and the
+At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is **4.72 ms at six workers** — a 4.72x
+reduction of the 22.3 ms one-worker build measured in that session, which is what "5x" meant when it was written — and the
 remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
 target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.
 
@@ -1702,3 +1703,106 @@ pool this phase was chartered to build would be chasing a fifth of a millisecond
 2.04, the two remaining passes are 70% of the rebuild and neither is a scan. Whatever the 5x gate is going to be, it is
 not going to be met by removing dispatches: 6.488 ms is 3.5x, and the arithmetic caps a perfect six-way split of these
 passes well short of 4.72 ms.
+
+### Which serial build is the denominator
+
+Three different one-worker numbers appear in this file for the same 1M fixture: 22.15 ms in phase 4, 22.5 ms in T03, 22.9 ms in
+T06. They are the same code measured in different sessions, and the ~2% between them is this machine's run-to-run spread — larger
+than several of the effects these sections report. That makes "5x against the serial build" ambiguous by construction, so the
+rule from here on is that a speedup quotes the one-worker number **measured in the same session, on the same fixture, by the same
+binary**, and a comparison across a code change quotes both binaries' own one-worker numbers. The T06 numbers below follow that
+rule; the earlier sections keep their contemporaneous serial figures, which is why they do not divide cleanly into each other.
+
+## The division was most of the rebuild (T06, `clear`)
+
+ADR 0060 identified `clear` as compute-bound on `(position - min) / cell_size` — three f32 divisions per body — and
+estimated 2.46 → 1.2–1.5 ms. The estimate was directionally right and much too small.
+
+| | before | after | |
+| --- | ---: | ---: | --- |
+| `clear`, 1 worker | 13.034 ms | **2.767 ms** | 4.7x faster serially |
+| `clear`, 6 workers | 2.463 ms | **0.739 ms** | 3.3x |
+| `count` | 1.730 ms | 1.749 ms | unchanged |
+| `prefix` | 0.112 ms | 0.110 ms | unchanged |
+| `place` | 1.984 ms | 1.975 ms | unchanged |
+| **total, 6 workers** | **6.289 ms** | **4.572 ms** | −27% |
+
+The change is a multiply by a cached `1.0 / cell_size` instead of a divide, and a `clamp_axis` that lifts to zero with one
+`max` and truncates with a saturating convert instead of compare-and-branching twice per axis. The serial pass fell by
+4.7x, not the ~2x the probe suggested: the real loop inlines the kernel, while the probe called it through a `fn` pointer
+and paid an indirect call per body, which inflated every fast variant it measured.
+
+Against the pre-fix serial build this is **5.02x** — the phase 5 gate.
+
+**The gate's denominator moved with it.** The serial path is now 12.229 ms rather than 22.943, so the same binary is
+2.67x against its own serial control. Both numbers are true and they answer different questions: wall clock fell 27%,
+while the parallel speedup ratio fell because a third of the serial work disappeared. A gate phrased as "5x against the
+serial build" has to say *which* serial build, which is the substance of ADR 0060's recommendation to re-derive it.
+
+## `count` cannot be rescued by private histograms (measured, and worse)
+
+`count` is 1.21x on six workers because every worker scans all 1M `cells` entries and filters for its own window: six
+4 MB scans, 24 MB, at the 14 GB/s this machine sustains — so it is at bandwidth, not badly scheduled. The obvious fix is
+to make it body-partitioned with a private histogram per worker and merge afterwards. Measured on the same shape
+(1M bodies, 421,875 cells), it is three times *worse*:
+
+| structure | 1 thread | 6 threads |
+| --- | ---: | ---: |
+| today (scan all, filter own window) | 5.446 ms | **1.658 ms** |
+| private histogram per worker + merge | 6.664 ms | 4.902 ms |
+| fused `clear`+`count` with private histograms | 20.496 ms | 8.899 ms |
+
+The reason is the one the numbers make obvious in hindsight: today's workers increment a window they own, 70k cells of
+L2-resident table each, and pay for it with a redundant 4 MB read that the memory system delivers at full speed. Six
+private histograms are 10 MB, so every increment becomes a cache miss, and the merge adds 2.5M more reads on top.
+
+So `count`'s low speedup is the price of its locality, not a defect in it. The only structure that reduces the bytes
+without losing the locality is a bucketing pass — scatter bodies into per-worker buckets once, then let each worker scan
+its own — which is 12 MB of traffic instead of 24 and would help `place` (the same rescan, 1.975 ms) more than `count`.
+That is a task with its own record, not a gate.
+
+## The bucketing pass: measured, and rejected (scatter probe)
+
+The scoped successor to `count` was to scatter bodies into per-worker buckets once, then let `count` and `place` each scan
+only their own — 12 MB of traffic per rebuild instead of 24 for each pass. A single-pass scatter into one shared output
+was budgeted at 0.6 ms, and a standalone probe was built before any crate change, on the rule that killed the private
+histograms. It missed by 4.7x, so the task is closed rather than implemented.
+
+1M bodies, 421,876 cells, 4 MB of cell ids scattered into six buckets, best of seven, `-O`, same six-core aarch64 VM:
+
+| shape | ms | per body |
+| --- | ---: | ---: |
+| write-only: six contiguous streams | **0.157** | 0.16 ns |
+| serial scatter, cursors in registers | 2.816 | 2.8 ns |
+| atomic cursors, 64 B apart | 3.138 | 3.1 ns |
+| atomic cursors packed into one line | **6.434** | 6.4 ns |
+| read side: rescan-all → own-slice (6 workers) | 0.728 → 0.155 | |
+
+**The bytes were never the constraint.** Writing the same 4 MB as six disjoint sequential streams takes 0.157 ms — 20x
+faster than the scatter that produces it. The scatter is latency-bound on a loop-carried dependency: each store's address
+comes from a cursor load, so every iteration waits one cache round trip for the previous one. 2.8 ns per body on this
+machine is L2 latency, not bandwidth, and no amount of traffic reduction touches it.
+
+**Cache coherency costs exactly 2.05x.** Six cursors packed into one 64-byte line means every `fetch_add` invalidates the
+line in the other five cores, and 1M of those is 6.4 ms. Padding each cursor to its own line halves it — and still loses
+to no atomics at all, because padding removes line-level false sharing and leaves cursor-level contention: all six
+workers increment all six cursors in turn.
+
+**The read saving was overestimated by 2.4x.** The model claimed 1.4 ms per pass; measured, it is 0.573 ms (0.728 →
+0.155). That sets the break-even exactly: bucketing needs a scatter of **≤ 1.15 ms** to pay for itself, and the cheapest
+implementable shape measured is 2.8 ms. With the scatter included, the rebuild would go 4.573 → 6.243 ms (+1.67) at best,
+or 6.565 ms with padded atomics.
+
+The only structure that removes the dependency is per-worker-per-bucket counts, a prefix, and then contiguous writes per
+bucket — which needs six passes over each worker's slice, about 1.2–1.3 ms by these numbers. That is at break-even, for a
+new pass, 4 MB of scratch and a merge-order determinism argument. It is not worth it, and the estimate it would rest on is
+of the kind that has been wrong twice already in this file.
+
+Two probe artefacts were caught and are recorded because both nearly became findings: an integer division per body in the
+bucket lookup (replacing it with a table made the scatter *slower*, 2.8 → 4.3 ms, proving neither was the bottleneck), and,
+in the earlier `clear` probe, a `fn`-pointer dispatch that blocked inlining and inflated every variant it measured except
+the divide-dominated one it was compared against.
+
+**Decision:** the bucketing task is closed as measured-and-rejected; ADR 0060's `count`/`place` fusion line ends here. If
+`place` is revisited, the target is its inner loop — 1M cursor load-modify-stores, the same dependency shape, and where
+its 1.975 ms actually goes — not the traffic in front of it.

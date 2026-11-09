@@ -311,6 +311,8 @@ impl QueryArena {
 pub struct SpatialGrid {
     config: SpatialGridConfig,
     cell_size: f32,
+    /// `1.0 / cell_size`, cached because the fill pass multiplies by it once per body per axis.
+    inv_cell_size: f32,
     dims: [u32; 3],
     /// Prefix sums: `cell_start[c]..cell_start[c + 1]` is cell `c`'s window in
     /// `order`. Length is `cell_count() + 1`.
@@ -520,6 +522,7 @@ impl SpatialGrid {
         Ok(Self {
             config,
             cell_size,
+            inv_cell_size: 1.0 / cell_size,
             dims,
             cell_start: vec![0; cells + 1],
             cell_cursor: Vec::new(),
@@ -548,6 +551,7 @@ impl SpatialGrid {
                 max_cells: 1,
             },
             cell_size: 2.0,
+            inv_cell_size: 0.5,
             dims: [1, 1, 1],
             cell_start: vec![0, 0],
             cell_cursor: Vec::new(),
@@ -643,7 +647,7 @@ impl SpatialGrid {
     /// it invisible to its own flock.
     #[must_use]
     pub fn cell_of(&self, position: Vec3) -> u32 {
-        cell_of_parts(self.config.min, self.cell_size, self.dims, position)
+        cell_of_parts(self.config.min, self.inv_cell_size, self.dims, position)
     }
 
     /// How many threads a rebuild may use.
@@ -783,12 +787,12 @@ impl SpatialGrid {
     /// Compute each body's cell. `cell_of` is the only float work in a rebuild, and it is done once per
     /// body into a reused buffer so the placement pass reads four bytes instead of recomputing.
     fn fill_cells_serial(&mut self) {
-        let (min, cell_size, dims) = (self.config.min, self.cell_size, self.dims);
+        let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
         let Self { cells, entries, .. } = self;
         cells.clear();
         cells.resize(entries.len(), 0);
         for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
-            *slot = cell_of_parts(min, cell_size, dims, entry.position);
+            *slot = cell_of_parts(min, inv, dims, entry.position);
         }
     }
 
@@ -1198,7 +1202,7 @@ impl SpatialGrid {
     /// Pass one, partitioned by body: each worker writes its own slice of the cell list.
     #[cfg(feature = "threads")]
     fn fill_cells_parallel(&mut self, workers: usize) {
-        let (min, cell_size, dims) = (self.config.min, self.cell_size, self.dims);
+        let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
         let Self { cells, entries, .. } = self;
         cells.clear();
         cells.resize(entries.len(), 0);
@@ -1210,7 +1214,7 @@ impl SpatialGrid {
             for (slots, slice) in cells.chunks_mut(chunk).zip(entries.chunks(chunk)) {
                 scope.spawn(move || {
                     for (slot, entry) in slots.iter_mut().zip(slice) {
-                        *slot = cell_of_parts(min, cell_size, dims, entry.position);
+                        *slot = cell_of_parts(min, inv, dims, entry.position);
                     }
                 });
             }
@@ -1726,21 +1730,31 @@ fn cell_count(dims: [u32; 3]) -> u64 {
 }
 
 /// Clamp a local coordinate to a cell index on one axis.
-fn cell_of_parts(min: Vec3, cell_size: f32, dims: [u32; 3], position: Vec3) -> u32 {
-    let local = (position - min) / cell_size;
+/// Which cell a position falls into: the map every pass agrees on.
+///
+/// `inv_cell_size` is `1.0 / cell_size`, so this is three multiplies rather than three divisions. When the cell size is a
+/// power of two the reciprocal is exact and the two are identical; for any other size they can differ by one unit in the
+/// last place, which only matters for a position sitting exactly on a cell boundary, where either cell is defensible.
+/// That is the trade ADR 0060 asked for: the division was most of this pass, and this pass was most of the rebuild.
+fn cell_of_parts(min: Vec3, inv_cell_size: f32, dims: [u32; 3], position: Vec3) -> u32 {
+    let local = (position - min) * inv_cell_size;
     let x = clamp_axis(local.x, dims[0]);
     let y = clamp_axis(local.y, dims[1]);
     let z = clamp_axis(local.z, dims[2]);
     (z * dims[1] + y) * dims[0] + x
 }
 
+/// Truncate a local coordinate to a cell index, without a branch per axis.
+///
+/// A coordinate that is not finite collapses to cell zero: a body with a NaN position would otherwise index a cell that
+/// does not exist, and the pass has to stay total. Everything else is lifted to zero with one `max` and truncated by
+/// `f32_to_u32`, which is a saturating convert — no compare-and-branch on the hot path, and the same answer as the
+/// compare-and-clamp it replaces, because truncation is monotonic and the conversion saturates rather than wrapping.
 fn clamp_axis(value: f32, cells: u32) -> u32 {
-    let max = cells.saturating_sub(1);
-    if !value.is_finite() || value <= 0.0 {
+    if !value.is_finite() {
         return 0;
     }
-    let floored = num::f32_to_u32(value);
-    floored.min(max)
+    num::f32_to_u32(value.max(0.0)).min(cells.saturating_sub(1))
 }
 
 #[cfg(test)]
@@ -2039,6 +2053,51 @@ mod tests {
             total += window.len();
         }
         assert_eq!(total, grid.len(), "every entry appears in exactly one cell");
+    }
+
+    #[test]
+    /// The map every pass agrees on: boundaries, out-of-range coordinates and non-finite ones.
+    ///
+    /// The fill pass multiplies by a cached reciprocal rather than dividing (ADR 0060), so this also pins what that
+    /// means at the edges: a coordinate below the volume, above it, NaN or infinite lands somewhere defined rather than
+    /// somewhere undefined, and the fill pass has to agree with `cell_of` for every one of them.
+    fn cell_of_is_clamped_and_agrees_with_the_fill_pass() {
+        let config = SpatialGridConfig::try_new(Vec3::splat(-8.0), Vec3::splat(8.0), 8.0).or_die();
+        let mut grid = SpatialGrid::new(config).or_die();
+        assert_eq!(grid.dims, [2, 2, 2]);
+        let cases: [(Vec3, u32, &str); 8] = [
+            (Vec3::splat(-8.0), 0, "the volume's own minimum"),
+            (Vec3::new(-1.0, -1.0, -1.0), 0, "just inside the low half"),
+            (
+                Vec3::new(0.0, 0.0, 0.0),
+                7,
+                "the boundary itself, in the high half",
+            ),
+            (Vec3::splat(7.999), 7, "just inside the volume"),
+            (Vec3::splat(1_000.0), 7, "far past the maximum"),
+            (Vec3::splat(f32::NEG_INFINITY), 0, "negative infinity"),
+            (Vec3::splat(f32::INFINITY), 0, "positive infinity"),
+            (Vec3::splat(f32::NAN), 0, "not a number"),
+        ];
+        for (position, expected, what) in cases {
+            assert_eq!(grid.cell_of(position), expected, "{what}");
+        }
+        grid.extend_from(cases.iter().enumerate().map(|(index, (position, ..))| {
+            (
+                NpcId::unique(num::usize_to_u32(index)),
+                *position,
+                Vec3::ZERO,
+            )
+        }));
+        grid.build();
+        for (body, (position, expected, what)) in cases.iter().enumerate() {
+            assert_eq!(grid.cell_of(*position), *expected, "{what}");
+            assert_eq!(
+                grid.cells.get(body).copied(),
+                Some(*expected),
+                "the fill pass disagrees with cell_of at {what}"
+            );
+        }
     }
 
     #[test]
