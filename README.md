@@ -6,7 +6,6 @@
 pluggable cognition and a replay you can trust.
 
 ```rust
-use bevy_app::App;
 use bevy_flock::prelude::*;
 
 let mut app = App::new();
