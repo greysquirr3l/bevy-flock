@@ -288,3 +288,20 @@ Gate: clippy -D warnings clean, 550 lib tests, 5 boundary tests, lint audit clea
 Remaining for T02: `--no-default-features` still fails because the adapter modules need the engine; gating
 `pub mod adapters` on `ecs` is what makes the facade usable as a core-only dependency.
 """
+
+[[completed]]
+task = "extract-core-crate (T02)"
+delivered_in = "feat/phase6-t02-extract-core"
+note = """
+`crates/bevy-flock-core` holds `domain`, `behavior`, `application`, `error` and `testkit`, moved with `git mv`. The facade
+re-exports them from its root, which is what keeps every published path compiling -- and what keeps the facade's own
+`crate::domain::...` references resolving, because a `pub use` puts the name in the root namespace.
+Verified: `cargo tree -p bevy-flock-core` lists no bevy_ecs, bevy_app or bevy_transform; the facade compiles with
+`--no-default-features`; 418 core tests plus 132 facade tests (550, unchanged); the boundary scanner now points at the core
+crate and its 5 tests pass, including the one that fails if a core file names bevy_ecs off a `feature = "ecs"` line;
+clippy is clean across all targets and features.
+Features forward by name both ways (`simd`, `threads`, `memory`, `serde`, `navmesh`, `ecs`); the core defaults to
+`simd`+`threads` and not `ecs`, which is what keeps a headless consumer's graph free of the engine.
+Still open: `headless-consumer-gate` needs a consumer that is not the facade -- a test crate that depends on
+`bevy-flock-core` alone and runs a crowd end to end -- before this phase can be called done.
+"""

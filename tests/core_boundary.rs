@@ -92,7 +92,8 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// The core source tree, rooted at `src/`.
 fn core_sources() -> Vec<(String, String)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    // The core layers moved to their own crate (ADR 0058); the scanner follows them rather than the facade.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/bevy-flock-core/src");
     let mut files = Vec::new();
     for layer in CORE_LAYERS {
         let mut found = Vec::new();
@@ -199,7 +200,7 @@ fn the_scanner_ignores_comments_and_catches_attributes() {
 /// future derive creeps in ungated, it fails here rather than in a downstream crate that cannot compile.
 #[test]
 fn core_mentions_of_the_engine_are_feature_gated() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/bevy-flock-core/src");
     let mut checked = 0usize;
     for relative in ECS_EXCEPTIONS {
         let path = root.join(relative);

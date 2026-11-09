@@ -45,30 +45,33 @@ default = ["simd", "threads", "ecs"]
 # simulation half of this crate can be built without the engine knowing it exists. On by default, because a
 # Bevy game is the reason it exists. `bevy-flock-core` will depend on this crate with `default-features = false`
 # and get a dependency graph with no `bevy_ecs` at all -- that is the boundary test in docs/adr/0058.
-ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_transform"]
+ecs = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_transform", "bevy-flock-core/ecs"]
 # Social memory: an opt-in store so a game that never remembers anyone does not
 # pay for the rows. Off by default and dependency-free.
-memory = []
+memory = ["bevy-flock-core/memory"]
 
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
-serde = ["dep:serde", "dep:ron", "smallvec/serde"]
+serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy-flock-core/serde"]
 # A polygon navmesh with derived adjacency, area costs and a string-pulled route: the shape a
 # level with doorways actually needs, where a cell grid has to over-block or let agents clip the
 # frame. Off by default because a game whose levels are open ground does not need it, and it is
 # the largest single module in the domain.
-navmesh = []
+navmesh = ["bevy-flock-core/navmesh"]
 # Steering on the ECS task pool (ADR 0044): the frame is cut into slices, one per worker.
 # On by default because it is the only lever that scales with cores rather than with lanes;
 # `default-features = false` gives a single-threaded, dependency-light build for a
 # deterministic replay harness or a single-core runner.
-threads = ["bevy_tasks/multi_threaded"]
+threads = ["bevy_tasks/multi_threaded", "bevy-flock-core/threads"]
 # Four agents at a time through `wide::f32x4`: the band kernel's blocks (ADR 0023) and the crowd
 # kernel's transposed blocks (ADR 0030). On by default since ADR 0031 measured it winning at every
 # density and population tested; the only cost is the `wide` dependency.
-simd = ["dep:wide"]
+simd = ["dep:wide", "bevy-flock-core/simd"]
 
 [dependencies]
+# The simulation itself, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
+# `application` is here, moved rather than copied, so a headless server can depend on the core alone.
+bevy-flock-core = { path = "crates/bevy-flock-core", default-features = false }
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
 # these five crates. `bevy_transform` is the ECS transform graph (also used by
 # physics), not a rendering crate: no GPU, window or asset type reaches this

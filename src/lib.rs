@@ -86,21 +86,19 @@
 // which is the boundary ADR 0058 describes and `bevy-flock-core` will depend on.
 #[cfg(feature = "ecs")]
 pub mod adapters;
-pub mod application;
-pub mod behavior;
 // The ECS systems that drive the simulation. Like `adapters`, this is engine code: the core exposes
 // `boids::BoidsParams`-shaped data and the systems that read it live on this side of the boundary.
 #[cfg(feature = "ecs")]
 pub mod boids;
-pub mod domain;
-pub mod error;
 pub mod prelude;
-/// Test-only helpers for the crate's own fixtures. Not part of the simulation API.
-#[doc(hidden)]
-pub mod testkit;
 
 #[cfg(feature = "ecs")]
 pub use adapters::primary::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockStats,
 };
-pub use error::{ConfigError, FlockError, PopulationError, RegistrationError};
+// The simulation, re-exported rather than reimplemented: every path a reader has in their code keeps working, and
+// `bevy_flock_core` is where the code actually is. `crate::domain::…` inside this crate resolves through these lines.
+pub use bevy_flock_core::{application, behavior, domain, error};
+#[doc(hidden)]
+pub use bevy_flock_core::testkit;
+pub use bevy_flock_core::error::{ConfigError, FlockError, PopulationError, RegistrationError};

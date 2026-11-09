@@ -185,3 +185,33 @@ and `application` has no `bevy_ecs` type in any signature.
 **Still open for T02:** `--no-default-features` does not yet build, because the adapter modules themselves need the engine.
 Gating `pub mod adapters` on the same `ecs` feature is what turns the facade into a crate that can be depended on as a
 core-only library, and it is the last thing standing between the boundary as documented and the boundary as built.
+
+### T02 delivered: the extraction, and how it was verified
+
+`crates/bevy-flock-core` now holds `domain`, `behavior`, `application`, `error` and `testkit`, moved with `git mv` so
+history follows the code. The facade's root does what this ADR said it would:
+
+```rust
+pub use bevy_flock_core::{application, behavior, domain, error};
+```
+
+A `pub use` puts the name in the root namespace, so the facade's own `crate::domain::…` paths kept working too — one move,
+two audiences, zero call-site edits in either the facade or a downstream game.
+
+Verified, not asserted:
+
+| check | result |
+| --- | --- |
+| `cargo tree -p bevy-flock-core` | no `bevy_ecs`, `bevy_app` or `bevy_transform` |
+| `cargo check --no-default-features` (facade) | compiles |
+| tests | 418 core + 132 facade = 550, unchanged |
+| `tests/core_boundary.rs` | 5 pass, including the feature-gate test, now scanning the core crate |
+| clippy | `--all-targets --all-features -D warnings`, clean |
+
+Feature forwarding is by name in both directions: `simd`, `threads`, `memory`, `serde`, `navmesh` and `ecs`. The core's
+defaults are `simd` and `threads` and deliberately not `ecs` — the derives that need the engine arrive only when the
+facade asks for them, which is what keeps a headless consumer's graph clean.
+
+What the split does *not* do: shrink the facade. `bevy_flock::adapters`, `::boids` and `::prelude` are still engine code
+and still mandatory for a Bevy user. The claim the split supports is narrower and more useful: the simulation is usable
+without the engine, and the boundary is now a dependency-graph fact rather than a convention.

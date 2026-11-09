@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The simulation is its own crate.** `bevy-flock-core` now holds `domain`, `behavior`, `application`, `error` and
+  `testkit` with no Bevy app in its dependency graph, so a headless server, a replay tool or a test harness can run a crowd
+  without an engine. `bevy-flock` re-exports every path that moved, so existing code compiles unchanged; the only edit
+  needed is if you depended on the crate with `default-features = false`, where the `ecs` feature now decides whether the
+  three `Resource` derives exist. Feature names forward unchanged: `simd`, `threads`, `memory`, `serde`, `navmesh`.
 
 - **A fourth naming culture, and the names stop shouting.** `NameStyle` gains `Highland` — broad
   vowels, gutturals, and surnames taken from places rather than trades — so a world seed can land on
