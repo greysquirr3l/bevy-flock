@@ -24,12 +24,14 @@
 //!
 //! # Status
 //!
-//! This is `0.1.0`: the simulation foundation. Steering, the spatial index,
-//! spawning, behaviour trees, state machines and the extension registry are
-//! implemented and tested. The budgeted think scheduler, the continuum ambient
-//! tier, dialogue, snapshots and the render adapters are specified in
-//! `plan.toml` and tracked in the README's status table. The docs in this crate
-//! describe what exists; they do not promise more.
+//! `0.1.0`. Steering, the spatial index, budgeted spawning, behaviour trees,
+//! state machines, the think scheduler, tiered cognition, the ambient continuum,
+//! dialogue, gesture and gaze playback, social memory and save compatibility are
+//! implemented and tested. The tests that enforce each claim are listed in
+//! `site/src/content/docs/reference/guarantees.md`, one row per promise.
+//!
+//! What remains before `1.0` is API surface rather than features: the freeze, the
+//! MSRV run and the empty-crate install, tracked in `docs/dev/meta/1.0-readiness.md`.
 //!
 //! # Five lines
 //!
@@ -50,10 +52,15 @@
 //!
 //! - [`domain`] is pure simulation state and mathematics. It does not import
 //!   Bevy, allocate in steady state, or read a clock.
-//! - `application` schedules that state against a budget and a logical tick.
-//! - `adapters::primary` is the Bevy-facing surface: components, systems,
+//! - [`application`] schedules that state against a budget and a logical tick.
+//! - [`adapters::primary`] is the Bevy-facing surface: components, systems,
 //!   the plugin and the command extension trait. Rendering is never one of
 //!   these adapters; a renderer observes the simulation and cannot drive it.
+//!
+//! [`domain`], [`application`] and [`behavior`] are re-exported from
+//! `bevy-flock-core`, a crate with no Bevy dependency at all; [`adapters`] and
+//! [`boids`] are the half that lives here. The seam is enforced by
+//! `tests/core_boundary.rs`, which fails if a core file names an engine crate.
 //!
 //! See `ARCHITECTURE.md` and `docs/dev/adr/` in the repository for the reasoning
 //! behind each of those boundaries.
@@ -62,11 +69,26 @@
 //!
 //! | feature | default | what it does |
 //! | --- | --- | --- |
-//! | `serde` | off | `Serialize`/`Deserialize` for blueprints, authored trees and snapshots |
+//! | `ecs` | on | the Bevy half: plugin, components, systems and the adapter surface |
+//! | `simd` | on | the wide steering kernel, four lanes at a time |
+//! | `threads` | on | parallel spatial build and scan under `std::thread::scope` |
+//! | `serde` | off | `Serialize`/`Deserialize` for blueprints, authored trees, saves and snapshots |
+//! | `memory` | off | social memory: bounded subject rows, ageing and persistence |
+//! | `navmesh` | off | pathfinding over a baked navmesh, behind the navigation adapter |
+//! | `full` | off | all of the above, for a game that wants the whole engine |
 //!
-//! Optional integrations (avian physics, instanced rendering, snapshotting,
-//! replication, inspectors) are tracked in `plan.toml` and land behind their
-//! own features; none of them will ever be required to run a crowd.
+//! `--no-default-features` builds the engine-free simulation alone, which is exactly
+//! what `bevy-flock-core` publishes. `ecs` is the only feature that puts a Bevy crate
+//! in the dependency graph.
+//!
+//! So the three sentences a new dependency needs are: `bevy-flock = "0.1"` for the crowd
+//! engine, `features = ["full"]` to turn on memory, saves and navigation as well, and
+//! `bevy-flock-anim` as a second crate if the crowd has to walk. That crate is separate
+//! because it pulls `bevy_animation` and `bevy_asset`, which a headless server should never
+//! compile; it depends on this one, so this one cannot re-export it.
+//!
+//! Optional integrations (avian physics, instanced rendering, replication,
+//! inspectors) land behind their own features; none is required to run a crowd.
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
@@ -82,8 +104,8 @@
 )]
 
 // The engine-facing half. Everything in here knows about Bevy; nothing outside it does. Gated on `ecs` so the
-// simulation half of the crate can be built with `--no-default-features` and no `bevy_ecs` in the graph at all --
-// which is the boundary ADR 0058 describes and `bevy-flock-core` will depend on.
+// simulation half can be built with `--no-default-features` and no `bevy_ecs` in the graph at all, which is the
+// boundary ADR 0058 describes and the reason `bevy-flock-core` exists as a crate of its own.
 #[cfg(feature = "ecs")]
 pub mod adapters;
 // The ECS systems that drive the simulation. Like `adapters`, this is engine code: the core exposes

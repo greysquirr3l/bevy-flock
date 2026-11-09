@@ -37,14 +37,37 @@ bevy-flock 0.1.0
 If `moving` is equal to `population` after two seconds, steering is running. If `population` is zero, the preset's spawn
 volume did not intersect your grid, see [Concepts](/bevy-flock/start/concepts/#the-grid).
 
-## Two crates, one import
+## What to add
 
-Since the phase-6 split there are two packages:
+Four crates, three of them optional. The first row is the one almost everybody needs.
 
-| crate | engine | use it for |
+| I want | add this |
+| --- | --- |
+| a crowd in a Bevy game | `bevy-flock` |
+| all of it, without reading a feature table | `bevy-flock = { version = "0.1", features = ["full"] }` |
+| NPCs that walk, gesture and look with skeletons | `bevy-flock-anim` as well |
+| a server, replay tool or test harness with no Bevy in the graph | `bevy-flock-core` alone |
+
+`full` turns on `ecs`, `simd`, `threads`, `memory`, `serde` and `navmesh`. It does not turn on the animation layer,
+because that lives in a crate which depends on this one: a re-export would be a dependency cycle. Add both and they meet
+at the component types in the prelude, which is the whole reason the prelude re-exports `Transform` and `Vec3` rather
+than defining its own.
+
+| crate | engine in the graph | what it is |
 | --- | --- | --- |
-| `bevy-flock` | Bevy | anything with an `App`, the normal case |
-| `bevy-flock-core` | none | headless servers, replay tools, CI harnesses, tests |
+| `bevy-flock` | Bevy | the plugin, components, systems and the re-exported simulation |
+| `bevy-flock-core` | none | the same simulation without an engine, for servers and replays |
+| `bevy-flock-anim` | Bevy plus `bevy_animation` | skeletal binding, gestures and gaze playback |
 
-`bevy-flock` re-exports everything from the core, so `bevy_flock::domain::…` and `bevy_flock::behavior::…` resolve in
-both. You only name `bevy-flock-core` directly if you want no Bevy in your dependency graph at all.
+`bevy-flock` re-exports the core, so `bevy_flock::domain::…` and `bevy_flock::behavior::…` resolve whichever you depend
+on. Name `bevy-flock-core` directly only when you want no Bevy in your dependency graph at all.
+
+## The whole path in one example
+
+```sh
+cargo run --release --example everything --features memory,serde
+```
+
+That example is the adoption path in order: add the plugin, ask for a crowd, run frames, read the counts the engine
+keeps, then save a memory snapshot and load it back. Read it before the guides; it is eighty lines and it does not
+render.

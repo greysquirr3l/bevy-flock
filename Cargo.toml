@@ -83,6 +83,11 @@ threads = ["bevy_tasks/multi_threaded", "bevy-flock-core/threads"]
 # kernel's transposed blocks (ADR 0030). On by default since ADR 0031 measured it winning at every
 # density and population tested; the only cost is the `wide` dependency.
 simd = ["dep:wide", "bevy-flock-core/simd"]
+# Everything the crate can do, for a game that wants the whole engine and would rather not read a
+# feature table to find out which four switches that is. Deliberately does not include `anim`: the
+# animation layer lives in `bevy-flock-anim`, which depends on this crate, so a re-export would be a
+# cycle. Add that crate separately and the two meet at the component types in the prelude.
+full = ["ecs", "simd", "threads", "memory", "serde", "navmesh"]
 
 [dependencies]
 # The simulation itself, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
@@ -299,3 +304,10 @@ harness = false
 [[bench]]
 name = "replication"
 harness = false
+
+[[example]]
+name = "everything"
+# The example exists to show the full adoption path, so it needs the features that path mentions:
+# social memory for the snapshot, and serde for its bytes.
+required-features = ["memory", "serde"]
+

@@ -36,6 +36,18 @@ ROOT = Path(__file__).resolve().parent.parent
 #: decision that a denied lint is wrong for one file, which needs a reason and a `plan.toml` task
 #: that removes it; see `docs/lint-policy.md`.
 SANCTIONED: dict[tuple[str, str], str] = {
+    # The steering kernels must not fuse: `a * b + c` rounds twice where `a.mul_add(b, c)` rounds
+    # once, and the scalar, SIMD and threaded roads are compared bit for bit. The facade states this
+    # at its crate root; the core states it on the two files that own the arithmetic, which is
+    # narrower than a crate-wide attribute and therefore the better place for it.
+    (
+        "crates/bevy-flock-core/src/application/crowd.rs",
+        "suboptimal_flops",
+    ): "the crowd kernel is compared bit for bit against the scalar and SIMD roads, so fusion is a divergence",
+    (
+        "crates/bevy-flock-core/src/application/packed.rs",
+        "suboptimal_flops",
+    ): "the packed kernel is compared bit for bit against the wide road, so fusion is a divergence",
     (
         "examples/memory_probe.rs",
         "unsafe_code",

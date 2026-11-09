@@ -1,6 +1,6 @@
 //! The ECS half of the think scheduler: tiers, weights, budgets, trees.
 //!
-//! [`ThinkScheduler`] decides who thinks; [`TieredSchedule`] decides who thinks *with
+//! [`ThinkScheduler`](crate::application::schedule::ThinkScheduler) decides who thinks; [`TieredSchedule`] decides who thinks *with
 //! what*, by giving each tier of cognition its own queue and its own reserved share of the
 //! frame (ADR 0017). This module is the wiring that makes both real, as four ordered
 //! systems in [`FlockSet::Perception`] and [`FlockSet::Cognition`]:
@@ -9,7 +9,8 @@
 //!    promotion ration, and writes the weight that goes with it.
 //! 2. [`plan_thinks`] reads every brain's declared cost and asks each tier who fits in its
 //!    reserved budget.
-//! 3. [`reflex_think`] runs the fixed rules for tier zero, which has no tree.
+//! 3. `reflex_think` runs the fixed rules for tier zero, which has no tree. It is a private
+//!    system, so it is named here rather than linked.
 //! 4. [`tick_chosen`] ticks the trees of the chosen NPCs in the tiers that have one.
 //!
 //! Splitting it this way is not tidiness: the planner needs every cost before it can
@@ -28,7 +29,7 @@
 //!
 //! The scheduler will not let one participant think twice on the same tick. Two
 //! [`Update`](bevy_app::Update) passes without the clock advancing are one tick of thinking
-//! followed by silence: healthy brains, `chosen: 0`. [`FlockPlugin`] advances the clock in
+//! followed by silence: healthy brains, `chosen: 0`. [`FlockPlugin`](crate::FlockPlugin) advances the clock in
 //! [`FlockSet::AdvanceTick`], so this only bites a test or a game that drives the systems
 //! itself.
 //!

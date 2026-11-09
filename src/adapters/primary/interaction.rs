@@ -25,7 +25,7 @@
 //! # Fatigue
 //!
 //! Talking to the same person four times in a second should not read as four times the
-//! friendship. [`InteractionLog::revisit`] records recent pairs, and a repeat inside the
+//! friendship. `InteractionLog` records recent pairs, and a repeat inside the
 //! configured window earns half the familiarity and a colder reaction — the same mechanism
 //! that stops a bark from looping, applied to the memory behind it.
 

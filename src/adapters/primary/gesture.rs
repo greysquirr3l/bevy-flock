@@ -17,7 +17,7 @@
 //!
 //! What is *not* here is the clip. A gesture is played by naming a node in the game's own graph,
 //! which the animation crate does; this module only says which kind, from which tick, at what weight.
-//! That weight is a pure function of the tick — [`NpcGestures::advance`] writes it once per tick — so
+//! That weight is a pure function of the tick — [`advance_gestures`] writes it once per tick — so
 //! a replay gestures identically at any frame rate (ADR 0052).
 //!
 //! # Asking for a gesture

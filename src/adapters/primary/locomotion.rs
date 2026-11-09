@@ -8,7 +8,7 @@
 //!
 //! Two rules make the numbers usable rather than merely present:
 //!
-//! * **No wall clock.** The derivation takes the tick's fixed delta from [`FlockConfig`], never
+//! * **No wall clock.** The derivation takes the tick's fixed delta from [`FlockConfig`](crate::FlockConfig), never
 //!   `Time<Virtual>`. A replay at a different frame rate computes the same speed, the same turn rate
 //!   and the same distance, which is what lets an animation replay at all (ADR 0052).
 //! * **No unit vectors from zero.** A body below [`MIN_MOVING_SPEED`] has no travel direction, so

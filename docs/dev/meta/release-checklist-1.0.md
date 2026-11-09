@@ -17,7 +17,8 @@ git status --porcelain          # must be empty
 git tag --list 'v*' | tail -1   # know the last release
 ```
 
-**Status:** ready. `main` needs PR #34 (the core-crate split) merged before step 6 can be re-run.
+**Status:** ready. PR #34 (the core-crate split) merged as `aaca2f6`, so step 6 can be re-run against `main` rather
+than against a branch.
 
 ## 1. Freeze the public surface
 
@@ -32,8 +33,13 @@ Plus a compile-only check that the documented paths are the promised ones: `test
 `bevy_flock::domain::…`, `::behavior::…`, `::application::…`, `::adapters::…` and `::prelude::*`, and assert a few type
 identities. It does not exercise behaviour; it fails when a path stops resolving, which is the 1.0 promise in one file.
 
-**Status:** the re-export is in place and 550 tests pass through it. `tests/facade_paths.rs` does not exist yet, write it
-before the tag, because it is the only test that fails if a published path is accidentally renamed.
+**Status:** the re-export is in place and **811 tests pass through it** (`cargo test --workspace --all-features`, 25
+suites; 704 of them under the default feature set). The doc gate passes: `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+--workspace --all-features` was red with nine broken or private links until the adoption-surface branch fixed them, two of
+which named items that no longer existed.
+
+`tests/facade_paths.rs` does not exist yet, write it before the tag, because it is the only test that fails if a published
+path is accidentally renamed.
 
 ## 2. The MSRV is a promise
 
@@ -82,7 +88,9 @@ Published as `site/src/content/docs/reference/guarantees.md`: eleven claims, eac
 - zero steady-frame allocation, the allocation counters in `tests/band_continuity.rs`, `tests/tree_no_alloc.rs`
 - budgets at 1k / 10k / 100k / 1M, `docs/dev/tuning/performance.md`, with the fixture each number came from
 
-**Status:** every property exists and is tested; the page that states them for an adopter does not.
+**Status:** done. `site/src/content/docs/reference/guarantees.md` publishes eleven claims, each with the test that
+enforces it, and states the limits of each (determinism is per platform and per feature set; parity is across worker counts
+on one machine). The page is linked from the sidebar, so an adopter meets it before they meet an issue tracker.
 
 ## 6. The core stands alone
 
@@ -93,9 +101,9 @@ cargo test -p bevy-flock-core --test headless_consumer
 cargo test --test core_boundary
 ```
 
-**Status:** all four pass on `feat/phase6-t02-extract-core` today. This is the release's structural claim: a headless
-consumer gets the simulation with no engine in the graph, and `headless_consumer.rs` is that consumer rather than a
-restatement of the claim.
+**Status:** all four pass on `main` after PR #34. This is the release's structural claim: a headless consumer gets the
+simulation with no engine in the graph, and `headless_consumer.rs` is that consumer rather than a restatement of the
+claim.
 
 ## 7. Comparable performance, on one machine
 
@@ -113,7 +121,7 @@ the feature.
 ## 8. Release mechanics
 
 ```bash
-# Both crates move together: the facade pins the core by path today and by version at publish.
+# Both crates move together: the facade pins the core by version and path, so a published facade cannot drift from it.
 # Edit both manifests to 1.0.0, or use `cargo set-version --workspace 1.0.0`.
 cargo publish --dry-run -p bevy-flock-core
 cargo publish -p bevy-flock-core
