@@ -1,0 +1,189 @@
+# plan.phase4.toml — bevy-flock, phase 4: finish what the build left serial
+#
+#   wiggum validate plan.phase4.toml
+#   wiggum generate plan.phase4.toml --dry-run
+#
+# Phase 3 took the spatial index from one thread to many and closed with a measurement rather than a
+# claim: at 1M bodies the query batch reached 6.36x on six workers and the rebuild only 2.94x, so the
+# frame landed at 4.65x (74.13 ms -> 15.96 ms). The split named the culprit exactly — inside the
+# rebuild, the per-body passes partition and the *cell* passes do not: the clear, the prefix sum over
+# ~15.6M cells, and the cursor restore all run on one thread, because they are what makes the window
+# arrays byte-identical at every worker count.
+#
+# So this phase is narrower than phase 3 and much more arithmetic: replace a global prefix sum with a
+# blocked two-pass scan, in parallel, without changing a single byte of the output. The hard part is not
+# the scan — it is that the scan's decomposition decides the *order* of every window, and order is what
+# ADR 0054 promises and the parity harness measures. A blocked scan that is merely "correct" and
+# reorders cells is a failed task, not a fast one.
+#
+# Ordered like a measurement: inventory the passes and pick a block size from evidence, fix the scan's
+# contract in an ADR, implement it, remove the two remaining serial passes, then re-run the same sweep
+# and state whether build reached 5x. If it does not, the number that refused to move names the next
+# phase, which is the only reason to write the target down in advance.
+#
+# Execution groups derive from `depends_on` alone (ADR 0033); scripts/group_cap.py chooses how many run
+# at once.
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name        = "bevy-flock"
+description = """
+bevy-flock is a crowd and NPC simulation engine for Bevy 0.20, and phase 4 is the work that makes the
+spatial rebuild's cell passes parallel without moving a single window out of cell order.
+"""
+language     = "rust"
+path         = "/home/ubuntu/bevy-flock"
+architecture = "hexagonal"
+# Determinism first, numbers second — the same rule as phase 3, now applied to an array layout rather
+# than a pairing: the scan may be split, the output may not be reordered.
+conventions = [
+    "Strict lint policy: only six allows repo-wide, `unwrap`/`expect`/`panic`/indexing denied everywhere including tests, every exception audited by scripts/lint_audit.py with a reason and removing task.",
+    "Determinism is a documented guarantee (ADR 0004): any change to window order, float accumulation order or hash iteration is a breaking change, and a blocked scan must be byte-identical to the serial one at every worker count and block size.",
+    "Every task ends with fmt, clippy --all-targets -D warnings, tests and an audit run; commit author is Nick Campbell <s0ma@protonmail.com>.",
+    "Numbers come from docs/performance.md with the machine named; the machine is a six-core aarch64 VM, and nothing is extrapolated to hardware that was not measured.",
+]
+[[phases]]
+name  = "Make the serial tail visible, then contract it"
+order = 1
+description = "Measure the five passes inside the rebuild separately, choose a block size from evidence, and fix in an ADR what a blocked scan is allowed to reorder (nothing)."
+[[phases.tasks]]
+slug = "build-pass-inventory"
+kind = "research"
+title = "Inventory the rebuild's passes and price the serial tail"
+goal = "Split the 1M rebuild into its five real passes — clear, per-body cell counting, prefix sum, cursor restore, fill — and time each one at one and six workers, so the parallel scan's target is a measured number rather than the 2.94x aggregate."
+depends_on = []
+hints = [
+    "Instrument `SpatialGrid::build` behind an example, not behind a feature: `examples/build_passes.rs`, printing one row per pass with median and spread over repeats, in the same JSON-lines shape as `examples/scaling_sweep.rs` so the chart script can read it.",
+    "Expect the prefix sum over ~15.6M cells to dominate and the cursor restore to be cheaper than assumed; if the clear is the largest serial pass instead, say so — that changes which task lands first.",
+    "Report the per-body passes separately from the per-cell passes: the point of the inventory is to show which half of the build has already been won.",
+    "Name the cell count for the fixture explicitly (extent 1000 m, 8 m cells = 15,625,000 cells) so a reader can reproduce the ratio rather than trust it.",
+]
+test_hints = [
+    "The example's totals must reconcile with `benches/spatial_build/build/1000000` within the run-to-run spread, or the inventory is measuring the instrumentation.",
+]
+must_haves = [
+    "`examples/build_passes.rs` reports all five passes at 1 and 6 workers over 1M bodies",
+    "docs/performance.md names the largest serial pass and its share of the 23.6 ms rebuild",
+    "The block-size candidates for the scan are named with a reason, not a guess",
+]
+evaluation_criteria = [
+    "The serial tail is quantified as a percentage of the build, not just described",
+    "A reader can tell from the table whether the scan is worth doing at all",
+]
+[[phases.tasks]]
+slug = "blocked-scan-adr"
+kind = "research"
+title = "ADR 0055: the blocked scan contract"
+goal = "Fix the decomposition before implementing it: blocks over the flattened cell index, per-block counts in parallel, a scan of block totals on one thread that is O(blocks) not O(cells), per-block local offsets in parallel, and a fill whose output is byte-identical to the serial scan."
+depends_on = ["build-pass-inventory"]
+hints = [
+    "Decompose over the flattened index rather than a 3D tiling. A tiling changes the order cells are visited in, and window order is the property ADR 0054 already promises and the parity harness already measures.",
+    "State the arithmetic: a global scan is O(cells) on one thread; a blocked scan is O(blocks) on one thread plus O(cells) split across workers. Write both terms down with the fixture's numbers, so the ADR predicts the speed-up before the code is asked to deliver it.",
+    "Keep the serial path as the reference implementation rather than deleting it: `blocks == 1` must produce the serial result by construction, which is what makes the parity test meaningful.",
+    "Restate the ban on a shared atomic cursor from ADR 0054 and say why a blocked scan obeys it: each block writes its own disjoint range, and the range comes from the scan rather than from racing for slots.",
+    "Name the acceptance test in the ADR: `cell_start` and `order` compared byte for byte at 1/2/3/8 workers across at least two block sizes, plus the long parity harness.",
+]
+test_hints = [
+    "The ADR's predicted speed-up is written as a number, so the implementation task can fail against it publicly.",
+]
+must_haves = [
+    "docs/adr/0055-blocked-prefix-sum.md exists with the decomposition, the complexity terms and the acceptance test",
+    "ADR 0054 is cross-referenced and its invariants are restated as still holding",
+    "The predicted build cost at six workers is written before any implementation lands",
+]
+evaluation_criteria = [
+    "The contract is specific enough that two implementers would produce the same array layout",
+    "The prediction is falsifiable and names the assumption it rests on",
+]
+[[phases]]
+name  = "Implement the scan and retire the serial passes"
+order = 2
+description = "Land the blocked scan, then remove the last two O(cells) serial passes — the clear and the cursor restore — with the parity harness holding the line."
+[[phases.tasks]]
+slug = "blocked-prefix-sum"
+kind = "infrastructure"
+title = "Replace the global prefix sum with a blocked two-pass scan"
+goal = "Compute cell windows with per-block counts in parallel, a serial scan over block totals, and per-block local offsets in parallel, producing arrays byte-identical to the serial scan at every worker count."
+depends_on = ["blocked-scan-adr"]
+hints = [
+    "Add a block count to the grid's configuration path (not to `SpatialGridConfig`, which is a spatial type): `with_blocks(n)`, defaulting to something derived from the cell count so a small grid still uses the serial scan.",
+    "Reuse the phase 3 partitioning helper rather than inventing a second one; two ways to split a range is how the two paths drift.",
+    "Extend `every_thread_count_builds_identical_windows` to iterate block sizes as well as worker counts, and make it compare `cell_start` *and* `order` as bytes.",
+    "Keep `blocks == 1` routing to the existing serial scan so the reference stays in the tree and the equivalence is testable rather than asserted.",
+]
+test_hints = [
+    "Byte equality of `cell_start` and `order` at 1/2/3/8 workers x block counts {1, 128, 1024, 16384}.",
+    "The parity harness (`tests/spatial_parity.rs`) must still pass unchanged: it is the integration-level proof that the scan did not move a neighbourhood.",
+]
+must_haves = [
+    "`SpatialGrid::with_blocks` exists, is documented, and defaults to serial for small grids",
+    "Window arrays are byte-identical across worker counts and block sizes, proven by a test that compares bytes",
+    "The blocked scan is used by `rebuild_spatial_grid` through the configuration already wired in phase 3",
+]
+evaluation_criteria = [
+    "The serial path is still reachable and still the reference",
+    "A change to block count cannot change the output, only the cost",
+]
+[[phases.tasks]]
+slug = "retire-serial-cell-passes"
+kind = "infrastructure"
+title = "Fold the cell clear and cursor restore into the blocked pass"
+goal = "Remove the two remaining O(cells) single-threaded passes: clear each block's cells in parallel, and derive each block's write cursor from its own scan result instead of copying a global cursor array."
+depends_on = ["blocked-prefix-sum"]
+hints = [
+    "The clear only needs to touch cells that were used last tick if the grid tracks a high-water mark; measure both and keep the simpler one if the difference is inside the spread.",
+    "The cursor restore exists so the fill does not have to re-read the scan; with per-block offsets the block already knows its base, so the restore can disappear rather than being parallelised. Deleting work beats distributing it.",
+    "Re-run the pass inventory afterwards and report the new shares — a pass that moved from 12 ms to 1 ms should show up as a smaller total, not just a smaller row.",
+]
+test_hints = [
+    "The parity harness and the byte-equality test must both still pass; a faster rebuild that reorders is a regression.",
+    "A benchmark comparison against the phase 3 baseline, with the ratio recorded rather than the raw time.",
+]
+must_haves = [
+    "The rebuild performs no O(cells) work on a single thread except the O(blocks) scan",
+    "docs/performance.md records the new pass inventory beside the old one",
+    "The gate baseline is re-recorded and the previous numbers stay in the doc for comparison",
+]
+evaluation_criteria = [
+    "The serial remainder is stated as a complexity term, not just a time",
+    "Nothing in the rebuild's output changed, demonstrated rather than claimed",
+]
+[[phases]]
+name  = "Measure and decide"
+order = 3
+description = "Re-run the scaling sweep and hold the result to the number phase 3 named. The stubs, the security pass and the remaining wiring are open tasks in the main plan.toml, not here."
+[[phases.tasks]]
+slug = "build-scaling-gate"
+kind = "audit"
+title = "Re-measure the curve and hold the build to 5x"
+goal = "Extend the sweep to report the rebuild's passes, re-run it at 1M over 1/2/4/6/8 workers, and state whether the build reached the 5x that phase 3's analysis said would take the frame to ~12 ms — with the reason when it did not."
+depends_on = ["retire-serial-cell-passes"]
+hints = [
+    "Reuse `examples/scaling_sweep.rs` and `scripts/spatial_scaling.py`; adding a second sweep script would make two sources of truth for one curve.",
+    "Compare like for like: same fixtures, same machine, same median-of-five. The phase 3 table is the row this one is measured against.",
+    "If the build lands under 5x, name the pass that refused — block-total scan, memory bandwidth on the fill, or the per-body passes that were already at 1.5x by two workers — and quantify its share.",
+    "Keep the parallel and serial bench cases in the baseline, so the gate protects the new path and the reference it replaced.",
+]
+test_hints = [
+    "`scripts/bench_gate.py --crate . --bench spatial` passes against the re-recorded baseline.",
+    "The parity harness still passes in release at 2,000 ticks, on the new scan.",
+]
+must_haves = [
+    "docs/performance.md has a phase 4 table beside the phase 3 one, and a verdict against the 5x target",
+    "benches/spatial-baseline.json is re-recorded on the blocked scan",
+    "The write-up names the largest remaining serial cost in the rebuild",
+]
+evaluation_criteria = [
+    "The verdict is falsifiable and cites the number that would have meant success",
+    "A reader can tell whether the next phase should be about the scan, the fill, or something else entirely",
+]
+# ─── Phase 3, for reference ───────────────────────────────────────────────────
+[[completed]]
+task = "phase-3 T01-T07"
+delivered_in = "feat/phase3-t06-t07-scaling-and-wiring"
+note = """
+Phase 3 took the spatial index from one thread to many: a gated serial baseline, ADR 0054's nine
+invariants, a band-partitioned build, an arena-strided batch query, a parity harness proving serial and
+parallel runs are the same simulation, the scaling measurement, and the ECS wiring that makes the
+parallel rebuild the one an App runs. It closed with 4.65x on the frame at 1M bodies on six cores and
+named its own weak half: the build at 2.94x, whose cell passes are still serial. Phase 4 is that half.
+"""
