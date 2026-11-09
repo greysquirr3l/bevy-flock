@@ -13,6 +13,10 @@ readme = "README.md"
 keywords = ["bevy", "crowd", "npc", "ecs", "gamedev"]
 categories = ["game-development", "simulation"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["simd", "threads"]
 # Social memory: an opt-in store, so a game that never remembers anyone does not pay for the rows.

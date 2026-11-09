@@ -13,6 +13,10 @@ readme = "README.md"
 keywords = ["bevy", "animation", "crowd", "npc", "gamedev"]
 categories = ["game-development", "animation"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 # The ECS half, not the facade. The layer reads `Locomotion`, `GazeAim`, `NpcGestures`, `NpcTier` and the
 # blackboard, all of which live there; depending on the facade instead would be the cycle this crate was

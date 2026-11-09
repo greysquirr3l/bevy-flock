@@ -120,31 +120,52 @@ the feature.
 
 ## 8. Release mechanics
 
+Four crates publish, in dependency order, at one version. The order is not a preference: `cargo` rewrites every
+`path` dependency to its version requirement before upload, so a crate whose dependency is not on crates.io cannot
+even be packaged.
+
 ```bash
-# Both crates move together: the facade pins the core by version and path, so a published facade cannot drift from it.
-# Edit both manifests to 1.0.0, or use `cargo set-version --workspace 1.0.0`.
-cargo publish --dry-run -p bevy-flock-core
-cargo publish -p bevy-flock-core
-cargo publish --dry-run -p bevy-flock
-cargo publish -p bevy-flock
+cargo set-version --workspace 1.0.0      # all four, together
+python3 scripts/publish_check.py         # metadata, versions and the order, without a registry
+
+cargo publish --dry-run -p bevy-flock-core && cargo publish -p bevy-flock-core
+cargo publish --dry-run -p bevy-flock-ecs  && cargo publish -p bevy-flock-ecs
+cargo publish --dry-run -p bevy-flock-anim && cargo publish -p bevy-flock-anim
+cargo publish --dry-run -p bevy-flock      && cargo publish -p bevy-flock
+
 cargo deny check
 git tag -a v1.0.0 -m "bevy-flock 1.0.0" && git push --tags
 ```
 
-Order matters: the core publishes first because the facade depends on it by version. Two conditions must be true before the
-first `publish`:
+**Only the first dry run can pass before the first upload.** For the other three it fails with
 
-- `publish = false` is removed from `crates/bevy-flock-core/Cargo.toml`, and its `description`, `keywords`, `categories`,
-  `readme` and `[package.metadata.docs.rs]` are filled in the way the facade's are.
-- Readiness items 1–5 are closed, because a `1.0.0` cannot be unpublished.
+```
+error: failed to prepare local package for uploading
+Caused by:
+  no matching package named `bevy-flock-core` found
+  location searched: crates.io index
+```
 
-**Status:** not ready, the core is `publish = false` by design during phase 6.
+which is the ordering constraint stating itself, not a defect. Sequential dry runs that pass are therefore possible
+only after each lower crate is live, which is why `scripts/publish_check.py` exists: it checks the same manifests for
+the things a dry run would catch (missing README, absent keywords, a path dependency without a version, a publishable
+crate depending on a `publish = false` one) and prints the order, offline, in CI, on every push.
+
+Three conditions must be true before the first `publish`, and the checker enforces the first two:
+
+- every crate carries `description`, `license`, `repository`, `documentation`, a `readme` that exists, `keywords`,
+  `categories`, `rust-version` and `[package.metadata.docs.rs] all-features = true`;
+- every `path` dependency also carries a `version` whose requirement accepts the dependency's own version;
+- readiness items 1-5 are closed, because a `1.0.0` cannot be unpublished.
+
+**Status:** the four manifests are publishable as of ADR 0062; the first upload is blocked on readiness items 1-5,
+not on packaging.
 
 ## 9. After the tag
 
-- `docs.rs` builds both crates: check the badge and that `--all-features` docs render.
+- `docs.rs` builds all four crates: check the badges and that `--all-features` docs render.
 - The changelog's `Unreleased` becomes `## 1.0.0 - <date>` with the core-split entry at the top.
-- `README.md` gets the version, the MSRV and the two-crate layout.
+- `README.md` gets the version, the MSRV and the four-crate layout.
 - Open the next `Unreleased` section immediately, so the habit survives the next commit.
 
 ## What is deliberately not on this list
