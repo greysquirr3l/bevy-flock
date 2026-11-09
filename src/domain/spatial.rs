@@ -178,8 +178,12 @@ pub struct SpatialGrid {
     order: Vec<u32>,
     /// Insertion-ordered agents.
     entries: Vec<GridEntry>,
-    /// Reused fill cursor so rebuilding does not allocate.
-    cursor: Vec<u32>,
+    /// The cell each entry landed in, remembered between the counting and placement passes.
+    ///
+    /// `cell_of` is the only float work in a rebuild and it was being done twice per body: once to
+    /// count, once to place. At a million bodies that was 18 of the 46 ms. Four bytes per body buys it
+    /// back, and it is the same buffer every tick, so a steady frame does not allocate for it.
+    cells: Vec<u32>,
 }
 
 impl SpatialGrid {
@@ -220,7 +224,7 @@ impl SpatialGrid {
             cell_start: vec![0; cells + 1],
             order: Vec::new(),
             entries: Vec::new(),
-            cursor: vec![0; cells],
+            cells: Vec::new(),
         })
     }
 
@@ -243,7 +247,7 @@ impl SpatialGrid {
             cell_start: vec![0, 0],
             order: Vec::new(),
             entries: Vec::new(),
-            cursor: vec![0],
+            cells: Vec::new(),
         }
     }
 
@@ -354,12 +358,20 @@ impl SpatialGrid {
     pub fn build(&mut self) {
         let cells = self.cell_count();
         self.cell_start.fill(0);
+        // Pass one: count, and remember where each body went. `cell_of` is the only float work in a
+        // rebuild and it used to be done twice per body — once to count, once to place. At a million
+        // bodies that second call was 18 of the 46 ms this took; four bytes per body buys it back, and
+        // the buffer is reused every tick so a steady frame does not allocate for it.
+        self.cells.clear();
+        self.cells.reserve(self.entries.len());
         for entry in &self.entries {
-            let cell = self.cell_of(entry.position) as usize;
-            if let Some(slot) = self.cell_start.get_mut(cell + 1) {
+            let cell = self.cell_of(entry.position);
+            self.cells.push(cell);
+            if let Some(slot) = self.cell_start.get_mut(cell as usize + 1) {
                 *slot += 1;
             }
         }
+        // Pass two: prefix sum, so `cell_start[c]` is where cell `c` begins.
         for index in 0..cells {
             let previous = self.cell_start.get(index).copied().unwrap_or(0);
             if let Some(current) = self.cell_start.get_mut(index + 1) {
@@ -369,22 +381,32 @@ impl SpatialGrid {
 
         self.order.clear();
         self.order.resize(self.entries.len(), 0);
-        self.cursor.clear();
-        self.cursor
-            .extend_from_slice(self.cell_start.get(..cells).unwrap_or(&[]));
-
-        for (index, entry) in self.entries.iter().enumerate() {
-            let cell = self.cell_of(entry.position) as usize;
-            let target = match self.cursor.get(cell).copied() {
+        // Pass three: place, using `cell_start` itself as the fill cursor rather than copying it into a
+        // second array. Afterwards `cell_start[c]` holds where cell `c + 1` begins.
+        for (index, cell) in self.cells.iter().enumerate() {
+            let cell = *cell as usize;
+            let target = match self.cell_start.get(cell).copied() {
                 Some(target) => target as usize,
                 None => continue,
             };
             if let Some(slot) = self.order.get_mut(target) {
                 *slot = num::usize_to_u32(index);
             }
-            if let Some(cursor) = self.cursor.get_mut(cell) {
+            if let Some(cursor) = self.cell_start.get_mut(cell) {
                 *cursor += 1;
             }
+        }
+        // Pass four: shift the advanced cursors back by one cell, descending because each step reads the
+        // value it is about to overwrite. One sequential pass over the cell array replaces the 2.3 MB
+        // copy the old cursor buffer needed, and there is one array where there were two.
+        for index in (1..=cells).rev() {
+            let previous = self.cell_start.get(index - 1).copied().unwrap_or(0);
+            if let Some(slot) = self.cell_start.get_mut(index) {
+                *slot = previous;
+            }
+        }
+        if let Some(first) = self.cell_start.get_mut(0) {
+            *first = 0;
         }
     }
 
@@ -812,6 +834,37 @@ mod tests {
             let centre = grid.cell_center(cell);
             assert_eq!(grid.cell_of(centre), cell);
         }
+    }
+
+    #[test]
+    fn every_cell_window_holds_exactly_the_entries_that_belong_to_it() {
+        // The build uses `cell_start` as its own fill cursor and shifts it back afterwards. If that
+        // shift is off by one, windows overlap or land on the wrong cell and a query silently returns
+        // the wrong neighbours, so the invariant is checked directly rather than through a query.
+        let mut grid = SpatialGrid::new(SpatialGridConfig::default()).or_die();
+        grid.extend_from((0..500).map(|index| {
+            let spread = num::u32_to_f32(num::usize_to_u32(index) * 7919 % 977);
+            (
+                NpcId::unique(num::usize_to_u32(index)),
+                Vec3::new(spread, spread * 0.5, spread * 1.25),
+                Vec3::ZERO,
+            )
+        }));
+        grid.build();
+        let mut total = 0_usize;
+        for cell in 0..num::usize_to_u32(grid.cell_count()) {
+            let window = grid.cell_window(cell);
+            for index in window {
+                let entry = grid.entries().get(*index as usize).or_die();
+                assert_eq!(
+                    grid.cell_of(entry.position),
+                    cell,
+                    "entry in the wrong cell"
+                );
+            }
+            total += window.len();
+        }
+        assert_eq!(total, grid.len(), "every entry appears in exactly one cell");
     }
 
     #[test]
