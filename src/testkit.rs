@@ -20,7 +20,88 @@
 //! This module is `#[doc(hidden)]` and exists for the crate's own tests, benchmarks and examples.
 //! It is not part of the simulation API and carries no stability promise.
 
+use crate::domain::spatial::SpatialGrid;
+use crate::domain::{num, spatial::Neighbour};
+use bevy_math::Vec3;
 use core::fmt::Debug;
+
+/// FNV-1a over 32-bit words, the digest the save format already uses.
+///
+/// `SubjectRegistry::fingerprint` hashes subject keys with exactly these constants, for exactly this
+/// reason: a microsecond-scale structural comparison that is not protecting a file against corruption.
+/// A parity harness needs the same thing over simulation state, and two digests in one crate that
+/// disagree about what "the same bytes" means would be a worse problem than sharing the constants.
+#[derive(Debug, Clone, Copy)]
+pub struct Digest(u32);
+
+impl Digest {
+    /// The FNV-1a offset basis.
+    pub const SEED: u32 = 0x811C_9DC5;
+
+    /// A digest with nothing in it.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(Self::SEED)
+    }
+
+    /// Fold one word in.
+    pub fn write_u32(&mut self, value: u32) {
+        for byte in value.to_le_bytes() {
+            self.0 ^= u32::from(byte);
+            self.0 = self.0.wrapping_mul(0x0100_0193);
+        }
+    }
+
+    /// Fold a float in, by its bits: `1.0` and `1.0 + 1e-7` must not collide, and `-0.0` must not
+    /// equal `0.0`.
+    pub fn write_f32(&mut self, value: f32) {
+        self.write_u32(value.to_bits());
+    }
+
+    /// Fold a vector in.
+    pub fn write_vec3(&mut self, value: Vec3) {
+        self.write_f32(value.x);
+        self.write_f32(value.y);
+        self.write_f32(value.z);
+    }
+
+    /// The digest so far.
+    #[must_use]
+    pub const fn finish(self) -> u32 {
+        self.0
+    }
+}
+
+impl Default for Digest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A digest of everything a neighbour query can observe about a grid.
+///
+/// One radius query per probe, folded in the order the query returns: identity, then squared distance,
+/// then position. Order matters, because the parity claim is about the *ordered* neighbour list — a set
+/// comparison would pass while two agents swapped places in the answer.
+///
+/// The probes are the caller's, so a harness can choose cells that straddle a band boundary or sit in
+/// the middle of the densest cell it has.
+#[must_use]
+pub fn spatial_digest(grid: &SpatialGrid, probes: &[Vec3], radius: f32) -> u32 {
+    let mut digest = Digest::new();
+    let mut out: Vec<Neighbour> = Vec::new();
+    digest.write_u32(num::usize_to_u32(grid.len()));
+    for probe in probes {
+        grid.radius(*probe, radius, &mut out);
+        digest.write_u32(num::usize_to_u32(out.len()));
+        for neighbour in &out {
+            digest.write_u32(neighbour.id.to_bits());
+            digest.write_f32(neighbour.distance_squared);
+            digest.write_vec3(neighbour.position);
+        }
+    }
+    digest.finish()
+}
 
 /// Unwrap a fixture, reporting the failure as a bug in the harness.
 ///

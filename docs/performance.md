@@ -1255,3 +1255,38 @@ worker, measured at 22 allocator calls for six workers, so the test asserts a bo
 says so. A frame that must not allocate runs the serial path or keeps a pool alive across ticks; the
 persistent pool is the open follow-up recorded in the plan, and the earlier claim in `build`'s own docs
 that the parallel path allocates nothing was corrected when this was measured.
+
+### The parity harness (T05)
+`tests/spatial_parity.rs` runs a simulation twice and compares the two runs tick by tick. Every tick folds
+the whole state into one FNV-1a digest — every body's identifier and position, the *ordered* neighbour lists
+around 24 probe points, and the scheduler's chosen set — so "identical" means the same bytes to the same
+algorithm the save format uses, not "similar within a tolerance".
+
+| Gate | Shape | Runtime |
+| --- | --- | --- |
+| Fast, release | 10,000 bodies × 2,000 ticks, four thread policies (1, 2, 3, 8) and a varying policy | 15 s |
+| Fast, debug | 10,000 bodies × 100 ticks, same policies | 12 s |
+| Release gate (`--ignored`) | 100,000 bodies × 10,000 ticks, serial vs a thread count that changes every tick | ≈3.5 min |
+
+The debug row exists because of a measurement that changed the harness: a 10,000-body rebuild costs 55 ms
+unoptimised and 0.5 ms optimised, so the first version of this gate took 40 s in a debug build and was
+timing the debug profile rather than the parallel build. The tick count is a tenth in debug and the test
+says which variant it ran, instead of quietly claiming the release numbers.
+
+The `#[ignore]`d runtime is extrapolated from a measured 100,000-body, 200-tick run: 3.9 s for 400 tick-runs
+(9.8 ms per 100,000-body tick), scaled to 20,000 tick-runs. It is stated as an extrapolation because the full
+run is a release gate, not something to spend four minutes of every session on.
+
+Two things had to be true before this harness was worth trusting, and both are tests rather than claims:
+
+* **The digest notices a millimetre.** `the_stream_is_sensitive_to_a_single_moved_body` moves one body out of
+  ten thousand by 1 mm and requires the stream to diverge on that tick.
+* **The digest notices the mistake a partition can make.**
+  `the_spatial_digest_notices_an_insertion_ordered_reduction` (in `src/domain/spatial.rs`, where a grid's
+  private arrays are reachable) rebuilds the window array in insertion order instead of cell order — every
+  body still present, every window still filled, so a set or count comparison would pass — and requires the
+  digest to differ. That is the negative control the plan asked for.
+
+The varying policy is not decoration either: a partition that only produces the right answer at a fixed
+worker count fails here, because the count changes every tick and the buffers are re-partitioned 2,000 times
+with 1, 8, 3 and 2 workers in rotation.

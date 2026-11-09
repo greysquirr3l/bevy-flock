@@ -1632,6 +1632,34 @@ mod tests {
     }
 
     #[test]
+    fn the_spatial_digest_notices_an_insertion_ordered_reduction() {
+        // The parity harness compares digests, so the digest has to notice the mistake a parallel
+        // partition can actually make: reducing into the window array in insertion order instead of cell
+        // order. Every body is still present, and every window still holds *a* body, which is why a test
+        // that only counted bodies, or compared the set of identifiers, would pass.
+        let grid = batch_fixture(2_000);
+        let probes = batch_centres(16);
+        let correct = crate::testkit::spatial_digest(&grid, &probes, 14.0);
+        // Stable on the same grid, or the comparison below would be noise rather than evidence.
+        assert_eq!(
+            correct,
+            crate::testkit::spatial_digest(&grid, &probes, 14.0)
+        );
+
+        let mut wrong = grid.clone();
+        for (slot, value) in wrong.order.iter_mut().enumerate() {
+            *value = num::usize_to_u32(slot);
+        }
+        let broken = crate::testkit::spatial_digest(&wrong, &probes, 14.0);
+        assert_ne!(
+            correct, broken,
+            "the digest must notice a reduction that ignored cell order"
+        );
+        // The identities are all still there: the difference is ordering, which is the point.
+        assert_eq!(wrong.len(), grid.len());
+    }
+
+    #[test]
     fn build_is_stable_when_positions_do_not_change() {
         let mut rng = RngStream::new(SimSeed::new(5), 5);
         let mut grid = grid();

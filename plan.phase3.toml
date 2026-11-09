@@ -217,6 +217,19 @@ the cursor restore stay serial because they are what make every thread count pro
 """
 
 [[completed]]
+task = "phase-3 T05 parity-harness"
+delivered_in = "feat/phase3-t05-parity-harness"
+note = """
+`tests/spatial_parity.rs` folds every tick into one FNV-1a digest (all positions, the ordered neighbour
+lists around 24 probes, and the scheduler's chosen set) and compares a serial run against 2, 3 and 8
+threads plus a policy that changes the thread count every tick. Fast gate: 10,000 bodies x 2,000 ticks in
+15 s release (100 ticks in debug, because a debug rebuild is 110x slower and would be timing the profile).
+Release gate (#[ignore]): 100,000 bodies x 10,000 ticks, ~3.5 min extrapolated from a measured 200-tick run.
+Both directions of sensitivity are tests, not claims: a body moved 1 mm must change the stream, and a
+reduction in insertion order instead of cell order must change the digest.
+"""
+
+[[completed]]
 task = "phase-3 T04 partitioned-queries"
 delivered_in = "feat/phase3-t04-partitioned-queries"
 note = """
