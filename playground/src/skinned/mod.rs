@@ -23,6 +23,7 @@
 //! some body's gaze was non-idle. That is the difference between "the example ran" and "the example
 //! animated", and it is what CI runs under `xvfb-run`.
 
+pub mod avatar;
 pub mod clips;
 pub mod crowd;
 pub mod rig;
@@ -99,11 +100,46 @@ pub struct Options {
     pub backend: Backend,
     /// Whether to exit non-zero if nothing moved.
     pub assert_motion: bool,
+    /// Which bodies to draw.
+    pub rig: Rig,
+}
+
+/// What the crowd is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Rig {
+    /// The three Meshy characters from `demo/assets/npcs/rigged`, rigged and textured.
+    #[default]
+    Avatar,
+    /// The procedural nine-joint mannequin built in `rig.rs`, which needs no assets at all.
+    Mannequin,
+}
+
+impl Rig {
+    /// Read a name from the command line.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "avatar" => Some(Self::Avatar),
+            "mannequin" => Some(Self::Mannequin),
+            _ => None,
+        }
+    }
+
+    /// The name the command line takes.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Avatar => "avatar",
+            Self::Mannequin => "mannequin",
+        }
+    }
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
+            // Resolved at the end of `parse`, once the rig is known: 2000 skinned avatars is nine
+            // million triangles, and 300 mannequins is not the plaza this example is about.
             population: DEFAULT_POPULATION,
             radius: DEFAULT_RADIUS,
             frames: None,
@@ -112,6 +148,7 @@ impl Default for Options {
             height: DEFAULT_HEIGHT,
             backend: Backend::Auto,
             assert_motion: false,
+            rig: Rig::Avatar,
         }
     }
 }
@@ -159,26 +196,28 @@ impl From<ClipError> for Error {
 
 /// The flags.
 pub const USAGE: &str = "\
-skinned — two thousand skinned NPCs on the district, from a clean checkout
+skinned — the Ashfall crowd, drawn as rigged characters
 
 USAGE:
     skinned [OPTIONS]
 
 OPTIONS:
-    --npc N            bodies to spawn (default 2000)
+    --rig NAME         avatar (default: the three Meshy characters) or mannequin
+    --npc N            bodies to spawn (default 300 avatars, 2000 mannequins)
     --radius M         plaza radius in metres (default 22)
     --frames N         draw N frames and exit (default: run until the window closes)
     --capture PATH     write a BMP of the last frame to PATH
-    --assert-motion    exit non-zero unless the crowd moved, blended, gestured and looked
+    --assert-motion    exit non-zero unless the crowd moved and blended, and -- for a rig with
+                       gesture and gaze clips -- gestured and looked
     --width N          window width in pixels (default 1280)
     --height N         window height in pixels (default 800)
     --backend NAME     auto, metal, vulkan, gl or noop (default auto)
     -h, --help         print this text
 
 The example is the phase-2 gate: it spawns the crowd, animates it from the simulation's own
-locomotion, gaze and gesture state, and draws it through Bevy's PBR pipeline. Nothing is downloaded:
-the body, the clips and the bind pose are all built in code.";
-
+locomotion, gaze and gesture state, and draws it through Bevy's PBR pipeline. --rig avatar loads
+the repository's Meshy characters and their idle, walk and run clips; --rig mannequin builds a
+nine-joint body and seven clips in code and needs no assets at all.";
 /// Why an argument could not be used.
 fn usage(message: impl Into<String>) -> Error {
     Error::Usage(message.into())
@@ -198,6 +237,7 @@ impl Options {
     /// [`Error::Usage`] for an unknown flag, a missing value or a value that does not parse.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Request, Error> {
         let mut options = Self::default();
+        let mut population_given = false;
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             let mut value = || {
@@ -206,7 +246,10 @@ impl Options {
             };
             match flag.as_str() {
                 "-h" | "--help" => return Ok(Request::Help),
-                "--npc" => options.population = number(&flag, &value()?)?,
+                "--npc" => {
+                    options.population = number(&flag, &value()?)?;
+                    population_given = true;
+                }
                 "--radius" => options.radius = number(&flag, &value()?)?,
                 "--frames" => options.frames = Some(number(&flag, &value()?)?),
                 "--capture" => options.capture = Some(PathBuf::from(value()?)),
@@ -218,8 +261,19 @@ impl Options {
                         .ok_or_else(|| usage(format!("no backend called `{name}`")))?;
                 }
                 "--assert-motion" => options.assert_motion = true,
+                "--rig" => {
+                    let name = value()?;
+                    options.rig = Rig::parse(&name)
+                        .ok_or_else(|| usage(format!("no rig called `{name}`")))?;
+                }
                 other => return Err(usage(format!("no flag called `{other}`"))),
             }
+        }
+        if !population_given {
+            options.population = match options.rig {
+                Rig::Avatar => avatar::DEFAULT_POPULATION,
+                Rig::Mannequin => DEFAULT_POPULATION,
+            };
         }
         if options.population == 0 {
             return Err(usage("--npc 0 spawns nothing to look at"));
@@ -256,7 +310,7 @@ impl Telemetry {
     ///
     /// [`Error::Still`] naming every test that failed, because a CI failure that says "nothing
     /// moved" without saying which of the four things was missing sends the reader to the wrong file.
-    pub fn check(&self) -> Result<(), Error> {
+    pub fn check(&self, rig: Rig) -> Result<(), Error> {
         let mut missing = Vec::new();
         if self.moved == 0 {
             missing.push("no body moved");
@@ -264,10 +318,13 @@ impl Telemetry {
         if self.blended == 0 {
             missing.push("no body blended walk or run");
         }
-        if self.gesturing == 0 {
+        // Gestures and gaze are the mannequin's: the avatar clips are Meshy's idle, walk and run,
+        // and nothing in this example maps a gesture cue onto them. The gate asks each rig for what
+        // that rig can actually prove rather than weakening the whole check.
+        if rig == Rig::Mannequin && self.gesturing == 0 {
             missing.push("no gesture reached a clip");
         }
-        if self.looking == 0 {
+        if rig == Rig::Mannequin && self.looking == 0 {
             missing.push("no body looked at anything");
         }
         if missing.is_empty() {
@@ -309,7 +366,35 @@ struct SpawnPositions(std::collections::HashMap<Entity, Vec3>);
 
 /// Build the app: plugins, resources, and the systems that make the crowd walk, blend and look.
 pub fn build_app(options: &Options) -> App {
+    let options = fall_back_without_avatars(options);
     let mut app = App::new();
+    add_plugins_for(&mut app, &options);
+    register_scene_types(&mut app);
+    // The simulation, then the animation layer that reads it. Both are the shipped plugins: this
+    // example adds no glue of its own between the crowd and its clips.
+    app.add_plugins(FlockPlugin::default());
+    app.add_plugins((AnimPlugin, GazePlugin, GesturePlugin));
+    insert_resources(&mut app, &options);
+    add_systems(&mut app);
+    app
+}
+
+/// One downgrade, in one place: the avatar rig is the default because it is what the example is
+/// for, but a checkout without the generated GLBs still has to run.
+fn fall_back_without_avatars(options: &Options) -> Options {
+    let mut options = options.clone();
+    if options.rig == Rig::Avatar && !avatar::assets_present() {
+        println!(
+            "skinned: no rigged avatars under {}, falling back to --rig mannequin",
+            avatar::ASSET_ROOT
+        );
+        options.rig = Rig::Mannequin;
+    }
+    options
+}
+
+/// The engine: window, renderer, asset loader, core pipelines and the glTF material hook.
+fn add_plugins_for(app: &mut App, options: &Options) {
     app.add_plugins((
         TaskPoolPlugin::default(),
         LogPlugin::default(),
@@ -320,7 +405,12 @@ pub fn build_app(options: &Options) -> App {
         FrameCountPlugin,
     ));
     app.add_plugins((
-        AssetPlugin::default(),
+        AssetPlugin {
+            // The avatars are the repository's assets, not a copy: the same GLBs the software demo
+            // loads, so a fix to one file is a fix to both demos.
+            file_path: avatar::ASSET_ROOT.to_owned(),
+            ..AssetPlugin::default()
+        },
         ImagePlugin::default(),
         MeshPlugin,
         AnimationPlugin,
@@ -334,7 +424,13 @@ pub fn build_app(options: &Options) -> App {
             ..RenderPlugin::default()
         },
         CorePipelinePlugin,
+        // Ordered before `PbrPlugin`: the material hook that attaches `MeshMaterial3d` to a glTF
+        // primitive is installed by `PbrPlugin`, into the extension registry `GltfPlugin` owns.
+        bevy_gltf::GltfPlugin::default(),
         PbrPlugin::default(),
+        // glTF scenes are `WorldAsset`s in 0.20, so the loader also needs the serialisation layer
+        // that instantiates one.
+        bevy_world_serialization::WorldSerializationPlugin,
     ));
     app.add_plugins((
         bevy_window::WindowPlugin {
@@ -351,18 +447,43 @@ pub fn build_app(options: &Options) -> App {
         },
         WinitPlugin::default(),
     ));
+}
 
-    // The simulation, then the animation layer that reads it. Both are the shipped plugins: this
-    // example adds no glue of its own between the crowd and its clips.
-    app.add_plugins(FlockPlugin::default());
-    app.add_plugins((AnimPlugin, GazePlugin, GesturePlugin));
+/// A glTF scene is a `WorldAsset`: its components are stored as reflect data and re-applied on
+/// spawn, so every type the scene carries has to be in the registry. The umbrella `bevy` crate
+/// registers the lot; a modular plugin list registers what it is told to.
+fn register_scene_types(app: &mut App) {
+    app.register_type::<Transform>()
+        .register_type::<bevy_transform::components::GlobalTransform>()
+        .register_type::<bevy_transform::components::TransformTreeChanged>()
+        .register_type::<bevy_camera::visibility::Visibility>()
+        .register_type::<bevy_camera::visibility::InheritedVisibility>()
+        .register_type::<bevy_camera::visibility::ViewVisibility>()
+        .register_type::<bevy_camera::visibility::VisibilityClass>()
+        .register_type::<bevy_camera::visibility::DynamicSkinnedMeshBounds>()
+        .register_type::<bevy_ecs::name::Name>()
+        .register_type::<bevy_mesh::Mesh3d>()
+        .register_type::<MeshMaterial3d<StandardMaterial>>()
+        .register_type::<bevy_mesh::skinning::SkinnedMesh>()
+        .register_type::<bevy_animation::AnimationTargetId>()
+        .register_type::<bevy_animation::AnimatedBy>()
+        .register_type::<bevy_animation::AnimationPlayer>()
+        .register_type::<bevy_gltf::GltfExtras>()
+        .register_type::<bevy_gltf::GltfSceneExtras>()
+        .register_type::<bevy_gltf::GltfSceneName>()
+        .register_type::<bevy_gltf::GltfMeshName>()
+        .register_type::<bevy_gltf::GltfMeshExtras>()
+        .register_type::<bevy_gltf::GltfMaterialName>()
+        .register_type::<bevy_gltf::GltfMaterialExtras>()
+        .register_type::<bevy_camera::primitives::Aabb>()
+        .register_type::<bevy_camera::visibility::NoFrustumCulling>()
+        .register_type::<ChildOf>()
+        .register_type::<Children>();
+}
 
+/// The scene's constants, the run's own state and the counters the gate reads.
+fn insert_resources(app: &mut App, options: &Options) {
     app.insert_resource(ClearColor(Color::srgb(0.36, 0.40, 0.47)));
-    app.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.62, 0.68, 0.80),
-        brightness: 1_000.0,
-        ..GlobalAmbientLight::default()
-    });
     app.insert_resource(GestureChannel::new(4_096));
     app.insert_resource(GestureConfig::default());
     app.insert_resource(Run {
@@ -382,7 +503,10 @@ pub fn build_app(options: &Options) -> App {
         ..GlobalAmbientLight::default()
     });
     app.init_resource::<Telemetry>();
+}
 
+/// Startup builds the plaza, the run's systems drive it, and `lifecycle` decides when to stop.
+fn add_systems(app: &mut App) {
     app.add_systems(
         Startup,
         (
@@ -390,7 +514,8 @@ pub fn build_app(options: &Options) -> App {
             spawn_sun,
             spawn_ground,
             spawn_landmark,
-            build_and_spawn_crowd,
+            build_and_spawn_crowd.run_if(wants_mannequin),
+            avatar::load.run_if(wants_avatar),
         ),
     );
     app.add_systems(
@@ -402,9 +527,19 @@ pub fn build_app(options: &Options) -> App {
             wave_now_and_then,
         ),
     );
+    app.add_systems(Update, (avatar::build_and_spawn, avatar::rebind_bones));
     app.add_systems(Update, sample_crowd);
     app.add_systems(Last, lifecycle);
-    app
+}
+
+/// Whether the run asked for the procedural mannequin.
+fn wants_mannequin(run: Res<Run>) -> bool {
+    run.options.rig == Rig::Mannequin
+}
+
+/// Whether the run asked for the rigged avatars.
+fn wants_avatar(run: Res<Run>) -> bool {
+    run.options.rig == Rig::Avatar
 }
 
 /// Build the shared rig assets and spawn the crowd.
@@ -692,7 +827,7 @@ fn lifecycle(
         telemetry.describe()
     );
     let verdict = if run.options.assert_motion {
-        telemetry.check()
+        telemetry.check(run.options.rig)
     } else {
         Ok(())
     };
@@ -743,7 +878,7 @@ pub fn run(options: &Options) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Backend, Error, Options, Request, Telemetry};
+    use super::{Backend, Error, Options, Request, Rig, Telemetry};
 
     fn parse(args: &[&str]) -> Result<Request, Error> {
         Options::parse(args.iter().map(|arg| (*arg).to_owned()))
@@ -759,11 +894,24 @@ mod tests {
     #[test]
     fn the_defaults_are_a_populated_plaza() {
         let options = options(&[]);
-        assert_eq!(options.population, 2_000);
+        // The rig decides the population: a skinned avatar is nine thousand triangles, so the
+        // default crowd is smaller than the mannequin's.
+        assert_eq!(options.rig, Rig::Avatar);
+        assert_eq!(options.population, super::avatar::DEFAULT_POPULATION);
         assert!(options.radius > 1.0);
         assert_eq!(options.backend, Backend::Auto);
         assert!(!options.assert_motion);
         assert_eq!(options.frames, None);
+    }
+    #[test]
+    fn the_mannequin_default_is_the_full_plaza() {
+        let options = options(&["--rig", "mannequin"]);
+        assert_eq!(options.population, super::DEFAULT_POPULATION);
+    }
+    #[test]
+    fn an_explicit_population_survives_the_rig_default() {
+        let options = options(&["--rig", "avatar", "--npc", "17"]);
+        assert_eq!(options.population, 17);
     }
 
     #[test]
@@ -822,7 +970,7 @@ mod tests {
 
     #[test]
     fn a_still_crowd_names_every_failure() {
-        let error = Telemetry::default().check();
+        let error = Telemetry::default().check(Rig::Mannequin);
         let Err(Error::Still(reason)) = error else {
             unreachable!("an empty telemetry must fail");
         };
@@ -843,7 +991,7 @@ mod tests {
             looking: 1,
             largest_step: 0.25,
         };
-        assert!(telemetry.check().is_ok());
+        assert!(telemetry.check(Rig::Mannequin).is_ok());
         assert!(telemetry.describe().contains("biggest step 0.250 m"));
     }
 }

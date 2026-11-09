@@ -121,6 +121,8 @@ failure mode is a black or flat-coloured window with no error.
 | `Res<ClearColor>` failed validation | nothing inserts it for you; the crate sets it to the fog's colour |
 | `TonyMcMapFace tonemapping requires the tonemapping_luts feature` | the camera asks for the default tonemapper; this crate selects `Tonemapping::AcesFitted`, which is a curve in code |
 | `Plugins<_>` is not satisfied | more than sixteen plugins in one `add_plugins` tuple; split it |
+| A glTF character spawns — `Mesh3d`, skin, bones all present — and draws nothing | `bevy_pbr`'s `bevy_gltf` feature, plus `GltfPlugin` added *before* `PbrPlugin`. `PbrPlugin` is what registers the hook that attaches `MeshMaterial3d` to a glTF primitive, and it registers it into the extension registry `GltfPlugin` owns: without the feature the primitives come out material-less, and in the wrong order the hook is installed into a registry nobody reads |
+| `world contains the unregistered type ...` when a scene instantiates | a dynamic scene re-applies components as reflect data, which does not run required-component insertion; register every component the scene can carry, `ChildOf` and `Children` included |
 
 The order is Bevy's own: task pool and log, then time/transform/input, then window, assets, image,
 camera, mesh, light, render, core pipeline, PBR, and `WinitPlugin` last, alone, because it installs
@@ -142,60 +144,47 @@ a regression that empties the frame is visible as an image rather than as a disc
 a Mac's job, and the summary line above is where to read them.
 
 ## The skinned district: the same crowd, with skeletons
-
 `playground`'s main binary draws boxes for bodies. The `skinned` binary draws the same crowd as
-nine-joint rigs with skinned meshes and a seven-clip blend tree, so the animation is Bevy's skinning
-path rather than geometry moved by hand. The rig matters more than the clip: a body whose mesh has
-legs but whose skeleton has no leg joints cannot step, and no amount of keyframes fixes that.
+rigged characters, so the animation is Bevy's skinning path rather than geometry moved by hand. The
+rig matters more than the clip: a body whose mesh has legs but whose skeleton has no leg joints
+cannot step, and no amount of keyframes fixes that.
 
+Two rigs ship, and the flag picks between them:
+
+- `--rig avatar` (default) loads the three Meshy characters in `demo/assets/npcs/rigged` — textured
+  mesh, 24 bones, one GLB per clip (`-idle`, `-walk`, `-run`). Bevy's glTF loader builds the scene,
+  skeleton, skin and clips; the example rewrites each bone's `AnimatedBy` to its body so the blend
+  and the gate see one entity per NPC. Default population is 300, because nine thousand triangles
+  per body is not a two-thousand-body crowd.
+- `--rig mannequin` builds a nine-joint rig and seven clips in code, loads nothing, and carries the
+  2,000-body plaza. It is also the fallback: if the GLBs are missing the example prints one line and
+  runs the mannequin instead of opening an empty plaza.
 ```sh
-cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --npc 2000
+cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --rig avatar --npc 300
+cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --rig mannequin --npc 2000
 ```
-
 | Flag | |
 |---|---|
-| `--npc N` | bodies, default 2000 |
-| `--radius M` | plaza radius, metres, default 34 |
+| `--rig NAME` | `avatar` (default) or `mannequin` |
+| `--npc N` | bodies: default 300 avatars, 2000 mannequins |
+| `--radius M` | plaza radius, metres, default 22 |
 | `--frames N` | draw N frames and exit |
 | `--capture PATH` | write the last frame as a BMP |
 | `--width N` `--height N` | default 1280x800 |
 | `--backend NAME` | `auto`, `metal`, `vulkan`, `gl` |
 | `--assert-motion` | non-zero exit unless the crowd provably animated |
-
 Verify it without a display, and without trusting your eyes:
-
 ```sh
 cd playground
 cargo build --bin skinned
-xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
+xvfb-run -a ./target/debug/skinned --rig mannequin --frames 200 --npc 2000 --assert-motion
 # skinned: 200 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.494 m
+xvfb-run -a ./target/debug/skinned --rig avatar --npc 40 --frames 140 --assert-motion
+# skinned: 153 frames — 40 moved, 40 blended, 0 gesturing, 0 looking, biggest step 0.830 m
 ```
 
-The four numbers are the gate: something moved, something blended walk or run above half weight,
-a gesture cue reached a clip, and someone aimed their gaze. Drop `--assert-motion` and those numbers
-are printed but do not fail the run.
-
-### Four Bevy 0.20 traps this example exists to document
-
-- **Magenta frames.** `Tonemapping::TonyMcMapface` needs the `tonemapping_luts` feature. Without it
-  Bevy logs one line and renders the entire frame magenta, which reads as a broken material for as
-  long as it takes to notice the log. This example uses `Tonemapping::None`.
-- **Skinned scenery.** A mesh carrying `JOINTS_0` and `JOINT_WEIGHT` is drawn with the skinned
-  pipeline. Give such a mesh to an entity without `SkinnedMesh` and wgpu fails validation on the
-  first frame and quits the app. Scenery meshes therefore carry no skin attributes at all.
-- **Ambient light.** `LightPlugin` inserts `GlobalAmbientLight` with a brightness of 80, so an insert
-  *before* `add_plugins` is simply overwritten: the scene keeps its default and "the ambient setting
-  does nothing". Insert it after the plugins. A body with its back to the sun then reads as a body,
-  not as a black silhouette.
-- **A rig without limb joints.** The first cut of this example had five joints and three stacked
-  boxes: legs, torso, head. The walk animated the hips, so the crowd turned while it slid, and every
-  body read as a plank. The fix is a joint per limb plus a channel per joint —
-  `every_limb_joint_carries_weight` and `the_walk_moves_the_legs_and_the_arms` are the two tests that
-  now fail if either half goes missing again.
-- **A rigid box split across two slots.** Weighting a limb by height with the same joint in both
-  slots leaves every vertex at half weight in each slot. It renders, but the mesh is no longer rigid
-  and no test that looks for a full-weight slot can see the limb; a box with one joint on both ends
-  now takes the whole weight in the first slot.
-- **Windings.** A box face listed clockwise against an outward normal renders black, not wrong. The
-  `every_triangle_faces_its_normal` test compares each triangle's geometric normal with the stored
-  one, which is the cheapest way to keep a corner table and a normal table honest.
+The numbers are the gate: something moved, something blended walk or run above half weight, a
+gesture cue reached a clip, and someone aimed their gaze. The last two are the mannequin's to prove —
+its clip set contains the gesture and gaze channels, while an avatar rig has Meshy's idle, walk and
+run and no clip bound to a cue — so the gate asks each rig only for what that rig can actually show.
+Drop `--assert-motion` and the same line prints as a measurement instead of a verdict.

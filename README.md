@@ -387,9 +387,13 @@ Vulkan or GL, and the GPU path is Bevy's rather than one written here, which is 
 offscreen front end exists to make its numbers comparable across machines, and this one exists to
 show what the crowd looks like standing in it. `playground/README.md` has the flags and the
 controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it, and
-`playground` also ships a second binary, `skinned`, which draws 2,000 bodies as nine-joint rigs with
-skinned meshes, swinging limbs and a seven-clip blend tree: `cargo run --release --manifest-path playground/Cargo.toml
---bin skinned -- --npc 2000`, and `--assert-motion` turns "did it animate?" into an exit code.
+`playground` also ships a second binary, `skinned`, which draws the crowd as rigged characters
+rather than boxes. By default it loads the three Ashfall avatars — rigged by Meshy into 24 bones,
+textured, with idle/walk/run clips in `demo/assets/npcs/rigged` — so
+`cargo run --release --manifest-path playground/Cargo.toml --bin skinned -- --npc 300` is 300 people
+walking. `--rig mannequin` swaps in the generated nine-joint rig with its seven-clip blend tree,
+which needs no assets and carries 2,000 bodies; `--assert-motion` turns "did it animate?" into an
+exit code.
 `docs/playbooks/bevy-playground.md` is the operational page: building for Metal, capturing a frame,
 reading the timing line, and the six-plugin checklist whose omission is a flat-coloured window
 rather than an error.

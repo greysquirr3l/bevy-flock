@@ -36,16 +36,20 @@ bevy_color = "0.20.1"
 bevy_core_pipeline = "0.20.1"
 bevy_diagnostic = "0.20.1"
 bevy_ecs = "0.20.1"
-bevy_image = { version = "0.20.1", features = ["bmp"] }
+# The avatars arrive as glTF with a skeleton; Bevy's loader builds the bones, the
+# skin and the clip assets, so this crate does not parse glTF itself.
+bevy_gltf = { version = "0.20.1", features = ["bevy_animation"] }
+bevy_world_serialization = "0.20.1"
+bevy_image = { version = "0.20.1", features = ["bmp", "jpeg"] }
 bevy_input = "0.20.1"
 bevy_light = "0.20.1"
 bevy_log = "0.20.1"
 bevy_math = "0.20.1"
 bevy_mesh = "0.20.1"
-bevy_pbr = "0.20.1"
+bevy_pbr = { version = "0.20.1", features = ["bevy_gltf"] }
 bevy_render = "0.20.1"
 bevy_time = "0.20.1"
-bevy_transform = "0.20.1"
+bevy_transform = { version = "0.20.1", features = ["bevy_reflect"] }
 bevy_window = "0.20.1"
 bevy_winit = "0.20.1"
 # The backend mask `WgpuSettings` takes. `bevy_render` depends on wgpu 30 and does not re-export

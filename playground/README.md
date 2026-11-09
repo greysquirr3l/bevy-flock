@@ -88,25 +88,38 @@ make a real GPU run a bounded, scriptable check:
 cargo run --release -p bevy-flock-playground -- --backend metal --frames 120 --view district
 ```
 
-## The skinned district: 2,000 bodies with a skeleton each
+## The skinned district: rigged avatars, or 2,000 mannequins
+`ashfall-playground` draws boxes. `skinned` draws people, two ways.
 
-`ashfall-playground` draws boxes. `skinned` draws people: every body is a nine-joint rig — hips,
-chest, head, two shoulders, two hips, and the two pivots gaze turns — with a skinned mesh, an
-`AnimationPlayer` and a blend tree, all built at startup, so the thing moving on
-screen is Bevy's own skinning and animation path and not a hand-rolled shader.
-
+`--rig avatar` (the default) loads the three Ashfall characters out of `demo/assets/npcs/rigged` —
+`aerie`, `gatewarden`, `scavenger` — each a textured mesh rigged by Meshy into 24 bones, with idle,
+walk and run recorded onto it as separate GLBs. Bevy's glTF loader builds the scene, the skeleton,
+the skin and the clip assets; the example's only glue is rewriting each bone's `AnimatedBy` to the
+body that owns it, so the blend, the gesture channel and the motion gate all see one entity per NPC
+rather than one per character plus one per bone.
 ```sh
-cargo run --release -p bevy-flock-playground --bin skinned -- --npc 2000
+cargo run --release -p bevy-flock-playground --bin skinned -- --rig avatar --npc 300
 ```
+![Forty rigged avatars circling the monolith](../docs/demo/ashfall-skinned-avatars.png)
+*40 rigged avatars, 140 frames, 1280x800, captured on `llvmpipe` under Xvfb. Twelve thousand
+triangles and 24 bones each, with the shipped idle/walk/run blend driving the legs.*
 
+`--rig mannequin` is the other half: a nine-joint rig — hips, chest, head, two shoulders, two hips,
+and the two pivots gaze turns — with a mesh, an `AnimationPlayer` and seven clips authored in code at
+startup. Nothing is loaded from disk, so a checkout with no generated assets still has a crowd, and
+the count goes to 2,000 and beyond.
+```sh
+cargo run --release -p bevy-flock-playground --bin skinned -- --rig mannequin --npc 2000
+```
 ![Two thousand skinned bodies around the monolith](../docs/demo/ashfall-skinned-district.png)
-*2,000 bodies, 200 frames, 1280x800, captured on `llvmpipe` under Xvfb. Each body is ten thousand
-vertices of skinned geometry and one blend tree of seven clips.*
+*2,000 mannequins, 200 frames, 1280x800, captured on `llvmpipe` under Xvfb. Each body is ten
+thousand vertices of skinned geometry and one blend tree of seven clips.*
 
 | Flag | |
 |---|---|
-| `--npc N` | bodies to spawn, default 2000 |
-| `--radius M` | plaza radius in metres, default 34 |
+| `--rig NAME` | `avatar` (default) or `mannequin`; falls back to `mannequin` when the GLBs are missing |
+| `--npc N` | bodies to spawn: default 300 avatars, 2000 mannequins |
+| `--radius M` | plaza radius in metres, default 22 |
 | `--frames N` | draw N frames and exit; omit to keep the window open |
 | `--capture PATH` | write the last frame to `PATH` as a BMP |
 | `--width N` `--height N` | window size, default 1280x800 |
@@ -116,16 +129,17 @@ vertices of skinned geometry and one blend tree of seven clips.*
 What the crowd does is the library's: `bevy-flock-anim` binds walk/run/idle/nod/wave clips to the
 rig through a per-entity blend, `bevy_flock`'s locomotion decides the blend weights from velocity,
 its gesture channel decides when a body waves, and `resolve_gaze` turns every body's head towards
-the monolith. The crate contributes the rig, the clips, the spiral placement and the milling motion —
+the monolith. The crate contributes the rigs, the clips, the spiral placement and the milling motion —
 each a pure function with tests.
 
 `--assert-motion` is the interesting flag. It is the difference between "the window opened" and "the
-crowd animated": it fails unless at least one body moved since spawn, blended walk or run above half
-weight, received a gesture cue that reached a clip, and aimed its gaze. Every failure is named on its
-own line, because "nothing moved" sends the reader to the wrong file when the real problem was that
-no gesture was ever requested:
-
+crowd animated": it fails unless at least one body moved since spawn and blended walk or run above
+half weight, and — for the mannequin, whose clips include the gesture and gaze channels — it also
+fails unless a gesture cue reached a clip and a body aimed its gaze. An avatar rig has Meshy's idle,
+walk and run and nothing that maps a gesture cue onto them, so the gate asks each rig only for what
+that rig can prove. Every failure is named on its own line, because "nothing moved" sends the reader
+to the wrong file when the real problem was that no gesture was ever requested:
 ```sh
-xvfb-run -a ./target/debug/skinned --frames 200 --npc 2000 --assert-motion
+xvfb-run -a ./target/debug/skinned --rig mannequin --frames 200 --npc 2000 --assert-motion
 # skinned: 200 frames — 2000 moved, 1958 blended, 21 gesturing, 667 looking, biggest step 2.494 m
 ```
