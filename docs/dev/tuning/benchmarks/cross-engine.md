@@ -105,19 +105,42 @@ printing a one-engine "comparison". Unreal is not automated: its harness lives i
 
 ## Running the Unreal side
 
-Mass Entity is the fair comparison, and the fixture is small enough to build in C++ without a project template of its own:
+`benchmarks/unreal/` is the harness: a `UTickableWorldSubsystem` that runs the same fixture in Unreal's own idiom
+(SoA arrays, counting-sort grid rebuild, bounded separation, fixed 60 Hz step) and prints the same JSON line. It is a
+subsystem rather than an actor, so installing it is copying a module into a project; there is no map to build and no
+blueprint to wire. Its [README](../../../benchmarks/unreal/README.md) has the setup, the flags and the build commands.
 
-1. `UCrossBenchSubsystem : UTickableWorldSubsystem`, or a `AActor` with `PrimaryActorTick`.
-2. Hold the crowd in `TArray<FVector>` (positions) and `TArray<FVector>` (velocities), SoA, as Mass would, not an array
-   of actors. An array of `AActor*` measures UObject overhead, not crowd simulation.
-3. Per tick: integrate toward the shared goal, run the engine's broadphase (Mass's `FMassEntityQuery` or a
-   `TArray<FBox>` grid) and local avoidance, then record `FPlatformTime::Seconds()` deltas.
-4. 100 warm-up ticks, 1000 measured, same six statistics, same JSON keys. Use the same seed for spawn.
-5. `UnrealEditor-Cmd.exe Project.uproject -game -nullrhi -ExecCmds="crossbench" -log` for a headless run; a PIE run with
-   the editor attached is not a result.
+```text
+UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
+  -crossbenchagents=10000 -crossbenchticks=1000 -crossbenchwarmup=100 \
+  -crossbenchmachine="unknown cpu, 6 threads"
+```
 
-If the intent is to test Unreal's *shipping* crowd stack rather than a harness someone wrote in an afternoon, say so in
-`notes` and quote the engine's own stat captures (`stat unit`, `stat MassEntity`) alongside.
+and through the runner, once that project exists:
+
+```text
+python3 scripts/cross_bench.py --agents 10000,100000 --engines unreal,bevy-flock,godot-grid \
+  --unreal-cmd 'UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
+    -crossbenchagents={agents} -crossbenchticks={ticks} -crossbenchwarmup={warmup}'
+```
+
+Three things about this harness are worth knowing before quoting its row:
+
+- **It is not Mass Entity.** A hand-written SoA loop answers "what does a straightforward crowd loop cost in this
+  engine". Mass answers "what does Epic's crowd stack cost". If you want the second, run `stat MassEntity` and
+  `stat unit` in a Mass scene and put the capture in `notes` rather than blending the two.
+
+- **The measured region is the subsystem tick**, which excludes the engine frame, as the Godot row excludes the rest of
+  its frame. The Rust row measures `App::update` and therefore includes its schedule. Read the three `notes` fields
+  together.
+
+- **`-crossbenchmachine=` exists because the comparator refuses mixed machine labels.** Unreal reports the real CPU
+  brand; the other two fall back to `unknown cpu` on a VM with no model line. Copy the string from the existing rows so
+  one machine has one label.
+
+The harness is written against the UE 5.x API but has not been compiled in this repository's CI, because UE5 does not
+fit in the sandbox the gates run in. The first build may need small version fixes; that is a five-minute fix in the
+project, not a redesign of the fixture.
 
 ## A same-machine result
 

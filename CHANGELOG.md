@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The Unreal side of the cross-engine benchmark exists.** `benchmarks/unreal/` is a `UTickableWorldSubsystem`
+  running the W1 fixture in Unreal's idiom: SoA arrays, a counting-sort grid rebuild each tick, bounded separation and
+  a fixed 60 Hz step, printed as the same JSON line the other harnesses print. A subsystem means no map, no actor and
+  no blueprint: adding the module is the install. `scripts/cross_bench.py --engines unreal --unreal-cmd ...` drives it
+  through an `UnrealEditor-Cmd -game -nullrhi` run and folds the row into the table, and its `--self-test` proves that
+  path against a fake command. The harness is written against the UE 5.x API but has not been compiled against an
+  engine here.
 - **The cross-engine benchmark actually ran, on one machine.** `benchmarks/godot/` is a committed project with
   command-line parameters and two modes: `array`, which is a lower bound for Godot because it has no spatial index, and
   `grid`, which rebuilds a uniform grid each tick and is the like-for-like row. `scripts/cross_bench.py` runs both
