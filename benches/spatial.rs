@@ -23,7 +23,7 @@ use std::hint::black_box;
 use bevy_flock::application::packed::{Pack, SteerParams, scatter};
 use bevy_flock::domain::NpcId;
 use bevy_flock::domain::num;
-use bevy_flock::domain::spatial::{Neighbour, SpatialGrid, SpatialGridConfig};
+use bevy_flock::domain::spatial::{Neighbour, QueryArena, SpatialGrid, SpatialGridConfig};
 use bevy_math::Vec3;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
@@ -157,5 +157,31 @@ fn bench_kernel(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_build, bench_query, bench_kernel);
+/// The batch query: one radius search per agent per tick, gathered into one reused arena.
+fn bench_batch(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("spatial_batch");
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    for population in [100_000_usize, 1_000_000] {
+        let grid = grid(population, 1);
+        let centres: Vec<Vec3> = (0..QUERIES)
+            .map(|index| position(index * 977, EXTENT))
+            .collect();
+        let mut arena = QueryArena::new(32);
+        for (label, threads) in [("serial", 1_usize), ("parallel", workers)] {
+            let grid = grid.clone().with_threads(threads);
+            group.bench_with_input(
+                BenchmarkId::new(format!("radius_batch_{label}"), population),
+                &population,
+                |bencher, _| {
+                    bencher.iter(|| {
+                        grid.radius_batch(&centres, QUERY_RADIUS, &mut arena);
+                        black_box(arena.count(0))
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+criterion_group!(benches, bench_build, bench_query, bench_batch, bench_kernel);
 criterion_main!(benches);

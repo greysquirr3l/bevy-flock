@@ -57,6 +57,10 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "unsafe_code",
     ): "a counting allocator is the only way to assert the tree allocates nothing",
     (
+        "tests/spatial_batch_no_alloc.rs",
+        "unsafe_code",
+    ): "a counting allocator is the only way to tell a zero-allocation batch from a bounded one",
+    (
         "demo/src/city.rs",
         "too_many_lines",
     ): "the layout is one pass of the same generator over districts, blocks, shelters and pylons; \

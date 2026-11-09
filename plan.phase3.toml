@@ -217,6 +217,20 @@ the cursor restore stay serial because they are what make every thread count pro
 """
 
 [[completed]]
+task = "phase-3 T04 partitioned-queries"
+delivered_in = "feat/phase3-t04-partitioned-queries"
+note = """
+`SpatialGrid::radius_batch` answers a whole crowd's queries into one reusable `QueryArena` with a fixed
+`cap` stride per query, so the arena partitions by query range with no gather step and no per-query `Vec`.
+1,000 queries at a million bodies: 5.48 ms serial, 1.07 ms on six workers (5.1x). Neighbour lists equal
+the truncated serial answer element for element at 1, 2, 3 and 8 threads.
+Steady-state allocation: zero on the serial path (asserted), and a measured bound of one scope packet per
+worker on the parallel path — the earlier "no allocation" claim for the parallel build was wrong and is
+corrected in the source and docs.
+Open follow-up: a persistent worker pool, so the parallel paths can make the zero-allocation claim too.
+"""
+
+[[completed]]
 task = "phase-3 T01 serial-baseline"
 delivered_in = "feat/phase3-t01-t02"
 note = """
