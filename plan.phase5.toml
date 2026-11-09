@@ -197,11 +197,11 @@ description = "Re-run the sweep and hold the result to the number phase 3 named.
 slug = "build-5x-gate"
 kind = "audit"
 title = "Re-measure the build and hold it to 5x at six workers"
-goal = "Re-run the scaling sweep over 1M bodies after the fusion and the pool, state whether the rebuild reached 5x on six workers, and if it did not, name the pass that refused with its measured share."
+goal = "Re-run the scaling sweep over 1M bodies after the fusion and the pool, state whether the rebuild reached 5x on six workers against the one-worker build measured in the same session, and if it did not, name the pass that refused with its measured share. Removing a serial cost moves the denominator too, so the parallel ratio and the wall clock are reported separately and the ratio is never quoted without the serial build it divides by."
 depends_on = ["persistent-worker-pool"]
 hints = [
     "Use `examples/scaling_sweep.rs` for the curve and `examples/build_passes.rs` for the attribution; a single number without a pass breakdown cannot name the next phase.",
-    "The arithmetic to check the result against: with a serial remainder of 0.30 ms at six workers the cap is 5.6x, so anything below 5x is a parallel-efficiency problem in `clear`, `count` or `place`, not a serial-tail problem. Saying which is the point of the task.",
+    "The arithmetic to check the result against: with a serial remainder of 0.30 ms at six workers the cap is 5.6x, so anything below 5x is a parallel-efficiency problem in `clear`, `count` or `place`, not a serial-tail problem. Saying which is the point of the task. That 0.30 ms was measured before T03 fused the seat pass and T05 fused the scan into the placement, so recompute the remainder before using the cap — and note that a pass made faster on both paths raises the cap while lowering the ratio.",
     "Re-record `benches/spatial-baseline.json` in the gate's own units and leave the previous numbers in docs/performance.md beside the new ones, so the gate keeps its meaning across the phase.",
     "If `count` is still near 1.0x, that is the finding: a pass that re-reads the cell list once per worker cannot scale, and phase 6 starts there rather than with another scan.",
 ]
@@ -210,6 +210,7 @@ test_hints = [
 ]
 must_haves = [
     "The 6-worker build number is stated against phase 4's 6.95 ms with the ratio, not just the absolute",
+    "Every speedup states the one-worker build it divides by, and whether that build was measured in the same session — a ratio against a stale denominator is the ambiguity this task exists to end",
     "The pass that limits the result is named with its measured share of the build",
     "docs/performance.md and the gate baseline agree with the example's output",
 ]
@@ -445,7 +446,8 @@ ADR 0060 measured the scaling curve and predicted that `clear` was compute-bound
 and worse than predicted: `clear` is 13.034 -> 2.767 ms serially and 2.463 -> 0.739 at six workers once the fill pass
 multiplies by a cached reciprocal and clamps with one `max` plus a saturating convert instead of two branches per axis.
 The rebuild is 6.289 -> 4.572 ms, which is 5.02x against the 22.943 ms serial baseline the gate was written against.
-The denominator is the story: the same binary is 2.67x against its own serial path, because a third of the serial work
+Against phase 4's 6.95 ms the same rebuild is 1.52x faster, which is the number that does not move when a denominator shifts.
+The denominator is the story: the same binary is 2.67x against its own serial path (12.229 ms), because a third of the serial work
 stopped existing. The ratio fell while the wall clock improved by 27%, and a gate phrased as "5x against the serial
 build" cannot say which of those it means -- which is why ADR 0060 asked for the target to be re-derived rather than
 merely met. Both figures are recorded in docs/performance.md so neither can be quoted alone.

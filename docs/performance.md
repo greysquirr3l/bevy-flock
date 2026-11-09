@@ -1534,7 +1534,8 @@ Removing a whole dispatch needs the body-cell pass and the count pass to share o
 first writes slices of the cell list that the second reads in full. That is a different design (atomics per body, or
 per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` task, not this one.
 
-At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is now 4.72 ms of single-worker build, and the
+At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is **4.72 ms at six workers** — a 4.72x
+reduction of the 22.3 ms one-worker build measured in that session, which is what "5x" meant when it was written — and the
 remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
 target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.
 
@@ -1702,6 +1703,15 @@ pool this phase was chartered to build would be chasing a fifth of a millisecond
 2.04, the two remaining passes are 70% of the rebuild and neither is a scan. Whatever the 5x gate is going to be, it is
 not going to be met by removing dispatches: 6.488 ms is 3.5x, and the arithmetic caps a perfect six-way split of these
 passes well short of 4.72 ms.
+
+### Which serial build is the denominator
+
+Three different one-worker numbers appear in this file for the same 1M fixture: 22.15 ms in phase 4, 22.5 ms in T03, 22.9 ms in
+T06. They are the same code measured in different sessions, and the ~2% between them is this machine's run-to-run spread — larger
+than several of the effects these sections report. That makes "5x against the serial build" ambiguous by construction, so the
+rule from here on is that a speedup quotes the one-worker number **measured in the same session, on the same fixture, by the same
+binary**, and a comparison across a code change quotes both binaries' own one-worker numbers. The T06 numbers below follow that
+rule; the earlier sections keep their contemporaneous serial figures, which is why they do not divide cleanly into each other.
 
 ## The division was most of the rebuild (T06, `clear`)
 
