@@ -1,3 +1,7 @@
+# This phase moves modules, so it is the last chance to do so without a semver event.
+# It is judged against docs/1.0-readiness.md item 6: the core must compile alone, the facade
+# must re-export the same paths, and a headless consumer must run a crowd with no Bevy app.
+
 # plan.phase6.toml — bevy-flock, phase 6: split the simulation core out of the engine adapter
 #
 #   wiggum validate plan.phase6.toml
