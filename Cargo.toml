@@ -52,7 +52,7 @@ memory = ["bevy-flock-core/memory"]
 
 # Serialisation of NPC blueprints, simulation snapshots and authored behaviour
 # trees. Off by default: a server that only simulates should not pay for serde.
-serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy-flock-core/serde"]
+serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy-flock-core/serde", "bevy_math/serialize"]
 # A polygon navmesh with derived adjacency, area costs and a string-pulled route: the shape a
 # level with doorways actually needs, where a cell grid has to over-block or let agents clip the
 # frame. Off by default because a game whose levels are open ground does not need it, and it is

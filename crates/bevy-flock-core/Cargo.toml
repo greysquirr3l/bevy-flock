@@ -19,7 +19,10 @@ threads = ["bevy_tasks/multi_threaded"]
 # Social memory: an opt-in store so a game that never remembers anyone does not pay for the rows.
 memory = []
 # Serialisation of blueprints, snapshots and authored behaviour trees.
-serde = ["dep:serde", "dep:ron", "smallvec/serde"]
+# `bevy_math/serialize` is not optional here: `Vec3` appears in every saved type, so a `serde` feature without it
+# produces deserialize impls that cannot be satisfied. The facade's serde feature had the same omission, hidden because
+# some other dependency happened to turn `serialize` on.
+serde = ["dep:serde", "dep:ron", "smallvec/serde", "bevy_math/serialize"]
 # A polygon navmesh with derived adjacency, area costs and a string-pulled route.
 navmesh = []
 # The `Resource` derives on `SimClock`, `FlockRegistry` and `MemoryStore`. Off by default here, which is the point: the
