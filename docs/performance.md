@@ -1630,3 +1630,75 @@ derived block counts at seven cell counts, so an edit to the constant fails a te
 The sweep also says what the block constant *cannot* buy: `prefix` is 0.22–0.28 ms of a 6.7 ms rebuild at every
 setting, so no choice here moves the total by more than noise. The 5x gate does not hinge on it — the dispatch tax
 does (§*What a thread hand-off costs*), which is what T05 is for.
+
+## Why the continuity gates were slow (and what the cost actually was)
+
+`tests/band_continuity.rs` runs five gates, four of which drive 10,000 ticks of a full `App`. The suite reported
+`gate_6` and `gate_7` "running for over 60 seconds" and one run left `gate_6` at **39 minutes and 213% CPU** before it
+was killed, so the first question was whether the fixture does something quadratic per tick.
+
+It does not. `examples/band_ticks.rs` was written to ask: same app, same 40,000-person seed, same sine path, every
+tick timed.
+
+| profile | per tick | 10,000 ticks |
+| --- | ---: | ---: |
+| release, moving camera | 1.62 ms median (p95 1.76) | 16 s |
+| release, camera held still | 1.56 ms median | 15 s |
+| dev/test profile, `gate_6` alone | 31 ms | 5 min 14 s |
+
+Two findings, and neither is an algorithmic one.
+
+**The camera is not the cost.** Holding it still moves the median by 0.06 ms: the ration's spawns and despawns are
+noise beside the per-tick work. Whatever the gates spend, they spend it every tick whether anyone crosses the band or
+not, which is the steering kernel plus the systems' own scans.
+
+**The profile is the cost.** 31 ms against 1.62 ms is 19x, and it is 19x on SIMD code that the dev profile does not
+vectorise, does not inline, and re-checks on every arithmetic op. Five such tests running in parallel on six cores
+with one counting allocator between them is where the 39 minutes came from — not from anything the band does.
+
+So the fix is a `[profile.test]` with `opt-level = 2`, not a smaller fixture and not an `#[ignore]`. The ticks are the
+gate (ADR 0022); the profile was never part of what it asserts, and `debug-assertions` and `overflow-checks` are still
+inherited from `dev`, so the tests keep checking. Measured effect, whole file, five gates:
+
+| | wall clock |
+| --- | ---: |
+| dev profile | > 39 min (killed) |
+| `opt-level = 2` | **45 s** |
+
+The compile side pays about a minute for the test profile once. Everything after that is fifty times cheaper, which
+is the difference between a suite nobody runs locally and one that finishes while you read the diff.
+
+## One dispatch for the scan and the placement (T05)
+
+The rebuild used four `thread::scope` dispatches — clear, count, scan, place — and ADR 0059 set out to remove one by
+fusing the scan with the placement, which touch the same two arrays and nothing else in between.
+
+Doing it needed a correction to the ADR's own reasoning. It proposed a barrier between the two phases, on the theory
+that a worker cannot place until the blocks below it have been scanned. A worker cannot *know* that, but it does not
+need to: it fills the windows of its own cells, every one of which starts at a total it has just computed itself on top
+of the base from `prefix_bases`. The barrier version measured **worse than what it replaced** — 7.42 ms against
+6.74 ms, `place` up 27% and `prefix` up 49%, because waking six threads costs more than the dispatch it was meant to
+save. Removing the barrier removed the cost.
+
+| six workers | before | after |
+| --- | ---: | ---: |
+| `clear` | 2.470 ms | 2.480 ms |
+| `count` | 1.858 ms | 1.855 ms |
+| `prefix` | 0.235 ms | **0.110 ms** |
+| `place` | 2.147 ms | 2.044 ms |
+| **total** | **6.711 ms** | **6.488 ms** |
+
+Thirteen alternating pairs against the previous binary, medians (best-of: 6.626 → 6.412). One worker is the control and
+takes the serial path: 22.827 → 22.692 ms, which is noise.
+
+Two things this run establishes beyond the 3%:
+
+**The dispatch costs about 0.2 ms in situ, not 0.53.** The phase 5 harness priced an *empty* scope: it pays spawn and
+join with nothing to overlap. A scope with work in it hides most of the last thread's creation behind the first
+threads' work. Every "the dispatch tax is X" figure in phase 4 and phase 5 should be read as an upper bound, and the
+pool this phase was chartered to build would be chasing a fifth of a millisecond per scope, not half.
+
+**`prefix` is now a tenth of a millisecond, and the serial tail is `count`.** With clears at 2.47 and placement at
+2.04, the two remaining passes are 70% of the rebuild and neither is a scan. Whatever the 5x gate is going to be, it is
+not going to be met by removing dispatches: 6.488 ms is 3.5x, and the arithmetic caps a perfect six-way split of these
+passes well short of 4.72 ms.

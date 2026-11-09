@@ -183,6 +183,13 @@ significant_drop_tightening = "deny"
 # uses. Debug symbols stay on so a profile can be read against the source.
 # Release-shaped, with symbols. `cargo flamegraph --profile profiling` then produces a
 # flamegraph whose frames are readable rather than a wall of unresolved addresses.
+[profile.test]
+# The gate tests drive 10,000 ticks of a full app each, and the band and crowd kernels are SIMD: unoptimised they
+# cost 31 ms a tick against 1.6 ms, which is the difference between a 30-second test binary and the 5 minutes one
+# gate took on its own (39 minutes for the file, five gates in parallel on six cores, `docs/performance.md`
+# §*Why the continuity gates were slow*). Debug assertions and overflow checks are inherited from `dev` and stay on:
+# these tests assert behaviour, so the profile is allowed to be fast but not to stop checking.
+opt-level = 2
 [profile.profiling]
 inherits = "release"
 debug = 1

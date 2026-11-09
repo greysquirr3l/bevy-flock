@@ -393,3 +393,46 @@ constant and proved only that it is self-consistent.
 The sweep also bounds what this task could ever win: prefix is 0.22-0.28 ms of a 6.7 ms rebuild at every setting, so
 no choice of constant moves the total beyond noise. The 5x gate hinges on the dispatch tax, which is T05.
 """
+
+[[completed]]
+task = "phase-5 T05 persistent-worker-pool: ownership decided (ADR 0059)"
+delivered_in = "perf/continuity-gates"
+note = """
+T05 turned out to be a soundness decision before it was a task, and the decision is now on record rather than
+discovered halfway through an implementation. A thread that outlives a call cannot hold a borrow of the grid's
+buffers, and the passes do not merely outlive the call — clear needs &mut on the cell list that count needs to read,
+which is why there are three scopes today and not one.
+Three options were priced. An unsafe parked pool takes the whole 1.59 ms dispatch tax and costs a hand-written
+aliasing guarantee in a crate whose lints were tightened because that class of bug had already shipped. Interior
+mutability is safe and either serialises the passes behind one mutex or pays a lock per block in exactly the loops
+being optimised, and it would fragment cell_start into something the rest of the crate assumes is contiguous.
+bevy_tasks is 13 us a round and allocates nine times, which the no-allocation promise refuses.
+Chosen: fuse the passes that do not conflict into one scope (count, block scan, place — disjoint &mut slices, bases
+derived per worker between barriers), keeping clear alone. That is one scope instead of three for a restructure of
+existing code with no unsafe, and it takes two thirds of the tax. The last third stays behind a feature flag until
+someone needs it enough to run Miri over it.
+"""
+
+[[completed]]
+task = "phase-5 T05 persistent-worker-pool (delivered as one dispatch for the scan and the placement)"
+delivered_in = "feat/phase5-t05-fused-dispatch"
+note = """
+ADR 0059 chose two dispatches over a pool, and the implementation then found that a third was available for free. The
+scan and the placement touch the same two tables and nothing else in between, so they now share one `thread::scope`,
+which is four dispatches per rebuild -> three.
+The ADR's own reasoning was wrong on one point and the measurement caught it. It proposed a barrier between the two
+phases, because a worker cannot know that the blocks below its own have been scanned. It cannot know that and does not
+need to: it fills the windows of its own cells, each of which starts at a total it has just computed itself on top of
+its base. The barrier version measured 7.42 ms against 6.74 ms before the change — waking six threads cost more than
+the dispatch it replaced. Without the barrier the same fusion is 6.71 -> 6.49 ms, with prefix 0.235 -> 0.110 ms.
+A second cost hid in the first attempt: the scan was written per cell, with a split for the bookkeeping on each of
+421,876 cells, which put prefix at 0.349 ms. The accumulation is one contiguous pass, as it always was.
+The dispatch figure the phase was chartered on was an overestimate by half. `examples/spawn_cost.rs` prices an empty
+scope at 0.53 ms; in situ a scope with work in it is worth about 0.2 ms, because the last thread's creation overlaps
+the first threads' work. Every dispatch-tax number from phase 4 onward is an upper bound, and the pool this task was
+named for would be chasing 0.2 ms a scope rather than 0.5.
+That also settles T06's gate arithmetic honestly: at 6.49 ms the rebuild is 3.5x against the serial 22.7 ms, and the
+remaining passes are clear (2.48) and place (2.04). A perfect six-way split of those two caps the build near 4.4 ms,
+so the 5x target is arithmetically reachable but is not reachable by removing dispatches — which was the last of them
+that could be removed. T06 should re-derive its gate before it is measured against it.
+"""
