@@ -144,8 +144,11 @@ CAST_LINTS = frozenset(
         "cast_possible_wrap",
     }
 )
-#: The conversion module: the one file permitted to carry a cast expectation.
-NUM_MODULE = "src/domain/num.rs"
+#: The conversion module: the one file permitted to carry a cast expectation. It moved into the core crate during the
+#: phase-6 extraction, so both locations are accepted: the rule is about the file's role (the crate's single numeric
+#: boundary), not about which crate's src/ tree it happens to sit under. Both are listed rather than one being rewritten
+#: so the audit keeps passing on a tree that still has the facade-local copy.
+NUM_MODULES = frozenset({"src/domain/num.rs", "crates/bevy-flock-core/src/domain/num.rs"})
 #: The crate roots that carry a source-level expectation, and the manifest that governs each one.
 #: A crate-level attribute applies to the crate it is written in and no other, so the root and the
 #: manifest have to agree: `src/lib.rs` is the library's root and `Cargo.toml` is the library's
@@ -440,7 +443,7 @@ def expected_is_allowed(
     attribute = "\n".join(lines[line - 1 : line + 8])
     if not REASON.search(attribute):
         return False
-    if relative == NUM_MODULE:
+    if relative in NUM_MODULES:
         return lint in CAST_LINTS
     if lint == "needless_pass_by_value":
         window = "\n".join(lines[line - 1 : line + SIGNATURE_WINDOW])
