@@ -202,3 +202,10 @@ gesture cue reached a clip, and someone aimed their gaze. The last two are the m
 its clip set contains the gesture and gaze channels, while an avatar rig has Meshy's idle, walk and
 run and no clip bound to a cue — so the gate asks each rig only for what that rig can actually show.
 Drop `--assert-motion` and the same line prints as a measurement instead of a verdict.
+
+The skinned example also prints `peak foot slide` in its headless summary. It is the largest
+single-tick distance a body covered that its stride clips did not account for, measured against the
+simulation tick rather than a frame. A straight walk reports under a millimetre over three hundred
+ticks; the plaza reports tens of millimetres because bodies are constantly starting and stopping, and
+the start window is what trades that slide for the absence of a pop. A demo image is not the check for
+this — the summary line is.

@@ -40,7 +40,7 @@ pivoting plays a turn clip. The weight comes out of idle's share, so walk and ru
 the sum stays one. Without this rule a hard-steering walker pivots on the spot while travelling,
 which reads as a bug to anyone who has watched a crowd.
 ### The library stops at cycles per second
-`cycles_per_second(speed)` is `speed / stride_metres`. A game multiplies by its own frame delta to
+`Locomotion::phase(stride_metres)` divided by the tick length is `speed / stride_metres`. A game multiplies by its own frame delta to
 set `ActiveAnimation::speed`. This is the one place the library is deliberately less useful than it
 could be, because accepting a delta would put the clock back inside the guarantee.
 ### Culling is the scheduler's tier, not a second distance test
@@ -60,8 +60,7 @@ steering target advanced to match — never both added, because that is how a cr
 double speed for reasons nobody can reproduce on their machine. The default exists because root
 motion is the single most common way an animation layer breaks a simulation.
 ### Gaze comes from perception, not from the camera
-`GazeTarget` carries the entity a cognition system already selected from the stimulus set, plus a
-weight. The library solves a two-bone analytic IK split across two spine joints, clamped per joint,
+`GazeAim` carries the point a cognition system already selected from the stimulus set, plus a weight. The library solves a two-bone analytic IK split across two spine joints, clamped per joint,
 and releases back to the animated pose on an integer tick counter when the target is dropped.
 Querying the player transform directly would work in a demo and fail the moment a game replaces
 perception, which is a supported thing to do (ADR 0008).
@@ -69,6 +68,13 @@ perception, which is a supported thing to do (ADR 0008).
 Binding plus gaze is budgeted at 0.3 ms for 2,000 animated bodies and 1.5 ms for 10,000 with
 culling, measured on the reference machine in `docs/performance.md`. Nothing in the per-frame path
 allocates after warm-up; `tests/no_alloc.rs` asserts it with the counting allocator.
+
+Measured on 2026-11-09 against that budget: the 10,000-with-culling case holds (0.94 ms for the blend,
+0.28 ms with the camera outside the plaza), and the 2,000 case does not — 0.18 ms of blend plus
+0.36 ms of gaze is 0.55 ms against a 0.30 ms ceiling. The budget is not rewritten to match the
+measurement. The two causes are named in `docs/performance.md`: per-bone sparse-set lookups in the
+gaze solve, and four hash-map lookups per body in the blend. Both are data-layout changes to two
+public entry points and belong in their own measured pass.
 ## Consequences
 **Positive.** A game keeps its artwork, its rig and its graph; the library cannot go stale against
 an asset pipeline it does not own. The animation layer inherits the determinism guarantee instead of

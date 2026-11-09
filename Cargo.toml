@@ -189,7 +189,12 @@ debug = 1
 strip = false
 
 [profile.bench]
+# Debug info keeps a bench debuggable; one codegen unit and thin LTO keep the number it reports
+# comparable with a shipped build. A bench compiled with sixteen codegen units measures the compiler's
+# scheduling, not the code's.
 debug = true
+codegen-units = 1
+lto = "thin"
 
 [[test]]
 name = "save_compat"

@@ -36,6 +36,7 @@ bevy_reflect = "0.20.1"
 bevy_transform = "0.20.1"
 
 [dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 proptest = "1.12"
 # The frame-rate fixture steers on a circle; `libm` rather than `f32::sin` because the fixture must
 # produce the same track on every platform, exactly as the simulation does.
@@ -78,3 +79,7 @@ cast_possible_wrap = "deny"
 float_cmp = "deny"
 missing_const_for_fn = "deny"
 significant_drop_tightening = "deny"
+
+[[bench]]
+name = "binding"
+harness = false

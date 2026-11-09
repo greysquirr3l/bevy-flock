@@ -175,6 +175,7 @@ mod tests {
         GestureChannel, GestureConfig, GestureKind, Locomotion, Npc, NpcGestures, NpcId, SimClock,
         advance_gestures, collect_gesture_requests, request_gesture,
     };
+    use bevy_transform::prelude::Transform;
 
     /// The node a gesture plays on, and a node the blend owns, chosen apart so a test can tell
     /// which system wrote what.
@@ -209,6 +210,7 @@ mod tests {
         let mut assets = Assets::<LocomotionProfile>::default();
         let profile = assets.add(fixture_profile());
         world.insert_resource(assets);
+        world.init_resource::<crate::lod::AnimationFocus>();
 
         let body = world
             .spawn((
@@ -224,6 +226,7 @@ mod tests {
                 ),
                 GestureClips::new().with(GestureKind::Wave, wave_node()),
                 GesturePlayback::new(),
+                Transform::default(),
                 AnimationPlayer::default(),
             ))
             .id();

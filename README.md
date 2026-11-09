@@ -1,4 +1,5 @@
 # bevy-flock
+<img src="docs/demo/bevy-flock-logo.png" width="320" height="320" align="right" alt="bevy-flock: a ring of ink-wash cranes">
 
 **Deterministic crowd and NPC simulation for Bevy.** One NPC or a million, with
 pluggable cognition and a replay you can trust.

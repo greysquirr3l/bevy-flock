@@ -46,7 +46,10 @@ use bevy_flock::prelude::{
     FlockPlugin, GazeAim, GazeTarget, GestureChannel, GestureConfig, GestureKind, Npc, NpcGestures,
     SimClock, request_gesture,
 };
-use bevy_flock_anim::{AnimPlugin, ClipBindings, ClipSlot, GazePlugin, GesturePlugin};
+use bevy_flock_anim::{
+    AnimPlugin, AnimationFocus, AnimationState, ClipBindings, ClipSlot, GazePlugin, GesturePlugin,
+    LodLevel,
+};
 use bevy_image::ImagePlugin;
 use bevy_input::InputPlugin;
 use bevy_light::{DirectionalLight, GlobalAmbientLight, LightPlugin};
@@ -301,6 +304,14 @@ pub struct Telemetry {
     pub moved: usize,
     /// The largest per-frame move seen, in metres.
     pub largest_step: f32,
+    /// Bodies animated every tick on the last frame.
+    pub full: usize,
+    /// Bodies blended on a cadence on the last frame.
+    pub stepped: usize,
+    /// Bodies whose players are paused on the last frame.
+    pub paused: usize,
+    /// The largest single-tick foot slide any body has shown, in millimetres.
+    pub peak_slide_mm: f32,
 }
 
 impl Telemetry {
@@ -337,8 +348,16 @@ impl Telemetry {
     #[must_use]
     pub fn describe(&self) -> String {
         format!(
-            "{} moved, {} blended, {} gesturing, {} looking, biggest step {:.3} m",
-            self.moved, self.blended, self.gesturing, self.looking, self.largest_step
+            "{} moved, {} blended, {} gesturing, {} looking, {} full / {} stepped / {} paused, biggest step {:.3} m, peak foot slide {:.3} mm",
+            self.moved,
+            self.blended,
+            self.gesturing,
+            self.looking,
+            self.full,
+            self.stepped,
+            self.paused,
+            self.largest_step,
+            self.peak_slide_mm
         )
     }
 }
@@ -528,7 +547,7 @@ fn add_systems(app: &mut App) {
         ),
     );
     app.add_systems(Update, (avatar::build_and_spawn, avatar::rebind_bones));
-    app.add_systems(Update, sample_crowd);
+    app.add_systems(Update, (focus_camera, sample_crowd));
     app.add_systems(Last, lifecycle);
 }
 
@@ -741,15 +760,27 @@ fn sample_crowd(
         &GazeAim,
         &AnimationPlayer,
         &ClipBindings,
+        Option<&AnimationState>,
     )>,
     starts: Res<SpawnPositions>,
 ) {
+    let (mut full, mut stepped, mut paused) = (0_usize, 0_usize, 0_usize);
+    let mut peak_slide = 0.0_f32;
     let mut moved = 0;
     let mut largest = 0.0_f32;
     let mut gesturing = 0;
     let mut looking = 0;
     let mut blended = 0;
-    for (entity, transform, gestures, aim, player, bindings) in &bodies {
+    for (entity, transform, gestures, aim, player, bindings, state) in &bodies {
+        if let Some(state) = state {
+            peak_slide = peak_slide.max(state.slide().peak_metres() * 1_000.0);
+        }
+        let lod = state.map(AnimationState::lod);
+        match lod.map(|lod| lod.level()) {
+            Some(LodLevel::Stepped) => stepped += 1,
+            Some(LodLevel::Paused) => paused += 1,
+            Some(LodLevel::Full) | None => full += 1,
+        }
         if let Some(start) = starts.0.get(&entity) {
             let step = (transform.translation - *start).length();
             if step > 0.02 {
@@ -786,8 +817,24 @@ fn sample_crowd(
     telemetry.gesturing = telemetry.gesturing.max(gesturing);
     telemetry.looking = telemetry.looking.max(looking);
     telemetry.blended = telemetry.blended.max(blended);
+    // Not a running maximum: the LOD split is a property of where the camera is now.
+    telemetry.full = full;
+    telemetry.stepped = stepped;
+    telemetry.paused = paused;
+    telemetry.peak_slide_mm = peak_slide;
 }
 
+/// Point the animation LOD at whatever the camera is watching.
+///
+/// The binding culls by distance only when it is told where the viewer is; without this the plaza
+/// would animate every body at full rate and the band would be dead weight.
+fn focus_camera(camera: Query<&Transform, With<Camera3d>>, mut focus: ResMut<AnimationFocus>) {
+    // `Transform`, not `GlobalTransform`: this runs in `Update`, before propagation, and the camera
+    // is a root, so its local transform is the world position the band wants.
+    if let Some(camera) = camera.iter().next() {
+        *focus = AnimationFocus::at(camera.translation);
+    }
+}
 /// Count down, capture, report, exit.
 fn lifecycle(
     mut run: ResMut<Run>,
@@ -990,6 +1037,10 @@ mod tests {
             gesturing: 1,
             looking: 1,
             largest_step: 0.25,
+            full: 1,
+            stepped: 0,
+            paused: 0,
+            peak_slide_mm: 0.0,
         };
         assert!(telemetry.check(Rig::Mannequin).is_ok());
         assert!(telemetry.describe().contains("biggest step 0.250 m"));

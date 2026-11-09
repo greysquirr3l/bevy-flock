@@ -9,6 +9,8 @@
 //! no state and allocates nothing: the same two numbers always produce the same four weights, which
 //! is what lets a replay animate identically at 20 frames a second and at 200.
 
+use crate::lod::BlendLod;
+use crate::settle::BlendWindows;
 use bevy_asset::Asset;
 use bevy_reflect::TypePath;
 use thiserror::Error;
@@ -71,6 +73,27 @@ pub enum ProfileError {
         /// Where it reaches full weight, radians per second.
         full: f32,
     },
+    /// The LOD band was inverted or empty, so no body would ever be stepped or paused.
+    #[error("lod band must satisfy 0 <= near < far, got near {near} and far {far}")]
+    LodBand {
+        /// The inner distance as authored.
+        near: f32,
+        /// The outer distance as authored.
+        far: f32,
+    },
+    /// The LOD cadence was zero ticks, which is a pause expressed as a step.
+    #[error("lod step interval must be at least one tick, got {0}")]
+    LodStep(u32),
+    /// A start or stop window was longer than four seconds of ticks.
+    #[error(
+        "settle windows must be at most 240 ticks, got start {start_ticks} and stop {stop_ticks}"
+    )]
+    SettleWindow {
+        /// The start window as authored, in ticks.
+        start_ticks: u32,
+        /// The stop window as authored, in ticks.
+        stop_ticks: u32,
+    },
     /// A field was `NaN` or infinite, which would poison every comparison downstream.
     #[error("{field} must be finite, got {value}")]
     NotFinite {
@@ -79,6 +102,31 @@ pub enum ProfileError {
         /// The value as authored.
         value: f32,
     },
+}
+
+/// Who moves a body whose clip carries its own translation.
+///
+/// The flag exists because both answers are defensible and only one of them can be the default. A
+/// simulation-driven crowd wants [`RootMotion::Simulation`]: the steering solution is the ground truth
+/// and a clip that translates its root is a rigging artifact to be dropped. A game built around
+/// mocap wants [`RootMotion::Clip`]: the clip's translation *is* the movement, and the steering target
+/// has to follow it. Choosing neither and letting both run is the one wrong answer, and it is what
+/// happens by accident when nobody decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RootMotion {
+    /// The simulation owns movement: reported clip translation is dropped on arrival.
+    #[default]
+    Simulation,
+    /// The clip owns movement: reported translation moves the body and advances its walk phase.
+    Clip,
+}
+
+impl RootMotion {
+    /// Whether a reported offset moves the body.
+    #[must_use]
+    pub const fn extracts(self) -> bool {
+        matches!(self, Self::Clip)
+    }
 }
 
 /// How a body's motion maps onto the four clip slots.
@@ -96,6 +144,9 @@ pub struct LocomotionProfile {
     stride_metres: f32,
     turn_threshold: f32,
     turn_full: f32,
+    lod: BlendLod,
+    windows: BlendWindows,
+    root_motion: RootMotion,
 }
 
 impl LocomotionProfile {
@@ -115,6 +166,72 @@ impl LocomotionProfile {
     /// look like a skating run.
     pub const fn stride_metres(&self) -> f32 {
         self.stride_metres
+    }
+
+    /// How far away this rig stays fully animated.
+    ///
+    /// Part of the profile rather than a constant because it is a property of the artwork: a body
+    /// whose silhouette is three pixels tall can be paused further out than one you can read.
+    pub const fn lod(&self) -> BlendLod {
+        self.lod
+    }
+
+    /// Who moves the body when a clip carries its own translation.
+    pub const fn root_motion(&self) -> RootMotion {
+        self.root_motion
+    }
+    /// Choose who owns movement, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{LocomotionProfile, RootMotion};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_root_motion(RootMotion::Clip);
+    /// assert!(profile.root_motion().extracts());
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_root_motion(mut self, root_motion: RootMotion) -> Self {
+        self.root_motion = root_motion;
+        self
+    }
+    /// How long this body takes to pick up its stride and to put it down, in ticks.
+    ///
+    /// Zero ticks for both — the default — means the pose follows the simulation exactly on the tick
+    /// it changes, which is what a replay of the simulation should show. A game that wants a start
+    /// and stop animation authors a window here.
+    pub const fn windows(&self) -> BlendWindows {
+        self.windows
+    }
+    /// Replace the settle windows, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{BlendWindows, LocomotionProfile};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_windows(BlendWindows::try_new(6, 8)?);
+    /// assert_eq!(profile.windows().start_ticks(), 6);
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_windows(mut self, windows: BlendWindows) -> Self {
+        self.windows = windows;
+        self
+    }
+    /// Replace the LOD band, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{BlendLod, LocomotionProfile};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_lod(BlendLod::disabled());
+    /// assert_eq!(profile.lod(), BlendLod::disabled());
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_lod(mut self, lod: BlendLod) -> Self {
+        self.lod = lod;
+        self
     }
 
     /// Validate an authored profile.
@@ -167,6 +284,9 @@ impl LocomotionProfile {
             stride_metres,
             turn_threshold,
             turn_full,
+            lod: BlendLod::default(),
+            windows: BlendWindows::immediate(),
+            root_motion: RootMotion::Simulation,
         })
     }
 
@@ -238,6 +358,23 @@ pub struct BlendWeights {
 }
 
 impl BlendWeights {
+    /// Scale the stride slots by `factor` and give the rest to idle.
+    ///
+    /// This is what a settle window applies: a body 40% through its start window is drawn as a body
+    /// standing still with 60% of its weight, which is the honest pose for "the legs have not caught
+    /// up yet". Nothing is normalised afterwards because the two weights trade exactly.
+    #[must_use]
+    pub fn with_stride_scaled(self, factor: f32) -> Self {
+        let factor = factor.clamp(0.0, 1.0);
+        let stride = self.walk + self.run;
+        let kept = stride * factor;
+        Self {
+            idle: self.idle + (stride - kept),
+            walk: self.walk * factor,
+            run: self.run * factor,
+            turn_in_place: self.turn_in_place,
+        }
+    }
     /// A pose with every weight at zero, which no profile produces and every default needs.
     pub const ZERO: Self = Self {
         idle: 0.0,
@@ -470,5 +607,22 @@ mod tests {
         for (slot, value) in slots.iter().zip(values) {
             assert!((weights.weight(*slot) - value).abs() < f32::EPSILON);
         }
+    }
+
+    #[test]
+    fn turn_in_place_is_unreachable_at_walking_speed() {
+        let profile = LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)
+            .unwrap_or_else(|_| unreachable!("the fixture profile is valid"));
+        // A body travelling at walking speed steers; it does not pivot, however hard it turns.
+        let walking = profile.blend(profile.walk_speed(), 40.0);
+        assert!(walking.weight(ClipSlot::TurnInPlace).abs() < 1e-6);
+        assert!((walking.weight(ClipSlot::Walk) - 1.0).abs() < 1e-6);
+        // Standing still and turning is the pivot's whole job, and it comes out of idle.
+        let pivot = profile.blend(0.0, 40.0);
+        assert!((pivot.weight(ClipSlot::TurnInPlace) - 1.0).abs() < 1e-6);
+        assert!(pivot.weight(ClipSlot::Idle).abs() < 1e-6);
+        // Below the profile's threshold there is no pivot at all: a body standing still and turning
+        // slowly is a body standing still.
+        assert!(profile.blend(0.0, 0.2).weight(ClipSlot::TurnInPlace).abs() < 1e-6);
     }
 }

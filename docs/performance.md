@@ -987,3 +987,114 @@ order equals identity order, which is what `BodyLink` relies on to move the righ
 `bodies()` remains, allocating exactly one `Vec`: snapshot callers — the binaries, the example, the
 tests — were never the problem, and changing their signature to save an allocation they make once
 would be churn.
+
+## Animation LOD: what stopping the invisible costs and saves (2026-11-09, T07)
+
+`apply_locomotion_blend` now decides, per body, whether to write the blend at all. The level comes
+from the tier the scheduler already assigned (`NpcTier`) and the distance to an `AnimationFocus` the
+game sets once a frame — not from a second distance test:
+
+| Level | What the binding does | When |
+|---|---|---|
+| `Full` | writes weights and rates every tick | inside `near`, or inside the band for a thinking tier |
+| `Stepped` | writes every `far_step_ticks` (default 6) | inside the band for a reflex or reactive tier |
+| `Paused` | `pause_all` and no writes | beyond `far` |
+
+Both distances and the cadence live on `LocomotionProfile` (`BlendLod`, `BlendLod::try_new`,
+`BlendLod::disabled`), because a rig with a long stride can be stepped further out than one with a
+short one before the freeze reads as a bug. No focus set means no culling: an app that never says
+where the camera is keeps every body animating.
+
+The measurement is `cargo run -p bevy-flock-anim --release --example lod_cost`, a release build on
+the same machine as this document's other numbers. Ten thousand bodies on a 60 m plaza, every body
+at reflex tier, 240 timed passes after a 32-pass warm-up, binding system only:
+
+| Camera | Bodies | Culled | Control | Saved | Split |
+|---|---|---|---|---|---|
+| plaza edge | 2,000 | 0.061 ms | 0.117 ms | 48.1% | 381 full, 1,619 stepped |
+| plaza edge | 10,000 | 0.305 ms | 0.601 ms | 49.1% | 1,914 full, 8,086 stepped |
+| 140 m out | 2,000 | 0.036 ms | 0.117 ms | 69.3% | 505 stepped, 1,495 paused |
+| 140 m out | 10,000 | 0.181 ms | 0.599 ms | 69.7% | 2,533 stepped, 7,467 paused |
+
+Two things this table says, and one it does not.
+
+* Culling at the plaza edge clears the gate — 49% of binding time at 10,000 bodies, against the 30%
+  the task asks for — because the tier check and the distance check are one branch set per body, not
+  a query or an allocation.
+* The paused band is worth more than the stepped one: 70% saved when the camera is outside the
+  plaza, since a paused body costs one `pause_all` per return rather than a write per tick. The
+  absolute numbers are small because the whole binding is 0.6 ms at 10,000; what a paused body also
+  saves is Bevy's `animate_targets`, which is outside this system and outside this table.
+* A stepped body still advances its clip — the cadence saves the writes, not the bones. Making the
+  cadence also freeze the skeleton is what `Paused` is for, and a game that wants low-rate bone
+  updates should step the whole player, not just this binding.
+
+The resume rule is a test, not a note: `a_returning_body_resumes_at_the_walked_phase` drives a body
+300 m out and back, then compares every node's weight against a control that was never culled, and
+`resuming_seeks_the_walk_clip_to_the_phase_the_distance_implies` checks the walk clip lands on
+`phase × duration` rather than frame zero.
+
+## Animation transitions (T08)
+
+The blend itself is a pure function of `Locomotion`, so it is free and it snaps. A start or stop
+window (`LocomotionProfile::windows`, `BlendWindows`) is the part that costs state: each body carries
+the pose it is being drawn in and the pose its window opened from, 32 bytes plus a tick counter, and
+interpolates on a linear ramp that lands exactly on the window.
+
+| Case | Measured |
+| ---- | -------- |
+| Straight walk, 300 ticks at 1.4 m/s, sum of per-tick slide | < 0.001 mm (test ceiling) |
+| Start window committed after 6 ticks | 6/6 of the walk weight, 3/6 at the halfway tick |
+| Stop window released after 8 ticks | 0/8 of the walk weight, idle at 1.0 |
+| Playground, 2,000 mannequins, 60 frames, default radius | peak 22.0 mm in one tick |
+
+The playground figure is the trade the window makes, not a defect in it: while a body is half a
+window into its start its legs carry half its motion, so the remaining half slides. It is largest in
+a milling crowd because bodies are changing state constantly. A game that wants no slide at all
+leaves the windows at zero, which is the default, and gets the exact simulation pose on every tick.
+
+Two rules make the measurement trustworthy. Slide is metres per **simulation tick** from `SimClock`,
+never a frame delta, so the same walk measured at 20 fps and at 240 fps reports the same number. And
+the ease is a fixed fraction of the window per tick, so `the_window_counts_ticks_rather_than_seconds`
+drives the same body at 1 tick and at 10 ticks per pass and requires the identical weight.
+
+## The binding envelope (T10)
+`cargo bench -p bevy-flock-anim --bench binding` is the measurement; `crates/bevy-flock-anim/benches/baseline.json`
+is the committed record; `python3 scripts/bench_gate.py` fails a build on a 25% regression against it.
+Every case runs the real systems on a real `World`, because a micro-benchmark of `blend()` on its own
+misses the query iteration, the asset lookups and the state writes, which is where the surprises are.
+
+Machine: a six-core x86-64 sandbox VM (no model string exposed), `[profile.bench]` with
+`codegen-units = 1` and `lto = "thin"`. Criterion's bencher output, median of a normal run:
+
+| Case | 2,000 bodies | 10,000 bodies |
+| ---- | -----------: | ------------: |
+| `weights/no_culling` — the blend with the LOD band switched off | 182 µs | 922 µs |
+| `weights/plaza_edge` — the blend with the camera on the plaza edge | 190 µs | 941 µs |
+| `culling/inside_band` — every body inside the near band | 187 µs | 935 µs |
+| `culling/beyond_far` — every body paused | 57 µs | 278 µs |
+| `gaze/2_000_bodies` — two bones solved per body | 363 µs | — |
+| `root_motion/no_report` — the reconciler with nothing to reconcile | 6.8 µs | 28 µs |
+| `root_motion/every_body_reports` — every body reports a clip offset | 36 µs | 175 µs |
+
+That is 91 ns per body for the blend and 181 ns per body for the gaze solve, at 2,000 bodies.
+
+**The plan's ceiling is missed, and this section says so rather than rounding it.** T10 asked for the
+bindings plus gaze under 0.3 ms at 2,000 bodies; the measured pair is 0.55 ms, 82% over. The gap is
+not in the arithmetic — 2,000 bodies of quaternion work is microseconds — it is in the two per-bone
+`get_mut` calls the gaze solve makes through a sparse set, one cache miss each, and in the four
+hash-map lookups the blend does to find its animation nodes. Both are data-layout problems, both are
+fixable, and neither is fixed here: doing it properly means writing the aim onto the bones during
+resolve instead of looking the bones up, and caching node handles in `AnimationState`, which is a
+change to two public entry points and belongs in its own measured pass.
+
+What the envelope does meet: 0.10 ms per 1,000 bodies for the blend, which is 6% of a 16.6 ms frame
+at 10,000, and 0.028 ms at 10,000 for the reconciler when no clip carries translation. The ceiling
+stands as the target for the follow-up task rather than being quietly rewritten to whatever the code
+happens to do.
+
+Two rules keep the gate honest. The baseline records the machine it was taken on and the gate compares
+ratios, so a slower runner fails everything and the fix is a new baseline on that runner, stated in the
+commit. And the allocation test is a test, not a benchmark: `tests/no_alloc.rs` counts allocations over
+600 ticks of the blend and 600 of the reconciler and fails on the first `Vec`, which is the regression
+a timing threshold would catch a release later.

@@ -117,6 +117,14 @@ impl Locomotion {
         self.speed > MIN_MOVING_SPEED
     }
 
+    /// Add a distance the body was moved by a clip rather than by steering.
+    ///
+    /// Used by root-motion extraction: the clip moved the body, so the walk cycle has to count that
+    /// distance or the legs will be put back where the steering thought they were.
+    pub fn apply_root_offset(&mut self, offset: Vec2) -> &mut Self {
+        self.distance += f64::from(offset.length());
+        self
+    }
     /// Fold one tick of motion into the component.
     ///
     /// `velocity` is the body's velocity after integration and `desired` the velocity steering asked
