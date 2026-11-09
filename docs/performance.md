@@ -1137,21 +1137,55 @@ Same machine as the animation envelope: six-core x86-64 sandbox VM, `[profile.be
 
 | Case | Population | Time | Per body |
 | ---- | ---------: | ---: | -------: |
-| `spatial_build/build` — full rebuild of every body | 100,000 | 6.7 ms | 67 ns |
-| | 1,000,000 | 47.2 ms | 47 ns |
+| `spatial_build/build` — full rebuild of every body | 100,000 | 5.4 ms | 54 ns |
+| | 1,000,000 | 30.5 ms | 30 ns |
 | `spatial_query/radius_1k_queries` — 1,000 radius-12 m queries | 100,000 | 0.70 ms | 0.70 µs/query |
 | | 1,000,000 | 6.5 ms | 6.5 µs/query |
 | `spatial_kernel/steer_integrate_advance` — the scalar reference kernel | 100,000 | 67.7 ms | 677 ns |
 
 Two things to read carefully, because both invite a wrong conclusion.
 
-**The 47 ms build is not the frame.** The published million-body frame (4.75 ms) is the banded continuum,
+**The 30 ms build is not the frame.** The published million-body frame (4.75 ms) is the banded continuum,
 where ambient bodies are *not* individually indexed: roughly 5,000 manifested bodies sit in the grid and
 the rest are handled as a field. This benchmark deliberately measures the worst case — every one of a
 million bodies rebuilt into cells every tick — because that is the case a naive parallel port would be
 asked to speed up, and because it is the ceiling a game hits the moment it decides every body matters.
-Comparing 47 ms against 4.75 ms and concluding the crate regressed would be comparing a full rebuild with
+Comparing 30 ms against 4.75 ms and concluding the crate regressed would be comparing a full rebuild with
 an incremental band.
+
+### Where the rebuild's time went
+The first baseline recorded 47.2 ms and that number was investigated before anything was optimised, with
+`cargo run --release --example profile_build` reproducing each pass of `SpatialGrid::build` from outside
+the crate and timing it separately:
+
+| Stage | 1M bodies | Per body |
+| ----- | --------: | -------: |
+| `cell_of`, one call per body | 17.9 ms | 17.9 ns |
+| counting pass (`cell_of` + histogram increment) | 22.5 ms | 22.5 ns |
+| prefix sum over 592,704 cells | 1.3 ms | — |
+| placement pass, cell indices already known | 3.5 ms | 3.5 ns |
+| `build()` as it was | 46.4 ms | 46.4 ns |
+
+The parts summed to 26 ms and the whole cost 46. The 20 ms difference was `cell_of` being called **twice
+per body** — once to count, once to place — plus a 2.3 MB copy of the prefix sums into a separate cursor
+array. Two changes, no change in behaviour:
+
+1. The counting pass remembers each body's cell in a reused `Vec<u32>`, so the placement pass reads four
+   bytes instead of recomputing three divisions and three clamps.
+2. `cell_start` is used as its own fill cursor and shifted back by one cell afterwards, in a descending
+   pass that reads each value just before overwriting it. That removes the cursor array entirely — one
+   buffer instead of two, and no copy.
+
+46.4 ms → 34.5 ms in the harness, 47.2 → 30.5 ms under criterion. `every_cell_window_holds_exactly_the
+_entries_that_belong_to_it` checks the invariant the in-place cursor risks: every window holds exactly the
+entries whose `cell_of` is that cell, and every entry appears exactly once.
+
+What is left is `cell_of` at 17.9 ns per body, which is three float divisions and three clamps, and the
+placement pass's random writes into a 592,704-cell cursor. Neither is a bug; both are the serial shape of
+the problem, which is why the next task partitions the cell range across threads instead of micro-tuning
+the arithmetic. A reciprocal multiply would remove most of the division cost and is deliberately not done:
+`1/cell_size` is exact only for power-of-two cell sizes, and the 7 m and 9 m sweeps in ADR 0031 would then
+assign boundary bodies to different cells than they do today.
 
 **The 677 ns kernel is the scalar reference, not the SIMD road.** `application::packed` is what the serial
 ECS path was measured against in ADR 0020; the million-body kernel is `benches/crowd.rs`. A scalar run at
