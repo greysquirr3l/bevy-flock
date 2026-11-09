@@ -15,6 +15,7 @@ Run it top to bottom on a clean `main`. Anything that fails is a blocker, not a 
 git switch main && git pull
 git status --porcelain          # must be empty
 git tag --list 'v*' | tail -1   # know the last release
+
 ```
 
 **Status:** ready. PR #34 (the core-crate split) merged as `aaca2f6`, so step 6 can be re-run against `main` rather
@@ -27,19 +28,25 @@ The promise: every public item is documented or deliberately hidden, and the fac
 ```bash
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features
 cargo test --test core_boundary
+
 ```
 
 Plus a compile-only check that the documented paths are the promised ones: `tests/facade_paths.rs` should import from
 `bevy_flock::domain::…`, `::behavior::…`, `::application::…`, `::adapters::…` and `::prelude::*`, and assert a few type
 identities. It does not exercise behaviour; it fails when a path stops resolving, which is the 1.0 promise in one file.
 
-**Status:** the re-export is in place and **811 tests pass through it** (`cargo test --workspace --all-features`, 25
-suites; 704 of them under the default feature set). The doc gate passes: `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
---workspace --all-features` was red with nine broken or private links until the adoption-surface branch fixed them, two of
-which named items that no longer existed.
+**Status:** met. The doc gate is clean across all four crates (`RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+--workspace --all-features`, zero errors; it was red with nine broken or private links until the adoption-surface
+branch fixed them, two of which named items that no longer existed).
 
-`tests/facade_paths.rs` does not exist yet, write it before the tag, because it is the only test that fails if a published
-path is accidentally renamed.
+`tests/facade_paths.rs` exists now, and it is the file the checklist asked for: 5 tests with all features, 4 with the
+default set, 1 with `--no-default-features`. It asserts path *resolution* and type *identity*, so the facade path and
+the crate path have to be one type rather than two lookalikes, and it compiles the README's first block with no
+`bevy_app` import anywhere in the file. Nothing in it exercises behaviour: it fails to compile when a published path
+stops resolving, which is the 1.0 promise in one file.
+
+The suite is **816 tests in 28 suites** with all features (`cargo test --workspace --all-features`) and **690 in 20**
+under the default set (`cargo test --workspace --tests`).
 
 ## 2. The MSRV is a promise
 
@@ -47,10 +54,14 @@ path is accidentally renamed.
 rustup toolchain install 1.97.1 --profile minimal
 cargo +1.97.1 check --workspace --all-features
 cargo +1.97.1 test --workspace --all-features --no-run
+
 ```
 
-**Status:** `rust-version = "1.97.1"` in both manifests, `rust-toolchain.toml` pins the same. Not yet run on a machine that
-has *only* 1.97.1, worth doing once, since a crate that builds on the author's newer toolchain says nothing about its floor.
+**Status:** met. `rust-version = "1.97.1"` in all four manifests, and `rust-toolchain.toml` pins the same, so the
+toolchain this repository builds with *is* the floor: `rustc 1.97.1` is what every number recorded here was measured
+under, which answers the "author's newer toolchain" worry without a second machine.
+`cargo +1.97.1 check --workspace --all-features` and `cargo +1.97.1 test --workspace --all-features --no-run` both
+pass, the second building every test binary.
 
 ## 3. A stranger is running a crowd in five minutes
 
@@ -59,25 +70,54 @@ cd /tmp && cargo new crowd-demo && cd crowd-demo
 cargo add bevy-flock
 # paste the README's first code block into src/main.rs, unmodified
 cargo run --release
+
 ```
 
 The rule: the block is copied, not adapted. If it needs an edit to compile, the README is wrong.
 
-**Status:** done in the documentation release. `README.md` leads with the five-line block, then a ten-minute verification
-path. Not yet re-run from a genuinely empty crate on a machine with no cached dependencies, which is the last confirmation
-this step wants before the tag.
+**Status:** met, after this item found a real defect. The README's first block opened with `use bevy_app::App;`, which
+does not compile in a crate that ran only `cargo add bevy-flock`:
+
+```
+error[E0432]: unresolved import `bevy_app`
+
+```
+
+The block now relies on the prelude's `App`, and was verified the only way that counts: an empty crate, one dependency,
+the block pasted unmodified, `cargo run` printing nothing and exiting zero. The site's first-crowd page carried the
+same defect plus an unused `SimClock` import; both are gone. `tests/facade_paths.rs` compiles the block as a test with
+no `bevy_app` import in the file, so the claim cannot drift back.
+
+What remains untested is the registry fetch itself, which needs the crate to exist: the five-minute run above used a
+`path` dependency, because `cargo add bevy-flock` has nothing to resolve until the first upload happens. That is
+sequencing, not a gap.
 
 ## 4. Errors a caller can act on
 
 ```bash
 grep -rn "unwrap()\|expect(" src crates --include=*.rs | grep -v "#\[cfg(test)\]"
 cargo test --workspace --all-features
+
 ```
 
-**Status:** the strict lint policy already denies `unwrap_used`, `expect_used`, `panic` and `indexing_slicing` across the
-workspace including tests, and `scripts/lint_audit.py` verifies that every sanctioned exception is documented. The
-remaining question here is documentation, not safety: each public error variant should name a field and a value the way
-`ConfigError::InvalidDistance { field, value }` does.
+**Status:** the safety half is met and machine-enforced; the documentation half is met for most variants, not all.
+
+Safety: the strict lint policy denies `unwrap_used`, `expect_used`, `panic` and `indexing_slicing` across the workspace
+including tests, `cargo clippy --workspace --all-targets --all-features -- -D warnings` is clean, and
+`scripts/lint_audit.py` verifies that each of the 44 sanctioned exceptions is documented. The 45 `unwrap(`/`expect(`
+hits the grep finds are inside those sanctioned scopes or in doc examples, and a test build would fail if that stopped
+being true.
+
+Documentation: of **84 public error variants, 66 carry a field or a value** and 18 are unit variants. Most of the 18
+have nothing to name (`DialogError::Empty`, `NavError::Empty`, `PopulationError::NoSlots`: the condition is the whole
+message). Three are worth a decision before 1.0, because they know more than they say:
+
+- `FieldError::TooLarge` does not say which axis, which value or which limit;
+- `FieldError::BadSpacing` does not say the spacing it rejected;
+- `GeneratorError::ZeroWeight` does not say which table entry.
+
+Changing those three is a small public-API change with test churn, so it is a decision for the owner rather than
+something this pass should do unasked.
 
 ## 5. Guarantees stated where an adopter reads them
 
@@ -88,9 +128,25 @@ Published as `site/src/content/docs/reference/guarantees.md`: eleven claims, eac
 - zero steady-frame allocation, the allocation counters in `tests/band_continuity.rs`, `tests/tree_no_alloc.rs`
 - budgets at 1k / 10k / 100k / 1M, `docs/dev/tuning/performance.md`, with the fixture each number came from
 
-**Status:** done. `site/src/content/docs/reference/guarantees.md` publishes eleven claims, each with the test that
-enforces it, and states the limits of each (determinism is per platform and per feature set; parity is across worker counts
-on one machine). The page is linked from the sidebar, so an adopter meets it before they meet an issue tracker.
+**Status:** met, and re-verified rather than taken on trust. The page publishes exactly eleven claims, and every test
+it names exists under that exact name:
+
+| row | found at |
+| --- | --- |
+| determinism | `tests/determinism.rs` |
+| spatial parity | `spatial::every_thread_count_builds_identical_windows` (core), `tests/spatial_parity.rs` |
+| population conserved | `tests/band_continuity.rs::gate_4_...` |
+| no pop at the boundary | `tests/band_continuity.rs::gate_5_...` |
+| anchor at 10 km | `tests/band_continuity.rs::gate_6_...` |
+| steady frame allocates nothing | `gate_7_...`, `tests/crowd_no_alloc.rs`, `tests/spatial_batch_no_alloc.rs`, `tests/tree_no_alloc.rs` |
+| folding | `tests/band_continuity.rs::gate_9_...` |
+| core names no engine crate | `tests/core_boundary.rs` |
+| core with no engine in the graph | `crates/bevy-flock-core/tests/headless_consumer.rs` |
+| old saves load | `tests/save_compat.rs` |
+| memory stays bounded | `tests/memory_aging.rs` |
+
+A renamed gate would silently orphan a row, so the names are the check, not the prose. The page also states the limits
+(per platform, per feature set, parity within one machine) and is linked from the sidebar.
 
 ## 6. The core stands alone
 
@@ -99,6 +155,7 @@ cargo tree -p bevy-flock-core | grep -E "bevy_(ecs|app|transform)"   # must prin
 cargo check --no-default-features
 cargo test -p bevy-flock-core --test headless_consumer
 cargo test --test core_boundary
+
 ```
 
 **Status:** all four pass on `main` after PR #34. This is the release's structural claim: a headless consumer gets the
@@ -112,6 +169,7 @@ cargo run --release --example cross_bench -- --agents 10000,100000,1000000 --tic
 # Godot: benchmarks/godot/cross_bench.gd, headless, same machine
 # Unreal: the TArray harness described in docs/dev/tuning/benchmarks/cross-engine.md, same machine
 python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
+
 ```
 
 **Status:** our row exists; the other two need one afternoon on a single machine. Until then the README says "in the band
@@ -135,6 +193,7 @@ cargo publish --dry-run -p bevy-flock      && cargo publish -p bevy-flock
 
 cargo deny check
 git tag -a v1.0.0 -m "bevy-flock 1.0.0" && git push --tags
+
 ```
 
 **Only the first dry run can pass before the first upload.** For the other three it fails with
@@ -144,6 +203,7 @@ error: failed to prepare local package for uploading
 Caused by:
   no matching package named `bevy-flock-core` found
   location searched: crates.io index
+
 ```
 
 which is the ordering constraint stating itself, not a defect. Sequential dry runs that pass are therefore possible
@@ -155,6 +215,7 @@ Three conditions must be true before the first `publish`, and the checker enforc
 
 - every crate carries `description`, `license`, `repository`, `documentation`, a `readme` that exists, `keywords`,
   `categories`, `rust-version` and `[package.metadata.docs.rs] all-features = true`;
+
 - every `path` dependency also carries a `version` whose requirement accepts the dependency's own version;
 - readiness items 1-5 are closed, because a `1.0.0` cannot be unpublished.
 

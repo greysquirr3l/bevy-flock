@@ -4,8 +4,6 @@ description: The smallest program that produces a moving crowd, and what each li
 ---
 
 ```rust
-use bevy_app::App;
-use bevy_flock::application::SimClock;
 use bevy_flock::prelude::*;
 
 fn main() {

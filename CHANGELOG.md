@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The README's first block compiles in a crate with one dependency.** It used to open with `use bevy_app::App;`,
+  which fails with `error[E0432]: unresolved import 'bevy_app'` after `cargo add bevy-flock`, because a transitive
+  dependency is not importable. The block now takes `App` from the prelude, and `tests/facade_paths.rs` compiles it as
+  a test that imports nothing but the crate itself. The site's first-crowd page had the same defect plus an unused
+  `SimClock` import.
+- `tests/facade_paths.rs` now pins the published paths: module-path resolution, prelude-to-module type identity, and
+  facade-to-crate type identity, so a path rename breaks a test instead of a downstream build. It runs in the
+  `--no-default-features` configuration too, where only the core paths are in play.
 - **The four crates are publishable, and something checks it.** `bevy-flock-core` still carried `publish = false`
   from the extraction, had no `readme`, `keywords`, `categories` or docs.rs table, and `bevy-flock-ecs` and
   `bevy-flock-anim` declared a `readme` that did not exist. `scripts/publish_check.py` now verifies the metadata
