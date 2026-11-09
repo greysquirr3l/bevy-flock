@@ -1,8 +1,3 @@
-#![expect(
-    clippy::print_stdout,
-    reason = "a profiling harness reports to stdout: the numbers are the deliverable"
-)]
-
 //! How long a band tick costs, and where the camera's motion shows up in it.
 //!
 //! `tests/band_continuity.rs` drives 10,000 ticks and the `gate_*` tests in it were taking tens of minutes,

@@ -105,6 +105,28 @@ fn body_sweep() -> Vec<usize> {
     }
 }
 
+/// `--workers 2,4,6`: the thread counts to measure. Defaults to every count from one to the core count.
+///
+/// The scaling curve is what the phase-5 gate has to be argued from: a pass that is 3.5x on six threads and a pass that
+/// is 5.3x fail the same target for different reasons, and one number at full width cannot tell them apart.
+fn worker_sweep(cores: usize) -> Vec<usize> {
+    let mut args = std::env::args().skip_while(|arg| arg != "--workers");
+    args.next();
+    let listed: Vec<usize> = args
+        .next()
+        .map(|list| {
+            list.split(',')
+                .filter_map(|item| item.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    if listed.is_empty() {
+        (1..=cores.max(1)).collect()
+    } else {
+        listed
+    }
+}
+
 /// Rebuild `REPEATS` times at this worker and block count, keeping the cost of every rebuild.
 fn measure(
     config: SpatialGridConfig,
@@ -179,8 +201,9 @@ fn main() {
             cores,
             CELL
         );
-        report(&measure(config, bodies, 1, 0), bodies, 1, 0);
-        report(&measure(config, bodies, cores, 0), bodies, cores, 0);
+        for workers in worker_sweep(cores) {
+            report(&measure(config, bodies, workers, 0), bodies, workers, 0);
+        }
         for blocks in block_sweep() {
             report(
                 &measure(config, bodies, cores, blocks),
