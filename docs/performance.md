@@ -1365,3 +1365,44 @@ So the blocked scan stays in the plan — it is cheap, it is a prerequisite for 
 it removes a serial pass — but it is no longer the headline. The tasks that follow this measurement are about
 the clear's 30 ns per cell and the count pass's negative scaling, and `build-scaling-gate`'s target has been
 re-derived from the floor above rather than from the 5x guess.
+
+### The blocked scan, and the prediction it missed (T03)
+
+`SpatialGrid::with_blocks` splits the prefix sum into blocks over the flattened cell index: per-block totals, a
+serial scan over those totals (O(blocks) additions), then a per-block local scan. There is no shared cursor and
+no atomic; `blocks` derives from the cell count and never from the worker count, so the decomposition cannot
+depend on the machine (ADR 0055 §6). Measured on the same 1M fixture and six aarch64 cores:
+
+| Pass | 1 worker | 6 workers | Before (T01) at 6 | Change |
+| --- | ---: | ---: | ---: | --- |
+| clear | 13.08 ms | 2.46 ms | 2.46 ms | — |
+| count | 1.70 ms | 1.74 ms | 2.08 ms | 0.84x |
+| prefix | 0.44 ms | **0.28 ms** | 0.87 ms | **3.1x faster** |
+| place | 7.32 ms | 2.22 ms | 2.23 ms | — |
+| restore | 0.68 ms | 0.70 ms | 0.68 ms | — |
+| **total** | **23.34 ms** | **7.48 ms** | 8.85 ms | **1.18x faster** |
+
+The build went from 8.85 ms to 7.48 ms at six workers, which is the 1.2x the ADR predicted — 8.85 minus the
+1.45 ms the scan and (eventually) the restore were worth. The `prefix` figure, however, **missed its own
+prediction by 2.8x**: ADR 0055 said ≤ 0.10 ms and the measured value is 0.28 ms.
+
+That miss was diagnosed by doing what the ADR said to do — sweep `blocks` rather than distrust the design — and
+the sweep says the design is not the problem:
+
+| Blocks | `prefix` at 6 workers |
+| ---: | ---: |
+| 64 | 0.272 ms |
+| 256 | 0.279 ms |
+| 1024 | 0.290 ms |
+| 4096 | 0.304 ms |
+
+Flat from 64 to 4096. If the O(blocks) step or per-block overhead were the limit, the curve would fall with fewer
+blocks; it does not, so the limit is elsewhere: the scan is a read-modify-write over 421,876 `u32` — 1.7 MB — and
+0.28 ms is about 6 GB/s of effective single-pass bandwidth on this VM. A 0.10 ms target implied ~17 GB/s, which
+is not available for a pass that both reads and writes the same array. **The prediction was wrong, not the
+implementation**, and the ADR now carries the measured floor with the arithmetic that explains it.
+
+What this leaves is where T04 goes next. The serial tail is now 0.98 ms: 0.28 ms of scan plus 0.70 ms of cursor
+restore. The restore exists only because `place` walks windows downwards from their ends, and per-block bases
+mean it can be deleted outright rather than parallelised — which is worth another 0.70 ms, or about 1.1x on the
+build, and takes the serial floor to roughly 0.3 ms.

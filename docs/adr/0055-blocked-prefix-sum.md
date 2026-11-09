@@ -128,7 +128,9 @@ authorises:
 A task implementing this ADR is not done until:
 
 - `cell_start` and `order` compare **byte for byte** against the serial scan at 1, 2, 3 and 8 workers across
-  block counts {1, 128, 1024, 16384}, in a test that compares bytes rather than element-wise equality. Byte
+  block counts {1, 128, 1024, 4096} — the last is `MAX_BLOCKS`; this ADR first said 16384, which its own
+  constant would have clamped, so the matrix and the clamp agree on 4096), in a test that compares bytes rather
+  than element-wise equality. Byte
   comparison, not element-wise: element-wise equality would let a difference in the padding between arrays pass.
 - `blocks = 1` is asserted to route to the serial scan, so the test above fails loudly if the reference path is
   removed rather than silently comparing the blocked path with itself.
@@ -154,9 +156,19 @@ improvement on its own, and 5.6x is a ceiling on a build whose `count` pass is c
 A task that lands this ADR and reports "no change to total" is not a failure — but it has to report the passes,
 and a `prefix` above 0.10 ms at six workers is.
 
-If `prefix` lands above 0.10 ms, the cause is almost certainly the O(b) step being run with `b` too small to hide
-its own loop overhead, and the fix is to sweep `blocks` rather than to distrust the design. That sweep is part of
-the implementing task, not a follow-up.
+If `prefix` lands above 0.10 ms, sweep `blocks` before distrusting the design. That sweep is part of the
+implementing task, not a follow-up.
+
+**What actually happened (T03).** `prefix` landed at **0.28 ms** at six workers — 2.8x over this prediction — and
+the sweep the paragraph above prescribes is what identified why: 64 blocks 0.272 ms, 256 blocks 0.279 ms, 1024
+blocks 0.290 ms, 4096 blocks 0.304 ms. Flat, so the O(b) step and per-block overhead are not the limit, and the
+suggested cause above was wrong. The limit is bandwidth: the scan is a read-modify-write over 421,876 `u32`, and
+0.28 ms is about 6 GB/s of effective single-pass bandwidth on the measurement VM. A 0.10 ms target implied
+~17 GB/s, which a pass that both reads and writes the same array does not get.
+
+The prediction is kept here rather than edited to match the result, because a prediction that is rewritten after
+the fact is not a prediction. The total did land where it said it would — 8.85 ms to 7.48 ms — so the arithmetic
+about the serial floor was right and the per-pass estimate for one of its terms was not.
 
 ## Consequences
 
