@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **A `full` feature, so "everything" is one line.** `features = ["full"]` turns on `ecs`, `simd`, `threads`, `memory`,
+  `serde` and `navmesh`. Before this, a game that wanted memory and saves had to read the feature table and guess the
+  combination. The animation layer is still a separate crate and cannot be folded in: `bevy-flock-anim` depends on
+  `bevy-flock`, so a re-export would be a cycle.
+- **`examples/everything.rs` is the adoption path in one file**: add the plugin, ask for a crowd, run frames, read the
+  counts, save a memory snapshot and load it back. Ninety lines, no renderer, and the first example a newcomer should
+  read. Run it with `cargo run --release --example everything --features memory,serde`.
+- **The crate docs stop understating the crate.** The status section still described the scheduler, continuum, dialogue,
+  snapshots and render adapters as future work when all five ship, and the feature table listed one of seven. Both now
+  match the code, and the docs name `bevy-flock-anim` and `bevy-flock-core` where a reader decides what to depend on.
+- **The doc gate is green again.** Nine broken or private intra-doc links had accumulated, two of them pointing at items
+  that no longer exist (`NavError::BadBitmap`, `NavGrid::bump`), so `RUSTDOCFLAGS="-D warnings" cargo doc` failed on
+  `main`. Fixed at the source: the links name real items, and the two stale claims now describe the API that is there.
 - **Documentation is now three things instead of one pile.** An Astro + Starlight site in `site/` covers install, a first
   crowd, concepts, guides and reference, published at <https://greysquirr3l.github.io/bevy-flock/>. Everything written for
   maintainers moved under `docs/dev/` (ADRs, tuning journals, gates, benchmarks, lint policy, release checklists) and is

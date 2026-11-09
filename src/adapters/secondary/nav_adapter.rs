@@ -39,7 +39,7 @@ impl NavGrid {
     ///
     /// # Errors
     ///
-    /// [`NavError::BadBitmap`] if the bitmap length does not match the bounds.
+    /// [`NavError::BitmapLength`] if the bitmap length does not match the bounds.
     pub fn from_bitmap(bounds: NavBounds, walkable: Vec<bool>) -> Result<Self, NavError> {
         Ok(Self {
             source: GridNavSource::from_bitmap(bounds, walkable)?,
@@ -53,7 +53,7 @@ impl NavGrid {
         &self.source
     }
 
-    /// The grid, mutably. Changing it without calling [`NavGrid::bump`] leaves stale
+    /// The grid, mutably. Changing it without calling [`NavGrid::block`] leaves stale
     /// fields in the cache, which is why the setter is a method and not a field.
     pub const fn source_mut(&mut self) -> &mut GridNavSource {
         &mut self.source

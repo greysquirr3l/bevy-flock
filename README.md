@@ -103,16 +103,17 @@ claim, measure your own before quoting these.
 Every number, including the optimisations that were measured and rejected, is in
 [`docs/dev/tuning/performance.md`](docs/dev/tuning/performance.md).
 
-## Two crates
+## What to add
 
-```text
-bevy-flock        plugin, components, systems, prelude   (needs Bevy)
-bevy-flock-core   spatial, steering, behaviour, tiers    (no engine in the graph)
-```
+| I want | add this |
+| --- | --- |
+| a crowd in a Bevy game | `bevy-flock` |
+| all of it | `bevy-flock = { version = "0.1", features = ["full"] }` |
+| NPCs that walk with skeletons | `bevy-flock-anim` as well |
+| no Bevy in the dependency graph | `bevy-flock-core` alone |
 
-`bevy-flock` re-exports the core, so `bevy_flock::domain::…` resolves either way. `cargo tree -p
-bevy-flock-core` lists no `bevy_ecs`, `bevy_app` or `bevy_transform`, that boundary is enforced
-by a test, not by review.
+`full` is `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh`. The animation layer is a separate crate because
+it pulls `bevy_animation` and `bevy_asset`, which a headless server should never compile.
 
 ## Where the documentation lives
 

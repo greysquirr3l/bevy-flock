@@ -371,7 +371,7 @@ impl FlockPlugin {
 ///
 /// Split out because the store's capacity is a game's decision, not the crowd's: a game
 /// that wants forty thousand rows says so by adding this plugin with its own
-/// [`MemoryConfig`] and capacity instead of accepting whatever the crowd happened to
+/// [`MemoryConfig`](crate::adapters::primary::memory_bridge::MemoryConfig) and capacity instead of accepting whatever the crowd happened to
 /// pick. [`FlockPlugin`] adds the default when the feature is on.
 #[cfg(feature = "memory")]
 #[derive(Debug, Clone, Copy, Default)]
