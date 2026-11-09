@@ -222,6 +222,10 @@ name = "continuum"
 harness = false
 
 [[bench]]
+name = "spatial"
+harness = false
+
+[[bench]]
 name = "packed"
 harness = false
 
