@@ -143,7 +143,16 @@ def main() -> int:
     else:
         current = run_bench(options.crate, options.bench)
 
-    baseline_path = options.baseline or options.crate / "benches" / "baseline.json"
+    # A crate with more than one gated bench needs more than one baseline, so prefer the per-bench name when it
+    # already exists and fall back to the crate-wide one. Without this, `--write-baseline` on the spatial bench
+    # writes `benches/baseline.json` while CI compares `benches/spatial-baseline.json` -- two files, one of which
+    # silently stops being read.
+    if options.baseline is not None:
+        baseline_path = options.baseline
+    else:
+        per_bench = options.crate / "benches" / f"{options.bench}-baseline.json"
+        fallback = options.crate / "benches" / "baseline.json"
+        baseline_path = per_bench if per_bench.exists() else fallback
     baseline_path = baseline_path.resolve()
 
     if options.write_baseline:

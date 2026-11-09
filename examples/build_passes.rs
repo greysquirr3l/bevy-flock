@@ -42,7 +42,7 @@ const PASSES: [(&str, fn(&PassCosts) -> Duration); 5] = [
     ("count", |costs| costs.count),
     ("prefix", |costs| costs.prefix),
     ("place", |costs| costs.place),
-    ("restore", |costs| costs.restore),
+    ("seat", |costs| costs.seat),
 ];
 
 /// A body's position: a golden-angle spiral inside the volume, so density is even and no cell is empty by

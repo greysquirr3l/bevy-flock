@@ -1406,3 +1406,42 @@ What this leaves is where T04 goes next. The serial tail is now 0.98 ms: 0.28 ms
 restore. The restore exists only because `place` walks windows downwards from their ends, and per-block bases
 mean it can be deleted outright rather than parallelised — which is worth another 0.70 ms, or about 1.1x on the
 build, and takes the serial floor to roughly 0.3 ms.
+
+### Retiring the cursor restore (T04)
+
+Placement used to advance `cell_start` itself and then pay a serial pass to shift the ends back down to starts.
+It now advances a copy (`cell_cursor`) and the shift is gone: `PassCosts::restore` became `PassCosts::seat`, one
+`memcpy` (ADR 0056). Same 1M fixture, six aarch64 cores:
+
+| Pass | 1 worker | 6 workers | T03 at 6 | Change |
+| --- | ---: | ---: | ---: | --- |
+| clear | 12.96 ms | 2.46 ms | 2.46 ms | — |
+| count | 1.72 ms | 1.76 ms | 1.74 ms | — |
+| prefix | 0.43 ms | 0.30 ms | 0.28 ms | — |
+| **seat** | **0.12 ms** | **0.11 ms** | 0.68 ms | **6.0x faster** |
+| place | 7.19 ms | 2.22 ms | 2.22 ms | — |
+| **total** | **22.15 ms** | **6.95 ms** | 7.48 ms | **1.08x faster** |
+
+Against the phase 3 baseline the build has gone 8.85 ms → 6.95 ms (1.27x) while the scan moved 0.87 → 0.30 ms and
+the restore 0.68 → 0.11 ms. The serial share fell from 13.1% to 5.8%, and the serial remainder is now stated as the
+complexity term the plan asked for:
+
+```
+serial = O(blocks) + sizeof(cell_start)        # 0.30 ms bandwidth-bound scan + 0.11 ms memcpy
+```
+
+Amdahl at that floor (0.41 ms of 22.15 ms) caps six workers at 5.5x, where the previous floor capped it at 4.5x —
+so the 5x gate is now reachable arithmetically for the first time, rather than being blocked by a pass nobody had
+questioned.
+
+**The copy is deliberately serial, and that is measured.** Splitting it across six workers came out at 0.21 ms
+against 0.11 ms serial: six `thread::scope` spawns cost more than the 1.7 MB they share, and the copy already runs
+at ~15 GB/s. It is therefore the rebuild's one remaining `O(cells)` single-threaded step, which contradicts the
+task's must-have. That is recorded as a deviation with the condition for revisiting it rather than quietly
+satisfied on paper — a worker pool that outlives a tick removes the spawn cost, and this crate does not have one
+yet (the same follow-up phase 3 recorded for the scan).
+
+Placement output is unchanged byte for byte: the fill still walks each window upwards in body order, and both the
+byte-equality matrix and the parity harness still compare exactly. What did change is what a rebuild can promise:
+`cell_start` is now the scan's output and nothing writes through it, which is why the postcondition has a test
+(`placement_leaves_the_window_table_alone`) that builds its expectation from body positions alone.

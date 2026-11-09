@@ -3,16 +3,16 @@
   "tolerance": 0.25,
   "caveat": "Recorded on one machine; the gate compares ratios, so run it on the machine that owns this file. See docs/performance.md for what each case is.",
   "cases": {
-    "spatial_batch/radius_batch_parallel/100000": 283217,
-    "spatial_batch/radius_batch_parallel/1000000": 949534,
-    "spatial_batch/radius_batch_serial/100000": 790231,
-    "spatial_batch/radius_batch_serial/1000000": 4176044,
-    "spatial_build/build/100000": 4542635,
-    "spatial_build/build/1000000": 23916441,
-    "spatial_build/build_parallel/100000": 3585909,
-    "spatial_build/build_parallel/1000000": 9951697,
-    "spatial_kernel/steer_integrate_advance/100000": 65739386,
-    "spatial_query/radius_1k_queries/100000": 688979,
-    "spatial_query/radius_1k_queries/1000000": 5222667
+    "spatial_batch/radius_batch_parallel/100000": 264564,
+    "spatial_batch/radius_batch_parallel/1000000": 958145,
+    "spatial_batch/radius_batch_serial/100000": 747387,
+    "spatial_batch/radius_batch_serial/1000000": 4952075,
+    "spatial_build/build/100000": 3146037,
+    "spatial_build/build/1000000": 22131363,
+    "spatial_build/build_parallel/100000": 1597677,
+    "spatial_build/build_parallel/1000000": 7740450,
+    "spatial_kernel/steer_integrate_advance/100000": 67421038,
+    "spatial_query/radius_1k_queries/100000": 687965,
+    "spatial_query/radius_1k_queries/1000000": 4394382
   }
 }
