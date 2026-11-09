@@ -16,7 +16,8 @@ use bevy_animation::graph::AnimationNodeIndex;
 use bevy_asset::Assets;
 use bevy_ecs::prelude::{Schedule, World};
 use bevy_flock::prelude::Locomotion;
-use bevy_flock_anim::{ClipBindings, LocomotionProfile, apply_locomotion_blend};
+use bevy_flock_anim::{AnimationFocus, ClipBindings, LocomotionProfile, apply_locomotion_blend};
+use bevy_transform::prelude::Transform;
 
 /// Counts every allocation the process makes.
 struct Counting;
@@ -73,6 +74,7 @@ fn the_binding_does_not_allocate_once_it_is_warm() {
     let mut assets = Assets::<LocomotionProfile>::default();
     let handle = assets.add(profile());
     world.insert_resource(assets);
+    world.init_resource::<AnimationFocus>();
 
     let nodes = [
         AnimationNodeIndex::new(0),
@@ -82,7 +84,12 @@ fn the_binding_does_not_allocate_once_it_is_warm() {
     ];
     let bindings =
         ClipBindings::new(handle, nodes[0], nodes[1], nodes[2]).with_turn_in_place(nodes[3]);
-    world.spawn((Locomotion::default(), bindings, AnimationPlayer::default()));
+    world.spawn((
+        Locomotion::default(),
+        Transform::default(),
+        bindings,
+        AnimationPlayer::default(),
+    ));
 
     let mut schedule = Schedule::default();
     schedule.add_systems(apply_locomotion_blend);
@@ -113,6 +120,7 @@ fn the_binding_does_not_allocate_with_a_thousand_bodies() {
     let mut assets = Assets::<LocomotionProfile>::default();
     let handle = assets.add(profile());
     world.insert_resource(assets);
+    world.init_resource::<AnimationFocus>();
 
     let bindings = ClipBindings::new(
         handle,
@@ -123,6 +131,7 @@ fn the_binding_does_not_allocate_with_a_thousand_bodies() {
     for _ in 0..1000 {
         world.spawn((
             Locomotion::default(),
+            Transform::default(),
             bindings.clone(),
             AnimationPlayer::default(),
         ));

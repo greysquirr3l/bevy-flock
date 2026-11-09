@@ -61,6 +61,45 @@ let bindings = ClipBindings::new(profile_handle, graph_nodes[0], graph_nodes[1],
 # }
 ```
 
+## Animating fewer bones when nobody is looking
+
+A crowd of ten thousand drawn bodies is ten thousand skeletons, and the bones cost more than the
+weights. `apply_locomotion_blend` therefore gates itself per body, from two inputs it already has:
+
+| Level | What happens | When |
+|---|---|---|
+| `Full` | weights and rates written every tick | inside `near` (40 m by default), or inside the band for a body the scheduler is thinking about |
+| `Stepped` | written every `far_step_ticks` (6) | inside the band, `Reflex` or `Reactive` tier |
+| `Paused` | `pause_all`, nothing written | beyond `far` (120 m) |
+
+The tier is the simulation's own `NpcTier`, not a second distance test, so a body the scheduler is
+about to promote is already animating before it can be seen moving. The distance is measured from
+`AnimationFocus`, which the game sets to whatever it is watching; set nothing and nothing is culled.
+
+Both numbers are profile values, not constants — `BlendLod::try_new` validates an authored band and
+`BlendLod::disabled()` turns culling off entirely:
+
+```rust
+use bevy_flock_anim::{AnimationFocus, BlendLod, LocomotionProfile};
+
+// A tighter band than the default, for a game whose camera never leaves the street.
+let profile = LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)?
+    .with_lod(BlendLod::try_new(25.0, 90.0, 4)?);
+
+// Once per frame, from the camera: the band measures from this point, and nothing is culled until
+// a focus is set.
+app.insert_resource(AnimationFocus::at(camera_position));
+```
+
+Coming back is where a naive cull pops. A resumed body gets this tick's weights *and* its walk and
+run clips seeked to the phase its own distance walked implies, so it takes the step it would have
+taken. That is `AnimationLod::resumes` in the telemetry, and two tests in `binding.rs`: one compares
+the resumed weights against a control that was never culled, one checks the seek time.
+
+Measured at 10,000 reflex-tier bodies with the camera at the plaza edge: 0.305 ms per binding pass
+against 0.601 ms unculled, 49% saved, and 70% with the camera outside the plaza. The table, the
+method and the caveats are in `docs/performance.md`.
+
 ## Licence
 
 MIT OR Apache-2.0.

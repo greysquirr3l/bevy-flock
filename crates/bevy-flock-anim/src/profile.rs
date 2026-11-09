@@ -9,6 +9,7 @@
 //! no state and allocates nothing: the same two numbers always produce the same four weights, which
 //! is what lets a replay animate identically at 20 frames a second and at 200.
 
+use crate::lod::BlendLod;
 use bevy_asset::Asset;
 use bevy_reflect::TypePath;
 use thiserror::Error;
@@ -71,6 +72,17 @@ pub enum ProfileError {
         /// Where it reaches full weight, radians per second.
         full: f32,
     },
+    /// The LOD band was inverted or empty, so no body would ever be stepped or paused.
+    #[error("lod band must satisfy 0 <= near < far, got near {near} and far {far}")]
+    LodBand {
+        /// The inner distance as authored.
+        near: f32,
+        /// The outer distance as authored.
+        far: f32,
+    },
+    /// The LOD cadence was zero ticks, which is a pause expressed as a step.
+    #[error("lod step interval must be at least one tick, got {0}")]
+    LodStep(u32),
     /// A field was `NaN` or infinite, which would poison every comparison downstream.
     #[error("{field} must be finite, got {value}")]
     NotFinite {
@@ -96,6 +108,7 @@ pub struct LocomotionProfile {
     stride_metres: f32,
     turn_threshold: f32,
     turn_full: f32,
+    lod: BlendLod,
 }
 
 impl LocomotionProfile {
@@ -115,6 +128,30 @@ impl LocomotionProfile {
     /// look like a skating run.
     pub const fn stride_metres(&self) -> f32 {
         self.stride_metres
+    }
+
+    /// How far away this rig stays fully animated.
+    ///
+    /// Part of the profile rather than a constant because it is a property of the artwork: a body
+    /// whose silhouette is three pixels tall can be paused further out than one you can read.
+    pub const fn lod(&self) -> BlendLod {
+        self.lod
+    }
+
+    /// Replace the LOD band, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{BlendLod, LocomotionProfile};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_lod(BlendLod::disabled());
+    /// assert_eq!(profile.lod(), BlendLod::disabled());
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_lod(mut self, lod: BlendLod) -> Self {
+        self.lod = lod;
+        self
     }
 
     /// Validate an authored profile.
@@ -167,6 +204,7 @@ impl LocomotionProfile {
             stride_metres,
             turn_threshold,
             turn_full,
+            lod: BlendLod::default(),
         })
     }
 

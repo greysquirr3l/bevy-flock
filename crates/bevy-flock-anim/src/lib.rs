@@ -17,6 +17,10 @@
 //!   four numbers that always sum to one, computed without a clock, an allocation or a random draw.
 //! * [`ClipSlot`] names the four poses: idle, walk, run, turn-in-place. The game maps each to a node
 //!   in its own `AnimationGraph`; this crate never sees a clip.
+//! * [`BlendLod`] decides how much animation a body is worth: fully animated near the focus, stepped
+//!   further out for the cheap tiers, paused beyond `far`. It reads the tier the simulation's
+//!   scheduler assigned rather than measuring distance twice, and it resumes a paused body at the
+//!   stride phase its own distance walked implies, so nothing pops when it comes back.
 //!
 //! Because the blend is a pure function of simulation state, a replay animates identically whether
 //! it is rendered at 20 frames a second or 200. That property is a test, not a hope: the animation
@@ -58,9 +62,11 @@
 pub mod binding;
 pub mod gaze;
 pub mod gesture;
+pub mod lod;
 pub mod profile;
 
 pub use binding::{AnimPlugin, BlendFrame, ClipBindings, apply_locomotion_blend};
 pub use gaze::{GazeBone, GazeLimits, GazePlugin, GazeRig, apply_gaze, look_angles, split_yaw};
 pub use gesture::{GestureClips, GesturePlayback, GesturePlugin, play_gestures};
+pub use lod::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
 pub use profile::{BlendWeights, ClipSlot, LocomotionProfile, ProfileError};

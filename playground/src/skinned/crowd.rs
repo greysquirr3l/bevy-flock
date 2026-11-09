@@ -11,7 +11,8 @@ use bevy_asset::{Assets, Handle};
 use bevy_camera::visibility::Visibility;
 use bevy_ecs::hierarchy::ChildOf;
 use bevy_ecs::prelude::{Entity, Query, Res, Resource, World};
-use bevy_flock::adapters::primary::cognition::NpcBlackboard;
+use bevy_flock::adapters::primary::cognition::{NpcBlackboard, NpcTier};
+use bevy_flock::domain::cognition::CognitionTier;
 use bevy_flock::domain::num;
 use bevy_flock::prelude::{
     GazeAim, GazeTarget, GestureKind, Npc, NpcBundle, NpcDesiredVelocity, NpcGestures, NpcId,
@@ -241,6 +242,9 @@ pub fn spawn_crowd(
         let body = world
             .spawn((
                 bundle,
+                // The tier the scheduler would assign a plaza body: the animation LOD reads it, so
+                // without it every body inside the band would blend every tick.
+                NpcTier(CognitionTier::Reflex),
                 Visibility::default(),
                 Mesh3d(handles.mesh.clone()),
                 MeshMaterial3d(handles.material_for(index)),

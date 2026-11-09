@@ -987,3 +987,49 @@ order equals identity order, which is what `BodyLink` relies on to move the righ
 `bodies()` remains, allocating exactly one `Vec`: snapshot callers — the binaries, the example, the
 tests — were never the problem, and changing their signature to save an allocation they make once
 would be churn.
+
+## Animation LOD: what stopping the invisible costs and saves (2026-11-09, T07)
+
+`apply_locomotion_blend` now decides, per body, whether to write the blend at all. The level comes
+from the tier the scheduler already assigned (`NpcTier`) and the distance to an `AnimationFocus` the
+game sets once a frame — not from a second distance test:
+
+| Level | What the binding does | When |
+|---|---|---|
+| `Full` | writes weights and rates every tick | inside `near`, or inside the band for a thinking tier |
+| `Stepped` | writes every `far_step_ticks` (default 6) | inside the band for a reflex or reactive tier |
+| `Paused` | `pause_all` and no writes | beyond `far` |
+
+Both distances and the cadence live on `LocomotionProfile` (`BlendLod`, `BlendLod::try_new`,
+`BlendLod::disabled`), because a rig with a long stride can be stepped further out than one with a
+short one before the freeze reads as a bug. No focus set means no culling: an app that never says
+where the camera is keeps every body animating.
+
+The measurement is `cargo run -p bevy-flock-anim --release --example lod_cost`, a release build on
+the same machine as this document's other numbers. Ten thousand bodies on a 60 m plaza, every body
+at reflex tier, 240 timed passes after a 32-pass warm-up, binding system only:
+
+| Camera | Bodies | Culled | Control | Saved | Split |
+|---|---|---|---|---|---|
+| plaza edge | 2,000 | 0.061 ms | 0.117 ms | 48.1% | 381 full, 1,619 stepped |
+| plaza edge | 10,000 | 0.305 ms | 0.601 ms | 49.1% | 1,914 full, 8,086 stepped |
+| 140 m out | 2,000 | 0.036 ms | 0.117 ms | 69.3% | 505 stepped, 1,495 paused |
+| 140 m out | 10,000 | 0.181 ms | 0.599 ms | 69.7% | 2,533 stepped, 7,467 paused |
+
+Two things this table says, and one it does not.
+
+* Culling at the plaza edge clears the gate — 49% of binding time at 10,000 bodies, against the 30%
+  the task asks for — because the tier check and the distance check are one branch set per body, not
+  a query or an allocation.
+* The paused band is worth more than the stepped one: 70% saved when the camera is outside the
+  plaza, since a paused body costs one `pause_all` per return rather than a write per tick. The
+  absolute numbers are small because the whole binding is 0.6 ms at 10,000; what a paused body also
+  saves is Bevy's `animate_targets`, which is outside this system and outside this table.
+* A stepped body still advances its clip — the cadence saves the writes, not the bones. Making the
+  cadence also freeze the skeleton is what `Paused` is for, and a game that wants low-rate bone
+  updates should step the whole player, not just this binding.
+
+The resume rule is a test, not a note: `a_returning_body_resumes_at_the_walked_phase` drives a body
+300 m out and back, then compares every node's weight against a control that was never culled, and
+`resuming_seeks_the_walk_clip_to_the_phase_the_distance_implies` checks the walk clip lands on
+`phase × duration` rather than frame zero.
