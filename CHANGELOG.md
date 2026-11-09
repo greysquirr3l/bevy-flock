@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The cross-engine benchmark actually ran, on one machine.** `benchmarks/godot/` is a committed project with
+  command-line parameters and two modes: `array`, which is a lower bound for Godot because it has no spatial index, and
+  `grid`, which rebuilds a uniform grid each tick and is the like-for-like row. `scripts/cross_bench.py` runs both
+  engines with identical arguments and prints the table through `compare_benchmarks.py`. First result on a six-core
+  aarch64 VM: 2.5x faster than the GDScript grid rebuild, 1.9x slower than a bare GDScript loop at 10k. The Unreal row
+  remains open; UE5 does not fit in this sandbox.
 - **The README's first block compiles in a crate with one dependency.** It used to open with `use bevy_app::App;`,
   which fails with `error[E0432]: unresolved import 'bevy_app'` after `cargo add bevy-flock`, because a transitive
   dependency is not importable. The block now takes `App` from the prelude, and `tests/facade_paths.rs` compiles it as

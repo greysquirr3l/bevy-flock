@@ -172,9 +172,24 @@ python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
 
 ```
 
-**Status:** our row exists; the other two need one afternoon on a single machine. Until then the README says "in the band
-the published Godot result occupies" and nothing stronger. The comparison script refuses to mix machines, that refusal is
-the feature.
+**Status:** two of the three rows exist, from one machine, by one command.
+
+`python3 scripts/cross_bench.py --agents 10000,100000` ran bevy-flock 0.1.0 and Godot 4.7.2 with identical tick counts
+and tick/warm-up settings, wrote one JSONL file per engine, and printed the table through
+`scripts/compare_benchmarks.py`. It is recorded in `cross-engine.md`.
+
+| agents | godot-array (lower bound) | bevy-flock | godot-grid (like-for-like) |
+| ---: | ---: | ---: | ---: |
+| 10,000 | 3.044 ms median | 5.661 ms | 13.976 ms |
+| 100,000 | 30.636 ms | 46.977 ms | 118.071 ms |
+
+Read it as 2.5x faster than a GDScript loop that rebuilds a grid, and 1.9x / 1.5x slower than one that does no indexing
+at all. The `array` row exists so the fast-looking comparison is visible next to the fair one rather than left to
+whoever reads the table.
+
+The Unreal row is the remaining gap. It needs UE5 and a C++ project on a machine of its own; the recipe is in
+`cross-engine.md`, and `UnrealEditor-Cmd` has nothing to run against in this sandbox. The Godot fixture is now a
+committed project with CLI parameters, so the day UE5 is available the gap is one harness, not one setup afternoon.
 
 ## 8. Release mechanics
 
