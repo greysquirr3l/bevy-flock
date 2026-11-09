@@ -30,6 +30,7 @@
 use bevy_math::Vec3;
 #[cfg(feature = "threads")]
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::domain::ids::NpcId;
 use crate::domain::num;
@@ -310,6 +311,66 @@ pub struct SpatialGrid {
     cells: Vec<u32>,
 }
 
+/// What each pass of a rebuild cost.
+///
+/// Produced by [`SpatialGrid::build_measured`]. The numbers in `docs/performance.md` come from this type
+/// rather than from a profiler's attribution, because a profiler cannot separate `count` from `prefix` inside
+/// an inlined rebuild — and separating exactly those two is the question phase 4 has to answer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PassCosts {
+    /// Clearing the cell counts and window starts: `fill_cells_*`. Partitions.
+    pub clear: Duration,
+    /// Counting bodies per cell: `count_cells_*`. Partitions.
+    pub count: Duration,
+    /// The prefix sum over the cell array. Serial by construction.
+    pub prefix: Duration,
+    /// Placing bodies into their windows and filling `order`: `place_cells_*`. Partitions.
+    pub place: Duration,
+    /// Restoring the write cursors from the window starts. Serial by construction.
+    pub restore: Duration,
+    /// Workers the rebuild actually used: not the configured count, and not the machine's.
+    pub workers: usize,
+    /// Bodies it placed.
+    pub bodies: usize,
+    /// Cells it scanned.
+    pub cells: usize,
+}
+
+impl PassCosts {
+    /// The sum of the five passes.
+    ///
+    /// Saturating rather than wrapping: a total that overflowed would read as a fast rebuild.
+    #[must_use]
+    pub fn total(&self) -> Duration {
+        [
+            self.clear,
+            self.count,
+            self.prefix,
+            self.place,
+            self.restore,
+        ]
+        .into_iter()
+        .fold(Duration::ZERO, |sum, pass| {
+            sum.checked_add(pass).unwrap_or(Duration::MAX)
+        })
+    }
+
+    /// The share of the rebuild that ran on a single thread.
+    ///
+    /// `prefix` and `restore` are the serial passes and `clear`, `count` and `place` partition, so this is
+    /// the fraction a blocked scan could in principle recover, times the workers it could use. Zero when the
+    /// rebuild took no measurable time.
+    #[must_use]
+    pub fn serial_share(&self) -> f32 {
+        let total = self.total().as_secs_f64();
+        if total <= 0.0 {
+            return 0.0;
+        }
+        let serial = self.prefix.as_secs_f64() + self.restore.as_secs_f64();
+        num::f64_to_f32(serial / total)
+    }
+}
+
 impl SpatialGrid {
     /// Build an empty grid.
     ///
@@ -515,21 +576,57 @@ impl SpatialGrid {
     /// which is the whole point of ADR 0054: the build partitions by *cell range* rather than by arrival
     /// order, so no body's placement depends on which worker got there first.
     pub fn build(&mut self) {
-        let workers = self.worker_count();
-        if workers <= 1 {
-            self.build_serial();
-        } else {
-            self.build_parallel(workers);
-        }
+        let _ = self.build_measured();
     }
 
-    /// The single-threaded rebuild, and the reference every parallel result is compared against.
-    fn build_serial(&mut self) {
-        self.fill_cells_serial();
-        self.count_cells_serial();
+    /// Rebuild, reporting what each pass cost.
+    ///
+    /// Five `Instant::now()` pairs against a rebuild that takes 8 ms at a million bodies is 0.01%, so this is
+    /// not behind a feature flag: the inventory in `docs/performance.md` has to be reproducible by anyone who
+    /// checks the tree out, and a diagnostic that exists only in one profile is a claim rather than a
+    /// measurement. [`SpatialGrid::build`] is this function with the costs dropped.
+    pub fn build_measured(&mut self) -> PassCosts {
+        let workers = self.worker_count();
+        let mut costs = PassCosts::default();
+
+        let start = Instant::now();
+        if workers <= 1 {
+            self.fill_cells_serial();
+        } else {
+            self.fill_cells_parallel(workers);
+        }
+        costs.clear = start.elapsed();
+
+        let start = Instant::now();
+        if workers <= 1 {
+            self.count_cells_serial();
+        } else {
+            self.count_cells_parallel(workers);
+        }
+        costs.count = start.elapsed();
+
+        // The scan is the serial tail this phase exists to attack. It is timed on its own rather than folded
+        // into the count it follows, because that attribution is the whole point of the inventory.
+        let start = Instant::now();
         self.prefix_cells();
-        self.place_cells_serial();
+        costs.prefix = start.elapsed();
+
+        let start = Instant::now();
+        if workers <= 1 {
+            self.place_cells_serial();
+        } else {
+            self.place_cells_parallel(workers);
+        }
+        costs.place = start.elapsed();
+
+        let start = Instant::now();
         self.restore_cell_start();
+        costs.restore = start.elapsed();
+
+        costs.workers = workers;
+        costs.bodies = self.entries.len();
+        costs.cells = self.cell_start.len();
+        costs
     }
 
     /// Compute each body's cell. `cell_of` is the only float work in a rebuild, and it is done once per
@@ -601,22 +698,6 @@ impl SpatialGrid {
         if let Some(first) = self.cell_start.get_mut(0) {
             *first = 0;
         }
-    }
-
-    /// The partitioned rebuild.
-    ///
-    /// Passes one and three are partitioned by *body* and by *cell range* respectively; pass two is
-    /// partitioned by cell range, which means every worker reads the whole cell list. That is
-    /// `O(workers * n)` sequential reads against `O(n)` writes, and it is the price of not keeping a
-    /// per-worker histogram: at a million bodies and six workers it is 24 MB of reads that are mostly
-    /// in cache, versus six histograms of 2.3 MB each to allocate, clear and merge.
-    #[cfg(feature = "threads")]
-    fn build_parallel(&mut self, workers: usize) {
-        self.fill_cells_parallel(workers);
-        self.count_cells_parallel(workers);
-        self.prefix_cells();
-        self.place_cells_parallel(workers);
-        self.restore_cell_start();
     }
 
     /// Pass one, partitioned by body: each worker writes its own slice of the cell list.

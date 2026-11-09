@@ -124,6 +124,31 @@ evaluation_criteria = [
     "A change to block count cannot change the output, only the cost",
 ]
 [[phases.tasks]]
+slug = "clear-and-count-cost"
+kind = "infrastructure"
+title = "Price and fix the clear's 30 ns per cell, and the count pass that scales backwards"
+goal = "Explain and remove the two costs T01 found instead of the scan it expected: a clear that spends 12.9 ms on 421,876 cells at one worker, and a count pass that goes from 1.68 ms to 2.08 ms when six workers are offered."
+depends_on = ["blocked-prefix-sum"]
+hints = [
+    "Twelve point nine milliseconds for 421,876 cells is 30 ns per cell, which is two orders of magnitude more than a store: something per cell is being faulted, reallocated or shared. Separate allocation from first-touch by warming the grid once and re-measuring, and count page faults rather than reasoning about them.",
+    "Check whether the clear writes cells it does not own — a block boundary that shares a cache line is the obvious candidate once the parallel path is in play, and it would explain why the pass scales 5.2x rather than 6x.",
+    "The count pass is 1.68 ms at one worker and 2.08 ms at six: that is not a slow pass, it is a pass whose partitioning costs more than its work. Look at what each call sets up before it splits — per-pass scratch allocation, thread spawn, or a barrier that has nothing to overlap with — and consider folding count and place into one partitioned region so the split is paid once.",
+    "Do not tune `place` in this task even though it is 25% of the parallel build: it scales 3.1x and its cost is understood, so changing it would confound the two results this task exists to establish.",
+]
+test_hints = [
+    "docs/performance.md gains a second inventory table from the same example, so the before and after are produced by one harness rather than two.",
+    "The parity harness and the byte-equality test must pass unchanged: this task is about cost, and any output difference is a defect.",
+]
+must_haves = [
+    "The clear's cost is attributed to named mechanisms with measurements, not to a guess",
+    "The clear at six workers is under 1.5 ms, and the count pass is at least 1.5x",
+    "docs/performance.md records the attribution and the new table beside the T01 one",
+]
+evaluation_criteria = [
+    "The explanation predicts the cost of a different cell count, and the prediction is checked",
+    "The total at six workers falls below the 8.85 ms T01 measured, with the drop attributed to a pass",
+]
+[[phases.tasks]]
 slug = "retire-serial-cell-passes"
 kind = "infrastructure"
 title = "Fold the cell clear and cursor restore into the blocked pass"
@@ -155,7 +180,7 @@ description = "Re-run the scaling sweep and hold the result to the number phase 
 slug = "build-scaling-gate"
 kind = "audit"
 title = "Re-measure the curve and hold the build to 5x"
-goal = "Extend the sweep to report the rebuild's passes, re-run it at 1M over 1/2/4/6/8 workers, and state whether the build reached the 5x that phase 3's analysis said would take the frame to ~12 ms — with the reason when it did not."
+goal = "Extend the sweep to report the rebuild's passes, re-run it at 1M over 1/2/4/6/8 workers, and hold the result to the ceiling ADR 0055 computes from the measured serial floor — not the 5x that T01 has since shown to be arithmetically unreachable — naming the pass that stops it if the total lands above the prediction."
 depends_on = ["retire-serial-cell-passes"]
 hints = [
     "Reuse `examples/scaling_sweep.rs` and `scripts/spatial_scaling.py`; adding a second sweep script would make two sources of truth for one curve.",
@@ -168,14 +193,30 @@ test_hints = [
     "The parity harness still passes in release at 2,000 ticks, on the new scan.",
 ]
 must_haves = [
-    "docs/performance.md has a phase 4 table beside the phase 3 one, and a verdict against the 5x target",
+    "docs/performance.md has a phase 4 table beside the phase 3 one, and a verdict against the re-derived ceiling",
     "benches/spatial-baseline.json is re-recorded on the blocked scan",
-    "The write-up names the largest remaining serial cost in the rebuild",
+    "The write-up names the largest remaining cost in the rebuild, which T01 suggests is the clear rather than the scan",
+    "The verdict states in one line why 5x was dropped as a target, citing the 1.55 ms serial floor",
 ]
 evaluation_criteria = [
     "The verdict is falsifiable and cites the number that would have meant success",
     "A reader can tell whether the next phase should be about the scan, the fill, or something else entirely",
 ]
+# ─── Delivered ────────────────────────────────────────────────────────────────
+[[completed]]
+task = "phase-4 T01 build-pass-inventory"
+delivered_in = "feat/phase4-t01-pass-inventory"
+note = """
+`SpatialGrid::build_measured` returns a `PassCosts` per rebuild, and `examples/build_passes.rs` reports all
+five passes at 1 and the machine's worker count as JSON lines. Measured at 1M bodies on six aarch64 cores:
+clear 12.91 -> 2.46 ms, count 1.68 -> 2.08 ms, prefix 0.85 -> 0.87 ms, place 6.99 -> 2.23 ms, restore
+0.68 -> 0.68 ms, total 23.14 -> 8.85 ms (2.6x). Serial share 6.7% -> 17.6%.
+The task's own hypothesis was falsified: the scan is 0.85 ms, not the multi-millisecond serialisation phase 3
+blamed, because the grid caps its cell array at 421,876 cells (75 per axis, effective 13.3 m) rather than the
+15.6M a dense 8 m grid would imply. The serial floor of 1.55 ms caps the build at 4.5x at six workers, so the
+planned 5x target was arithmetically unreachable; T05's target is re-derived in ADR 0055 and a new task
+(`clear-and-count-cost`) inherits the work the measurement actually points at.
+"""
 # ─── Phase 3, for reference ───────────────────────────────────────────────────
 [[completed]]
 task = "phase-3 T01-T07"
