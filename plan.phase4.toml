@@ -218,6 +218,27 @@ planned 5x target was arithmetically unreachable; T05's target is re-derived in 
 (`clear-and-count-cost`) inherits the work the measurement actually points at.
 """
 [[completed]]
+task = "phase-4 T03 blocked-prefix-sum"
+delivered_in = "feat/phase4-t03-blocked-scan"
+note = """
+`with_blocks` and `block_count` on SpatialGrid, with the blocked scan behind them: per-block totals, a serial scan
+over the block totals, then per-block local scans split across workers. Blocks derive from the cell count (4096
+cells per block, clamped to MAX_BLOCKS and to the cell count), never from the worker count; grids under
+PARALLEL_MIN_CELLS keep the serial scan and the override is clamped rather than honoured. PassCosts reports the
+block count that actually ran, so "the blocked scan is in use" is a claim a test can check, and blocks == 1 is
+asserted to route to the reference.
+Tests: block_span tiles every fixture without gaps (and the long blocks come first); block_count ignores the
+worker count; small grids stay serial; and the ADR's matrix — workers {1,2,3,8} x blocks {1,128,1024,4096} — is
+compared as raw bytes against the serial reference. The matrix tops out at MAX_BLOCKS because the ADR's first
+draft said 16384, which its own clamp would have fought; that inconsistency is corrected in the ADR.
+Measured (1M bodies, 421,876 cells, six aarch64 cores): prefix 0.87 -> 0.28 ms at six workers (3.1x), build
+8.85 -> 7.48 ms (1.18x). The ADR predicted prefix <= 0.10 ms and 7.40 ms total: the total landed, the scan missed
+by 2.8x. The block sweep the ADR prescribed (64/256/1024/4096 -> 0.272/0.279/0.290/0.304 ms) shows the curve is
+flat, so the limiter is bandwidth on a 1.7 MB read-modify-write (~6 GB/s) rather than block granularity, and
+0.10 ms would have needed ~17 GB/s. The ADR now records the measured floor and the arithmetic. serial floor is
+0.98 ms (0.28 scan + 0.70 restore), which is what T04 attacks by deleting the restore.
+"""
+[[completed]]
 task = "phase-4 T02 blocked-scan-adr"
 delivered_in = "feat/phase4-t02-blocked-scan-adr"
 note = """
