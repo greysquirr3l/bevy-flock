@@ -1058,7 +1058,7 @@ never a frame delta, so the same walk measured at 20 fps and at 240 fps reports 
 the ease is a fixed fraction of the window per tick, so `the_window_counts_ticks_rather_than_seconds`
 drives the same body at 1 tick and at 10 ticks per pass and requires the identical weight.
 
-## The binding envelope (T10)
+## The binding envelope (T10, profiled after T07–T11 merged)
 `cargo bench -p bevy-flock-anim --bench binding` is the measurement; `crates/bevy-flock-anim/benches/baseline.json`
 is the committed record; `python3 scripts/bench_gate.py` fails a build on a 25% regression against it.
 Every case runs the real systems on a real `World`, because a micro-benchmark of `blend()` on its own
@@ -1069,29 +1069,55 @@ Machine: a six-core x86-64 sandbox VM (no model string exposed), `[profile.bench
 
 | Case | 2,000 bodies | 10,000 bodies |
 | ---- | -----------: | ------------: |
-| `weights/no_culling` — the blend with the LOD band switched off | 182 µs | 922 µs |
-| `weights/plaza_edge` — the blend with the camera on the plaza edge | 190 µs | 941 µs |
-| `culling/inside_band` — every body inside the near band | 187 µs | 935 µs |
-| `culling/beyond_far` — every body paused | 57 µs | 278 µs |
-| `gaze/2_000_bodies` — two bones solved per body | 363 µs | — |
-| `root_motion/no_report` — the reconciler with nothing to reconcile | 6.8 µs | 28 µs |
+| `weights/no_culling` — the blend with the LOD band switched off | 179 µs | 902 µs |
+| `weights/plaza_edge` — the blend with the camera on the plaza edge | 186 µs | 935 µs |
+| `culling/inside_band` — every body inside the near band | 187 µs | 940 µs |
+| `culling/beyond_far` — every body paused | 57 µs | 275 µs |
+| `gaze/2_000_bodies` — two bones solved per body | 263 µs | — |
+| `root_motion/no_report` — the reconciler with nothing to reconcile | 6.3 µs | 26 µs |
 | `root_motion/every_body_reports` — every body reports a clip offset | 36 µs | 175 µs |
 
-That is 91 ns per body for the blend and 181 ns per body for the gaze solve, at 2,000 bodies.
+That is 90 ns per body for the blend and 131 ns per body for the gaze solve, at 2,000 bodies: 0.44 ms
+for the pair against the plan's 0.30 ms ceiling. The gap is 47% and it was 82% before the profile below;
+this section records both numbers because the second one is the one that argues for the follow-up.
 
-**The plan's ceiling is missed, and this section says so rather than rounding it.** T10 asked for the
-bindings plus gaze under 0.3 ms at 2,000 bodies; the measured pair is 0.55 ms, 82% over. The gap is
-not in the arithmetic — 2,000 bodies of quaternion work is microseconds — it is in the two per-bone
-`get_mut` calls the gaze solve makes through a sparse set, one cache miss each, and in the four
-hash-map lookups the blend does to find its animation nodes. Both are data-layout problems, both are
-fixable, and neither is fixed here: doing it properly means writing the aim onto the bones during
-resolve instead of looking the bones up, and caching node handles in `AnimationState`, which is a
-change to two public entry points and belongs in its own measured pass.
+### What the profile found
+`cargo run --release -p bevy-flock-anim --example profile_gaze` runs four variants of the gaze solve on
+one 2,000-body fixture, so the difference between two rows is the cost of the thing that differs:
 
-What the envelope does meet: 0.10 ms per 1,000 bodies for the blend, which is 6% of a 16.6 ms frame
-at 10,000, and 0.028 ms at 10,000 for the reconciler when no clip carries translation. The ceiling
-stands as the target for the follow-up task rather than being quietly rewritten to whatever the code
-happens to do.
+| Variant | ns/body |
+| ------- | ------: |
+| the arithmetic alone, no bone writes | 155 (with the old `from_euler`) |
+| the shipped system, before | 189 |
+| the shipped system, after | 128 |
+| bones iterated in table order, body read through `ChildOf` | 294 |
+
+Two findings, one of which was a wrong guess worth recording:
+
+1. **The hypothesis was wrong.** The gap was not the sparse-set `get_mut`. Rebuilding the system to
+   iterate bones sequentially and look the body up through `ChildOf` measured *worse* — 294 ns against
+   128 — because two adjacent bone entities cost one cache line, while two random body lookups cost
+   more and lose the sequential body read too.
+2. **The cost was the trigonometry.** `Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)` builds a
+   three-axis rotation: three sine and three cosine calls, one of them for a zero angle. The spine only
+   ever wanted a yaw, and the head's `YXZ` is exactly `from_rotation_y(yaw) * from_rotation_x(pitch)`.
+   Replacing both took the solve from 189 to 128 ns per body, 363 µs to 263 µs at 2,000, a 28% cut for
+   two lines and no semantic change: the tests that compare solved rotations against `to_euler` in the
+   same order still pass bit for bit.
+
+A third experiment is recorded because it did *not* work. Skipping `set_weight`/`set_speed` when the
+eight per-body values were unchanged — the steady-walking case, which is most of a crowd — measured
+198 µs against 179: reading and copying the extra 32 bytes per body through `AnimationState` cost more
+than the writes it saved, and `AnimationState` is touched by every other system that inspects a body.
+It was reverted rather than kept behind a flag, and the blend is where it was.
+
+### What remains, and why it is not in this pass
+The remaining 90 ns per body for the blend is the four `set_weight`/`set_speed` writes plus the blend's
+own arithmetic, in a system already inside 6% of a 16.6 ms frame at 10,000 bodies. Getting the pair under
+0.30 ms needs a design change rather than a line: cache the node handles on `AnimationState` so the
+player's map is probed once rather than per write, and write the four weights as one component the
+renderer-facing system reads, which changes two public entry points and their tests. That is the
+follow-up task, and `scripts/bench_gate.py` keeps the baseline honest until it lands.
 
 Two rules keep the gate honest. The baseline records the machine it was taken on and the gate compares
 ratios, so a slower runner fails everything and the fix is a new baseline on that runner, stated in the

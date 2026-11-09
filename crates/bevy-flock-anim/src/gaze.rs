@@ -22,7 +22,7 @@ use bevy_ecs::prelude::{Component, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_flock::prelude::GazeAim;
 use bevy_math::ops::{asin, atan2};
-use bevy_math::{EulerRot, Quat, Vec2, Vec3};
+use bevy_math::{Quat, Vec2, Vec3};
 use bevy_transform::components::{GlobalTransform, Transform};
 
 /// Where a body's spine and head are, for the gaze solve.
@@ -154,12 +154,16 @@ pub fn apply_gaze(
         let weight = aim.weight();
 
         if let Ok(mut spine) = bones.get_mut(rig.spine) {
-            let delta = Quat::from_euler(EulerRot::YXZ, spine_yaw * weight, 0.0, 0.0);
+            // One axis, so one sine and one cosine: `from_euler` builds a three-axis rotation and
+            // pays for all three, which measured as most of the gaze solve's cost.
+            let delta = Quat::from_rotation_y(spine_yaw * weight);
             spine.rotation *= delta;
         }
         if let Ok(mut head) = bones.get_mut(rig.head) {
-            let delta =
-                Quat::from_euler(EulerRot::YXZ, head_yaw * weight, head_pitch * weight, 0.0);
+            // `YXZ` is yaw-then-pitch, which is exactly this product minus the third axis the Euler
+            // helper computes and multiplies by a zero angle.
+            let delta = Quat::from_rotation_y(head_yaw * weight)
+                * Quat::from_rotation_x(head_pitch * weight);
             head.rotation *= delta;
         }
     }

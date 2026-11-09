@@ -35,6 +35,20 @@ impl ClipSlot {
     /// Every slot, in a fixed order, so a game can iterate its bindings without a map.
     pub const ALL: [Self; 4] = [Self::Idle, Self::Walk, Self::Run, Self::TurnInPlace];
 
+    /// The slot's position in [`ClipSlot::ALL`], which is also its index in a per-body table.
+    ///
+    /// The binding keeps four weights and four rates per body; this is how it finds a body's row
+    /// without a map. A test asserts it agrees with `ALL` for every slot.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Walk => 1,
+            Self::Run => 2,
+            Self::TurnInPlace => 3,
+        }
+    }
+
     /// The slot's name in an error message or a log line.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -606,6 +620,13 @@ mod tests {
         let values = weights.as_array();
         for (slot, value) in slots.iter().zip(values) {
             assert!((weights.weight(*slot) - value).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn every_slot_index_matches_its_position_in_all() {
+        for (position, slot) in ClipSlot::ALL.iter().enumerate() {
+            assert_eq!(slot.index(), position, "{} is at {position}", slot.as_str());
         }
     }
 
