@@ -1138,7 +1138,7 @@ Same machine as the animation envelope: six-core x86-64 sandbox VM, `[profile.be
 | Case | Population | Time | Per body |
 | ---- | ---------: | ---: | -------: |
 | `spatial_build/build` — full rebuild of every body | 100,000 | 5.4 ms | 54 ns |
-| | 1,000,000 | 30.5 ms | 30 ns |
+| | 1,000,000 | 23.8 ms | 23.8 ns |
 | `spatial_query/radius_1k_queries` — 1,000 radius-12 m queries | 100,000 | 0.70 ms | 0.70 µs/query |
 | | 1,000,000 | 6.5 ms | 6.5 µs/query |
 | `spatial_kernel/steer_integrate_advance` — the scalar reference kernel | 100,000 | 67.7 ms | 677 ns |
@@ -1198,3 +1198,31 @@ The query number is the one that should move first. At 6.5 µs per query for a 1
 million bodies, the query is where a manifest tier spends its time, and it is embarrassingly parallel in a
 way the build is not: each query is independent, and the only ordering constraint is the deterministic
 gather into the shared arena (ADR 0054, invariant 4).
+
+### The rebuild, partitioned (T03)
+`SpatialGrid::build` partitions its three `O(n)` passes across `with_threads(n)` workers and keeps the
+prefix sum serial. At a million bodies on this six-core VM, `cargo run --release --example profile_build`:
+
+| Threads | Rebuild | Speed-up |
+| ------: | ------: | -------: |
+| 1 (serial reference) | 28.0 ms | — |
+| 6 | 10.0 ms | 2.8× |
+
+Three things explain why six workers buy 2.8× rather than 6×, and none of them is a defect:
+
+- The prefix sum (1.3 ms) and the cursor restore (0.3 ms) are serial by design; they are the parts that
+  make every thread count produce identical arrays.
+- Passes two and three partition by *cell range*, so every worker reads the whole cell list:
+  `O(threads × n)` sequential reads. At 6 × 1M u32 that is 24 MB of mostly-cached traffic per rebuild,
+  bought in exchange for having no per-worker histogram to allocate, clear and merge.
+- `cell_of` (17.9 ms serial) is the only stage that scales cleanly, because it partitions by body with no
+  sharing at all. It is also the stage SIMD would help: three divisions per body, vectorisable with
+  IEEE-correct `_mm256_div_ps` (bit-identical results, unlike a reciprocal multiply). The counting and
+  placement passes are random scatter writes over 592,704 cells and cannot vectorise, so a SIMD
+  `cell_of` would move at most ~6 of the 10 ms left and is deliberately not done in this task — the
+  partitioning above is what the measurements asked for, and SIMD would need a strided-to-lane
+  transpose to feed it from `Vec<GridEntry>`'s 32-byte stride.
+
+Parity is tested, not assumed: `every_thread_count_builds_identical_windows` builds the same 6,000-body
+fixture at 1, 2, 3 and 8 threads and compares `cell_start` and `order` byte for byte — a query test would
+pass while two cells' windows were swapped, because it only looks at one cell at a time.

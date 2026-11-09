@@ -28,6 +28,8 @@
 //! simulation see the same neighbours in the same order.
 
 use bevy_math::Vec3;
+#[cfg(feature = "threads")]
+use std::thread;
 
 use crate::domain::ids::NpcId;
 use crate::domain::num;
@@ -50,6 +52,24 @@ use crate::error::ConfigError;
 /// this crate actually targets. 2^20 is the choice, and the guidance that follows
 /// from it is in the docs: size the volume to the playable area, not to the map.
 pub const DEFAULT_MAX_CELLS: u64 = 1 << 20;
+
+/// Bodies below this stay on the serial path.
+///
+/// A rebuild of a few thousand bodies takes a few hundred microseconds, which is the same order as
+/// spawning a handful of threads; below this threshold the parallel path is slower and noisier.
+const PARALLEL_MIN_BODIES: usize = 4_096;
+
+/// How many workers a grid uses when nobody says otherwise.
+///
+/// ADR 0054 makes the count configuration rather than behaviour: every count produces the same cells in
+/// the same order, so defaulting to the machine's parallelism is safe. A single-core target, or a build
+/// without the `threads` feature, gets one.
+fn default_threads() -> usize {
+    if cfg!(feature = "threads") {
+        return std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    }
+    1
+}
 
 /// Construction parameters for a [`SpatialGrid`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -178,6 +198,8 @@ pub struct SpatialGrid {
     order: Vec<u32>,
     /// Insertion-ordered agents.
     entries: Vec<GridEntry>,
+    /// How many threads a rebuild may use. See [`SpatialGrid::with_threads`].
+    threads: usize,
     /// The cell each entry landed in, remembered between the counting and placement passes.
     ///
     /// `cell_of` is the only float work in a rebuild and it was being done twice per body: once to
@@ -224,6 +246,7 @@ impl SpatialGrid {
             cell_start: vec![0; cells + 1],
             order: Vec::new(),
             entries: Vec::new(),
+            threads: default_threads(),
             cells: Vec::new(),
         })
     }
@@ -247,6 +270,7 @@ impl SpatialGrid {
             cell_start: vec![0, 0],
             order: Vec::new(),
             entries: Vec::new(),
+            threads: 1,
             cells: Vec::new(),
         }
     }
@@ -333,11 +357,32 @@ impl SpatialGrid {
     /// it invisible to its own flock.
     #[must_use]
     pub fn cell_of(&self, position: Vec3) -> u32 {
-        let local = (position - self.config.min) / self.cell_size;
-        let x = clamp_axis(local.x, self.dims[0]);
-        let y = clamp_axis(local.y, self.dims[1]);
-        let z = clamp_axis(local.z, self.dims[2]);
-        (z * self.dims[1] + y) * self.dims[0] + x
+        cell_of_parts(self.config.min, self.cell_size, self.dims, position)
+    }
+
+    /// How many threads a rebuild may use.
+    #[must_use]
+    pub const fn threads(&self) -> usize {
+        self.threads
+    }
+
+    /// Set how many threads a rebuild may use.
+    ///
+    /// This is configuration, not behaviour: the resulting cell windows and the order within them are
+    /// identical at every count (ADR 0054). One means the serial path, which is what a single-core
+    /// target gets, and what a build without the `threads` feature gets regardless of what is set here.
+    #[must_use]
+    pub const fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads;
+        self
+    }
+
+    /// Threads a rebuild will actually use for this grid's size.
+    fn worker_count(&self) -> usize {
+        if !cfg!(feature = "threads") || self.entries.len() < PARALLEL_MIN_BODIES {
+            return 1;
+        }
+        self.threads.max(1).min(self.cell_count().max(1))
     }
 
     /// Centre of a cell.
@@ -353,36 +398,72 @@ impl SpatialGrid {
 
     /// Group the entries by cell. Call once per tick, after all inserts.
     ///
-    /// Cost is `O(cells + n)`: one counting pass over agents, one prefix sum over
-    /// the (budgeted) cell array, one placement pass. No sorting, no allocation.
+    /// Cost is `O(cells + n)` on one thread: one pass computing each body's cell, one counting pass,
+    /// one prefix sum over the (budgeted) cell array, one placement pass. No sorting, no allocation
+    /// after the first tick.
+    ///
+    /// With [`SpatialGrid::with_threads`] above one, the three `O(n)` passes are partitioned across
+    /// workers and the prefix sum stays serial. The result is byte-identical at every thread count,
+    /// which is the whole point of ADR 0054: the build partitions by *cell range* rather than by arrival
+    /// order, so no body's placement depends on which worker got there first.
     pub fn build(&mut self) {
-        let cells = self.cell_count();
+        let workers = self.worker_count();
+        if workers <= 1 {
+            self.build_serial();
+        } else {
+            self.build_parallel(workers);
+        }
+    }
+
+    /// The single-threaded rebuild, and the reference every parallel result is compared against.
+    fn build_serial(&mut self) {
+        self.fill_cells_serial();
+        self.count_cells_serial();
+        self.prefix_cells();
+        self.place_cells_serial();
+        self.restore_cell_start();
+    }
+
+    /// Compute each body's cell. `cell_of` is the only float work in a rebuild, and it is done once per
+    /// body into a reused buffer so the placement pass reads four bytes instead of recomputing.
+    fn fill_cells_serial(&mut self) {
+        let (min, cell_size, dims) = (self.config.min, self.cell_size, self.dims);
+        let Self { cells, entries, .. } = self;
+        cells.clear();
+        cells.resize(entries.len(), 0);
+        for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
+            *slot = cell_of_parts(min, cell_size, dims, entry.position);
+        }
+    }
+
+    /// Count how many bodies land in each cell, in `cell_start[cell + 1]`.
+    fn count_cells_serial(&mut self) {
         self.cell_start.fill(0);
-        // Pass one: count, and remember where each body went. `cell_of` is the only float work in a
-        // rebuild and it used to be done twice per body — once to count, once to place. At a million
-        // bodies that second call was 18 of the 46 ms this took; four bytes per body buys it back, and
-        // the buffer is reused every tick so a steady frame does not allocate for it.
-        self.cells.clear();
-        self.cells.reserve(self.entries.len());
-        for entry in &self.entries {
-            let cell = self.cell_of(entry.position);
-            self.cells.push(cell);
-            if let Some(slot) = self.cell_start.get_mut(cell as usize + 1) {
+        for cell in &self.cells {
+            if let Some(slot) = self.cell_start.get_mut(*cell as usize + 1) {
                 *slot += 1;
             }
         }
-        // Pass two: prefix sum, so `cell_start[c]` is where cell `c` begins.
+    }
+
+    /// Turn counts into prefix sums, so `cell_start[cell]` is where that cell's window begins.
+    fn prefix_cells(&mut self) {
+        let cells = self.cell_count();
         for index in 0..cells {
             let previous = self.cell_start.get(index).copied().unwrap_or(0);
             if let Some(current) = self.cell_start.get_mut(index + 1) {
                 *current += previous;
             }
         }
+    }
 
+    /// Place body indices into `order`, using `cell_start` itself as the fill cursor.
+    ///
+    /// Afterwards `cell_start[cell]` holds where cell `cell + 1` begins, which
+    /// [`SpatialGrid::restore_cell_start`] turns back into the array a query reads.
+    fn place_cells_serial(&mut self) {
         self.order.clear();
         self.order.resize(self.entries.len(), 0);
-        // Pass three: place, using `cell_start` itself as the fill cursor rather than copying it into a
-        // second array. Afterwards `cell_start[c]` holds where cell `c + 1` begins.
         for (index, cell) in self.cells.iter().enumerate() {
             let cell = *cell as usize;
             let target = match self.cell_start.get(cell).copied() {
@@ -396,9 +477,13 @@ impl SpatialGrid {
                 *cursor += 1;
             }
         }
-        // Pass four: shift the advanced cursors back by one cell, descending because each step reads the
-        // value it is about to overwrite. One sequential pass over the cell array replaces the 2.3 MB
-        // copy the old cursor buffer needed, and there is one array where there were two.
+    }
+
+    /// Shift the advanced cursors back by one cell, descending because each step reads the value it is
+    /// about to overwrite. One sequential pass replaces a copy of the whole array, and it is the same
+    /// pass at any thread count, so it stays serial.
+    fn restore_cell_start(&mut self) {
+        let cells = self.cell_count();
         for index in (1..=cells).rev() {
             let previous = self.cell_start.get(index - 1).copied().unwrap_or(0);
             if let Some(slot) = self.cell_start.get_mut(index) {
@@ -408,6 +493,184 @@ impl SpatialGrid {
         if let Some(first) = self.cell_start.get_mut(0) {
             *first = 0;
         }
+    }
+
+    /// The partitioned rebuild.
+    ///
+    /// Passes one and three are partitioned by *body* and by *cell range* respectively; pass two is
+    /// partitioned by cell range, which means every worker reads the whole cell list. That is
+    /// `O(workers * n)` sequential reads against `O(n)` writes, and it is the price of not keeping a
+    /// per-worker histogram: at a million bodies and six workers it is 24 MB of reads that are mostly
+    /// in cache, versus six histograms of 2.3 MB each to allocate, clear and merge.
+    #[cfg(feature = "threads")]
+    fn build_parallel(&mut self, workers: usize) {
+        self.fill_cells_parallel(workers);
+        self.count_cells_parallel(workers);
+        self.prefix_cells();
+        self.place_cells_parallel(workers);
+        self.restore_cell_start();
+    }
+
+    /// Pass one, partitioned by body: each worker writes its own slice of the cell list.
+    #[cfg(feature = "threads")]
+    fn fill_cells_parallel(&mut self, workers: usize) {
+        let (min, cell_size, dims) = (self.config.min, self.cell_size, self.dims);
+        let Self { cells, entries, .. } = self;
+        cells.clear();
+        cells.resize(entries.len(), 0);
+        let chunk = entries.len().div_ceil(workers);
+        if chunk == 0 {
+            return;
+        }
+        thread::scope(|scope| {
+            for (slots, slice) in cells.chunks_mut(chunk).zip(entries.chunks(chunk)) {
+                scope.spawn(move || {
+                    for (slot, entry) in slots.iter_mut().zip(slice) {
+                        *slot = cell_of_parts(min, cell_size, dims, entry.position);
+                    }
+                });
+            }
+        });
+    }
+
+    /// Pass two, partitioned by cell range.
+    ///
+    /// A worker owns cells `[lo, hi)`, zeroes exactly those counters and adds only the bodies that
+    /// belong to them, so the counters need no merge afterwards — which is also why there is no
+    /// per-worker histogram to allocate, clear or reconcile.
+    ///
+    /// Every worker reads the whole cell list: `O(workers * n)` sequential reads against `O(n)` writes.
+    /// At a million bodies and six workers that is 24 MB of mostly-cached reads, cheaper than six
+    /// histograms of 2.3 MB each.
+    #[cfg(feature = "threads")]
+    fn count_cells_parallel(&mut self, workers: usize) {
+        let cells_in_grid = self.cell_count();
+        let Self {
+            cell_start, cells, ..
+        } = self;
+        let cell_list: &[u32] = cells;
+        let per = cells_in_grid.div_ceil(workers);
+        thread::scope(|scope| {
+            let mut rest: &mut [u32] = cell_start.as_mut_slice();
+            let mut at = 0_usize;
+            for index in 0..workers {
+                let lo = index * per;
+                let hi = ((index + 1) * per).min(cells_in_grid);
+                if lo >= hi {
+                    continue;
+                }
+                let Some(head) = (lo + 1).checked_sub(at) else {
+                    continue;
+                };
+                let current = std::mem::take(&mut rest);
+                let Some((_, tail)) = current.split_at_mut_checked(head) else {
+                    continue;
+                };
+                let Some((window, tail_rest)) = tail.split_at_mut_checked(hi - lo) else {
+                    continue;
+                };
+                rest = tail_rest;
+                at = hi + 1;
+                scope.spawn(move || {
+                    window.fill(0);
+                    for cell in cell_list {
+                        let cell = *cell as usize;
+                        if cell < lo || cell >= hi {
+                            continue;
+                        }
+                        if let Some(slot) = window.get_mut(cell - lo) {
+                            *slot += 1;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// Pass three, partitioned by cell range.
+    ///
+    /// A range's bodies occupy a contiguous run of `order` — that is what the prefix sum bought — so
+    /// each worker writes a disjoint slice and no two workers ever alias. The run's boundaries are read
+    /// from the cursor array before it is split, at a point where the values at and beyond `lo` are
+    /// still untouched by anyone.
+    #[cfg(feature = "threads")]
+    fn place_cells_parallel(&mut self, workers: usize) {
+        let cells_in_grid = self.cell_count();
+        let bodies = self.entries.len();
+        let Self {
+            cell_start,
+            order,
+            cells,
+            ..
+        } = self;
+        let cell_list: &[u32] = cells;
+        order.clear();
+        order.resize(bodies, 0);
+        let per = cells_in_grid.div_ceil(workers);
+        thread::scope(|scope| {
+            let mut cursor_rest: &mut [u32] = cell_start.as_mut_slice();
+            let mut order_rest: &mut [u32] = order.as_mut_slice();
+            let mut cursor_at = 0_usize;
+            let mut order_at = 0_usize;
+            for index in 0..workers {
+                let lo = index * per;
+                let hi = ((index + 1) * per).min(cells_in_grid);
+                if lo >= hi {
+                    continue;
+                }
+                let begin = cursor_rest.first().copied().unwrap_or(0) as usize;
+                let end = cursor_rest.get(hi - lo).copied().unwrap_or(0) as usize;
+                let remaining = std::mem::take(&mut cursor_rest);
+                let runs_remaining = std::mem::take(&mut order_rest);
+                let (Some(head), Some(run)) = (
+                    lo.checked_sub(cursor_at),
+                    begin.checked_sub(order_at).filter(|_| end >= begin),
+                ) else {
+                    continue;
+                };
+                let Some((_, tail)) = remaining.split_at_mut_checked(head) else {
+                    continue;
+                };
+                let Some((cursor, tail_rest)) = tail.split_at_mut_checked(hi - lo) else {
+                    continue;
+                };
+                cursor_rest = tail_rest;
+                cursor_at = hi;
+                let Some((_, runs)) = runs_remaining.split_at_mut_checked(run) else {
+                    continue;
+                };
+                let Some((out, runs_rest)) = runs.split_at_mut_checked(end - begin) else {
+                    continue;
+                };
+                order_rest = runs_rest;
+                order_at = end;
+                scope.spawn(move || {
+                    for (body, cell) in cell_list.iter().enumerate() {
+                        let cell = *cell as usize;
+                        if cell < lo || cell >= hi {
+                            continue;
+                        }
+                        let Some(slot) = cursor.get_mut(cell - lo) else {
+                            continue;
+                        };
+                        let target = *slot as usize;
+                        *slot += 1;
+                        if let Some(out) = target
+                            .checked_sub(begin)
+                            .and_then(|local| out.get_mut(local))
+                        {
+                            *out = num::usize_to_u32(body);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// Without the `threads` feature there is nothing to partition onto.
+    #[cfg(not(feature = "threads"))]
+    fn build_parallel(&mut self, _workers: usize) {
+        self.build_serial();
     }
 
     /// The entry indices in one cell.
@@ -560,6 +823,14 @@ fn cell_count(dims: [u32; 3]) -> u64 {
 }
 
 /// Clamp a local coordinate to a cell index on one axis.
+fn cell_of_parts(min: Vec3, cell_size: f32, dims: [u32; 3], position: Vec3) -> u32 {
+    let local = (position - min) / cell_size;
+    let x = clamp_axis(local.x, dims[0]);
+    let y = clamp_axis(local.y, dims[1]);
+    let z = clamp_axis(local.z, dims[2]);
+    (z * dims[1] + y) * dims[0] + x
+}
+
 fn clamp_axis(value: f32, cells: u32) -> u32 {
     let max = cells.saturating_sub(1);
     if !value.is_finite() || value <= 0.0 {
@@ -865,6 +1136,53 @@ mod tests {
             total += window.len();
         }
         assert_eq!(total, grid.len(), "every entry appears in exactly one cell");
+    }
+
+    #[test]
+    fn every_thread_count_builds_identical_windows() {
+        // ADR 0054 invariant 7: the thread count is configuration and cannot change behaviour. This
+        // compares the raw arrays rather than query results, because a query test would pass while two
+        // cells' windows were swapped — it only looks at one cell at a time.
+        let build = |threads: usize| {
+            let config =
+                SpatialGridConfig::try_new(Vec3::splat(-400.0), Vec3::splat(400.0), 6.0).or_die();
+            let mut grid = SpatialGrid::new(config).or_die().with_threads(threads);
+            grid.extend_from((0..6_000).map(|index| {
+                let step = num::u32_to_f32(num::usize_to_u32(index));
+                (
+                    NpcId::unique(num::usize_to_u32(index)),
+                    Vec3::new(
+                        (step * 0.37).sin() * 380.0,
+                        (step * 0.11).cos() * 40.0,
+                        (step * 0.23).sin() * 380.0,
+                    ),
+                    Vec3::ZERO,
+                )
+            }));
+            grid.build();
+            grid
+        };
+        let serial = build(1);
+        assert_eq!(
+            serial.worker_count(),
+            1,
+            "the reference must be the serial path"
+        );
+        for threads in [2, 3, 8] {
+            let parallel = build(threads);
+            assert!(
+                parallel.worker_count() > 1,
+                "threads = {threads} must actually partition"
+            );
+            assert_eq!(
+                parallel.cell_start, serial.cell_start,
+                "prefix sums differ at {threads} threads"
+            );
+            assert_eq!(
+                parallel.order, serial.order,
+                "placement order differs at {threads} threads"
+            );
+        }
     }
 
     #[test]

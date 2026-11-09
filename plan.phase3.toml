@@ -207,6 +207,16 @@ evaluation_criteria = [
 ]
 
 [[completed]]
+task = "phase-3 T03 band-partitioned-build"
+delivered_in = "feat/phase3-t03-parallel-build"
+note = """
+`SpatialGrid::build` partitions its three O(n) passes across `with_threads(n)` workers; the prefix sum and
+the cursor restore stay serial because they are what make every thread count produce identical arrays.
+28.0 ms -> 10.0 ms at a million bodies on six cores (2.8x), measured by `examples/profile_build.rs`.
+`every_thread_count_builds_identical_windows` compares `cell_start` and `order` byte for byte at 1/2/3/8.
+"""
+
+[[completed]]
 task = "phase-3 T01 serial-baseline"
 delivered_in = "feat/phase3-t01-t02"
 note = """
