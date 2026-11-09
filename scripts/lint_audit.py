@@ -152,7 +152,12 @@ NUM_MODULE = "src/domain/num.rs"
 #: manifest.
 CRATE_ROOTS = {
     "src/lib.rs": "Cargo.toml",
+    "crates/bevy-flock-anim/src/lib.rs": "crates/bevy-flock-anim/Cargo.toml",
     "demo/src/lib.rs": "demo/Cargo.toml",
+    "examples/build_passes.rs": "Cargo.toml",
+    "examples/scaling_sweep.rs": "Cargo.toml",
+    "playground/src/lib.rs": "playground/Cargo.toml",
+    "tests/spatial_parity.rs": "Cargo.toml",
 }
 #: A Bevy system parameter, by value, as the framework's `SystemParam` contract requires.
 BEVY_PARAM = re.compile(
@@ -650,6 +655,38 @@ def self_test() -> int:
             "fn f() {}\n",
             0,
             "a crate-level expectation restating the manifest's crate-wide allow",
+        ),
+        (
+            "crates/bevy-flock-anim/src/lib.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n'
+            '    reason = "animation blends must preserve unfused deterministic rounding"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "the animation crate root restates its manifest's crate-wide allow",
+        ),
+        (
+            "examples/build_passes.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n'
+            '    reason = "benchmark fixtures must preserve unfused deterministic rounding"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "an example crate root restates the library manifest's crate-wide allow",
+        ),
+        (
+            "playground/src/lib.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n'
+            '    reason = "playground transforms must preserve unfused deterministic rounding"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "the playground crate root restates its manifest's crate-wide allow",
+        ),
+        (
+            "tests/spatial_parity.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n'
+            '    reason = "parity fixtures must preserve unfused deterministic rounding"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "an integration-test crate root restates the library manifest's crate-wide allow",
         ),
         (
             "src/lib.rs",

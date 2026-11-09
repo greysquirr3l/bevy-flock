@@ -1,3 +1,8 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "benchmark fixtures must preserve unfused deterministic rounding"
+)]
+
 //! Runtime thread scaling for the spatial index, measured rather than modelled.
 //!
 //! Three phases, because they scale for different reasons and averaging them would hide that:

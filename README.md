@@ -1,4 +1,5 @@
 # bevy-flock
+
 <img src="docs/demo/bevy-flock-logo.png" width="320" height="320" align="right" alt="bevy-flock: a ring of ink-wash cranes">
 
 **Deterministic crowd and NPC simulation for Bevy.** One NPC or a million, with
@@ -401,7 +402,7 @@ rather than an error.
 
 ## Architecture
 
-```
+```bash
 src/
   domain/         pure simulation math and state — no Bevy, no clock, no I/O
   application/    the logical clock and orchestration

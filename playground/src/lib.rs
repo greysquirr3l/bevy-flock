@@ -1,3 +1,8 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "playground transforms must preserve unfused deterministic rounding"
+)]
+
 //! A windowed 3D Ashfall playground: the crowd and the city, drawn by Bevy's PBR pipeline.
 //!
 //! `demo-gpu` renders the same scene offscreen with a hand-written wgpu pipeline, which is what

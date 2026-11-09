@@ -197,13 +197,13 @@ Four `#[expect]`s are therefore permitted, and the audit checks all four:
    benchmark group drops, so the group's scope *is* the measurement; shortening the guard's life
    would measure less, not more. The audit only accepts the expectation in a bench, and only when
    the reason names Criterion.
-4. **At a crate root, for a lint that crate's own manifest already allows crate-wide.** The library
-   root (`src/lib.rs`) and the demo library root (`demo/src/lib.rs`) each carry one, for
-   `suboptimal_flops`. The manifest is the authority — it allows the lint for the reason above — and
-   the attribute restates that decision in the source, where it outranks the command line. The audit
-   reads the manifest that governs the root and accepts the expectation only when that manifest
-   allows the named lint crate-wide, so the two can never drift apart: a manifest that stopped
-   allowing the lint, or a root that moved, fails the audit.
+4. **At a crate root, for a lint that crate's own manifest already allows crate-wide.** The library,
+   animation, demo and playground library roots, the two affected example roots, and the spatial
+   parity integration-test root carry `suboptimal_flops` expectations. Animation blends, playground
+   transforms, benchmark fixtures and parity fixtures preserve unfused rounding for deterministic
+   replays and measurements. The manifest is the authority; the source attribute restates its
+   decision where it outranks command-line lint flags. The audit checks each root against its own
+   manifest.
 
 ### Why the fourth one is in the source at all
 
@@ -224,14 +224,12 @@ Two consequences follow, and both are checked:
 
 - The expectation must be **fulfilled** in every configuration the project builds, or
   `unfulfilled_lint_expectations` fails the build. That is the property that makes this an
-  `#[expect]` and not an `#[allow]`: when the last unfused multiply-add in the library is rewritten,
-  the build says so. The library root's sites are in `application::crowd` and `application::packed`,
-  which are always compiled; the demo root's are spread across its ten modules, which are always
-  compiled too.
+  `#[expect]` and not an `#[allow]`: when the last unfused multiply-add in a crate is rewritten, the
+  build says so. Each expectation is attached to a root that includes at least one affected
+  expression in every configuration where that target is built.
 - The attribute covers **one crate**. A crate-level attribute in `src/lib.rs` says nothing about
-  `tests/`, `benches/` or `examples/`, which are separate crates with their own roots. Those targets
-  carry no unfused arithmetic today, so they need no attribute; if one grows some, it needs its own.
-
+  `tests/`, `benches/` or `examples/`, which are separate crates with their own roots. Each affected
+  target needs its own expectation, even when it shares a manifest with the library.
 
 An `#[expect]` is not a suppression. It fails the build the day the lint stops firing, so it cannot
 rot into an `allow`; it is a statement that the lint is wrong here, and the compiler holds you to it.
@@ -257,8 +255,9 @@ is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather
 item, and a `cfg_attr` wrapper marks the attribute conditional — a decision that holds under some
 configuration is not a crate-wide one, so the audit does not accept it as one.
 
-It also reads every manifest that carries the table — the library's `Cargo.toml`, `demo/Cargo.toml`
-`demo-gpu/Cargo.toml` and `playground/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
+It also reads every manifest that carries the table — the library's `Cargo.toml`,
+`crates/bevy-flock-anim/Cargo.toml`, `demo/Cargo.toml`, `demo-gpu/Cargo.toml` and
+`playground/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
 both directions:
 
 - **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
@@ -271,7 +270,7 @@ both directions:
   *stricter* than the library — the GPU demo denies the groups rather than warning about them, since
   it has no `-D warnings` step of its own — the comparison is against a strength order rather than
   for equality, and no manifest may allow a lint that `TOLERATED` does not list. The tolerated set
-  itself is checked once against all four manifests together, so an entry nothing allows any more
+  itself is checked once against all five manifests together, so an entry nothing allows any more
   still fails.
 
 `--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level
