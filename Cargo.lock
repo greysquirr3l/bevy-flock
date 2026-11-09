@@ -206,9 +206,12 @@ name = "bevy-flock"
 version = "0.1.0"
 dependencies = [
  "bevy-flock-core",
+ "bevy_animation",
  "bevy_app",
+ "bevy_asset",
  "bevy_ecs",
  "bevy_math",
+ "bevy_reflect",
  "bevy_tasks",
  "bevy_transform",
  "criterion",
@@ -226,17 +229,6 @@ name = "bevy-flock-anim"
 version = "0.1.0"
 dependencies = [
  "bevy-flock",
- "bevy_animation",
- "bevy_app",
- "bevy_asset",
- "bevy_ecs",
- "bevy_math",
- "bevy_reflect",
- "bevy_transform",
- "criterion",
- "libm",
- "proptest",
- "thiserror 2.0.21",
 ]
 
 [[package]]

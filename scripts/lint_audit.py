@@ -49,11 +49,15 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "suboptimal_flops",
     ): "the packed kernel is compared bit for bit against the wide road, so fusion is a divergence",
     (
+        "src/anim/mod.rs",
+        "suboptimal_flops",
+    ): "animation blends and root-motion traces must preserve unfused deterministic rounding",
+    (
         "examples/memory_probe.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to report steady-state allocation",
     (
-        "crates/bevy-flock-anim/tests/no_alloc.rs",
+        "tests/anim_no_alloc.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to observe an allocation; confined to one test binary",
     (

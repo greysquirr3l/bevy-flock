@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The animation layer is a `bevy-flock` feature now.** `features = ["anim"]` (and therefore
+  `features = ["full"]`) turns on blended clip weights, gaze and gesture playback. Before this the layer lived in
+  `bevy-flock-anim`, which depended on `bevy-flock`, so a feature could never include it: Cargo rejects the cycle. The
+  old package remains as a re-export shim so `use bevy_flock_anim::AnimPlugin;` keeps compiling, and it retires at 1.0.
+  See ADR 0061.
+- **The animation bench, baseline and no-allocation test moved with the code**, to `benches/anim_binding.rs`,
+  `benches/anim-baseline.json` and `tests/anim_no_alloc.rs`. The CI gate reads the new baseline path.
+- **Two configuration warnings are gone.** `block_bases`, `prefix_bases` and an orphaned `build_parallel` stub were
+  dead on the no-threads path; they are now gated or deleted, so `--no-default-features` builds clean.
 - **A `full` feature, so "everything" is one line.** `features = ["full"]` turns on `ecs`, `simd`, `threads`, `memory`,
   `serde` and `navmesh`. Before this, a game that wanted memory and saves had to read the feature table and guess the
   combination. The animation layer is still a separate crate and cannot be folded in: `bevy-flock-anim` depends on

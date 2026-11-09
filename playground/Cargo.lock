@@ -356,9 +356,13 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 name = "bevy-flock"
 version = "0.1.0"
 dependencies = [
+ "bevy-flock-core",
+ "bevy_animation",
  "bevy_app",
+ "bevy_asset",
  "bevy_ecs",
  "bevy_math",
+ "bevy_reflect",
  "bevy_tasks",
  "bevy_transform",
  "libm",
@@ -368,18 +372,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy-flock-anim"
+name = "bevy-flock-core"
 version = "0.1.0"
 dependencies = [
- "bevy-flock",
- "bevy_animation",
- "bevy_app",
- "bevy_asset",
  "bevy_ecs",
  "bevy_math",
- "bevy_reflect",
- "bevy_transform",
+ "bevy_tasks",
+ "libm",
+ "smallvec",
  "thiserror 2.0.21",
+ "wide",
 ]
 
 [[package]]
@@ -399,7 +401,6 @@ name = "bevy-flock-playground"
 version = "0.1.0"
 dependencies = [
  "bevy-flock",
- "bevy-flock-anim",
  "bevy-flock-demo",
  "bevy_a11y",
  "bevy_animation",

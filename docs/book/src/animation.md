@@ -1,7 +1,7 @@
 # Animation
 
 The simulation moves bodies. Animation makes them look like they are walking rather than sliding, and
-the whole design of `bevy-flock-anim` follows from one refusal: it will not own your skeleton.
+the whole design of `bevy-flock::anim` follows from one refusal: it will not own your skeleton.
 
 You keep your rig, your clips, your `AnimationGraph` and your asset pipeline. The crate owns the
 numbers a crowd needs, how fast a stride is, when a body is turning on the spot, how far away a body
@@ -13,8 +13,8 @@ ADR 0052, and this chapter is how you adopt it.
 | Interface | Where it lives | Who writes it | What it is |
 | --- | --- | --- | --- |
 | `Locomotion` | `bevy-flock` (core) | the simulation | speed, turn rate, acceleration and distance travelled, derived from the velocity integration wrote |
-| `LocomotionProfile` | `bevy-flock-anim` | you, as data | validated authored numbers: walking speed, running speed, stride, turn band, LOD distances |
-| `ClipSlot` | `bevy-flock-anim` | the crate | four names, idle, walk, run, turn-in-place, that you map onto nodes in *your* graph |
+| `LocomotionProfile` | `bevy-flock::anim` | you, as data | validated authored numbers: walking speed, running speed, stride, turn band, LOD distances |
+| `ClipSlot` | `bevy-flock::anim` | the crate | four names, idle, walk, run, turn-in-place, that you map onto nodes in *your* graph |
 
 The fourth thing is yours too: `ClipBindings`, the map from `ClipSlot` to `AnimationNodeIndex`. Only
 your code knows how your graph was built, so the crate refuses to guess.
@@ -107,7 +107,7 @@ root motion is the most common way an animation layer breaks a simulation.
 
 Gaze aims a two-bone chain at whatever cognition already selected, never at the camera directly: the
 aim comes from the stimulus set through `GazeAim`, so replacing perception does not break the face.
-Gestures are a channel on the blackboard, a behaviour leaf asks for one, `bevy-flock-anim` plays the
+Gestures are a channel on the blackboard, a behaviour leaf asks for one, `bevy-flock::anim` plays the
 clip at a weight the gesture's urgency sets, and the blend leaves it alone.
 
 ## The envelope, and what to do with it

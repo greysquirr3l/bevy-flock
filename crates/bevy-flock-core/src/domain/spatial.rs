@@ -342,6 +342,10 @@ pub struct SpatialGrid {
     /// Reused per-block count totals for the blocked scan. See [`SpatialGrid::with_blocks`].
     block_totals: Vec<u32>,
     /// Reused per-block starting offsets for the blocked scan.
+    ///
+    /// Only the parallel path reads them: the serial rebuild scans the window table directly. Gated with
+    /// the code that uses them rather than left to warn in a build that has no threads.
+    #[cfg(feature = "threads")]
     block_bases: Vec<u32>,
     /// The cell each entry landed in, remembered between the counting and placement passes.
     ///
@@ -531,6 +535,7 @@ impl SpatialGrid {
             threads: default_threads(),
             blocks: 0,
             block_totals: Vec::new(),
+            #[cfg(feature = "threads")]
             block_bases: Vec::new(),
             cells: Vec::new(),
         })
@@ -560,6 +565,7 @@ impl SpatialGrid {
             threads: 1,
             blocks: 0,
             block_totals: Vec::new(),
+            #[cfg(feature = "threads")]
             block_bases: Vec::new(),
             cells: Vec::new(),
         }
@@ -574,7 +580,7 @@ impl SpatialGrid {
     /// The cell size actually in use.
     ///
     /// Equal to `config().cell_size` unless the volume needed more than
-    /// [`MAX_CELLS`] cells, in which case the grid coarsened to stay inside the
+    /// `MAX_CELLS` cells, in which case the grid coarsened to stay inside the
     /// budget.
     #[must_use]
     pub const fn effective_cell_size(&self) -> f32 {
@@ -587,7 +593,7 @@ impl SpatialGrid {
         self.dims
     }
 
-    /// Total number of cells, never more than [`MAX_CELLS`].
+    /// Total number of cells, never more than `MAX_CELLS`.
     #[must_use]
     pub fn cell_count(&self) -> usize {
         num::u64_to_usize(cell_count(self.dims))
@@ -671,7 +677,7 @@ impl SpatialGrid {
     ///
     /// ADR 0055: this changes what a rebuild costs and never what it produces. `0` — the default — derives the
     /// count from the cell count, and `1` routes to the serial scan, which is the reference the byte-equality
-    /// test compares against. Values above [`MAX_BLOCKS`] and grids under [`PARALLEL_MIN_CELLS`] are clamped,
+    /// test compares against. Values above `MAX_BLOCKS` and grids under `PARALLEL_MIN_CELLS` are clamped,
     /// so a caller cannot ask for a slower scan by accident.
     #[must_use]
     pub const fn with_blocks(mut self, blocks: usize) -> Self {
@@ -867,6 +873,7 @@ impl SpatialGrid {
     ///
     /// Saturating rather than wrapping, for the same reason `PassCosts::total` saturates: a sum that overflowed
     /// would shift every window after it and still add up to the population.
+    #[cfg(feature = "threads")]
     fn prefix_bases(&mut self) -> u32 {
         let blocks = self.block_count();
         self.block_bases.clear();
@@ -1347,16 +1354,6 @@ impl SpatialGrid {
                 lo_block = hi_block;
             }
         });
-    }
-
-    /// Without the `threads` feature there is nothing to partition onto: the four passes run in order, which is
-    /// exactly what `build_measured` does at one worker.
-    #[cfg(not(feature = "threads"))]
-    fn build_parallel(&mut self, _workers: usize) {
-        self.fill_cells_serial();
-        self.count_cells_serial();
-        self.prefix_cells_serial();
-        self.place_cells_serial();
     }
 
     /// The entry indices in one cell.

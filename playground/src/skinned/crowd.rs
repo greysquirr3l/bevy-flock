@@ -18,7 +18,7 @@ use bevy_flock::prelude::{
     GazeAim, GazeTarget, GestureKind, Npc, NpcBundle, NpcDesiredVelocity, NpcGestures, NpcId,
     NpcVelocity, SimClock,
 };
-use bevy_flock_anim::{
+use bevy_flock::anim::{
     BlendWindows, ClipBindings, GazeBone, GazeLimits, GazeRig, GestureClips, GesturePlayback,
     LocomotionProfile, ProfileError,
 };

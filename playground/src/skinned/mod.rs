@@ -46,7 +46,7 @@ use bevy_flock::prelude::{
     FlockPlugin, GazeAim, GazeTarget, GestureChannel, GestureConfig, GestureKind, Npc, NpcGestures,
     SimClock, request_gesture,
 };
-use bevy_flock_anim::{
+use bevy_flock::anim::{
     AnimPlugin, AnimationFocus, AnimationState, ClipBindings, ClipSlot, GazePlugin, GesturePlugin,
     LodLevel,
 };

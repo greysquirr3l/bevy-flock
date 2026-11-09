@@ -75,17 +75,19 @@
 //! | `serde` | off | `Serialize`/`Deserialize` for blueprints, authored trees, saves and snapshots |
 //! | `memory` | off | social memory: bounded subject rows, ageing and persistence |
 //! | `navmesh` | off | pathfinding over a baked navmesh, behind the navigation adapter |
+//! | `anim` | off | blended clip weights, gaze and gesture playback; the only feature that needs `bevy_animation` |
 //! | `full` | off | all of the above, for a game that wants the whole engine |
 //!
 //! `--no-default-features` builds the engine-free simulation alone, which is exactly
 //! what `bevy-flock-core` publishes. `ecs` is the only feature that puts a Bevy crate
 //! in the dependency graph.
 //!
-//! So the three sentences a new dependency needs are: `bevy-flock = "0.1"` for the crowd
-//! engine, `features = ["full"]` to turn on memory, saves and navigation as well, and
-//! `bevy-flock-anim` as a second crate if the crowd has to walk. That crate is separate
-//! because it pulls `bevy_animation` and `bevy_asset`, which a headless server should never
-//! compile; it depends on this one, so this one cannot re-export it.
+//! So the sentence a new dependency needs is `bevy-flock = { version = "0.1", features = ["full"] }`:
+//! the crowd engine, memory, saves, navigation and the animation layer in one line. `anim` is a
+//! feature rather than a second package because a layer you have to discover in another crate is a
+//! layer half the games never add. It is off by default because it is the only feature that pulls
+//! `bevy_animation` and `bevy_asset`, which a dedicated server should never compile. The old
+//! `bevy-flock-anim` package still exists as a re-export shim for 0.x compatibility.
 //!
 //! Optional integrations (avian physics, instanced rendering, replication,
 //! inspectors) land behind their own features; none is required to run a crowd.
@@ -108,6 +110,12 @@
 // boundary ADR 0058 describes and the reason `bevy-flock-core` exists as a crate of its own.
 #[cfg(feature = "ecs")]
 pub mod adapters;
+/// Animation binding: turns simulated locomotion into blended clip weights.
+///
+/// Behind the `anim` feature, because it is the only layer in this crate that needs
+/// `bevy_animation` and `bevy_asset`.
+#[cfg(feature = "anim")]
+pub mod anim;
 // The ECS systems that drive the simulation. Like `adapters`, this is engine code: the core exposes
 // `boids::BoidsParams`-shaped data and the systems that read it live on this side of the boundary.
 #[cfg(feature = "ecs")]

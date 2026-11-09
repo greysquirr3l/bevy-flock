@@ -322,7 +322,7 @@ jobs:
       # against itself proves the script runs, that the file parses, and that the case names in it are
       # the ones the script looks for. A real comparison needs the machine that recorded the baseline;
       # a shared runner measures the runner, which is why this is a self-check and says so.
-      - run: python3 scripts/bench_gate.py --check crates/bevy-flock-anim/benches/baseline.json
+      - run: python3 scripts/bench_gate.py --check benches/anim-baseline.json
       - run: python3 scripts/bench_gate.py --baseline benches/spatial-baseline.json --check benches/spatial-baseline.json
   examples:
     name: Examples run

@@ -7,9 +7,9 @@
 //! any of it has one name to look up.
 use bevy_ecs::prelude::Component;
 
-use crate::lod::AnimationLod;
-use crate::settle::Settle;
-use crate::slide::FootSlide;
+use crate::anim::lod::AnimationLod;
+use crate::anim::settle::Settle;
+use crate::anim::slide::FootSlide;
 
 /// What the binding has done to one body, as of the last tick it was evaluated.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq)]
@@ -59,7 +59,7 @@ impl AnimationState {
 #[cfg(test)]
 mod tests {
     use super::AnimationState;
-    use crate::lod::LodLevel;
+    use crate::anim::lod::LodLevel;
 
     #[test]
     fn a_fresh_state_is_full_weight_and_has_measured_nothing() {

@@ -7,7 +7,7 @@
 //! message and a panic in *production* is an outage, and a file-level opt-out cannot tell them
 //! apart.
 //!
-//! So a test that needs to fail loudly says so with [`OrDie`], which reports the failure with
+//! So a test that needs to fail loudly says so with `OrDie`, which reports the failure with
 //! `unreachable!` and a message that names the fixture:
 //!
 //! ```rust

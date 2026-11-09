@@ -19,7 +19,7 @@ use bevy_math::{Vec2, Vec3};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use bevy_flock_anim::{
+use bevy_flock::anim::{
     AnimationFocus, BlendLod, ClipBindings, GazeBone, GazeLimits, GazeRig, LocomotionProfile,
     RootMotionTrace, RootOffset, apply_gaze, apply_locomotion_blend, apply_root_motion,
 };

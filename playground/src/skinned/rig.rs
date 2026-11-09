@@ -9,7 +9,7 @@
 //! Three joints are animated by clips (`hips`, `torso`, `head`); two are pivots parented to the
 //! animated bones and driven by the gaze solve. The mesh is weighted to the *pivots* for the chest
 //! and head, which is what makes a gaze visible: the clip moves the bone the pivot hangs from, and
-//! gaze composes on top of it in a node no clip touches (see `bevy_flock_anim::gaze`).
+//! gaze composes on top of it in a node no clip touches (see `bevy_flock::anim::gaze`).
 
 use bevy_asset::RenderAssetUsages;
 use bevy_math::{Mat4, Vec2, Vec3};

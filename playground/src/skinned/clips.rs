@@ -9,7 +9,7 @@
 //! A walk cycle is two steps: the same leg is forward again after a full period. The example's
 //! stride is 1.5 m, so a body at 1.4 m/s covers a stride in 1.07 s and the walk clip is authored at
 //! that length. Run is authored shorter because a run is faster, not because the clip plays faster:
-//! [`bevy_flock_anim::apply_locomotion_blend`] also scales playback rate by speed over the profile's
+//! [`bevy_flock::anim::apply_locomotion_blend`] also scales playback rate by speed over the profile's
 //! stride, so the clip's own period is the tempo a body at the profile's walk speed would show.
 
 use bevy_animation::animation_curves::AnimationCurve;

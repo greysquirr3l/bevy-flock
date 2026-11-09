@@ -134,7 +134,7 @@ impl NodeKind {
 /// A tree described as data, before compilation.
 ///
 /// Built with [`sequence`], [`selector`], [`parallel`], [`action`] and friends, or
-/// deserialised from RON with [`NodeSpec::from_ron`] when the `serde` feature is
+/// deserialised from RON with `NodeSpec::from_ron` when the `serde` feature is
 /// on. Both produce the same compiled tree, which is asserted by a golden test.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

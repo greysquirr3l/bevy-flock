@@ -2,7 +2,7 @@
 """Fail a build when the animation binding regresses against its committed baseline.
 
 The benchmark in `crates/bevy-flock-anim/benches/binding.rs` reports one number per case. This
-compares each against `crates/bevy-flock-anim/benches/baseline.json` and fails when a case is more
+compares each against the baseline it is given (`benches/anim-baseline.json` for the animation binding) and fails when a case is more
 than `--tolerance` slower (25% by default, which is the gate the phase-2 plan asks for).
 
 Two ways to use it:

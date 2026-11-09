@@ -5,7 +5,7 @@
 //! everyone, or a thousand NPCs talking at once because nothing limits them.
 //!
 //! This module is the limiter. [`BarkTable`] holds rate-limited categories;
-//! [`BarkBudget`] enforces one bark per NPC per cooldown and a global cap per tick
+//! `BarkBudget` enforces one bark per NPC per cooldown and a global cap per tick
 //! so a riot does not become a thousand overlapping voice lines; and the picker
 //! refuses to repeat an NPC's last line, which is what stops "salt? salt? salt?"
 //! from being the defining memory of a market.

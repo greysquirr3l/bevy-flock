@@ -45,19 +45,18 @@ Four crates, three of them optional. The first row is the one almost everybody n
 | --- | --- |
 | a crowd in a Bevy game | `bevy-flock` |
 | all of it, without reading a feature table | `bevy-flock = { version = "0.1", features = ["full"] }` |
-| NPCs that walk, gesture and look with skeletons | `bevy-flock-anim` as well |
+| NPCs that walk, gesture and look with skeletons | `bevy-flock` with `features = ["anim"]` |
 | a server, replay tool or test harness with no Bevy in the graph | `bevy-flock-core` alone |
 
-`full` turns on `ecs`, `simd`, `threads`, `memory`, `serde` and `navmesh`. It does not turn on the animation layer,
-because that lives in a crate which depends on this one: a re-export would be a dependency cycle. Add both and they meet
-at the component types in the prelude, which is the whole reason the prelude re-exports `Transform` and `Vec3` rather
-than defining its own.
+`full` turns on `ecs`, `simd`, `threads`, `memory`, `serde`, `navmesh` and `anim`. The animation layer is a feature
+rather than a second crate because a dependency that has to be discovered in a separate package is a dependency half the
+games never add. It stays off by default because it is the only feature that pulls `bevy_animation` and `bevy_asset`.
 
 | crate | engine in the graph | what it is |
 | --- | --- | --- |
 | `bevy-flock` | Bevy | the plugin, components, systems and the re-exported simulation |
 | `bevy-flock-core` | none | the same simulation without an engine, for servers and replays |
-| `bevy-flock-anim` | Bevy plus `bevy_animation` | skeletal binding, gestures and gaze playback |
+| `bevy-flock-anim` | Bevy plus `bevy_animation` | a re-export shim kept for 0.x compatibility; new code uses the `anim` feature |
 
 `bevy-flock` re-exports the core, so `bevy_flock::domain::…` and `bevy_flock::behavior::…` resolve whichever you depend
 on. Name `bevy-flock-core` directly only when you want no Bevy in your dependency graph at all.
