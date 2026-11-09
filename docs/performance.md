@@ -1290,3 +1290,44 @@ Two things had to be true before this harness was worth trusting, and both are t
 The varying policy is not decoration either: a partition that only produces the right answer at a fixed
 worker count fails here, because the count changes every tick and the buffers are re-partitioned 2,000 times
 with 1, 8, 3 and 2 workers in rotation.
+
+### Thread scaling: where the phase 3 ceiling actually is (T06)
+Measured with `examples/scaling_sweep.rs`: 1M bodies, 5,000 queries of radius 12 m, median of five runs per
+cell, on **this VM — aarch64, six cores** (`thread::available_parallelism()` = 6). It is not a workstation and
+nothing below is extrapolated to hardware that was not measured. The figure is
+`docs/images/spatial-scaling.png`; the table is the same data.
+
+| Phase | 1 thread | 2 | 4 | 6 | 8 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| build | 23.62 ms | 15.23 ms | 9.42 ms | 8.02 ms | 10.72 ms |
+| batch | 49.94 ms | 25.13 ms | 12.25 ms | 7.85 ms | 11.31 ms |
+| frame | 74.13 ms | 40.51 ms | 21.65 ms | 15.96 ms | 21.94 ms |
+| build speed-up | 1.00x | 1.55x | 2.51x | 2.94x | 2.20x |
+| batch speed-up | 1.00x | 1.99x | 4.07x | 6.36x | 4.41x |
+| frame speed-up | 1.00x | 1.83x | 3.42x | 4.65x | 3.38x |
+
+Three things in that table decide the next phase.
+
+**The batch scales, the build saturates at four threads, and the frame lands in between.** The batch reaches
+6.36x at six workers, which is slightly *super*linear — page faults on the freshly allocated arena and entry
+arrays are paid concurrently rather than in one thread's critical path — and it is the only phase here that
+would justify more cores. The build gains 2.51x by four workers and then 0.43x more by six: its three O(n)
+passes partition cleanly, but the prefix sum over the cell array, the cell clear and the cursor restore are
+serial by construction (they are what makes the arrays identical at every thread count, ADR 0054). Those are
+~15.6M cells at these settings, and they are the flat part of the curve.
+
+**Eight workers is slower than six on every phase**, 10.7 ms against 8.0 ms for the build and 21.9 ms against
+16.0 ms for the frame. Six cores cannot hide eight threads' cache pressure, and the serial passes are not
+helped by having more threads queue behind them. `BoidsConfig::workers` therefore defaults to the machine's
+count and clamps anything larger, because the sweep says a configuration cannot be allowed to ask for it.
+
+**The verdict against the phase's own goal.** The goal was that the parallel path carry the 1M population at a
+frame cost that a simulation can live with. Success was defined as 4x on `frame` at the machine's core count;
+the measurement is **4.65x** (74.13 ms to 15.96 ms), so the phase met its number — but the split says where the
+credit goes: the batch is 6.4x and the build is 2.9x, and the build is the half that a parallel prefix sum
+would fix. That is the falsifiable part: if build's speed-up had reached 5x at six workers, frame cost would be
+about 12 ms rather than 16, and nothing in the batch would have had to change.
+
+`benches/spatial-baseline.json` is re-recorded with the parallel cases (`spatial_build/build_parallel`,
+`spatial_query/radius_batch_parallel`) beside the serial ones, so the gate protects both paths and a future
+regression has somewhere to appear.

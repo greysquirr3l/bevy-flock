@@ -207,6 +207,29 @@ evaluation_criteria = [
 ]
 
 [[completed]]
+task = "phase-3 T06 thread-scaling-measurement"
+delivered_in = "feat/phase3-t06-t07-scaling-and-wiring"
+note = """
+`examples/scaling_sweep.rs` measures build, batch and frame at 1/2/4/6/8 workers over 1M bodies and 5,000
+queries, median of five runs, and writes JSON lines; `scripts/spatial_scaling.py` prints the table and draws
+docs/images/spatial-scaling.png from the same records. Verdict: frame 74.13 ms -> 15.96 ms (4.65x) on this
+six-core aarch64 VM, so the phase met its 4x goal, but the split credits the batch (6.36x) and blames the
+build (2.94x), whose serial prefix sum over ~15.6M cells is the flat part of the curve. Eight workers is
+slower than six on every phase, which is why BoidsConfig::workers clamps to the machine count.
+The baseline now carries the parallel cases beside the serial ones.
+"""
+[[completed]]
+task = "phase-3 T07 ecs-wiring"
+delivered_in = "feat/phase3-t06-t07-scaling-and-wiring"
+note = """
+The per-tick rebuild in `rebuild_spatial_grid` now takes its worker count from `BoidsConfig::workers`
+(0 = the machine, anything larger clamped), so the partitioned build is what the ECS actually runs rather
+than something only the bench exercises. `the_ecs_rebuild_is_identical_at_any_worker_count` spawns 2,000
+bodies into a real App at 1, 2, 3 and 8 workers and requires one digest, so the wiring cannot drift from the
+domain contract. This task was in the generated order list but never written into the phase, so it is added
+here rather than claimed retroactively.
+"""
+[[completed]]
 task = "phase-3 T03 band-partitioned-build"
 delivered_in = "feat/phase3-t03-parallel-build"
 note = """
