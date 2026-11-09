@@ -132,3 +132,30 @@ implementation should want to.
   the invariant that makes it unnecessary (`cursor == start` after the scan) is the thing worth having.
 - **Write the cursor table from `count` instead.** Count does not know window starts; it knows counts. The starts
   only exist after the prefix sum, so the scan is the only pass that can write both.
+
+## Outcome
+
+Implemented as decided, with two amendments the measurement forced and one prediction that did not hold.
+
+**Amendment — a single worker takes the serial scan.** The decision routed on `blocks` alone, which sent a
+one-worker rebuild through the blocked scan: it walked the same array in the same order, through a block loop, for
+1.02 ms against 0.42 ms. Routing now asks `needs_block_totals_for(workers)` — a blocked scan *and* more than one
+worker — and both `count` and `prefix` consult it, which is what lets `count` skip the totals entirely on a serial
+rebuild. The block count is still reported, because it is still what the grid was configured for.
+
+**Amendment — the cursor table is not cleared.** The decision said the scan writes both arrays, which it does, but
+`count` cleared `cell_cursor` first for tidiness: 1.7 MB of `fill` per rebuild, 0.3 ms, to prepare memory the scan
+overwrites in full. Every slot the scan writes, it writes unconditionally; the one slot it skips is index 0, and the
+scan sets that. The table is still sized once, so the steady-frame no-allocation promise is unchanged.
+
+**The accumulate was not a cost — and the read it replaced was not a win.** The decision expected `count` to absorb a
+new per-block accumulate in a pass that scales 0.98×, and named the fallback (each worker sums its own window after
+counting it) if that was not free. That fallback is what shipped, because it is measurably free: `count` at six
+workers went 1.734 → 1.772 ms. The other half of the trade did register — `prefix` 0.296 → 0.238 ms, the 1.7 MB totals
+read leaving the serial tail — but it is 0.06 ms of a 6.8 ms rebuild, which alternated binaries cannot distinguish
+from noise. The total is unchanged (6.758 → 6.814 ms, medians of six alternating pairs).
+
+So the fusion is kept for what it removes rather than for what it saves: a pass, a copy, a field, and the reread
+between two phases. The revert clause this ADR wrote for itself is not invoked, because the change did not make the
+rebuild worse — but neither did it make it better, and the next task should not be chosen on the assumption that it
+did. Full figures in `docs/performance.md` §*The count pass absorbs the scan's totals*.

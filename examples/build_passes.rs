@@ -16,7 +16,12 @@
 //! ```text
 //! cargo run --release --example build_passes
 //! cargo run --release --example build_passes -- --blocks 64,256,1024,4096
+//! cargo run --release --example build_passes -- --bodies 100000,1000000 --blocks 32,128,512
 //! ```
+//!
+//! `--bodies` exists for phase 5's block sweep: the block constant has to work at the population the game actually
+//! runs, not only at the million-body fixture, and the pass mix changes with it — `clear`, `count` and `place` walk
+//! the bodies while the scan walks the cells, so a grid with few bodies in many cells is nearly all scan.
 //!
 //! The `--blocks` sweep exists because ADR 0055's prediction has to be checkable against the knob rather than
 //! against one arbitrary setting: it re-reports every pass at the machine's worker count for each block count
@@ -42,12 +47,11 @@ const BODIES: usize = 1_000_000;
 const REPEATS: usize = 7;
 
 /// The named getters, so adding a sixth pass to `PassCosts` cannot leave this inventory quietly incomplete.
-const PASSES: [(&str, fn(&PassCosts) -> Duration); 5] = [
+const PASSES: [(&str, fn(&PassCosts) -> Duration); 4] = [
     ("clear", |costs| costs.clear),
     ("count", |costs| costs.count),
     ("prefix", |costs| costs.prefix),
     ("place", |costs| costs.place),
-    ("seat", |costs| costs.seat),
 ];
 
 /// A body's position: a golden-angle spiral inside the volume, so density is even and no cell is empty by
@@ -82,15 +86,39 @@ fn block_sweep() -> Vec<usize> {
         .unwrap_or_default()
 }
 
+/// `--bodies 100000,1000000` from the command line, or the fixture population when it was not asked for.
+fn body_sweep() -> Vec<usize> {
+    let mut args = std::env::args().skip_while(|arg| arg != "--bodies");
+    args.next();
+    let listed: Vec<usize> = args
+        .next()
+        .map(|list| {
+            list.split(',')
+                .filter_map(|item| item.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    if listed.is_empty() {
+        vec![BODIES]
+    } else {
+        listed
+    }
+}
+
 /// Rebuild `REPEATS` times at this worker and block count, keeping the cost of every rebuild.
-fn measure(config: SpatialGridConfig, workers: usize, blocks: usize) -> Vec<PassCosts> {
+fn measure(
+    config: SpatialGridConfig,
+    bodies: usize,
+    workers: usize,
+    blocks: usize,
+) -> Vec<PassCosts> {
     let mut samples = Vec::with_capacity(REPEATS);
     for _ in 0..REPEATS {
         let mut grid = SpatialGrid::new(config)
             .or_die()
             .with_threads(workers)
             .with_blocks(blocks);
-        grid.extend_from((0..BODIES).map(|index| {
+        grid.extend_from((0..bodies).map(|index| {
             (
                 NpcId::unique(num::usize_to_u32(index)),
                 position(index),
@@ -103,7 +131,7 @@ fn measure(config: SpatialGridConfig, workers: usize, blocks: usize) -> Vec<Pass
 }
 
 /// Print one `pass` record per pass and one `total` for the run.
-fn report(samples: &[PassCosts], workers: usize, blocks: usize) {
+fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
     let ran = samples.first().map_or(0, |costs| costs.blocks);
     for (name, get) in PASSES {
         let seconds = median(
@@ -113,8 +141,8 @@ fn report(samples: &[PassCosts], workers: usize, blocks: usize) {
                 .collect(),
         );
         println!(
-            "{{\"kind\":\"pass\",\"pass\":\"{name}\",\"threads\":{workers},\"requested_blocks\":{blocks},\
-             \"blocks\":{ran},\"seconds\":{seconds}}}"
+            "{{\"kind\":\"pass\",\"pass\":\"{name}\",\"bodies\":{bodies},\"threads\":{workers},\
+             \"requested_blocks\":{blocks},\"blocks\":{ran},\"seconds\":{seconds}}}"
         );
     }
     let total = median(
@@ -132,8 +160,9 @@ fn report(samples: &[PassCosts], workers: usize, blocks: usize) {
     let cells = samples.first().map_or(0, |costs| costs.cells);
     let used = samples.first().map_or(0, |costs| costs.workers);
     println!(
-        "{{\"kind\":\"total\",\"threads\":{workers},\"requested_blocks\":{blocks},\"blocks\":{ran},\
-         \"seconds\":{total},\"serial_share\":{serial},\"cells\":{cells},\"used_workers\":{used}}}"
+        "{{\"kind\":\"total\",\"bodies\":{bodies},\"threads\":{workers},\"requested_blocks\":{blocks},\
+         \"blocks\":{ran},\"seconds\":{total},\"serial_share\":{serial},\"cells\":{cells},\
+         \"used_workers\":{used}}}"
     );
 }
 
@@ -142,18 +171,23 @@ fn main() {
     let config =
         SpatialGridConfig::try_new(Vec3::splat(-EXTENT), Vec3::splat(EXTENT), CELL).or_die();
     let cells = SpatialGrid::new(config).or_die().cell_count();
-    println!(
-        "{{\"kind\":\"meta\",\"machine\":\"{}\",\"cores\":{},\"bodies\":{},\"cell\":{},\"cells\":{cells},\
-         \"repeats\":{REPEATS}}}",
-        std::env::consts::ARCH,
-        cores,
-        BODIES,
-        CELL
-    );
-
-    report(&measure(config, 1, 0), 1, 0);
-    report(&measure(config, cores, 0), cores, 0);
-    for blocks in block_sweep() {
-        report(&measure(config, cores, blocks), cores, blocks);
+    for bodies in body_sweep() {
+        println!(
+            "{{\"kind\":\"meta\",\"machine\":\"{}\",\"cores\":{},\"bodies\":{bodies},\"cell\":{},\
+             \"cells\":{cells},\"repeats\":{REPEATS}}}",
+            std::env::consts::ARCH,
+            cores,
+            CELL
+        );
+        report(&measure(config, bodies, 1, 0), bodies, 1, 0);
+        report(&measure(config, bodies, cores, 0), bodies, cores, 0);
+        for blocks in block_sweep() {
+            report(
+                &measure(config, bodies, cores, blocks),
+                bodies,
+                cores,
+                blocks,
+            );
+        }
     }
 }
