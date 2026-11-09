@@ -15,6 +15,12 @@ pub use crate::adapters::primary::components::{
     FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcBrain, NpcBundle, NpcDesiredVelocity,
     NpcIdentity, NpcMood, NpcNeeds, NpcTarget, NpcTemperament, NpcVelocity,
 };
+pub use crate::adapters::primary::gaze::{GazeAim, GazeConfig, GazeTarget, resolve_gaze};
+pub use crate::adapters::primary::gesture::{
+    GestureChannel, GestureConfig, GestureCue, GestureKind, GestureRequest, KEY_GESTURE,
+    NpcGestures, advance_gestures, collect_gesture_requests, request_gesture,
+};
+pub use crate::adapters::primary::locomotion::{Locomotion, MIN_MOVING_SPEED};
 pub use crate::adapters::primary::plugin::{
     CrowdPreset, FlockCommands, FlockConfig, FlockPlugin, FlockRequest, FlockSet, FlockStats,
     spawn_position,
@@ -41,7 +47,7 @@ pub use crate::adapters::primary::stimulus::{
     PerceivedStimuli, Perception, PerceptionSettings, StimulusPlugin, StimulusSource,
 };
 pub use crate::application::schedule::{Plan, SchedulerError, ThinkScheduler};
-pub use crate::application::{AvoidReport, AvoidanceParams, SteeringRoad};
+pub use crate::application::{AvoidReport, AvoidanceParams, SimClock, SteeringRoad};
 pub use crate::behavior::memory_leaves::{
     GRUDGE_VALENCE, GreetFriend, KEY_MEMORY_FAMILIARITY, KEY_MEMORY_FLAGS, KEY_MEMORY_VALENCE,
     MemoryLeaves, RECOGNITION_THRESHOLD, RecogniseKnown, Remembered, ShunGrudge, WARM_VALENCE,

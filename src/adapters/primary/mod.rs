@@ -4,9 +4,12 @@ pub mod band;
 pub mod cognition;
 pub mod components;
 pub mod dialogue;
+pub mod gaze;
+pub mod gesture;
 pub mod grouping;
 #[cfg(feature = "memory")]
 pub mod interaction;
+pub mod locomotion;
 #[cfg(feature = "memory")]
 pub mod memory_bridge;
 pub mod observability;
@@ -27,6 +30,11 @@ pub use components::{
 pub use dialogue::{
     Barks, DialogHub, DialogOutbox, NpcBarks, SilentProvider, SpokenLine, produce_barks,
     tick_dialog,
+};
+pub use gaze::{GazeAim, GazeConfig, GazeTarget, resolve_gaze};
+pub use gesture::{
+    GestureChannel, GestureConfig, GestureCue, GestureKind, GestureRequest, NpcGestures,
+    advance_gestures, collect_gesture_requests, request_gesture,
 };
 pub use grouping::{
     GroupLeader, GroupMember, Groups, NpcIndex, index_new_npcs, reconcile_despawns,

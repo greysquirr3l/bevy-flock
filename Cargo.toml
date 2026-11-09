@@ -1,3 +1,14 @@
+[workspace]
+# Phase 2 gives the integrations their own crates so the simulation core keeps its dependency set:
+# the animation layer needs bevy_animation, which no headless server build should compile. Members
+# are `crates/*` and nothing else.
+#
+# The demo crates are excluded on purpose. Each is its own package with its own lock file, its own
+# release profile and its own reason to exist, and folding them in would make a `cargo test` at the
+# root build three renderers before it ran a single simulation test.
+members = ["crates/*"]
+exclude = ["demo", "demo-gpu", "playground", "compat", "fuzz"]
+
 [package]
 name = "bevy-flock"
 version = "0.1.0"

@@ -1,0 +1,1359 @@
+# plan.phase2.toml — bevy-flock, phase 2: from simulation systems to an NPC framework
+#
+#   wiggum validate plan.phase2.toml
+#   wiggum generate plan.phase2.toml --dry-run
+#   wiggum generate plan.phase2.toml
+#
+# Phase 1 lives in `plan.toml` and is closed: 50 tasks, 28 of them shipped against that
+# file before it was rotated, the rest recorded in its `[[completed]]` table. That file
+# is history and stays as written. This one is the next work queue and starts empty.
+#
+# What phase 1 built is the hard half: a deterministic core, a spatial index that holds
+# a million inhabitants, a virtual-cost scheduler, behaviour trees with declared costs,
+# social memory with a versioned save format, and demos to look at. What it did not
+# build is the shell a game developer meets first — nothing animates the crowd, nothing
+# lets a designer author one, and nothing lets you inspect what the scheduler decided.
+#
+# The plan is ordered so that the first phase is the two-week slice that turns the
+# library into something a game developer would call a framework: 2,000 skinned NPCs
+# whose locomotion, gaze and gestures come from the simulation that is already running.
+# Everything after it is the rest of the shell, in the order a user would hit it.
+#
+# Execution groups are derived from `depends_on` alone; they encode ordering, not
+# capacity. Run scripts/group_cap.py to choose how many to take at once (ADR 0033).
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name        = "bevy-flock"
+description = """
+bevy-flock is a crowd and NPC simulation engine for Bevy 0.20, and phase 2 is the work
+that makes it a framework rather than a library of systems.
+
+The simulation core is shipped: deterministic identifiers and PCG32 streams, a spatial
+grid that carries 1,000,000 ambient inhabitants in a banded continuum, a virtual-cost
+fair-queue scheduler that decides who thinks, behaviour trees and state machines with
+declared costs, social memory with a versioned save format, and measured kernels behind
+`simd` and `threads`.
+
+Phase 2 adds the shell around it, in the order a user meets it:
+
+  * Animation. A crowd that slides is a scatter plot. Locomotion blended from the
+    steering solution, gaze from the perception system, gestures from behaviour leaves —
+    and all of it a function of the simulation tick, not of frame time, so a replay
+    animates identically at 20 fps and at 200.
+  * Authoring. Archetypes and behaviour graphs in a versioned RON schema with a
+    validator that names the line, and hot reload so a designer edits without a rebuild.
+  * Inspection. An inspector, debug draw and a replay scrubber over the deterministic
+    tick, so a claim about the scheduler can be checked rather than believed.
+  * Reference adapters. One implementation per port — Avian, a navmesh bake, replicon,
+    the impostor LOD budget currently living in the demo — so the ports are proven
+    rather than asserted.
+  * Persistence and streaming. A crowd that can be saved, streamed in and out around a
+    moving player, and reloaded with identity intact.
+  * A determinism contract that is stated, scoped and tested, rather than implied.
+
+The crate's boundary does not move. Rendering, physics and networking stay the game's
+or Bevy's; what phase 2 adds is the glue that a developer otherwise writes themselves,
+and one working reference for each port.
+"""
+language     = "rust"
+path         = "/home/ubuntu/bevy-flock"
+architecture = "hexagonal"
+
+# ─── Preflight ────────────────────────────────────────────────────────────────
+
+[preflight]
+build = "cargo build --workspace --all-targets --all-features"
+test  = "cargo test --workspace --all-features"
+lint  = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+audit = "cargo deny check"
+
+# ─── Orchestrator ─────────────────────────────────────────────────────────────
+
+[orchestrator]
+persona     = "You are a principal Rust engineer who ships libraries other people depend on, and who has been burned by an animation layer that looked right in a demo and wrong in a game. You measure before you claim, you write the failing test first, and you never describe work as complete that a reviewer could falsify in five minutes."
+strategy    = "complete"
+max_retries = 3
+on_failure  = "pause"
+require_evaluator = true
+gates = ["api-freeze"]
+rules = [
+    "Bevy 0.20.1, Rust edition 2024, stable toolchain only — no nightly features anywhere in a crate or in CI.",
+    "The simulation core keeps its dependency set: bevy_app, bevy_ecs, bevy_math, bevy_tasks, bevy_transform, smallvec, thiserror, libm. Animation, rendering, egui and physics crates may not appear in the core's dependency graph; `cargo tree -p bevy-flock -e normal` is the check.",
+    "New crates are separate packages in the root workspace: `crates/bevy-flock-anim`, `-tooling`, `-authored`, `-persist`, `-adapters`. `demo`, `demo-gpu` and `playground` stay outside the workspace, as they are today, because each has its own lock file.",
+    "Never use `.unwrap()`, `.expect()`, `panic!`, `unreachable!` or panicking indexing in library code. Use `?`, `let else`, or an explicit match. Tests use the existing `bevy_flock::testkit` helpers, not unwrap.",
+    "No `#[allow(clippy::...)]`. Fix the lint, or use `#[expect(...)]` with a reason, and record it in `scripts/lint_audit.py` — the audit fails an undocumented expectation.",
+    "`#![deny(unsafe_code)]` stays. Analytic IK, blend maths and quantisation are safe Rust; if a profiled path genuinely needs unsafe it is a single documented module with a Miri run, not a sprinkling.",
+    "Animation is a function of simulation state, never of frame time. A system may read `Tick`, `Locomotion` and perception output; it may not scale a clip weight by `Time::delta`. The test is: replay a 600-tick run at 20 fps and at 200 fps and assert identical blend weights at every tick.",
+    "Determinism rules from phase 1 still hold: no HashMap iteration order, no wall-clock time, no std transcendentals in simulation paths — `libm` only. If the animation binding needs a smoothing curve, it is a fixed-step exponential written as a pure function of tick count.",
+    "No binary art assets are committed. Examples and tests build a procedural rig and procedural clips; a game supplies its own glTF. A test asset may be added only if it is under 32 KB and generated by a committed script.",
+    "Allocation: binding systems allocate nothing per frame after warm-up. `tests/no_alloc.rs` in the affected crate asserts it with the counting allocator pattern already used in `tests/crowd_no_alloc.rs`.",
+    "Every optional integration is behind a feature: `anim`, `authored`, `tooling`, `persist`, `physics-avian`, `navmesh-bake`, `replicon`. `cargo hack check --each-feature` runs before a task is called done.",
+    "Every new dependency needs a one-paragraph justification in the task notes and an ADR in `docs/adr/`. Bevy subcrates the core already uses do not count; bevy_animation, bevy_gltf, bevy_render and egui do.",
+    "Public API: documented, `#[must_use]` where a dropped value is a bug, with a compiled doctest, following `docs/api-conventions.md`.",
+    "Performance claims are benchmarks a reviewer runs with one command. Numbers in docs come from a committed run on a named machine, pasted into the task notes.",
+    "`demo`, `demo-gpu` and `playground` must keep building and their tests passing after every task, because they are how a reviewer sees the change.",
+]
+
+# ─── Evaluator ────────────────────────────────────────────────────────────────
+
+[evaluator]
+persona        = "You are a hostile reviewer for a game-engine library who has watched three animation layers ship broken. You assume the implementer reported success without evidence. You run the benchmarks, read the tests, replay the example at two frame rates, grep for frame-time-dependent maths, and check the public API against the documented contract before scoring anything."
+pass_threshold = 8
+hard_fail      = true
+test_tool      = "cargo test --workspace --all-features"
+mode           = "blocking"
+contract_review = true
+
+[[evaluator.criteria]]
+name        = "tests-and-invariants"
+weight      = 20
+description = "All tests pass, including the property tests, the no-allocation assertions and the determinism tests added by the task; new public behaviour is covered by at least one test that fails if the implementation is stubbed out."
+
+[[evaluator.criteria]]
+name        = "frame-rate-independence"
+weight      = 20
+description = "No animation, authoring or tooling system scales anything by frame delta time. A 600-tick run replayed at two simulated frame rates produces identical blend weights, gaze weights and gesture timings, and the test that proves it exists."
+
+[[evaluator.criteria]]
+name        = "performance-budget"
+weight      = 15
+description = "The task's benchmark exists, was run, and meets the stated budget with numbers pasted into the completion notes; the binding path allocates nothing per frame after warm-up."
+
+[[evaluator.criteria]]
+name        = "api-ergonomics"
+weight      = 15
+description = "A game can adopt the feature from the task's example alone: the library names the parameters, the game supplies the clips and the assets, and nothing requires forking the crate or reaching into private state."
+
+[[evaluator.criteria]]
+name        = "boundary-integrity"
+weight      = 15
+description = "The core crate's dependency graph is unchanged, every integration is behind a feature, and `cargo check --no-default-features` compiles with no animation, render, egui or physics code in the build."
+
+[[evaluator.criteria]]
+name        = "documentation"
+weight      = 10
+description = "Module docs state the contract and what breaks if it changes; the ADR and the book chapter are updated in the same task as the code, not afterwards."
+
+[[evaluator.criteria]]
+name        = "safety-and-lints"
+weight      = 5
+description = "Clippy clean with the project profile and -D warnings, no new #[allow], no unsafe, and no panic path reachable from public API with valid input."
+
+# ─── Capabilities ─────────────────────────────────────────────────────────────
+
+[[capabilities]]
+name        = "skinned-crowd"
+title       = "A Crowd That Looks Alive"
+description = "Locomotion, gaze and gesture driven by the simulation, deterministically, without the library shipping art or owning the renderer."
+requirements = [
+    "MUST expose the simulation's motion intent — planar speed, turn rate, acceleration, stride phase — as a component a game can read, computed from the steering solution and never from `Time::delta`.",
+    "MUST blend locomotion clips from that intent through a profile asset the game supplies, such that the same tick produces the same clip weights at any frame rate.",
+    "MUST drive gaze from the perception system's current target with a configurable weight and a release rule, never by polling the camera.",
+    "MUST let behaviour leaves request a one-shot gesture clip through a bounded queue with per-NPC cooldowns, and MUST fall back gracefully when no clip is registered.",
+    "MUST stop evaluating animation for bodies beyond the configured detail distance or outside the camera's budget, and MUST resume seamlessly when they return.",
+    "MUST ship no art: examples and tests build a procedural rig and clips, and the contract for a game's own glTF is documented.",
+]
+
+[[capabilities.scenarios]]
+name = "walk-to-run-blend"
+when  = "an NPC's planar speed rises from 1.2 m/s to 5.0 m/s over 60 ticks"
+then  = "the walk clip's weight reaches zero, the run clip's weight reaches one, and no frame shows both at zero"
+[[capabilities.scenarios]]
+name = "replay-at-two-frame-rates"
+when  = "a 600-tick run is replayed once at 20 fps and once at 200 fps"
+then  = "the per-tick clip weight vectors are identical, because nothing reads frame delta"
+[[capabilities.scenarios]]
+name = "gaze-follows-perception"
+when  = "the player enters an NPC's sight stimulus and stays inside the cone"
+then  = "the NPC's gaze weight rises to the profile's maximum over the configured ticks and releases when the stimulus expires"
+[[capabilities.scenarios]]
+name = "gesture-cooldown"
+when  = "a leaf requests the same bark gesture four times in ten ticks"
+then  = "at most one gesture plays, and the other three are recorded as suppressed rather than queued"
+[[capabilities.scenarios]]
+name = "distance-culling"
+when  = "a camera moves from the crowd's centre to 300 m away"
+then  = "animation evaluation stops for bodies past the cull distance, frame cost falls by the measured amount, and weight state on return resumes at the value the simulation implies"
+
+[[capabilities]]
+name        = "authored-content"
+title       = "Content a Designer Can Edit"
+description = "Archetypes and behaviour graphs in a versioned text format, validated at load with useful errors, reloadable without a rebuild."
+requirements = [
+    "MUST define every authored file in a versioned RON schema with a `version` field, rejecting an unknown version with a typed error that names the supported ones.",
+    "MUST reject unknown fields rather than ignoring them, and MUST report the file path and line for every validation failure.",
+    "MUST convert a loaded file once, at the boundary, into newtypes that cannot hold an invalid value — no re-validation inside simulation.",
+    "MUST support hot reload in a development build: a changed file applies on the next tick without restarting, and a broken file leaves the previous definition in force while reporting the error.",
+    "MUST express behaviour graphs in the same format, including leaf identifiers, declared costs and blackboard keys, and MUST validate that every referenced leaf is registered.",
+    "MUST generate a human-readable preview of each authored graph, so a designer can diff two versions in review.",
+]
+
+[[capabilities.scenarios]]
+name = "unknown-version"
+when  = "a file declares `version: 3` and the crate supports 1 and 2"
+then  = "loading fails with a typed error naming the supported versions and the file path, and nothing is spawned"
+[[capabilities.scenarios]]
+name = "unknown-field"
+when  = "an archetype file contains `temperment` — a misspelling of `temperament`"
+then  = "loading fails with the file path, the line number and the offending key, and the previous definition stays in force"
+[[capabilities.scenarios]]
+name = "hot-reload"
+when  = "a designer doubles an archetype's weighting while the simulation runs"
+then  = "newly spawned NPCs use the new value, existing NPCs keep their parsed values, and no tick panics or drops population"
+[[capabilities.scenarios]]
+name = "unregistered-leaf"
+when  = "a behaviour graph names a leaf that no plugin registered"
+then  = "app construction fails with a typed error listing the missing identifier, not a runtime panic mid-frame"
+
+[[capabilities]]
+name        = "inspectable-crowd"
+title       = "Claims You Can Check"
+description = "An inspector, a debug draw and a replay scrubber over the deterministic tick, so scheduler and banding decisions are observable rather than asserted."
+requirements = [
+    "MUST show, for a selected NPC, its tier, current brain, declared and measured cost, last dispatch tick, current target and any social memory rows.",
+    "MUST draw the spatial grid, band boundaries, flow field and active anchors as debug geometry, toggled independently and costing nothing when disabled.",
+    "MUST support stepping a simulation backwards and forwards over recorded history, with the state digest of any visited tick matching a fresh run to that tick.",
+    "MUST report per-tick census: population by tier, thinking count against budget, allocation count and the cost-model drift of every registered leaf.",
+    "MUST be entirely optional and feature-gated, adding no dependency to a build that does not enable it.",
+]
+
+[[capabilities.scenarios]]
+name = "scrub-parity"
+when  = "a 500-tick run is scrubbed back to tick 200 and forward again to 500"
+then  = "the digest at tick 500 equals the digest of an uninterrupted run, and the scrubber says so"
+[[capabilities.scenarios]]
+name = "inspector-costs"
+when  = "ten NPCs of the same archetype are inspected after 1,000 ticks"
+then  = "each shows a measured cost within the calibration tolerance of its declared cost, or is flagged as drifted"
+[[capabilities.scenarios]]
+name = "disabled-costs-nothing"
+when  = "the tooling feature is off"
+then = "`cargo tree -p bevy-flock` shows no egui, no gizmo and no debug-draw dependency"
+
+[[capabilities]]
+name        = "reference-integrations"
+title       = "One Working Implementation Per Port"
+description = "Avian, a navmesh bake, replicon and the impostor budget, each as a reference adapter that proves the port's contract and can be copied."
+requirements = [
+    "MUST implement each port once, in its own crate, behind its own feature, with the port itself unchanged unless a real implementation exposes a flaw.",
+    "MUST pass a shared conformance suite that every implementation of the port satisfies, so a game's own adapter can be checked the same way.",
+    "MUST document, for each adapter, what it deliberately does not do — the gaps are part of the contract.",
+    "MUST keep the core free of every adapter: `cargo check --no-default-features` builds a crowd with none of them present.",
+    "MUST measure each adapter's per-frame cost at 2,000 and 10,000 bodies and record it in `docs/performance.md`.",
+]
+
+[[capabilities.scenarios]]
+name = "avian-velocity-handoff"
+when  = "the physics adapter is enabled and an NPC is steered into a wall"
+then  = "the velocity reaches the character controller, the controller resolves the collision, and the next tick's steering sees the corrected position"
+[[capabilities.scenarios]]
+name = "port-conformance"
+when = "any adapter runs against the shared conformance suite"
+then = "the suite passes without a feature-specific skip, or the adapter documents the skip as a contract gap"
+[[capabilities.scenarios]]
+name = "replication-budget"
+when  = "10,000 NPCs are replicated to a client with the tier budget enabled"
+then  = "only the near tier is sent in full, ambient bodies are sent as aggregate deltas, and the bytes per tick stay under the documented ceiling"
+
+[[capabilities]]
+name        = "world-persistence"
+title       = "A City You Can Leave and Return To"
+description = "Save a running crowd, stream it in and out around a moving player, and reload it with identity, memory and anchors intact."
+requirements = [
+    "MUST snapshot the crowd's simulation state — identities, transforms, velocities, brain state, memory rows — in a versioned format that extends the existing save format rather than replacing it.",
+    "MUST restore a snapshot into a fresh app such that the state digest at the save tick matches the digest of the run it came from.",
+    "MUST stream population in and out around a moving anchor without breaking identity continuity: an NPC that leaves the streamed region and returns is the same NPC, with its memory intact.",
+    "MUST keep anchor exemption: an NPC the game has anchored is never dissolved by streaming, and the population mass stays conserved across transitions.",
+    "MUST extend the compatibility corpus so a snapshot written by the previous minor version loads, and a snapshot from the next one fails with a clear version error.",
+]
+
+[[capabilities.scenarios]]
+name = "save-load-digest"
+when  = "a 400-tick run is snapshotted, reloaded into a fresh app and advanced 50 ticks"
+then  = "the digest at the save tick matches, and the next 50 ticks match an uninterrupted run"
+[[capabilities.scenarios]]
+name = "stream-continuity"
+when  = "the anchor travels 2 km away and back while 10,000 NPCs stream out and in"
+then  = "every NPC that returns carries its previous identity and memory, and the live population returns to its starting count"
+[[capabilities.scenarios]]
+name = "forward-incompatible"
+when  = "a snapshot written by a newer minor version is loaded by an older build"
+then  = "loading fails with a typed version error naming both versions, and the app is left unchanged"
+
+[[capabilities]]
+name        = "determinism-contract"
+title       = "A Guarantee That Is Stated, Scoped and Tested"
+description = "The determinism claim the README makes is the claim the tests prove, including where it stops."
+requirements = [
+    "MUST state the determinism guarantee in one paragraph, naming what is guaranteed (same build, same target, same feature set, same seed) and what is not (across compilers, across libm versions, across architectures).",
+    "MUST prove the guaranteed half with a cross-target CI probe that compares state digests, and MUST fail the build if the guarantee regresses on a target where it is claimed.",
+    "MUST document the threading rule: a result may depend on the number of workers only where the test suite proves it does not.",
+    "MUST NOT claim cross-platform bit-identical replay unless a fixed-point path is implemented and measured; if that path is chosen, it gets its own ADR and its own budget.",
+    "MUST make the replay workflow usable: a command log plus a seed reproduces a run, with one command to record and one to verify.",
+]
+
+[[capabilities.scenarios]]
+name = "same-target-replay"
+when  = "a recorded command log is replayed on the same target and feature set"
+then  = "every checkpoint digest matches the recording, and the verification command exits zero"
+[[capabilities.scenarios]]
+name = "worker-count-invariance"
+when  = "the same run executes with one worker and with all cores"
+then  = "the digests match, as the threading rule requires"
+[[capabilities.scenarios]]
+name = "unclaimed-target"
+when  = "a target where the guarantee is not claimed runs the probe"
+then  = "the probe reports the divergence as information rather than as a failure, and the documentation says why"
+
+# ─── Phases ───────────────────────────────────────────────────────────────────
+
+# ─── Phase 1: the two-week slice ──────────────────────────────────────────────
+
+[[phases]]
+name  = "Two-Week Slice: A Skinned Crowd"
+order = 1
+description = "The artifact that makes a game developer call this a framework: 2,000 NPCs whose motion, gaze and gestures come from the simulation. Everything in this phase is on the critical path for the rest, so it goes first."
+
+[[phases.tasks]]
+slug      = "workspace-and-anim-crate"
+kind      = "infrastructure"
+title     = "Root workspace, the animation crate, and the binding contract in an ADR"
+goal      = "Turn the repository into a workspace whose root package is the existing crate, add `crates/bevy-flock-anim` behind an `anim` feature, and write the ADR that fixes the animation binding contract before any code depends on it."
+depends_on = []
+hints = [
+    "Root `Cargo.toml` gains `[workspace] members = [\"crates/*\"]`. The root package stays `bevy-flock`; `demo`, `demo-gpu` and `playground` are excluded because each has its own lock file and its own release profile.",
+    "The new crate depends on bevy_animation 0.20.1, bevy_transform, bevy_ecs and bevy_flock. It must never be a dependency of the core, and the core must not gain a feature that pulls it in.",
+    "Write ADR 0052 'The animation binding contract' first: the library computes motion intent and names parameters, the game supplies clips and the graph, and every binding is a pure function of simulation state.",
+    "State the three interfaces the ADR fixes: `Locomotion` (component), `LocomotionProfile` (asset), `GazeTarget` (component). Anything else the phase needs may be added later without reopening the ADR.",
+    "CI: the workspace build joins the existing matrix; `cargo hack check --each-feature` covers the new crate.",
+]
+test_hints = [
+    "`cargo check -p bevy-flock --no-default-features` succeeds and `cargo tree -p bevy-flock -e normal` contains no animation or render crate.",
+    "A doctest in the new crate constructs a profile and evaluates one weight, so the crate compiles as documentation users will read it.",
+]
+must_haves = [
+    "`crates/bevy-flock-anim` builds inside the root workspace with `cargo test -p bevy-flock-anim`",
+    "`docs/adr/0052-animation-binding-contract.md` exists and names the three interfaces",
+    "The core's dependency graph is unchanged, proven by a CI step that diffs `cargo tree -p bevy-flock -e normal`",
+]
+evaluation_criteria = [
+    "`cargo tree -p bevy-flock -e normal` shows no bevy_animation, bevy_gltf, bevy_render or egui",
+    "The new crate's CI job runs fmt, clippy with -D warnings, and tests",
+    "ADR 0052 states what the library owns and what the game owns, with the replay argument for frame-rate independence",
+]
+
+[[phases.tasks]]
+slug      = "locomotion-intent"
+title     = "Locomotion intent as a component, computed from the steering solution"
+goal     = "Publish what the simulation already knows about an NPC's motion — planar speed, turn rate, acceleration, stride phase — as a component a game can read, without adding a frame-time dependency."
+depends_on = ["workspace-and-anim-crate"]
+hints = [
+    "New module in the core (`src/adapters/primary/locomotion.rs`), no new dependency: derive speed from the velocity component the steering wrote, turn rate from the yaw delta per tick, acceleration from the velocity delta per tick.",
+    "Stride phase is the existing walk-cycle idea from `playground/src/lib.rs::stride_phase`, promoted with the same semantics: phase advances with distance covered, wrapped to one turn, pure function of inputs.",
+    "Quantise nothing here: the values are f32 with `libm`-only transcendentals, and the turn-rate derivation must use `libm::atan2f` rather than `std`.",
+    "The system runs after steering and before animation binding, in a named set so a game can order its own systems around it; document the set in the module header.",
+]
+test_hints = [
+    "A stationary NPC reports zero speed, zero turn rate and an unchanged stride phase.",
+    "A straight 60-tick walk at 1.4 m/s reports speed within 1e-4 of 1.4 every tick after the first, and a stride phase that advances monotonically.",
+    "A standing start then a 90-degree turn reports a turn rate peak within the tick the turn happened, and zero after it settles.",
+]
+must_haves = [
+    "`Locomotion` is documented with a doctest and derives `Component`, `Debug`, `Clone`, `Copy`",
+    "The system writes only `Locomotion` and reads only velocity, transform and tick",
+    "No `std` transcendental appears in the module (grep-able check named in the task notes)",
+]
+evaluation_criteria = [
+    "A test fails if the turn rate is derived from frame time rather than from the tick delta",
+    "The stride phase matches the playground implementation for the same distance walked, proven by a shared test vector",
+    "The module header names the schedule set and what reads the component",
+]
+
+[[phases.tasks]]
+slug      = "locomotion-blend-binding"
+title     = "Map locomotion intent onto a game-supplied animation graph"
+goal     = "Given a `LocomotionProfile` asset naming idle, walk and run clip nodes, produce per-clip weights from `Locomotion` and drive `AnimationPlayer` with them, deterministically and without allocating."
+depends_on = ["locomotion-intent"]
+hints = [
+    "The profile maps speed thresholds to `AnimationNodeIndex` values plus blend half-widths; weights are a pure function `blend_weights(profile, speed) -> SmallVec<[f32; 3]>` that sums to one and is exhaustively unit-tested.",
+    "Apply weights by playing each clip once and setting `ActiveAnimation::weight`; do not queue transitions per frame. Use `AnimationPlayer::play` for the first activation and `playing_animations_mut` thereafter.",
+    "Scale playback rate from stride length rather than from speed alone, so a slow walk does not look like a skating run — the profile carries the metres-per-cycle figure.",
+    "Idle is a weight, not a state: an NPC at rest keeps all three clips playing with idle at one, which is what makes the transition reversible without a graph edit.",
+    "Reuse a per-entity buffer from a `Local` or a component rather than allocating per frame; the no-allocation test is part of this task.",
+]
+test_hints = [
+    "Property test: for 10,000 random speeds in range, weights are finite, non-negative and sum to 1.0 within 1e-5.",
+    "At the walk threshold exactly, walk is 1.0 and the neighbours are 0.0; half a blend width above it, the two neighbours sum to 1.0.",
+    "A 600-tick run driven at 20 fps and at 200 fps produces identical weight vectors at every tick (the frame-rate independence test this phase exists to pass).",
+]
+must_haves = [
+    "`LocomotionProfile` is an `Asset` with a documented default and a compile-time-checked example",
+    "The binding system allocates nothing per frame, asserted by a counting-allocator test",
+    "A game can adopt it from the doc comment alone: build a profile, add the plugin, supply clips",
+]
+evaluation_criteria = [
+    "The weights are bit-identical between the two frame-rate runs, not merely close",
+    "`cargo test -p bevy-flock-anim` includes the allocation test and it passes with the binding system enabled",
+    "The doc comment shows the profile asset and the three clip nodes it expects",
+]
+
+[[phases.tasks]]
+slug      = "gaze-and-look-at"
+title     = "Gaze driven by perception, with analytic two-bone IK"
+goal     = "Turn an NPC's head and spine toward the target the perception system already tracks, with a weight that ramps and releases on a tick count, and no external IK dependency."
+depends_on = ["locomotion-blend-binding"]
+hints = [
+    "Read the existing stimulus/perception output — the current target a cognition system already selects — rather than querying the player transform directly; the binding must work when a game replaces perception.",
+    "Two-bone analytic IK on the spine chain: solve the yaw and pitch split across two joints proportionally to a profile weight, clamp to per-joint limits, and leave the root untouched so locomotion is not disturbed.",
+    "Ramp in and out over a configured number of ticks with an integer counter, not a delta-time lerp; a released target decays to zero weight and then the joints return to the animated pose.",
+    "Run after animation evaluation and before transform propagation, in a documented set; the system writes only the joint transforms it owns.",
+]
+test_hints = [
+    "A target directly ahead produces zero rotation on both joints; a target 45 degrees to the right splits the rotation across them according to the profile and respects the clamp.",
+    "Releasing the target returns both joints to their animated pose within the configured tick count, bit-identically to a never-tracked run.",
+    "The rotation applied never exceeds the joint limits for 10,000 random target directions.",
+]
+must_haves = [
+    "No new dependency: the IK is safe Rust in the anim crate",
+    "Gaze weight is a function of tick counts, proven by the frame-rate independence test",
+    "Per-joint limits are part of the profile asset and are validated at load",
+]
+evaluation_criteria = [
+    "A test proves the joints return exactly to the animated pose after release",
+    "The system's schedule placement is documented and asserted by an ordering test",
+    "No `Time` resource is read anywhere in the gaze path",
+]
+
+[[phases.tasks]]
+slug      = "gesture-channel"
+title     = "One-shot gestures requested by behaviour leaves"
+goal     = "Let a leaf request a gesture clip — a wave, a bark, a flinch — through a bounded, cooldown-aware channel that plays it over the locomotion blend and returns to it cleanly."
+depends_on = ["locomotion-blend-binding"]
+hints = [
+    "Model it on the existing bark path in `src/adapters/primary/dialogue.rs`: a request component or event, a bounded queue, per-category cooldowns in ticks, and suppression counted rather than queued.",
+    "Play the gesture as an extra clip at weight 1.0 over the locomotion layers, driven by `AnimationTransitions::play` with a blend time from the profile; on completion, drop its weight to zero rather than stopping it, so the return blend is smooth.",
+    "A gesture whose clip is not registered in the graph must be suppressed with a named reason and counted, never panic and never stall the queue.",
+    "Cooldowns are per NPC and per category, in ticks, and survive a gesture being interrupted by a higher-priority one.",
+]
+test_hints = [
+    "Four identical requests in ten ticks produce at most one gesture and three suppressions.",
+    "A gesture interrupted by a higher-priority request returns locomotion weights to their pre-gesture values within the blend window.",
+    "An unregistered gesture increments the suppression counter with a reason and leaves the animation state untouched.",
+]
+must_haves = [
+    "The queue is bounded and its capacity is a documented configuration value",
+    "Suppressions are observable through the existing diagnostics surface, not silently dropped",
+    "The feature works with no gesture clips registered at all: the crowd still animates",
+]
+evaluation_criteria = [
+    "A test proves the locomotion weights are restored after a gesture completes, within tolerance and within the blend window",
+    "No unbounded allocation occurs when a game floods the channel with requests",
+    "The doc comment names the leaf-side API a behaviour author calls",
+]
+
+[[phases.tasks]]
+slug      = "skinned-district-example"
+title     = "2,000 skinned NPCs on the district, from a clean checkout"
+goal     = "The artifact of this phase: an example that spawns 2,000 NPCs with a procedurally built three-bone rig and procedural idle/walk/run clips, driven by the real simulation, and renders them through Bevy's PBR pipeline with gaze and gestures in evidence."
+depends_on = ["locomotion-intent", "locomotion-blend-binding", "gaze-and-look-at", "gesture-channel"]
+hints = [
+    "No art ships. Build the rig with `SkinnedMesh`, `Joint` children and `SkinnedMeshInverseBindposes`, and build the clips by inserting `VariableCurve`s into `AnimationClip::curves_mut()` — the same code path a glTF would take, minus the file.",
+    "Reuse the Ashfall scene: `bevy_flock_demo` already generates the district and places 2,000 bodies, and `playground/src/scene.rs` already converts instances to entities. The example is the animation layer on top, not a second scene.",
+    "The example must open and animate, and must also run headless for CI: a `--frames N` mode that advances N ticks, asserts the clips' weights changed, and exits zero without a window, following the `playground` flag conventions.",
+    "Document the swap-a-glTF path in the example's header: what a game replaces (the rig builder, the clip builder) and what it keeps (the profile, the systems).",
+    "Record a capture into `docs/demo/` only if the docs tree has settled; otherwise leave the capture task to the tooling phase, which has the harness.",
+]
+test_hints = [
+    "Headless mode: after 120 ticks of a walking crowd, at least one NPC has a non-zero run weight and at least one has a non-zero gaze weight.",
+    "The example's rig builder is unit-tested for joint order and inverse-bindposes round-trip, because a wrong order is the classic invisible-mesh failure.",
+    "A frame-rate run at 20 fps and one at 200 fps reach the same weights at tick 120.",
+]
+must_haves = [
+    "`cargo run -p bevy-flock-anim --example skinned_district` opens and animates 2,000 NPCs from the real simulation",
+    "The same binary with `--frames 120 --headless` exits zero in CI with no display",
+    "The example documents what a game replaces to use its own artwork",
+]
+evaluation_criteria = [
+    "The example runs from a clean checkout with no asset download step",
+    "The headless mode is part of CI and fails if the weights do not move",
+    "A reviewer can see locomotion blends, gaze and a gesture in one run of the example",
+]
+
+# ─── Phase 2: animation completion ────────────────────────────────────────────
+
+[[phases]]
+name  = "Animation Completion"
+order = 2
+description = "The slice proves the contract; this phase makes it hold at scale and under a camera that moves."
+
+[[phases.tasks]]
+slug      = "animation-culling-and-lod"
+title     = "Stop animating what nobody can see, and resume without a pop"
+goal     = "Gate animation evaluation by distance and by the band tier the scheduler already computes, with a documented resume rule, and measure the saving at 2,000 and 10,000 bodies."
+depends_on = ["locomotion-blend-binding", "animation-transition-quality"]
+hints = [
+    "The scheduler's tier is the input, not a second distance test: ambient bodies are not animated at all, far ones step at a configured interval, near ones every frame.",
+    "Resume without a pop: on return, set the clip weights from the simulation's current `Locomotion` and start the clip at the phase the distance walked implies, rather than at frame zero.",
+    "Measure both costs: the binding system's time with and without culling at 2,000 and 10,000 bodies, pasted into the notes and into `docs/performance.md`.",
+]
+test_hints = [
+    "A camera moving from the crowd centre to 300 m and back restores every NPC's weight to the value the simulation implies, within tolerance.",
+    "An ambient-tier NPC receives no animation evaluation for 1,000 ticks, proven by a counter.",
+    "The cull-distance change is a profile value, not a constant: a test sets it to zero and sees every body animated.",
+]
+must_haves = [
+    "Culling decisions are replayed deterministically: the same tick and camera produce the same culled set",
+    "Measured saving recorded for both populations",
+    "No weight restarts at zero on resume",
+]
+evaluation_criteria = [
+    "The tier-driven path is proven to be the scheduler's tier, not a duplicate distance computation",
+    "The measured saving is at least 30% of binding time at 10,000 bodies with the camera at the crowd edge, or the task explains why not",
+    "Frame-rate independence still holds with culling enabled",
+]
+
+[[phases.tasks]]
+slug      = "animation-transition-quality"
+title     = "Turn in place, start and stop, and a foot-slide measurement"
+goal     = "Make the transitions look deliberate: a stationary turn plays a turn clip rather than sliding, start and stop blend over a configured window, and foot slide is measured rather than eyeballed."
+# After the example, not before it: foot slide is a thing you measure on a crowd that is already
+# walking, and the example is what makes that possible.
+depends_on = ["skinned-district-example"]
+hints = [
+    "Turn-in-place is a fourth weight driven by turn rate at near-zero speed; the profile carries the threshold, and a test asserts it is unreachable at walking speed.",
+    "Define foot slide as the horizontal distance a planted foot travels between consecutive ticks; expose it per NPC for the example to report, and assert a ceiling in a test on a straight walk.",
+    "Start and stop are a blend-window counter in ticks, not a lerp against delta time.",
+]
+test_hints = [
+    "A straight walk at constant speed reports foot slide under the profile's ceiling for 300 ticks.",
+    "An NPC turning on the spot at 90 degrees per second reaches full turn-in-place weight within the configured window and no walk weight.",
+    "Stopping from a walk reaches idle weight within the stop window, and starting reaches walk weight within the start window.",
+]
+must_haves = [
+    "Foot slide is a measurable quantity in the public API, documented with its definition",
+    "Turn-in-place is a profile value that can be disabled entirely",
+    "All windows are tick counts",
+]
+evaluation_criteria = [
+    "The measured foot slide on a straight walk is under the stated ceiling, with the number in the notes",
+    "A test fails if any transition uses frame delta",
+    "The example reports foot slide in its headless output so a regression is visible in CI",
+]
+
+[[phases.tasks]]
+slug      = "root-motion-reconciler"
+title     = "Root motion, without it fighting the spatial index"
+goal     = "Handle clips that carry their own translation: apply the motion to the entity's transform, keep the steering solution authoritative for the next tick, and document the contract so a game does not get double movement."
+depends_on = ["skinned-district-example"]
+hints = [
+    "Either the clip's root translation is ignored and the simulation owns movement (the default), or it is extracted and added to the transform while the steering target is advanced to match — never both added.",
+    "Make the choice a per-profile flag with a documented default of 'simulation owns movement', because that is the one that keeps deterministic replay intact.",
+    "If extraction is enabled, quantise the accumulated root offset per tick so two runs of the same clips produce bit-identical transforms.",
+]
+test_hints = [
+    "With extraction disabled, a clip with root translation leaves the transform to the simulation, and the digest matches a root-motion-free run.",
+    "With extraction enabled, the same clip advances the transform by the clip's translation, and the digest is stable across two runs.",
+]
+must_haves = [
+    "The default keeps the simulation authoritative",
+    "The contract is stated in the module docs and in ADR 0052",
+    "No path adds clip translation and steering translation in the same tick",
+]
+evaluation_criteria = [
+    "A test proves no double movement in either mode",
+    "Determinism is preserved with extraction enabled, proven by a repeated-run digest test",
+    "The flag is documented with the reason a game would choose either way",
+]
+
+[[phases.tasks]]
+slug      = "animation-perf-budget"
+title     = "A budget for the binding layer, measured and gated"
+goal     = "Bench the binding path at 2,000 and 10,000 bodies, publish the numbers, and add the test that keeps it honest: no allocation after warm-up and a stated ceiling for per-frame binding cost."
+depends_on = ["skinned-district-example", "animation-culling-and-lod"]
+hints = [
+    "Benchmark in `crates/bevy-flock-anim/benches/`: weights, gaze, gesture dispatch and culling, each measured separately so a regression names itself.",
+    "Target: binding plus gaze under 0.3 ms at 2,000 animated bodies on this machine, and under 1.5 ms at 10,000 with culling on; state the machine in the notes.",
+    "Add the no-allocation assertion to the crate's test suite and reference the existing counting-allocator pattern rather than inventing a second one.",
+]
+test_hints = [
+    "Allocation test: 600 ticks with animation enabled, zero allocations after the first frame.",
+    "Bench runs in CI in a mode that fails on a 25% regression against the committed baseline.",
+]
+must_haves = [
+    "Numbers pasted into the task notes and into `docs/performance.md`",
+    "The bench is one command and needs no assets",
+    "The budget is stated in the crate's README and in ADR 0052",
+]
+evaluation_criteria = [
+    "The measured binding cost meets the stated ceiling on the named machine",
+    "The allocation test fails if a `Vec` is introduced in the per-frame path",
+    "A reviewer can run the bench and reproduce the numbers within noise",
+]
+
+[[phases.tasks]]
+slug      = "animation-docs-and-book"
+title     = "The chapter that makes the animation layer adoptable"
+goal     = "Write the book chapter and the crate docs that a developer reads before adopting the binding: the contract, the three interfaces, the performance envelope, and what to do when their rig does not match the assumptions."
+depends_on = ["animation-perf-budget", "root-motion-reconciler"]
+hints = [
+    "Chapter in `docs/book/src/animation.md` and a summary entry; the site generator (phase 8) picks it up with the rest.",
+    "Cover the failure modes explicitly: wrong joint order, inverse-bindposes missing, clips whose root motion double-counts, and graphs where the clip nodes are unnamed.",
+    "Include the measured numbers and the two-frame-rate replay trick, because that is the claim a sceptical reader will test.",
+]
+test_hints = [
+    "Every code block in the chapter compiles as a doctest, or is marked `text` with a reason.",
+    "The chapter's links to ADR 0052 and to the example resolve in a link check.",
+]
+must_haves = [
+    "Chapter exists in the book summary",
+    "Crate-level docs on `bevy-flock-anim` state the contract in their first paragraph",
+    "The four documented failure modes each name the symptom and the fix",
+]
+evaluation_criteria = [
+    "A reader can adopt the layer from the chapter without reading the source",
+    "The doctests compile",
+    "ADR 0052 and the chapter agree on every interface name",
+]
+
+# ─── Phase 3: authoring ──────────────────────────────────────────────────────
+
+[[phases]]
+name  = "Authoring"
+order = 3
+description = "Content a designer can edit and a reviewer can diff, with errors that name the line."
+
+[[phases.tasks]]
+slug      = "archetype-schema"
+title     = "A versioned RON schema for NPC archetypes"
+goal     = "Define the archetype format — temperament, needs, behaviour graph reference, appearance hints, spawn weighting — as versioned RON that converts once into validated newtypes."
+# Deliberately after the slice: the authored format encodes appearance and behaviour hints for a
+# crowd that is already animating, and writing it against an unproven animation contract means
+# writing it twice.
+depends_on = ["skinned-district-example"]
+hints = [
+    "New crate `crates/bevy-flock-authored` behind an `authored` feature, depending on `serde`, `ron` and the core's existing `serde` feature rather than re-implementing it.",
+    "`#[serde(deny_unknown_fields)]` everywhere, plus a `version: u32` field checked before anything else; unsupported versions produce a typed error listing what is supported.",
+    "Convert at the boundary: the parsed document is a private DTO, the public type is a validated `Archetype` whose constructors cannot fail after load.",
+    "Follow the existing `saves.rs` precedent for version handling and its compatibility corpus, so there is one versioning idiom in the crate, not two.",
+]
+test_hints = [
+    "Round-trip: every archetype in the shipped catalogue serialises and parses back to an equal value.",
+    "An unknown field fails with the field name and line; an unknown version fails with the supported list.",
+    "A weight of zero, a negative cost and a duplicate leaf reference each fail with a typed error.",
+]
+must_haves = [
+    "Schema documented field by field in the crate's module docs",
+    "The shipped presets are expressible in the format, proving it is not a subset of what the code can do",
+    "No `unwrap` in the parser: every failure is a typed error with a path",
+]
+evaluation_criteria = [
+    "A malformed file reports path, line and key for every failure mode tested",
+    "The DTO never leaves the crate; the public type is validated",
+    "The format covers temperament, needs, behaviour reference and spawn weight",
+]
+
+[[phases.tasks]]
+slug      = "archetype-registry"
+title     = "A registry, a catalogue, and hot reload that keeps the old definition on failure"
+goal     = "Load a directory of archetype files into a registry the spawner draws on, with a development-only hot reload that applies changes without a restart and leaves the last good definition in force when a file breaks."
+depends_on = ["archetype-schema"]
+hints = [
+    "The registry is a resource keyed by a stable slug; spawn weights are renormalised at load, not per spawn, so the draw stays deterministic.",
+    "Hot reload watches modification times in a development build only, parses into a staging map, and swaps on success. A failure logs the typed error and keeps the previous entry.",
+    "Determinism: the registry's iteration order is sorted by slug wherever it affects a draw, and the profile carries a content hash that a save records.",
+]
+test_hints = [
+    "Mutating a file on disk and reloading changes the weight for newly spawned NPCs and leaves existing ones unchanged.",
+    "Breaking a file mid-run leaves the previous definition in force and reports the error once, not every tick.",
+    "The same directory loaded twice produces the same registry hash and the same spawn sequence for a seed.",
+]
+must_haves = [
+    "Hot reload is off by default and cannot be enabled in a release build",
+    "Registry iteration that affects spawning is ordered by slug",
+    "The content hash is recorded in saves, so a replay can detect a content change",
+]
+evaluation_criteria = [
+    "A test proves a broken file does not clear the registry",
+    "A test proves spawn determinism with two load orders",
+    "Reload cost is measured and stated for a 100-file catalogue",
+]
+
+[[phases.tasks]]
+slug      = "behaviour-graph-format"
+title     = "Behaviour graphs in the same format, validated against the registry"
+goal     = "Express trees and state machines in RON — leaves by identifier, declared costs, blackboard keys — and fail app construction when a graph names a leaf nobody registered."
+depends_on = ["archetype-registry"]
+hints = [
+    "Reuse the phase-1 behaviour registry: the format references leaf identifiers, and construction checks each against the registry, collecting every missing one into a single error.",
+    "Declared costs live in the graph so the calibration gate keeps working; a graph whose declared cost is absent is a load error, not a default.",
+    "State machines get states, transitions with named conditions and an initial state; validate that every transition target exists and that the initial state is declared.",
+]
+test_hints = [
+    "A graph naming an unregistered leaf fails construction with a typed error listing it.",
+    "A transition to a non-existent state fails with both names in the message.",
+    "A loaded graph runs identically to the equivalent hand-built tree, proven by comparing dispatched-leaf sequences over 200 ticks.",
+]
+must_haves = [
+    "Declared costs are mandatory in the format",
+    "The unregistered-leaf error lists every missing identifier, not the first",
+    "Hand-built and authored graphs are proven equivalent for the shipped presets",
+]
+evaluation_criteria = [
+    "Calibration still passes with authored graphs, proven by the existing gate",
+    "A test proves every validation failure names the file, the line and the offending key",
+    "The format can express every built-in preset without a code path that bypasses the registry",
+]
+
+[[phases.tasks]]
+slug      = "authoring-preview"
+title     = "A readable preview of every authored graph"
+goal     = "Generate a deterministic text or Mermaid rendering of each authored graph so a pull request shows what changed in the behaviour, not just in the RON."
+depends_on = ["behaviour-graph-format"]
+hints = [
+    "`cargo run -p bevy-flock-authored --bin preview -- docs/content` writes one `.mmd` per graph plus an index; a `--check` mode fails if the committed previews are stale.",
+    "Ordering is by slug and by node declaration order, so two runs produce byte-identical output and the diff is meaningful.",
+    "Keep the renderer dependency-free: emitting Mermaid text is string building, not a graph library.",
+]
+test_hints = [
+    "`--check` fails when a committed preview no longer matches the source graph.",
+    "Two runs produce byte-identical output.",
+    "Previewing a graph with a cycle in its state machine still terminates and marks the cycle.",
+]
+must_haves = [
+    "Preview generation is a CI check, not an optional tool",
+    "Output is deterministic and dependency-free",
+    "A cycle is visible rather than hanging",
+]
+evaluation_criteria = [
+    "A review of a graph change shows the behavioural difference in the diff",
+    "The preview tool runs in under a second on the shipped catalogue",
+    "No new dependency was added for rendering",
+]
+
+# ─── Phase 4: tooling ────────────────────────────────────────────────────────
+
+[[phases]]
+name  = "Inspection"
+order = 4
+description = "The scheduler's decisions and the band system's boundaries become observable, and a replay can be scrubbed."
+
+[[phases.tasks]]
+slug      = "inspector-overlay"
+title     = "An inspector for one NPC and for the population"
+goal     = "An optional overlay that shows, for a selected NPC, its tier, brain, declared and measured cost, dispatch history, target and memory rows — and for the population, the census the scheduler is acting on."
+depends_on = ["skinned-district-example"]
+hints = [
+    "New crate `crates/bevy-flock-tooling`, feature `tooling`, depending on egui/bevy_egui only behind that feature; the core stays free of it.",
+    "Read through the existing diagnostics surface (`src/adapters/primary/observability.rs`) rather than reaching into scheduler internals; if a field is missing, add it to diagnostics, not to the overlay.",
+    "Selection by click or by cycling; the overlay must work when the game has replaced cognition entirely, showing the external state instead of the built-in one.",
+]
+test_hints = [
+    "With the feature off, `cargo tree -p bevy-flock` has no egui.",
+    "The overlay's data assembly is tested headlessly: given a world, it produces the same values the diagnostics report.",
+    "Selecting an NPC with external cognition shows the external marker rather than zeros.",
+]
+must_haves = [
+    "Feature-gated, off by default, no dependency in a build that does not enable it",
+    "Data assembly tested without a window",
+    "Missing fields are added to diagnostics rather than read through private state",
+]
+evaluation_criteria = [
+    "A reviewer can answer 'why did this NPC not think this tick' from the overlay alone",
+    "The overlay costs nothing measurable when disabled",
+    "No core file gains an egui import",
+]
+
+[[phases.tasks]]
+slug      = "debug-draw"
+title     = "Draw the grid, the bands, the flow and the anchors"
+goal     = "Optional debug geometry for the spatial grid, band boundaries, the current flow field and the anchored NPCs, each independently toggled, drawn through Bevy gizmos."
+depends_on = ["inspector-overlay"]
+hints = [
+    "Read-only views over the existing spatial and band resources; no new state, no writes.",
+    "Cap the drawn primitives (a configured budget) so drawing the 1M-inhabitant configuration does not melt the frame, and say so in the docs.",
+    "Draw the anchor exemption explicitly: anchored NPCs in one colour, so the memory-reclamation behaviour is visible rather than argued.",
+]
+test_hints = [
+    "The primitive budget is respected at 1M inhabitants, asserted by counting queued gizmos.",
+    "Each layer toggles independently.",
+    "With the feature off, no gizmo code compiles into the build.",
+]
+must_haves = [
+    "A primitive budget with a documented default",
+    "Anchored NPCs visibly distinguished",
+    "No writes to simulation state",
+]
+evaluation_criteria = [
+    "A capture of the debug draw is committed to the docs once the tree has settled",
+    "Frame cost with all layers on is measured and stated",
+    "A reviewer can see a band boundary move when the budget changes",
+]
+
+[[phases.tasks]]
+slug      = "replay-scrubber"
+title     = "Scrub the deterministic tick backwards and forwards"
+goal     = "Record a run's command log and snapshots, scrub to any tick, and prove that the digest at a scrubbed tick equals a fresh run to that tick."
+depends_on = ["inspector-overlay", "debug-draw"]
+hints = [
+    "Snapshot every N ticks (configurable), replay forward from the nearest snapshot to the target, and discard history beyond a budget; the count in a test must match an uninterrupted run exactly.",
+    "The command log is the existing deterministic input surface, not a new one; if commands are not yet recorded, that recording is part of this task.",
+    "Expose it as a CLI in the tooling crate and as a keyboard control in the example, so both a test and a human can drive it.",
+]
+test_hints = [
+    "Scrub to tick 200 and back to 500 in a 500-tick run: the digest equals the uninterrupted run's.",
+    "Scrubbing across a band transition produces the same manifested set as the fresh run.",
+    "A corrupted snapshot is rejected with a typed error and leaves the run intact.",
+]
+must_haves = [
+    "Digest parity is a test, not a claim",
+    "History memory is bounded and configurable",
+    "A corrupt snapshot cannot panic the scrubber",
+]
+evaluation_criteria = [
+    "The parity test covers a run with band transitions, memory and gestures",
+    "Memory ceiling is stated for a 10,000-body run at the default interval",
+    "The CLI reproduces the test's result on the shipped example",
+]
+
+[[phases.tasks]]
+slug      = "census-hud"
+title     = "The numbers a reviewer wants, on screen and in one command"
+goal     = "A HUD and a `--census` output reporting population by tier, thinking count against budget, allocation count, per-leaf cost drift and the spatial occupancy summary."
+depends_on = ["inspector-overlay"]
+hints = [
+    "Build on the existing telemetry SVG generator rather than duplicating its aggregation; the HUD reads the same numbers.",
+    "One command prints the census for a headless run, so CI and a reviewer get the same table without a window.",
+    "Cost drift is reported per registered leaf against the calibration baseline, with the tolerance named.",
+]
+test_hints = [
+    "The headless census of a 10,000-body run reports counts that sum to the population.",
+    "Cost drift is flagged when a leaf is deliberately slowed by 25% in a test.",
+    "The HUD and the headless output agree for the same tick.",
+]
+must_haves = [
+    "One command produces the table with no window",
+    "Population counts sum to the configured population in every test",
+    "Drift uses the existing calibration tolerance, not a second number",
+]
+evaluation_criteria = [
+    "A reviewer can paste the census into a bug report and have it mean something",
+    "The table includes allocations per frame",
+    "No aggregation logic is duplicated from telemetry",
+]
+
+# ─── Phase 5: reference adapters ────────────────────────────────────────────
+
+[[phases]]
+name  = "Reference Adapters"
+order = 5
+description = "One working implementation per port, plus the conformance suite that makes a game's own adapter checkable."
+
+[[phases.tasks]]
+slug      = "adapter-conformance-kit"
+title     = "A conformance suite every adapter must pass"
+goal     = "A shared test kit that takes any implementation of the physics, navigation and replication ports and proves it honours the contract, so reference adapters and a game's own are checked the same way."
+depends_on = ["skinned-district-example"]
+hints = [
+    "The kit lives in a dev-only crate so a game can depend on it without pulling adapters in; it exposes functions a game's test calls, not a macro that hides the assertions.",
+    "Cover the contract, not the implementation: ordering, determinism of what the port returns, handling of an NPC that despawns mid-frame, and behaviour when the port is unavailable.",
+    "Every reference adapter in this phase runs the kit; a documented skip is allowed only where the port's contract genuinely permits it.",
+]
+test_hints = [
+    "A deliberately broken adapter fails the kit with a message naming the violated clause.",
+    "The kit runs with no window, no GPU and no network.",
+]
+must_haves = [
+    "Kit is reusable outside this repository",
+    "Each clause it checks maps to a sentence in the port's documentation",
+    "A skip must state its reason in the adapter's own docs",
+]
+evaluation_criteria = [
+    "Each port's documentation gained a sentence per conformance clause",
+    "The kit is proven to catch a broken adapter",
+    "No adapter is exempt without a documented reason",
+]
+
+[[phases.tasks]]
+slug      = "adapter-avian"
+title     = "Avian as the reference physics adapter"
+goal     = "Push steering velocities into Avian's kinematic character controller, read positions back, and prove the handoff resolves a collision without breaking determinism."
+depends_on = ["adapter-conformance-kit", "animation-transition-quality"]
+hints = [
+    "Its own crate behind `physics-avian`; the core keeps its zero-physics dependency graph.",
+    "Avian's character controller is kinematic: the simulation owns intent, the controller owns resolution, and the next tick's steering reads the resolved position. Document that split because it is the thing every game gets wrong.",
+    "Determinism: physics resolution is not deterministic across Avian versions, so state the guarantee precisely — a replay with physics enabled is reproducible only for a pinned Avian version, and say so in the adapter's docs.",
+]
+test_hints = [
+    "An NPC steered into a wall ends up outside it, and the following tick's steering sees the corrected position.",
+    "The conformance kit passes.",
+    "With the feature off, the core's dependency graph is unchanged.",
+]
+must_haves = [
+    "Adapter crate behind its own feature, with the conformance kit as a test dependency",
+    "The determinism caveat is documented in the adapter, not buried",
+    "2,000-body cost measured and recorded",
+]
+evaluation_criteria = [
+    "The collision test fails if position readback is removed",
+    "The core's `cargo tree` is unchanged",
+    "The adapter's docs state what it does not do (e.g. ragdolls, stacking)",
+]
+
+[[phases.tasks]]
+slug      = "adapter-navmesh-bake"
+title     = "Bake a navmesh from level geometry into the existing navmesh feature"
+goal     = "Produce the `navmesh` feature's polygon mesh from a Bevy scene's colliders, with area costs and off-mesh links, so a level with doorways works without a hand-authored grid."
+depends_on = ["adapter-conformance-kit"]
+hints = [
+    "Bake offline in a tool or at load in a development build; the shipped path reads a baked artifact, because a bake in the frame budget is a stall.",
+    "Reuse the existing navmesh adjacency and string-pulled routing; the new work is geometry to polygons, not a second pathfinder.",
+    "Off-mesh links (doors, ladders, jumps) are authored data that survive a re-bake, keyed by position so a geometry change does not silently drop them.",
+]
+test_hints = [
+    "A two-room scene with one doorway produces a route that goes through the doorway rather than around the building.",
+    "A re-bake preserves authored off-mesh links within tolerance.",
+    "Pathing on the baked mesh matches the grid's result on an open plane, within a stated tolerance.",
+]
+must_haves = [
+    "Bake runs offline and is reproducible for the same input",
+    "Off-mesh links survive a re-bake",
+    "The `navmesh` feature's existing tests still pass",
+]
+evaluation_criteria = [
+    "The doorway test fails without the bake and passes with it",
+    "Bake time is stated for a representative scene",
+    "No new dependency in the core crate",
+]
+
+[[phases.tasks]]
+slug      = "adapter-replicon"
+title     = "Replication that respects the tier budget"
+goal     = "Feed the existing quantised tier deltas into bevy_replicon so a client sees the near tier in full and the ambient tier as aggregate deltas, under a documented byte ceiling."
+depends_on = ["adapter-conformance-kit"]
+hints = [
+    "The quantisation and delta format already exist in `src/adapters/secondary/network.rs`; this adapter is transport and interest management, not a second encoding.",
+    "Interest is the player's tier, not a radius recomputed independently, so the bytes follow the scheduler's decision.",
+    "Measure bytes per tick at 10,000 bodies and paste the number; the ceiling is part of the acceptance.",
+]
+test_hints = [
+    "Near-tier NPCs arrive with position, facing and tier; ambient bodies arrive as aggregate counts.",
+    "Bytes per tick at 10,000 bodies stay under the documented ceiling.",
+    "A despawn on the server does not leave a ghost on the client after the reconciliation window.",
+]
+must_haves = [
+    "No second encoding of the same state",
+    "Byte ceiling documented and measured",
+    "Core's dependency graph unchanged",
+]
+evaluation_criteria = [
+    "The measured bytes per tick are in the notes and in `docs/performance.md`",
+    "A test proves interest management follows the tier, not a duplicate radius",
+    "The adapter documents its interpolation assumptions",
+]
+
+[[phases.tasks]]
+slug      = "adapter-render-lod"
+title     = "Promote the impostor budget out of the demo and into the library"
+goal     = "Move the demo's LOD switching — mesh to billboard with a cross-fade band, driven by a per-frame budget — into the library's render adapter, so a game gets it without copying demo code."
+depends_on = ["adapter-conformance-kit", "animation-culling-and-lod"]
+hints = [
+    "The demo has this logic already (`demo-gpu/src/session.rs` and the render plan in `src/adapters/primary/render.rs`); promote the decision logic, leave the GPU code in the demo.",
+    "The budget decides how many bodies get a mesh; the cross-fade band is a function of distance, evaluated in the render plan rather than in a shader, so it is testable without a device.",
+    "The animation culling from phase 2 must feed the same budget, or an NPC will be animated while drawn as a billboard.",
+]
+test_hints = [
+    "Budget accounting: the plan never allocates more mesh slots than the configured budget.",
+    "A body crossing the fade band produces monotonic billboard opacity across ticks.",
+    "The animated-but-invisible case is impossible: any body with a mesh is animated, any billboard is not.",
+]
+must_haves = [
+    "Decision logic in the library, GPU code stays in the demo",
+    "Fade is tick-driven and testable without a device",
+    "The demo now consumes the library's plan rather than its own copy",
+]
+evaluation_criteria = [
+    "The demo's duplicated logic is removed, proven by the demo building against the library API",
+    "Mesh/billboard animation consistency is asserted by a test",
+    "Per-frame plan cost measured at 10,000 bodies",
+]
+
+# ─── Phase 6: persistence and streaming ─────────────────────────────────────
+
+[[phases]]
+name  = "World Persistence"
+order = 6
+description = "Leave the city, come back, and find the same people with the same grudges."
+
+[[phases.tasks]]
+slug      = "crowd-snapshot"
+title     = "Snapshot the crowd, not just the memories"
+goal     = "A versioned snapshot of a running crowd — identities, transforms, velocities, brain state, memory rows, registry hash — that restores into a fresh app with a matching digest."
+depends_on = ["archetype-registry", "adapter-conformance-kit"]
+hints = [
+    "Extend the existing save format rather than inventing a second one; `src/domain/saves.rs` already has the versioning idiom and a compatibility corpus.",
+    "Snapshots are cold: taking one is allowed to allocate, restoring must not depend on tick history.",
+    "Record the content hash from the registry, so restoring a snapshot against edited content fails loudly instead of silently changing the world.",
+]
+test_hints = [
+    "Save at tick 400, restore, advance 50: digests match an uninterrupted run.",
+    "Restoring against a different registry hash fails with a typed error naming both hashes.",
+    "A snapshot with a truncated section is rejected without panicking.",
+]
+must_haves = [
+    "One versioning idiom across memory and crowd snapshots",
+    "Content hash recorded and checked",
+    "Restore into a fresh app is the tested path, not restore in place",
+]
+evaluation_criteria = [
+    "Digest parity after restore is a test",
+    "Snapshot size is measured for 10,000 bodies and stated",
+    "The format is documented field by field",
+]
+
+[[phases.tasks]]
+slug      = "region-streaming"
+title     = "Stream the crowd around a moving anchor, keeping identity"
+goal     = "Spawn and dissolve population around a moving anchor without breaking identity: an NPC that leaves and returns is the same NPC, and anchored NPCs are never dissolved."
+depends_on = ["crowd-snapshot"]
+hints = [
+    "The band system already materialises and dissolves; the new work is identity continuity — the frozen record of an NPC that left must survive and be restored on return, with its memory.",
+    "Anchor exemption is a hard rule from ADR 0019/0020: assert it in a long test with a travelling anchor and an anchored NPC.",
+    "Population mass must stay conserved across the boundary, which the existing boundary harness already checks; extend it rather than writing a parallel test.",
+]
+test_hints = [
+    "A 10,000-body city, an anchor travelling 2 km and back: live count returns to 10,000 and every returning NPC keeps identity and memory.",
+    "An anchored NPC survives 10,000 ticks of travel.",
+    "No allocation growth across 10,000 ticks of streaming, asserted with the counting allocator.",
+]
+must_haves = [
+    "Identity continuity proven by a test, not by construction",
+    "Anchor exemption asserted in the long test",
+    "Memory growth bounded and measured",
+]
+evaluation_criteria = [
+    "The returning-NPC test fails if the frozen record is dropped",
+    "Allocation count is flat across the travel test",
+    "The boundary harness from phase 1 is extended, not duplicated",
+]
+
+[[phases.tasks]]
+slug      = "save-compat-matrix"
+title     = "Extend the compatibility corpus to crowd snapshots"
+goal     = "Backward and forward compatibility tests for the crowd snapshot, in the same shape the memory corpus already uses."
+depends_on = ["crowd-snapshot"]
+hints = [
+    "The corpus is committed files generated by the writer, one per supported version; a test loads each and compares a digest.",
+    "Forward incompatibility is a test too: a file from the next minor version must fail with a version error, not a parse error.",
+    "Regenerating the corpus is a scripted step with a documented command, so it does not rot.",
+]
+test_hints = [
+    "Every committed corpus file loads and produces its recorded digest.",
+    "A synthetic future-version file fails with the typed version error.",
+    "A file missing an optional section loads with documented defaults.",
+]
+must_haves = [
+    "Corpus files committed, one per supported version",
+    "Regeneration command documented and scripted",
+    "Forward failure is tested, not assumed",
+]
+evaluation_criteria = [
+    "The corpus runs in CI on every platform in the matrix",
+    "Digests are compared, not field counts",
+    "A reviewer can add a version by following the documented step",
+]
+
+# ─── Phase 7: the determinism contract ──────────────────────────────────────
+
+[[phases]]
+name  = "Determinism Contract"
+order = 7
+description = "The claim in the README becomes a claim the tests prove, scoped to where it is true."
+
+[[phases.tasks]]
+slug      = "determinism-adr"
+title     = "Decide what determinism means, and write it down"
+goal     = "An ADR that states the guarantee precisely — same build, same target, same feature set, same seed — names what is not guaranteed, and sets the rule for threading and for adapters that break it."
+depends_on = ["adapter-avian", "region-streaming"]
+hints = [
+    "The honest boundary: `f32` maths plus a system libm plus different backends means cross-architecture bit-identity is not achievable, and the ADR should say so rather than implying otherwise.",
+    "Cover the three cases explicitly: replay on the same target (guaranteed), across targets with the same libm and toolchain (best effort, tested where CI can), and across architectures (not guaranteed).",
+    "State the threading rule as a testable sentence, and point at the test that proves worker-count invariance.",
+    "If a fixed-point path is wanted, it is a separate ADR with its own budget; this one records the decision not to take it yet and why.",
+]
+test_hints = [
+    "Every claim in the ADR maps to a named test or CI job, listed in a table at the end.",
+    "A claim with no test is either removed or marked as untested in the ADR.",
+]
+must_haves = [
+    "One paragraph a game developer can act on",
+    "A table mapping each claim to the test that proves it",
+    "Adapters that break the guarantee are named",
+]
+evaluation_criteria = [
+    "No claim in the ADR lacks a test or an explicit untested marker",
+    "The README's determinism sentence will match the ADR's scope after the docs task",
+    "The threading rule is a sentence that can be falsified",
+]
+
+[[phases.tasks]]
+slug      = "determinism-probe"
+title     = "A probe that measures the guarantee instead of asserting it"
+goal     = "A runnable probe that replays a recorded command log, compares checkpoint digests, and reports divergence with the first differing field — used in CI where the guarantee is claimed and as information elsewhere."
+depends_on = ["determinism-adr"]
+hints = [
+    "Record: seed, feature set, tick count, command log. Verify: replay and compare digests at checkpoints. Both one command.",
+    "Digest comparison must name the first divergent entity and field, or the probe is useless for debugging.",
+    "Run it in CI on the targets where the guarantee is claimed, and as a non-blocking report on the ones where it is not.",
+]
+test_hints = [
+    "A deliberately perturbed run fails the probe with the first divergence named.",
+    "Same-target replay exits zero on every claimed target.",
+    "Worker-count invariance passes with 1 and with all cores.",
+]
+must_haves = [
+    "One command records, one verifies",
+    "The first divergent field is reported",
+    "CI runs it where claimed and reports it where not",
+]
+evaluation_criteria = [
+    "The probe runs in the release checklist",
+    "A reviewer can reproduce a reported divergence from the recorded log",
+    "The probe is used by at least one example, proving it works outside the test harness",
+]
+
+[[phases.tasks]]
+slug      = "determinism-docs"
+title     = "Say the same thing in the README, the book and the site"
+goal     = "Rewrite every determinism claim in the repository to the scope the ADR defines, and add the replay workflow to the book so a game can adopt it in an afternoon."
+depends_on = ["determinism-probe"]
+hints = [
+    "Search for every occurrence of 'deterministic', 'bit-identical', 'replay' and 'same on every platform' in README, book, docs and crate docs, and reconcile each with the ADR.",
+    "Add a book chapter: recording a run, verifying it, and what to do when the probe reports divergence.",
+    "Corrections are part of the task, not a follow-up: a claim that survives the ADR but not the code is a lie with a citation.",
+]
+test_hints = [
+    "A grep-based test or CI step lists every claim site and fails if one contains a phrase the ADR retired.",
+    "Book code blocks compile or are marked text.",
+]
+must_haves = [
+    "No claim in the repository exceeds the ADR's scope",
+    "Replay workflow documented end to end",
+    "The grep check is in CI so the claims cannot drift again",
+]
+evaluation_criteria = [
+    "Every claim site reconciled, with the list in the task notes",
+    "The book chapter lets a reader record and verify a run",
+    "CI enforces the retired phrases",
+]
+
+# ─── Phase 8: 1.0 ───────────────────────────────────────────────────────────
+
+[[phases]]
+name  = "Ship 1.0"
+order = 8
+description = "The boring work that makes the interesting work adoptable: stability policy, gates, docs site, examples, migration, publish."
+
+[[phases.tasks]]
+slug      = "api-stability-policy"
+title     = "Semver, MSRV and the API snapshot"
+goal     = "A written stability policy, a cargo-semver-checks gate on the public API, and an MSRV that CI actually holds."
+depends_on = ["determinism-docs"]
+hints = [
+    "Policy: which crates are 1.0, which are 0.x, what a minor bump may change, and how deprecations work for at least one minor version.",
+    "cargo-semver-checks against the last published version runs in CI; a break must be deliberate and recorded in the changelog.",
+    "MSRV pinned in one place and checked by a dedicated CI job, not by a comment in the README.",
+]
+test_hints = [
+    "The semver job fails on a synthetic breaking change.",
+    "The MSRV job builds with the pinned toolchain.",
+    "The API snapshot diff appears in the pull request body via the existing tooling or a committed file.",
+]
+must_haves = [
+    "Policy document under `docs/`",
+    "Semver and MSRV gates in CI",
+    "A deprecation example in the codebase",
+]
+evaluation_criteria = [
+    "A reviewer can tell what a version bump permits without reading code",
+    "The gates fail when they should, proven by a synthetic change",
+    "MSRV is one number in one place",
+]
+
+[[phases.tasks]]
+slug      = "perf-gates"
+title     = "Performance gates that fail a pull request"
+goal     = "Turn the measured budgets into CI gates — crowd kernel, animation binding, readback, band transition — with thresholds derived from committed baselines and a documented way to update them."
+depends_on = ["api-stability-policy", "animation-perf-budget"]
+hints = [
+    "Reuse the existing scaling-regression suite and its baseline format rather than adding a second mechanism.",
+    "Thresholds are per-machine-class where possible; where they cannot be, the gate compares against a committed baseline on the fixed runner and fails on a percentage regression.",
+    "Updating a baseline is a scripted, reviewable commit, not a hand edit.",
+]
+test_hints = [
+    "A deliberately slowed kernel fails the gate with the offending benchmark named.",
+    "The gate passes on an unchanged tree.",
+]
+must_haves = [
+    "Every published budget has a gate or a documented reason it cannot be gated",
+    "Baseline updates are scripted and reviewed",
+    "The gates run on the same runner class as the baselines",
+]
+evaluation_criteria = [
+    "A regression is caught before merge, demonstrated once",
+    "The gate names the benchmark and the delta",
+    "No budget in the docs is ungated without a reason",
+]
+
+[[phases.tasks]]
+slug      = "docs-site"
+title     = "Publish the documentation as a Starlight site"
+goal     = "An Astro/Starlight site generated from `docs/`, with the book, the ADRs, the performance record and the playbooks navigable, deployed to GitHub Pages by a script the user can run where the pages clone lives."
+depends_on = ["determinism-docs"]
+hints = [
+    "Blocked until the documentation cleanup lands: start from the settled `docs/` tree, not the one being restructured, or the mapping is written twice.",
+    "`docs/` stays canonical. A sync step generates Starlight content with frontmatter and rewritten links at build time, and the generated tree is gitignored, so there is one copy of the prose.",
+    "Follow the skill's deploy script contract: configuration in `package.json`, a `deploy:dry` rehearsal, and the Pages-source conflict documented rather than worked around.",
+    "The site must build in CI as a check even though deploy runs from the user's machine.",
+]
+test_hints = [
+    "A CI job builds the site and fails on a broken internal link.",
+    "The sync step is deterministic: two runs produce identical output.",
+    "Every ADR, chapter and playbook appears in the navigation, asserted by a test that counts sources against pages.",
+]
+must_haves = [
+    "One source of truth for the prose",
+    "CI builds the site",
+    "Deploy is a documented command, not a manual sequence",
+]
+evaluation_criteria = [
+    "A page exists for every source document, proven by a count",
+    "The link check covers relative links and images",
+    "The deploy rehearsal runs without touching the live site",
+]
+
+[[phases.tasks]]
+slug      = "example-catalogue"
+title     = "Examples a developer can run in five minutes"
+goal     = "A small, CI-smoke-tested set: headless crowd, skinned district, authored content, inspector, streaming city — each runnable with one command and each proving one capability end to end."
+depends_on = ["perf-gates", "region-streaming", "inspector-overlay"]
+hints = [
+    "Every example has a `--frames N --headless` path so CI runs it without a display; the animated ones assert a weight or a census value before exiting.",
+    "Keep the set small and orthogonal; a tenth example that differs by a flag is a maintenance cost, not a feature.",
+    "The catalogue is the README's front door: each entry says what it proves and what to read next.",
+]
+test_hints = [
+    "CI runs every example in headless mode and fails on a non-zero exit.",
+    "Each example's assertion would fail if its capability were stubbed.",
+]
+must_haves = [
+    "Five examples, each with a headless path",
+    "CI smoke-tests all of them",
+    "README links each with what it proves",
+]
+evaluation_criteria = [
+    "A developer can go from clone to a running crowd in one command",
+    "No example requires an asset download",
+    "The examples between them exercise animation, authoring, tooling, streaming and the core",
+]
+
+[[phases.tasks]]
+slug      = "migration-guide"
+title     = "A migration guide from 0.1 to 1.0"
+goal     = "A guide that takes a 0.1 user to 1.0: renamed APIs, the new features and what they cost, the determinism scope, and the order to adopt them in."
+depends_on = ["example-catalogue"]
+hints = [
+    "Written against real code: port one of the phase-1 demos through the guide as a worked example, and commit the before/after.",
+    "Call out the breaking changes with the compiler error a user will actually see, so the guide is greppable.",
+    "State plainly which new features are opt-in and what each one costs in dependencies and frame time.",
+]
+test_hints = [
+    "The worked port compiles and its tests pass in CI.",
+    "Every breaking change listed has a compiler error quoted next to it.",
+]
+must_haves = [
+    "A worked port, not only prose",
+    "Costs stated per opt-in feature",
+    "Determinism scope explained in the guide's first screen",
+]
+evaluation_criteria = [
+    "The worked port is a CI test",
+    "No breaking change is missing from the list, checked against the changelog",
+    "A 0.1 user can follow it without reading the ADRs",
+]
+
+[[phases.tasks]]
+slug      = "release-1-0"
+title     = "Publish 1.0 and prove the artefacts"
+goal     = "Cut the release: changelog, release checklist executed, docs.rs build verified, crates published in dependency order, and a tag whose tree reproduces the released artefacts."
+depends_on = ["migration-guide"]
+hints = [
+    "Execute the existing `docs/release-checklist.md`, updating it where phase 2 changed the process.",
+    "Publish in dependency order with `--dry-run` first, and verify docs.rs builds for the core and every published crate.",
+    "The tag must reproduce: a fresh clone of the tag builds, tests and runs the examples, which is the last thing checked before publishing and the first thing a user does.",
+]
+test_hints = [
+    "A fresh clone of the candidate tag builds and passes the full suite.",
+    "docs.rs builds for every published crate, verified before the announcement.",
+    "The published crate versions resolve together in a scratch project that spawns a crowd and animates it.",
+]
+must_haves = [
+    "Changelog with the phase-2 features and their costs",
+    "Release checklist executed and updated",
+    "Scratch-project verification of the published set",
+]
+evaluation_criteria = [
+    "The tag reproduces in a clean environment",
+    "Every published crate documents the same determinism scope",
+    "A user can build the skinned example from crates.io, not only from the repository",
+]
+
+# ─── Policy ──────────────────────────────────────────────────────────────────
+
+[security]
+# No network, storage or authentication surface in the library. The replication
+# adapter is transport-shaped but delegates to a game's bevy_replicon setup; the
+# supply-chain job (cargo-deny/audit) and the fuzz targets cover the rest.
+skip_hardening_task = true
+
+[integration]
+skip_wiring_audit = false
+skip_stub_audit   = false
+
+[targets]
+vscode      = true
+claude      = true
+agent_rules = true
+opencode    = false
+
+[style]
+avoid_ai_patterns = true
+avoid_god_files   = true
+strict            = true
+completion_standard = """
+Every task ships only when all of the following hold, and the evidence is in the
+completion notes rather than in a claim:
+
+- Preflight (build + test + lint + deny) passes with zero warnings, on the default
+  feature set, on --all-features and on --no-default-features.
+- Every exit criterion in the task file is met. A partially met criterion is a
+  failed task, and an inconvenient criterion is the one that mattered.
+- The task's benchmark exists and was actually run. Numbers are pasted, not
+  estimated, and the machine is named. A budget with no number is not a budget.
+- Nothing in the animation or tooling paths reads frame delta time. The two-frame-rate
+  replay test exists and covers the new work, not only the work it was written for.
+- No placeholder survives: no todo!(), no unimplemented!(), no hard-coded return
+  standing in for an implementation, no "for now" branch.
+- No #[allow] was added. No unwrap/expect/panic entered library code. No unsafe
+  entered the crate. A silenced lint has a reason and an entry in the audit script.
+- The core crate's dependency graph is unchanged, and the change is proven by the
+  CI step that diffs `cargo tree -p bevy-flock -e normal`, not by inspection.
+- New public API has a compiled doctest, and a game can adopt it from the doc
+  comment and the example alone.
+- Documentation states the contract and what breaks if it changes; the ADR and the
+  book chapter are updated in the same task as the code.
+- `demo`, `demo-gpu` and `playground` still build and their tests still pass.
+- Tests fail if the implementation is reverted to a stub. Verified by commenting
+  out the implementation and watching the test go red.
+- The work is finished, not deferred. "Follow-up task" is only acceptable for
+  genuinely new scope the plan did not name, never for finishing this one.
+"""

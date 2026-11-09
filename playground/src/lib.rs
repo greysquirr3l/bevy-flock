@@ -21,6 +21,7 @@
 
 pub mod camera;
 pub mod scene;
+pub mod skinned;
 
 use bevy_a11y::AccessibilityPlugin;
 use bevy_app::{App, AppExit, Last, Startup, TaskPoolPlugin, Update};

@@ -41,6 +41,10 @@ SANCTIONED: dict[tuple[str, str], str] = {
         "unsafe_code",
     ): "a counting allocator is the only way to report steady-state allocation",
     (
+        "crates/bevy-flock-anim/tests/no_alloc.rs",
+        "unsafe_code",
+    ): "a counting allocator is the only way to observe an allocation; confined to one test binary",
+    (
         "tests/band_continuity.rs",
         "unsafe_code",
     ): "a counting allocator is the only way to assert gate 7",
@@ -166,6 +170,7 @@ REASON = re.compile(r'reason\s*=\s*"(?:[^"\\]|\\.)*"', re.S)
 
 SEARCH = (
     "src",
+    "crates",
     "tests",
     "benches",
     "examples",
@@ -180,6 +185,7 @@ SEARCH = (
 #: this list has no table to weaken; one that is, cannot weaken it quietly.
 MANIFESTS = (
     "Cargo.toml",
+    "crates/bevy-flock-anim/Cargo.toml",
     "demo/Cargo.toml",
     "demo-gpu/Cargo.toml",
     "playground/Cargo.toml",
@@ -304,6 +310,19 @@ def check_manifest(root: Path) -> int:
     """
     problems = []
     covered: set[str] = set()
+    # A crate added to `crates/` with a lint table of its own is exactly the crate that would slip
+    # through a hand-written list: the list would still pass, over one manifest fewer. Discovery
+    # closes that hole without forcing a table onto the tool crates that carry none.
+    for pattern in ("*/Cargo.toml", "crates/*/Cargo.toml"):
+        for path in sorted(root.glob(pattern)):
+            relative = path.relative_to(root).as_posix()
+            if relative in MANIFESTS:
+                continue
+            if "[lints" in path.read_text(encoding="utf-8"):
+                problems.append(
+                    f"  {relative}: carries a lint table but is not in MANIFESTS, so its policy is "
+                    f"never checked"
+                )
     for relative in MANIFESTS:
         path = root / relative
         if not path.is_file():

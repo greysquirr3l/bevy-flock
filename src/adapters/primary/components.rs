@@ -8,8 +8,10 @@
 use std::sync::Arc;
 
 use bevy_ecs::prelude::*;
-use bevy_math::Vec3;
+use bevy_math::{Vec2, Vec3};
 use bevy_transform::prelude::Transform;
+
+use crate::adapters::primary::locomotion::Locomotion;
 
 use crate::behavior::blackboard::Blackboard;
 use crate::behavior::tree::{BehaviorTree, LeafDispatch, Status, TreeCursor};
@@ -57,6 +59,13 @@ pub struct NpcMood(pub Mood);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 pub struct NpcVelocity(pub Vec3);
 
+impl NpcVelocity {
+    /// The horizontal component: what a walking animation and the spatial index care about.
+    pub const fn planar(&self) -> Vec2 {
+        Vec2::new(self.0.x, self.0.z)
+    }
+}
+
 /// The velocity steering wants this tick.
 ///
 /// Written by steering; read by integration. Kept separate from
@@ -64,6 +73,13 @@ pub struct NpcVelocity(pub Vec3);
 /// direction instantly reads as a swarm of insects, not as people.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 pub struct NpcDesiredVelocity(pub Vec3);
+
+impl NpcDesiredVelocity {
+    /// The horizontal component: where the body is trying to go.
+    pub const fn planar(&self) -> Vec2 {
+        Vec2::new(self.0.x, self.0.z)
+    }
+}
 
 /// How much this NPC yields to others in the reciprocal avoidance pass (ADR 0045).
 ///
@@ -280,6 +296,11 @@ pub struct NpcBundle {
     pub velocity: NpcVelocity,
     /// Desired velocity.
     pub desired: NpcDesiredVelocity,
+    /// How the body is moving, in the terms an animation layer blends with (ADR 0052).
+    ///
+    /// Derived from the velocity above once per tick, so a game never has to reinterpret velocity
+    /// and hope its idea of "walking" matches the one the crowd was simulated with.
+    pub locomotion: Locomotion,
     /// Detail tier.
     pub lod: LodTier,
 }
@@ -302,6 +323,7 @@ impl NpcBundle {
             needs: NpcNeeds(Needs::satisfied()),
             velocity: NpcVelocity(Vec3::ZERO),
             desired: NpcDesiredVelocity(Vec3::ZERO),
+            locomotion: Locomotion::default(),
             lod: LodTier::Near,
         }
     }
@@ -362,6 +384,7 @@ mod tests {
                 needs: NpcNeeds(Needs::satisfied()),
                 velocity: NpcVelocity(Vec3::ZERO),
                 desired: NpcDesiredVelocity(Vec3::ZERO),
+                locomotion: Locomotion::default(),
                 lod: LodTier::Near,
             })
             .id();

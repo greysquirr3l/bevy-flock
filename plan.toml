@@ -1309,3 +1309,24 @@ parameters by value, and `cargo check` refuses `&mut ResMut<T>` with "does not d
 system configuration". The audit records that exception against this one manifest, has a fixture for
 it, and fails if the same allow appears anywhere else.
 """
+
+[[completed]]
+id = "t06-skinned-district-example"
+title = "2,000 skinned NPCs on the district, from a clean checkout"
+delivered_in = "feat/phase2-anim"
+summary = """
+`playground --bin skinned` spawns 2,000 five-joint rigs on the Ashfall district: a procedurally built
+skinned mesh (10,000 joints total), four looping clips and two one-shots, all bound through
+`bevy-flock-anim` so the blend weights come from the library's `Locomotion`, gestures from its gesture
+channel and head aim from `resolve_gaze`. Bevy's own skinning and animation pipeline does the drawing;
+nothing moves geometry by hand.
+
+Verification is a gate rather than a screenshot: `--assert-motion` exits non-zero unless a body moved,
+a stride weight passed half, a gesture cue reached a clip and a gaze aimed, and it names each failure
+separately. Headless on llvmpipe under Xvfb: 213 frames — 2000 moved, 1958 blended, 21 gesturing, 667
+looking, largest step 2.612 m. 23 crate tests, clippy `-D warnings` clean. Two bugs that only the
+picture could reveal are now tests: scenery meshes must not carry skin attributes (wgpu validation, app
+quits on frame one) and every box triangle must wind with its normal (a black face, not an error).
+`docs/demo/ashfall-skinned-district.png` is the committed capture;
+`docs/playbooks/bevy-playground.md` records the four Bevy 0.20 traps this example exists to document.
+"""
