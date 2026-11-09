@@ -14,7 +14,7 @@ what it needs.
 | `memory` | off | social memory store and its ageing | no per-agent memory cost at all |
 | `serde` | off | save/load and authored tree serialisation | no `serde` or `ron` in your graph |
 | `navmesh` | off | polygon navmesh with derived adjacency and string-pulled routes | pathfinding is yours |
-| `full` | off | `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh`, for a game that wants the whole engine |
+| `full` | off | `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh`, for a game that wants the whole engine | the six defaults above, unchanged |
 
 ```toml
 # a headless replay harness: no engine, no allocator churn, no tasks

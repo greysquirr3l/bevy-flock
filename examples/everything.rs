@@ -31,17 +31,22 @@ use bevy_flock::prelude::*;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. One plugin. The preset picks a population, a temperament mix and a spatial budget that
     //    suit the scene; `with_population` overrides the count without touching the rest.
+    const START: usize = 2_000;
+    const EXTRA: usize = 500;
+
     let preset = CrowdPreset::MarketplaceBustle;
-    let population = PopulationSize::try_new(2_000)?;
+    let population = PopulationSize::try_new(START)?;
     let config = FlockConfig::preset(preset).with_population(population);
 
     let mut app = App::new();
     app.add_plugins(FlockPlugin::new(config));
 
     // 2. Ask for more people than the startup crowd. The queue spends `spawn_budget` per frame.
-    let extra = PopulationSize::try_new(500)?;
+    let extra = PopulationSize::try_new(EXTRA)?;
     app.spawn_flock(FlockRequest::new(extra));
-    let target = 2_500_u32;
+    // The count the queue should reach. Derived from the two constants rather than written out, so
+    // editing one of them cannot leave the loop waiting for a number nobody asked for.
+    let target = u32::try_from(START + EXTRA)?;
 
     // 3. Run frames until the queue drains. A fixed number here because the example has no window;
     //    a game runs `app.update()` from its own loop.

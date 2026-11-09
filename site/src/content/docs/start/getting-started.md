@@ -69,5 +69,5 @@ cargo run --release --example everything --features memory,serde
 ```
 
 That example is the adoption path in order: add the plugin, ask for a crowd, run frames, read the counts the engine
-keeps, then save a memory snapshot and load it back. Read it before the guides; it is ninety lines and it does not
+keeps, then save a memory snapshot and load it back. Read it before the guides; it is eighty lines and it does not
 render.
