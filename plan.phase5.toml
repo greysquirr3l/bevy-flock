@@ -1,0 +1,278 @@
+# plan.phase5.toml — bevy-flock, phase 5: the scan's last 4%, and the pass that refuses
+#
+#   wiggum validate plan.phase5.toml
+#   wiggum generate plan.phase5.toml --dry-run
+#
+# Phase 4 closed at 6.95 ms for a 1M-body rebuild on six cores (1 worker: 22.15 ms, 3.19x), with the serial
+# remainder down to 0.41 ms — a 0.30 ms scan plus a 0.11 ms memcpy, 5.8% of the build. That floor puts Amdahl's
+# six-worker cap at 5.5x, so the gate phase 3 named is now reachable in principle and still not reached in fact.
+#
+# The arithmetic that decides this phase is uncomfortable and worth writing down before any code:
+#
+#   pass     6 workers   share of 6.95 ms   scaling from 1 worker
+#   clear        2.46 ms        35%               5.3x
+#   count        1.76 ms        25%               0.98x   <-- the one that refuses
+#   prefix       0.30 ms         4%               1.4x
+#   seat         0.11 ms         2%               1.1x
+#   place        2.22 ms        32%               3.2x
+#
+# So "target the parallel prefix sum" is a task worth at most 4% of the build, and deleting the scan outright
+# would take 6.95 to 6.65 ms. That is the honest ceiling, and this phase says so in its first task rather than
+# after its last. What the scan *can* still buy is not time but structure: it is the last place the rebuild reads
+# an array twice, and the last pass that exists only to move data sideways.
+#
+# Two things therefore get pursued together. First, the scan absorbs its neighbours: per-block totals are
+# accumulated by the count pass that already walks every body, and the local scan writes both the window table
+# and the cursor table, which deletes `seat` entirely. Second, the cost that is common to *all three* parallel
+# passes is addressed once: `std::thread::scope` boxes a work packet per worker per pass, measured at ~0.1 ms per
+# pass (a six-worker copy of 1.7 MB cost 0.21 ms against 0.11 ms serial), so roughly 0.3 ms of the 6.95 ms build
+# is spent spawning threads that then do 1.5 ms of work. A pool that outlives a tick pays that once, and it is
+# also the precondition ADR 0056 named for parallelising the seat.
+#
+# Ordering follows the measurement, not the ambition: price the scan's sub-passes and the spawn overhead, contract
+# the fusion in an ADR, implement it, then pick the block constant from a sweep, then remove the spawn cost, then
+# re-run the sweep and state whether the build reached 5x. If it does not, the pass that refused is named in the
+# closing task and becomes phase 6's subject — which is the only reason to write a target down in advance.
+#
+# Execution groups derive from `depends_on` alone (ADR 0033); scripts/group_cap.py chooses how many run at once.
+# ─── Project ──────────────────────────────────────────────────────────────────
+[project]
+name        = "bevy-flock"
+description = """
+bevy-flock is a crowd and NPC simulation engine for Bevy 0.20, and phase 5 is the work that folds the spatial
+rebuild's prefix sum into the passes around it and removes the per-tick cost of starting threads.
+"""
+language     = "rust"
+path         = "/home/ubuntu/bevy-flock"
+architecture = "hexagonal"
+# Determinism first, numbers second — the same rule as phases 3 and 4, now applied to the order in which passes
+# run rather than to the order in which cells are written.
+conventions = [
+    "Strict lint policy: only six allows repo-wide, `unwrap`/`expect`/`panic`/`indexing` denied everywhere including tests, every exception audited by scripts/lint_audit.py with a reason and removing task.",
+    "Determinism is a documented guarantee (ADR 0004): a fused pass must produce the same bytes as the three passes it replaces, at every worker count and block size, and a worker pool must not make the output depend on which worker woke first.",
+    "Every task ends with fmt, clippy --all-targets -D warnings, tests and an audit run; commit author is Nick Campbell <s0ma@protonmail.com>.",
+    "Numbers come from docs/performance.md with the machine named; the machine is a six-core aarch64 VM, and nothing is extrapolated to hardware that was not measured.",
+    "A pass that is removed is removed from `PassCosts`, from examples/build_passes.rs and from the inventory table in the same commit, because a stale row is a claim rather than a measurement.",
+]
+[[phases]]
+name  = "Price the scan, then fold it away"
+order = 1
+description = "Split the 0.30 ms scan into its three sub-steps and price the spawn overhead that every parallel pass pays, so the fusion's ceiling is a number before it is a design."
+[[phases.tasks]]
+slug = "scan-subpass-inventory"
+kind = "research"
+title = "Price the scan's three sub-steps and the per-pass spawn cost"
+goal = "Split `prefix_cells_blocked` into block totals, the serial O(blocks) base scan and the per-block local scan, time each at one and six workers over 1M bodies, and separately measure what `std::thread::scope` costs per pass, so phase 5 knows which of the two targets is worth its tasks."
+depends_on = []
+hints = [
+    "Extend `examples/build_passes.rs` rather than writing a second harness: it already prints JSON lines per pass and already takes `--blocks`, and a second inventory is a second thing to keep honest.",
+    "Time the spawn cost directly — a six-worker scope whose bodies return immediately, repeated enough to leave the timer's own resolution behind — instead of inferring it from the seat pass's 0.21 vs 0.11 ms, which confounds spawn with copy.",
+    "Expect the totals step to be the largest of the three, because it is the only one that reads the counts array without writing it; if the local scan dominates instead, the fusion should target the local scan's read-modify-write and not the totals.",
+    "Report the scan's share of the build beside the absolute milliseconds. The number that matters for sequencing is 4%, not 0.30 ms.",
+]
+test_hints = [
+    "The three sub-step times must sum to the `prefix` row already recorded, within the run-to-run spread, or the split is measuring the instrumentation.",
+]
+must_haves = [
+    "`examples/build_passes.rs` reports totals, bases and local scan separately at 1 and 6 workers",
+    "docs/performance.md carries the sub-step table beside the five-pass one, with the scan's share of the build stated",
+    "The spawn cost per pass is a measured number with the method stated",
+]
+evaluation_criteria = [
+    "A reader can tell from the numbers whether the fusion is worth 0.2 ms or 0.05 ms before it is designed",
+    "The ceiling of phase 5 is stated as a percentage of the build, not as an aspiration",
+]
+[[phases.tasks]]
+slug = "fused-scan-adr"
+kind = "research"
+title = "ADR 0057: the scan absorbs its totals pass and seats its own cursors"
+goal = "Fix in an ADR what fusing the scan means: the count pass accumulates per-block totals as it counts, the serial step becomes O(blocks) additions with no re-read, and the local scan writes each cell's start into both the window table and the cursor table so that `seat` disappears."
+depends_on = ["scan-subpass-inventory"]
+hints = [
+    "The contract that must not move: `blocks` is still derived from the cell count and never from the worker count (ADR 0055 §6), so the fused pass is byte-identical to the three it replaces at every block size.",
+    "The local scan writing two arrays is the cheap half of the idea — it replaces a store plus a later read-and-store with two stores from a register the pass already holds — and the ADR should say what it costs when the two arrays are far apart in memory, because that is where the win could turn into a loss.",
+    "Accumulating totals inside the count pass is the expensive half, because `count` is already the pass with the worst scaling (0.98x at six workers). State the trade explicitly: a 1.7 MB read removed from the scan against a per-block accumulate added to the pass that is already the bottleneck.",
+    "Record what happens to `PassCosts` when a pass disappears: the type is the inventory, so a five-row table becoming four rows is a documentation change in the same commit, not a later one.",
+]
+test_hints = [
+    "The byte-equality matrix (workers {1,2,3,8} × blocks {1,128,1024,4096}) must still pass unchanged; it is the only test that can catch a fused pass that reorders.",
+    "A test must assert the fused totals equal the separately computed ones, so that the fusion cannot silently drop a cell at a block boundary.",
+]
+must_haves = [
+    "docs/adr/0057-*.md exists with the fused decomposition, the two trade-offs and the rejected shapes",
+    "The ADR names the pass count before and after, and what `PassCosts` reports instead of the deleted passes",
+    "The determinism argument covers a worker pool: the output may not depend on which worker wakes first",
+]
+evaluation_criteria = [
+    "The ADR can be implemented without re-deriving the scan's arithmetic",
+    "A reader can tell which half of the fusion is expected to pay and which is expected to cost",
+]
+[[phases]]
+name  = "Implement the fusion"
+order = 2
+description = "Fold the totals pass into the count and the seat pass into the local scan, then pick the block constant from a sweep rather than from the one that happens to be in the tree."
+[[phases.tasks]]
+slug = "fused-count-and-scan"
+kind = "infrastructure"
+title = "Fuse the block totals into the count and delete the seat pass"
+goal = "Make the count pass accumulate per-block totals while it counts, make the blocked scan skip its totals re-read, and have the local scan write the window table and the cursor table together, so `PassCosts` loses both `seat` and the totals step."
+depends_on = ["fused-scan-adr"]
+hints = [
+    "`count_cells_parallel` already owns a cell range per worker, so the block a cell belongs to is arithmetic on that range; the totals can be accumulated in the worker's own slice of `block_totals` with no atomics and no merge.",
+    "The serial count path has no ranges to exploit — it walks every body — so it can accumulate into `block_totals` with one extra index computation per body, or keep the separate totals pass and say which is faster on that path.",
+    "If the fused count measures slower than the sum it replaces, keep the separate pass and record the negative result: the task's value is the measurement, and a fusion that loses is a finding, not a failure to hide.",
+    "Delete `seat_cursors` and `PassCosts::seat` rather than leaving them unused; `serial_share` then counts only the scan, and the doc comment claiming a memcpy is the serial remainder has to change with it.",
+]
+test_hints = [
+    "`placement_leaves_the_window_table_alone` must still pass, now with the cursors seated by the scan itself — it is the test that says the table is not a side effect.",
+    "Run the no-allocation suite: the fusion must not add a per-tick buffer, and the block totals must keep their reused allocation.",
+]
+must_haves = [
+    "The rebuild performs no O(cells) pass that both reads and writes the cell array except the local scan",
+    "The pass inventory shrinks from five rows to three or four, and the doc table shrinks with it",
+    "The byte-equality matrix and the parity harness both pass unchanged",
+]
+evaluation_criteria = [
+    "The rebuild is faster or the negative result is recorded with the number that refuted it",
+    "No pass remains whose only job is to move an array sideways",
+]
+[[phases.tasks]]
+slug = "block-constant-sweep"
+kind = "research"
+title = "Pick CELLS_PER_BLOCK from a sweep, not from the number in the tree"
+goal = "Sweep the block constant across populations and worker counts — 4096 cells per block is 103 blocks at 421,876 cells, which is 17 blocks per worker and probably too few — and choose the value from the measured curve, keeping the block count derived from cells alone so the output stays machine-independent."
+depends_on = ["fused-count-and-scan"]
+hints = [
+    "`examples/build_passes.rs` already takes `--blocks`; sweep the derived constant by sweeping the block count and reading back which value of `CELLS_PER_BLOCK` produces it, so the harness does not need a second knob.",
+    "The two effects to separate: too few blocks leaves workers idle at the tail of a pass, too many blocks makes the serial O(blocks) step and the per-block overhead visible. The sweep should show both walls, not just the chosen point.",
+    "Check the cache behaviour of the local scan while you are there: each block's slice is walked forward and the totals are read backwards, and a block that fits in L1 is the argument for the constant, so state the block's byte size at the chosen value.",
+    "Do not let the constant depend on the worker count. A grid built on six cores and the same grid built on sixteen must produce the same bytes, and ADR 0055 §6 is the reason.",
+]
+test_hints = [
+    "A test must assert the derived block count for a range of cell counts against the chosen constant, so a later edit to the constant cannot silently change the decomposition without changing the test.",
+]
+must_haves = [
+    "The chosen constant is justified by a table of block counts against measured times, with both walls visible",
+    "docs/performance.md records the sweep and the block's byte size at the chosen value",
+    "The block count remains a function of the cell count alone",
+]
+evaluation_criteria = [
+    "A reader can see why the constant is what it is without running the sweep",
+    "The choice is stated in cells and in bytes, so it can be re-checked on a machine with different cache sizes",
+]
+[[phases]]
+name  = "Remove the cost that is common to every pass"
+order = 3
+description = "A pool that outlives a tick pays the spawn cost once instead of once per pass, and it is the precondition ADR 0056 named for parallelising the seat."
+[[phases.tasks]]
+slug = "persistent-worker-pool"
+kind = "infrastructure"
+title = "A worker pool that outlives a tick, so no pass pays for starting threads"
+goal = "Replace the per-pass `std::thread::scope` with a pool that parks its workers between rebuilds, so the ~0.1 ms per pass spent boxing work packets is paid once per grid rather than once per pass, and record what that does to the three parallel passes."
+depends_on = ["block-constant-sweep"]
+hints = [
+    "The pool must not allocate per tick: the no-allocation suite counts steady-frame allocator calls, and a channel that allocates per message would fail it. Fixed slots and a condvar, or a hand-rolled barrier over `std::sync::Mutex<State>`, both keep the count at zero.",
+    "Determinism is the risk, not speed: workers must be assigned fixed cell ranges, and the main thread must not proceed until every worker has finished, or two runs on the same machine produce different windows. The parity harness is what catches this, and it must be run more than once.",
+    "Measure the spawn cost before and after with the same method as T01, so the win is a difference between two numbers rather than a claim about `thread::scope`.",
+    "A pool that lives on the grid is a `Drop` impl and a thread lifetime question; if the crate cannot own threads without changing its public surface, say so and park the pool behind a feature rather than shipping a half-owned thread.",
+]
+test_hints = [
+    "Run the parity harness twice in the same test binary and compare: a pool that leaks state between rebuilds shows up as a difference between the first and second run, not as a failure of either.",
+    "The no-allocation suite must still report zero steady-frame allocations with the pool enabled.",
+]
+must_haves = [
+    "The rebuild makes no per-pass thread spawn, measured before and after",
+    "Every worker's cell range is fixed by its index, not by arrival order",
+    "The pool is created once per grid and shut down without leaking threads",
+]
+evaluation_criteria = [
+    "The spawn cost is gone from the inventory rather than moved to a different row",
+    "Two consecutive rebuilds on the same grid produce identical bytes, demonstrated by a test",
+]
+[[phases]]
+name  = "Measure and decide"
+order = 4
+description = "Re-run the sweep and hold the result to the number phase 3 named. The pass that refuses becomes the next phase's subject."
+[[phases.tasks]]
+slug = "build-5x-gate"
+kind = "audit"
+title = "Re-measure the build and hold it to 5x at six workers"
+goal = "Re-run the scaling sweep over 1M bodies after the fusion and the pool, state whether the rebuild reached 5x on six workers, and if it did not, name the pass that refused with its measured share."
+depends_on = ["persistent-worker-pool"]
+hints = [
+    "Use `examples/scaling_sweep.rs` for the curve and `examples/build_passes.rs` for the attribution; a single number without a pass breakdown cannot name the next phase.",
+    "The arithmetic to check the result against: with a serial remainder of 0.30 ms at six workers the cap is 5.6x, so anything below 5x is a parallel-efficiency problem in `clear`, `count` or `place`, not a serial-tail problem. Saying which is the point of the task.",
+    "Re-record `benches/spatial-baseline.json` in the gate's own units and leave the previous numbers in docs/performance.md beside the new ones, so the gate keeps its meaning across the phase.",
+    "If `count` is still near 1.0x, that is the finding: a pass that re-reads the cell list once per worker cannot scale, and phase 6 starts there rather than with another scan.",
+]
+test_hints = [
+    "The regression gate must pass against the re-recorded baseline, and the re-recording must be done on a quiet machine — a baseline recorded under load is a baseline that fails later.",
+]
+must_haves = [
+    "The 6-worker build number is stated against phase 4's 6.95 ms with the ratio, not just the absolute",
+    "The pass that limits the result is named with its measured share of the build",
+    "docs/performance.md and the gate baseline agree with the example's output",
+]
+evaluation_criteria = [
+    "The phase ends with a number and a named successor task, or with 5x reached and the gate held",
+    "Nothing in the inventory is extrapolated to cores that were not measured",
+]
+# ─── Orchestrator ─────────────────────────────────────────────────────────────
+[orchestrator]
+persona     = "You are a principal Rust engineer who owns a crowd engine's spatial index and has been burned by a parallel build that looked deterministic on six cores and reordered on sixteen. You measure before you claim, you write the test that would catch the reorder before the code that could cause it, and you treat a fusion that turns out slower as a result worth recording rather than a mistake worth hiding."
+strategy    = "complete"
+max_retries = 3
+on_failure  = "pause"
+require_evaluator = true
+rules = [
+    "Rust edition 2024, stable toolchain, Bevy 0.20.1. No nightly features in a crate or in CI, and no new dependency for threading: the pool is built on std, because a crate that ships a runtime to save 0.3 ms has traded a measurement for a maintenance burden.",
+    "Determinism outranks speed (ADR 0004). A fused pass must produce the same bytes as the passes it replaces at every worker count and block size, and the pool must assign cell ranges by worker index rather than by arrival order. The parity harness runs twice in one process to catch state leaking between rebuilds.",
+    "The block decomposition is a function of the cell count alone (ADR 0055 §6). No constant, divisor or threshold in the spatial grid may be derived from `threads`, `available_parallelism` or the machine, because the output would then depend on the machine.",
+    "`PassCosts` is the inventory: when a pass is deleted it leaves `PassCosts`, `examples/build_passes.rs` and the table in docs/performance.md in the same commit. A row that outlives its pass is a claim rather than a measurement.",
+    "No `.unwrap()`, `.expect()`, `panic!`, `unreachable!` or panicking indexing, including in tests; the crate's `testkit` helpers exist for that. No `#[allow(clippy::...)]`: fix the lint, or use `#[expect(...)]` with a reason recorded in scripts/lint_audit.py.",
+    "`#![deny(unsafe_code)]` stays. A worker pool over `std::sync` is safe Rust; if a profiled path genuinely needs unsafe it is one documented module with a Miri run, not a sprinkle.",
+    "Zero steady-frame allocation is a measured claim, not an aspiration: `tests/crowd_no_alloc.rs` and `tests/spatial_batch_no_alloc.rs` count allocator calls and must stay at zero with the pool enabled.",
+    "Numbers come from docs/performance.md with the machine named — a six-core aarch64 VM — and nothing is extrapolated to cores that were not measured. A baseline is recorded on a quiet machine; one recorded under load fails later and teaches nothing.",
+    "Every task ends with `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, the full test suite and `python3 scripts/lint_audit.py`; commit author is Nick Campbell <s0ma@protonmail.com>.",
+    "A negative result is a deliverable. If the fused count is slower than the pass it replaces, the task records the number and keeps the faster shape, because the phase's value is knowing which of the two targets was worth its tasks.",
+]
+
+# ─── Evaluator ────────────────────────────────────────────────────────────────
+
+[evaluator]
+persona        = "You are a hostile reviewer for a simulation library who has watched a 'parallel' rebuild ship that was neither faster nor deterministic. You assume the implementer timed the wrong thing. You re-run the inventory, diff the window arrays across worker counts, check that every deleted pass left the type, the example and the doc together, and recompute Amdahl's cap from the serial remainder before scoring anything."
+pass_threshold = 8
+hard_fail      = true
+test_tool      = "cargo test --offline --all-targets --all-features"
+mode           = "blocking"
+contract_review = true
+
+[[evaluator.criteria]]
+name        = "byte-identical-output"
+weight      = 25
+description = "The equivalence matrix (workers {1,2,3,8} x blocks {1,128,1024,4096}) passes unchanged, the parity harness passes, and a run of the same fixture twice in one process produces identical window arrays — including with the worker pool enabled."
+
+[[evaluator.criteria]]
+name        = "measured-not-claimed"
+weight      = 20
+description = "Every performance statement in the task notes is backed by a run of a committed example or bench on the named machine, with the before and after in the same units. A fusion that lost is reported with the number that refuted it rather than removed from the notes."
+
+[[evaluator.criteria]]
+name        = "inventory-consistency"
+weight      = 20
+description = "`PassCosts`, `examples/build_passes.rs` and the inventory table in docs/performance.md describe the same set of passes, and the table's rows sum to the total it reports. No deleted pass lingers in any of the three."
+
+[[evaluator.criteria]]
+name        = "serial-remainder-arithmetic"
+weight    = 15
+description = "The serial remainder is stated as a complexity term with its measured milliseconds, and the six-worker cap derived from it is recomputed and agrees with the reported speedup within the run-to-run spread."
+
+[[evaluator.criteria]]
+name        = "thread-lifetime-and-allocations"
+weight    = 15
+description = "The pool is created once per grid, shuts its threads down on drop without leaking, assigns ranges by index, and the no-allocation suites still report zero steady-frame allocator calls."
+
+[[evaluator.criteria]]
+name        = "task-hygiene"
+weight      = 5
+description = "fmt, clippy with -D warnings over all targets and features, the full test suite and the lint audit are green in the final state of every task, and the commit author is Nick Campbell <s0ma@protonmail.com>."
