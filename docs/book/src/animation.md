@@ -99,7 +99,7 @@ Extraction is yours, because the crate does not know which joint is your root. R
 your bridge and report it; the crate consumes the report exactly once, quantises it to a micrometre,
 and (in `Clip` mode) advances the body's walk phase by the distance so the next tick's blend does not
 drag the legs back. `RootMotionTrace` counts what happened and digests the applied offsets, so two runs
-of the same clips can be compared bit for bit. [ADR 0053](../adr/0053-root-motion-contract.md) has the
+of the same clips can be compared bit for bit. [ADR 0053](../../dev/adr/0053-root-motion-contract.md) has the
 reasoning; the short version is that the default is the safe one and the opt-in is explicit because
 root motion is the most common way an animation layer breaks a simulation.
 
@@ -113,7 +113,7 @@ clip at a weight the gesture's urgency sets, and the blend leaves it alone.
 ## The envelope, and what to do with it
 
 At 2,000 bodies the blend costs about 0.09 ms per tick and the gaze solve about 0.18 ms on the
-reference machine in `docs/performance.md`; at 10,000 the blend is 0.94 ms with the LOD band on and
+reference machine in `docs/dev/tuning/performance.md`; at 10,000 the blend is 0.94 ms with the LOD band on and
 0.28 ms with the camera outside the plaza. The plan's 0.3 ms ceiling for blend plus gaze at 2,000 is
 *not* met — the measured pair is 0.55 ms — and the same document says so with the per-case table and
 names the two causes: per-bone sparse-set lookups in the gaze solve and hash-map node lookups in the

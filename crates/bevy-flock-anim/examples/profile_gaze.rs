@@ -11,7 +11,7 @@
 //!   writes are sequential. The candidate replacement if the lookups are the cost.
 //!
 //! `cargo run --release -p bevy-flock-anim --example profile_gaze` prints microseconds per pass over
-//! 2,000 bodies, runs about three seconds, and is the measurement named in `docs/performance.md`.
+//! 2,000 bodies, runs about three seconds, and is the measurement named in `docs/dev/tuning/performance.md`.
 use std::hint::black_box;
 use std::time::Instant;
 

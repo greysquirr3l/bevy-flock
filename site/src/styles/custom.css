@@ -1,0 +1,25 @@
+/* Slate and amber: legible at 3am, distinguishable in a screenshot, and not the Starlight purple that every scaffolded
+   docs site ships with. Only Starlight's own tokens are overridden, so upgrades do not fight this file. */
+:root {
+  --sl-color-accent-low: #3a2a12;
+  --sl-color-accent: #d99a2b;
+  --sl-color-accent-high: #f6d79a;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eceef2;
+  --sl-color-gray-2: #c6c8d2;
+  --sl-color-gray-3: #9a9db0;
+  --sl-color-gray-4: #5f6270;
+  --sl-color-gray-5: #31333d;
+  --sl-color-gray-6: #1b1c22;
+  --sl-color-black: #101116;
+  --sl-font: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #fbeccd;
+  --sl-color-accent: #a2641a;
+  --sl-color-accent-high: #5a3a0d;
+}
+/* A crowd is a table of numbers; let the tables breathe. */
+.sl-markdown-content table { font-variant-numeric: tabular-nums; }
+.sl-markdown-content code { font-feature-settings: 'calt' 0; }

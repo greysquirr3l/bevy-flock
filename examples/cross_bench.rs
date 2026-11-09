@@ -1,6 +1,6 @@
 //! The cross-engine fixture: one frame of the whole crowd, reported in the shared JSON schema.
 //!
-//! This is the `bevy-flock` side of `docs/benchmarks/cross-engine.md`. It runs the documented workload — a spawn burst
+//! This is the `bevy-flock` side of `docs/dev/tuning/benchmarks/cross-engine.md`. It runs the documented workload — a spawn burst
 //! followed by steady-state ticks — and reports the same six statistics every other engine's harness must report, so the
 //! numbers can be put in one table instead of two blog posts.
 //!

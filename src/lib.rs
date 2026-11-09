@@ -55,7 +55,7 @@
 //!   the plugin and the command extension trait. Rendering is never one of
 //!   these adapters; a renderer observes the simulation and cannot drive it.
 //!
-//! See `ARCHITECTURE.md` and `docs/adr/` in the repository for the reasoning
+//! See `ARCHITECTURE.md` and `docs/dev/adr/` in the repository for the reasoning
 //! behind each of those boundaries.
 //!
 //! # Feature flags

@@ -1,0 +1,53 @@
+---
+title: bevy-flock
+description: A deterministic NPC and crowd engine for Bevy.
+template: splash
+hero:
+  tagline: Ten thousand agents in a frame. A million when you need them. Deterministic, and it never allocates mid-frame.
+  actions:
+    - text: Install
+      link: /bevy-flock/start/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: A crowd in five lines
+      link: /bevy-flock/start/first-crowd/
+      icon: rocket
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Five lines to a crowd" icon="rocket">
+    `FlockPlugin::new(FlockConfig::preset(CrowdPreset::CityAmbient))` and you have a city. Presets cover a quiet
+    village, a city ambient layer and a battle horde; every field is yours to change.
+  </Card>
+  <Card title="Deterministic by construction" icon="approve-check">
+    Same seed, same platform, same features — same digest over hundreds of ticks. Save it, replay it, test it in CI.
+  </Card>
+  <Card title="Cost you can predict" icon="setting">
+    Distance decides how much thinking an NPC gets: reflex, ambient, or full cognition near the player. The budget is a
+    number you set, not a number you discover.
+  </Card>
+  <Card title="Engine, not a framework" icon="puzzle">
+    It does not render, collide, network or read your files. It simulates a crowd and hands you the ECS handles.
+  </Card>
+</CardGrid>
+
+## Where to go first
+
+If you have never used it, read [Install](/bevy-flock/start/getting-started/) then
+[A crowd in five lines](/bevy-flock/start/first-crowd/). Both are short on purpose.
+
+If you are deciding whether it fits, read [Concepts](/bevy-flock/start/concepts/) and
+[Performance](/bevy-flock/reference/performance/) — the numbers there are measurements with the fixture named, not
+rounded claims.
+
+If you are already running a crowd and it is not behaving the way you want, the guides are the place:
+[Behaviour that varies](/bevy-flock/guides/behaviour/), [Memory and grudges](/bevy-flock/guides/memory/),
+[Scaling to a million](/bevy-flock/guides/scaling/).
+
+## What it is not
+
+`bevy-flock` is a simulation library for Bevy, not a full NPC game framework: no renderer, no physics, no networking, no
+filesystem adapters. The [coverage page](/bevy-flock/reference/coverage/) is explicit about what is in the crate and what
+stays your job, because finding out at integration time is worse than reading it here.

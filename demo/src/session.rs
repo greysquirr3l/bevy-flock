@@ -27,7 +27,7 @@ pub const LOOP_STEPS: usize = 24;
 /// The shipped PNGs are read at leisure and made at full detail; a terminal picture is steered at
 /// twenty frames a second and is 120 pixels wide. Measured on the district view at 120 by 64 pixels,
 /// the full budget costs about 1,100 ms a frame and this one costs about 25, which is the difference
-/// between a still and a camera. See `docs/performance.md`.
+/// between a still and a camera. See `docs/dev/tuning/performance.md`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Budget {
     /// Bodies drawn, nearest first.

@@ -67,7 +67,7 @@ library with a gizmo dependency is a crowd library that cannot be used on a serv
    the whole crowd; the default spreads it.
 3. **Check the grid volume.** The rebuild is a fixed cost sized from the configured volume:
    a 1 km box is ~1.0 ms per frame regardless of population, a 200 m box ~20 µs.
-4. **Profile.** `docs/performance.md` records the flamegraph method and what it found: the
+4. **Profile.** `docs/dev/tuning/performance.md` records the flamegraph method and what it found: the
    steering kernel, then the neighbour walk, then the write pattern.
 
 ## "It is not deterministic"

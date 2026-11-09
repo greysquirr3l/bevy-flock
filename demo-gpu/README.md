@@ -66,6 +66,6 @@ times the per-frame instance upload alone, which is the part that scales with po
 than with draw calls. On a software adapter, expect the upload to dominate and the draw to look
 almost free — that is the adapter, not the pipeline.
 
-`docs/playbooks/gpu-demos.md` is the instruction set this crate was built against: environment
+`docs/dev/tuning/playbooks/gpu-demos.md` is the instruction set this crate was built against: environment
 classification, adapter policy, the pipeline recipe, the shader rules, the correctness gates and
 the benchmarking traps.

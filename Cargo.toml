@@ -26,7 +26,23 @@ categories = ["game-development", "simulation"]
 # Benches and examples ship with the package: a reader can run what the README
 # claims without cloning, and excluding them made `cargo package` warn about every
 # `[[bench]]` target on every publish. `docs/` and CI stay out.
-exclude = ["docs/", ".github/"]
+# The published crate ships code and the README. Everything a maintainer reads while tuning -- the ADRs, the
+# performance journals, the gates, the playbooks, the benchmark harnesses, the docs site sources -- stays in the
+# repository and out of the tarball, because crates.io is a distribution channel and not a filing cabinet.
+exclude = [
+    "docs/",
+    ".github/",
+    "site/",
+    "benchmarks/",
+    "crates/",
+    "scripts/",
+    "demo/",
+    "demo-gpu/",
+    "playground/",
+    "compat/",
+    "fuzz/",
+    "assets/",
+]
 # The published crate ships code and docs only. Benchmarks and examples live in
 # the repository so that dev-only dependencies never reach a consumer's graph.
 

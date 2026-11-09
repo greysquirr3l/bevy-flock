@@ -52,5 +52,5 @@ want to understand why it is fast, read [The model](the-model.md) and
 [Behaviour](behaviour.md), [Memory](memory.md) and [Extending it](extending.md). If
 something is wrong at 2 a.m., read [When it goes wrong](debugging.md).
 
-Every number in this book comes from `docs/performance.md`, which records the host, the
+Every number in this book comes from `docs/dev/tuning/performance.md`, which records the host, the
 toolchain and the lockfile the measurement used. Nothing here is a projection.

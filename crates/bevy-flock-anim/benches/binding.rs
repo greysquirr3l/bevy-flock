@@ -6,7 +6,7 @@
 //! here and a passing test there describe the same code.
 //!
 //! `cargo bench -p bevy-flock-anim` runs it. The numbers, the machine, and the ceilings they are
-//! compared against live in `docs/performance.md`; `scripts/bench_gate.py` is the gate that fails a
+//! compared against live in `docs/dev/tuning/performance.md`; `scripts/bench_gate.py` is the gate that fails a
 //! build on a 25% regression against the committed baseline.
 use bevy_animation::graph::AnimationNodeIndex;
 use bevy_animation::prelude::AnimationPlayer;

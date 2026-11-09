@@ -1,6 +1,6 @@
 # What it costs
 
-Every number here comes from `docs/performance.md`, which names the host, the toolchain and
+Every number here comes from `docs/dev/tuning/performance.md`, which names the host, the toolchain and
 the lockfile. The point of this chapter is not the absolute milliseconds — those belong to a
 machine — but the *ratios* and the *shape*, which belong to the design.
 
@@ -58,7 +58,7 @@ declared 150 ns would suggest. Query traversal, blackboard access and change det
 real costs no declared hint includes.
 
 The declared costs in the leaf catalogue are calibrated to within 20% of the measured
-per-leaf cost — `benches/brain.rs` measures, `docs/performance.md` records, and ADR 0009
+per-leaf cost — `benches/brain.rs` measures, `docs/dev/tuning/performance.md` records, and ADR 0009
 explains why a virtual cost rather than wall time is what the scheduler spends.
 
 ## The three rejected designs

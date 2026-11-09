@@ -124,7 +124,7 @@ could not do rather than failing silently:
 - `translated` — the registry moved, so identifiers were remapped;
 - `unverified_mapping` — a version 1 file, whose subjects were taken on trust.
 
-`docs/adr/0012` to `0014` and `docs/memory.md` carry the details, including the measured
+`docs/dev/adr/0012` to `0014` and `docs/dev/tuning/memory.md` carry the details, including the measured
 encoding and decoding costs at 50,000 rows.
 
 ## The honest limits

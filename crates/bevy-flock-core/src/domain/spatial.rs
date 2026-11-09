@@ -353,7 +353,7 @@ pub struct SpatialGrid {
 
 /// What each pass of a rebuild cost.
 ///
-/// Produced by [`SpatialGrid::build_measured`]. The numbers in `docs/performance.md` come from this type
+/// Produced by [`SpatialGrid::build_measured`]. The numbers in `docs/dev/tuning/performance.md` come from this type
 /// rather than from a profiler's attribution, because a profiler cannot separate `count` from `prefix` inside
 /// an inlined rebuild — and separating exactly those two is the question phase 4 has to answer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -728,7 +728,7 @@ impl SpatialGrid {
     /// Rebuild, reporting what each pass cost.
     ///
     /// Five `Instant::now()` pairs against a rebuild that takes 8 ms at a million bodies is 0.01%, so this is
-    /// not behind a feature flag: the inventory in `docs/performance.md` has to be reproducible by anyone who
+    /// not behind a feature flag: the inventory in `docs/dev/tuning/performance.md` has to be reproducible by anyone who
     /// checks the tree out, and a diagnostic that exists only in one profile is a claim rather than a
     /// measurement. [`SpatialGrid::build`] is this function with the costs dropped.
     pub fn build_measured(&mut self) -> PassCosts {
@@ -2386,7 +2386,7 @@ mod tests {
 
     #[test]
     fn the_block_constant_is_pinned_by_its_bytes_and_its_table() {
-        // Phase 5 T04 swept the constant and kept it (docs/performance.md §*Picking CELLS_PER_BLOCK*), so these
+        // Phase 5 T04 swept the constant and kept it (docs/dev/tuning/performance.md §*Picking CELLS_PER_BLOCK*), so these
         // numbers are literal on purpose: editing `CELLS_PER_BLOCK` has to fail *here*, and the failure has to send
         // the reader back to the sweep. A test written as `cells.div_ceil(CELLS_PER_BLOCK)` would move with the
         // constant and prove only that it is self-consistent.

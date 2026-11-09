@@ -98,7 +98,7 @@ the resumed weights against a control that was never culled, one checks the seek
 
 Measured at 10,000 reflex-tier bodies with the camera at the plaza edge: 0.305 ms per binding pass
 against 0.601 ms unculled, 49% saved, and 70% with the camera outside the plaza. The table, the
-method and the caveats are in `docs/performance.md`.
+method and the caveats are in `docs/dev/tuning/performance.md`.
 
 ## Starting and stopping
 

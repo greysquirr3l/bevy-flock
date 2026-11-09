@@ -9,7 +9,7 @@
 //! simulation state. It is deliberately a newtype rather than a `u64` so that a
 //! duration, a tick count and a cost cannot be passed to each other.
 //!
-//! [ADR 0009]: https://github.com/greysquirr3l/bevy-flock/blob/main/docs/adr/0009-virtual-cost-stride-scheduler.md
+//! [ADR 0009]: https://github.com/greysquirr3l/bevy-flock/blob/main/docs/dev/adr/0009-virtual-cost-stride-scheduler.md
 
 use core::fmt;
 use core::iter::Sum;

@@ -23,7 +23,7 @@ that steer it. There is nothing else to add, and nothing to draw: the plugin mov
 
 If you have no renderer at all — a server, a test, a benchmark — use `App::new()` and add
 only `FlockPlugin`. The crate never asks for a window, and every benchmark in
-`docs/performance.md` was measured headless.
+`docs/dev/tuning/performance.md` was measured headless.
 
 ## Sizing the crowd
 

@@ -79,6 +79,6 @@ fn main() {
     println!();
     println!(
         "Note: this is the full-cognition path. For the ambient continuum — the\n\
-         millions-of-NPCs path — see the band plugin and `docs/performance.md`."
+         millions-of-NPCs path — see the band plugin and `docs/dev/tuning/performance.md`."
     );
 }

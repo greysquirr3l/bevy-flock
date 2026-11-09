@@ -98,7 +98,7 @@ condition(|ctx| ctx.field_link_tag() == Some(LinkTag::new(1)))
 
 `AmbientField` is the far layer, and it is deliberately boring: a sparse grid of cells, each
 holding an occupation count, a mood, an alarm level and a couple of stamps. Nine gates keep
-it honest (recorded in `docs/gates/continuum.md`), and the five that matter to a game are:
+it honest (recorded in `docs/dev/tuning/gates/continuum.md`), and the five that matter to a game are:
 
 1. **No allocation per tick** — the field is sized once; folding and advection reuse buffers.
 2. **Conservation** — people are moved between cells, never created or destroyed.

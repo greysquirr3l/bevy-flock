@@ -122,7 +122,7 @@ let cost = archetypes.cost(Archetype::Guard);   // the number the scheduler budg
 ```
 
 `docs/adr` and `src/behavior/archetypes.rs` carry the cost table; the benchmark
-`benches/brain.rs` is what keeps it honest, and `docs/performance.md` records the measured
+`benches/brain.rs` is what keeps it honest, and `docs/dev/tuning/performance.md` records the measured
 cognition costs that the table is calibrated against.
 
 ## What not to do
