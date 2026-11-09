@@ -5,7 +5,7 @@ description: What serialises, what does not, and how to keep a save loadable acr
 
 A crowd is state: positions, velocities, needs, temperaments, memory rows, the clock. The `serde` feature makes that
 state serialisable, and the format carries a version so a save written by an older build is either loaded correctly or
-rejected loudly — never silently misread.
+rejected loudly, never silently misread.
 
 ```toml
 [dependencies]
@@ -33,6 +33,6 @@ row's meaning. v2 keys by subject, so an unknown subject is rejected with an err
 
 ## Where to look
 
-- `docs/dev/adr/0012-*` — persistence and format
-- `docs/dev/adr/0013-*` — the subject registry
-- `docs/dev/adr/0014-*` — the compatibility testing framework
+- `docs/dev/adr/0012-*`, persistence and format
+- `docs/dev/adr/0013-*`, the subject registry
+- `docs/dev/adr/0014-*`, the compatibility testing framework

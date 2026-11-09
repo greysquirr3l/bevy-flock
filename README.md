@@ -27,7 +27,7 @@ GPU.
 ## What you get
 
 **Steering that looks like a crowd.** Separation, alignment, cohesion, seek, arrive, and
-reciprocal local avoidance with per-NPC priority — so a big guard walks through a crowd rather
+reciprocal local avoidance with per-NPC priority, so a big guard walks through a crowd rather
 than around it.
 
 **Personality that changes the walk.** Temperament traits bias steering weights and need decay,
@@ -55,7 +55,7 @@ back as it leaves. Anchors never fold; population is conserved exactly.
 state digest over hundreds of ticks. Saves carry a version; v1 files still load.
 
 **Neighbours without the O(n²).** A uniform spatial grid, rebuilt per frame or every N frames,
-with radius and k-nearest queries. Its parallel and serial builds are byte-identical — worker
+with radius and k-nearest queries. Its parallel and serial builds are byte-identical, worker
 count changes speed, never output.
 
 Not included, on purpose: rendering, physics, networking, asset loading, dialogue content. This
@@ -82,21 +82,21 @@ cargo run --release --example profile_crowd
 ```
 
 `hello_flock` prints the tick, the population, how many are moving and the fastest speed. If the
-population is zero, the preset's spawn volume missed your grid — the
+population is zero, the preset's spawn volume missed your grid, the
 [concepts page](https://greysquirr3l.github.io/bevy-flock/start/concepts/) explains the grid.
 
 ## Performance
 
 Reference machine: shared cloud vCPU, x86_64, `--release`. Ratios and shape, not a hardware
-claim — measure your own before quoting these.
+claim, measure your own before quoting these.
 
 | | measured | gate |
 | --- | --- | --- |
 | 1,000,000-inhabitant band frame, wide kernel | 3.78 ms | < 6 ms |
 | 1,000,000-inhabitant band frame, scalar | 4.75 ms | < 6 ms |
 | 100,000 with 5,000 manifested | 3.37 ms | < 8 ms |
-| 1,000,000-body spatial rebuild, 6 workers | 4.572 ms | — |
-| Per agent | 32 B wide / 28 B scalar | — |
+| 1,000,000-body spatial rebuild, 6 workers | 4.572 ms |, |
+| Per agent | 32 B wide / 28 B scalar |, |
 | Steady-state allocations over 60 frames | 0 | 0 |
 
 Every number, including the optimisations that were measured and rejected, is in
@@ -110,15 +110,15 @@ bevy-flock-core   spatial, steering, behaviour, tiers    (no engine in the graph
 ```
 
 `bevy-flock` re-exports the core, so `bevy_flock::domain::…` resolves either way. `cargo tree -p
-bevy-flock-core` lists no `bevy_ecs`, `bevy_app` or `bevy_transform` — that boundary is enforced
+bevy-flock-core` lists no `bevy_ecs`, `bevy_app` or `bevy_transform`, that boundary is enforced
 by a test, not by review.
 
 ## Where the documentation lives
 
-- **The site** — [greysquirr3l.github.io/bevy-flock](https://greysquirr3l.github.io/bevy-flock/):
+- **The site**, [greysquirr3l.github.io/bevy-flock](https://greysquirr3l.github.io/bevy-flock/):
   install, first crowd, concepts, guides, reference. Start here.
-- **The book** — [`docs/book/`](docs/book), deeper and older, built with mdBook.
-- **`docs/dev/`** — ADRs, tuning journals, gates, benchmark harnesses. Written for whoever
+- **The book**, [`docs/book/`](docs/book), deeper and older, built with mdBook.
+- **`docs/dev/`**, ADRs, tuning journals, gates, benchmark harnesses. Written for whoever
   changes the engine, kept in the repository and out of the crates.io tarball on purpose.
 
 ## MSRV

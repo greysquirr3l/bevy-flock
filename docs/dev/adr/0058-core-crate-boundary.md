@@ -1,4 +1,4 @@
-# 0058 — The simulation core becomes a crate, and the engine keeps the adapter
+# 0058, The simulation core becomes a crate, and the engine keeps the adapter
 - **Status:** Accepted
 - **Date:** 2026-11-09
 - **Supersedes:** the packaging half of [0001](0001-hexagonal-layout.md), which chose one crate with module
@@ -6,7 +6,7 @@
 ## Context
 [0001](0001-hexagonal-layout.md) drew the hexagon as modules: `domain` and `ports` in the middle, `application`
 composing them, `adapters` on the outside talking to Bevy. Since then that has held because people respected it,
-and `tests/core_boundary.rs` has now made it checkable — on its first run it found `behavior/social.rs` importing
+and `tests/core_boundary.rs` has now made it checkable, on its first run it found `behavior/social.rs` importing
 `crate::adapters::primary::perception` for two blackboard keys, a core behaviour learning its own inputs from an
 adapter.
 
@@ -22,7 +22,7 @@ The layout is in better shape than the packaging suggests. Measured at the commi
 
 Files naming the crate, not occurrences. The three `bevy_ecs` entries in the core are two `#[derive(Resource)]`
 attributes and one `use bevy_ecs::prelude::*` in `application/mod.rs`; `ports` has no dependencies at all. So the
-core is engine-independent except for three lines, and `src/adapters` — twenty-three files — is the only place that
+core is engine-independent except for three lines, and `src/adapters`, twenty-three files, is the only place that
 wants an app runtime, a transform hierarchy and a renderer.
 
 The cost of that being a *convention* rather than a boundary is paid by every consumer:
@@ -38,16 +38,16 @@ The cost of that being a *convention* rather than a boundary is paid by every co
 ## Decision
 **Two crates, split along the line the modules already draw, with the public surface held perfectly still.**
 
-- `bevy-flock-core` — `domain`, `ports`, `behavior`, `application`, `error`, `testkit`. Dependencies:
+- `bevy-flock-core`, `domain`, `ports`, `behavior`, `application`, `error`, `testkit`. Dependencies:
   `bevy_math`, `bevy_tasks`, `smallvec`, `thiserror`, `libm`, plus optional `serde`, `ron` and `wide`. No
   `bevy_ecs`, no `bevy_app`, no `bevy_transform`, no renderer.
-- `bevy-flock` — `adapters`, `boids`, `prelude`, the plugin and the crate-level re-exports. Depends on
+- `bevy-flock`, `adapters`, `boids`, `prelude`, the plugin and the crate-level re-exports. Depends on
   `bevy-flock-core` with an **exact** version pin, plus `bevy_ecs`, `bevy_app`, `bevy_transform`.
 - `bevy-flock-anim` is untouched. It is already separate for a reason that still holds: it needs
   `bevy_animation`, which no headless simulation should compile.
 
 `boids` moves to the facade despite living at `src/boids.rs` today, because it is nine engine references and two
-ECS systems — `FlockSpatialGrid` and the rebuild that drives it. Its public path is unchanged.
+ECS systems, `FlockSpatialGrid` and the rebuild that drives it. Its public path is unchanged.
 
 ### Module paths inside the core do not change
 
@@ -62,8 +62,8 @@ a rewrite, and `git log --follow` still finds the history.
 pub use bevy_flock_core::{application, behavior, domain, error, ports, testkit};
 ```
 
-`bevy_flock::domain::num::f32_to_i64` — the path six modules of the software demo import, and the one the
-conversion-helper docs point at — resolves unchanged, as do `::application`, `::behavior`, `::ports`, `::testkit`
+`bevy_flock::domain::num::f32_to_i64`, the path six modules of the software demo import, and the one the
+conversion-helper docs point at, resolves unchanged, as do `::application`, `::behavior`, `::ports`, `::testkit`
 and `::error`. The prelude keeps its current
 contents, including the `bevy_app::App` / `bevy_transform::Transform` re-exports, because it belongs to the facade
 and a game that uses the plugin needs exactly those.
@@ -94,7 +94,7 @@ Two rules, because this is where the split fails quietly:
 ### One core, exactly
 
 Two versions of `bevy-flock-core` in one binary is a compile error at the point of mixing, not a silent wrong
-answer — but it is a confusing compile error, and the way to avoid ever seeing it is the exact pin
+answer, but it is a confusing compile error, and the way to avoid ever seeing it is the exact pin
 (`bevy-flock-core = { version = "=0.1.1", ... }`) plus publishing both crates at the same version from the same
 commit. `multiple_crate_versions` is one of the six allows in the lint policy; this is the one place it would
 actually cost something, so it is handled by discipline in the manifest rather than by the lint.
@@ -103,7 +103,7 @@ actually cost something, so it is handled by discipline in the manifest rather t
 - A headless consumer adds `bevy-flock-core` and gets a simulation whose dependency set is a vector type, a task
   pool, `smallvec`, `thiserror` and `libm`. The number of nodes it saves is measured by the phase's last task and
   recorded in `docs/dev/tuning/performance.md`; this ADR deliberately does not guess it.
-- `cargo test -p bevy-flock-core` becomes a meaningful thing to run — the simulation suite, without the app
+- `cargo test -p bevy-flock-core` becomes a meaningful thing to run, the simulation suite, without the app
   runtime. `cargo test` at the root still builds everything, because the adapters need the core.
 - A new manifest means a new strict lint spine and a new entry in `scripts/lint_audit.py`'s manifest list. That is
   a real cost of the split and the reason it is two crates rather than five.
@@ -117,7 +117,7 @@ actually cost something, so it is handled by discipline in the manifest rather t
   performance record would say so.
 
 ## Rejected alternatives
-- **Five crates — `domain`, `ports`, `behavior`, `application` as separate packages.** No consumer can observe the
+- **Five crates, `domain`, `ports`, `behavior`, `application` as separate packages.** No consumer can observe the
   difference: Cargo builds a dependency chain in order regardless, so only the root of the chain gets faster, and
   every internal type would need a re-export layer at each hop. Four more manifests, four more lint tables, for a
   boundary the module system already draws.
@@ -140,19 +140,19 @@ green (4 tests) and every `use bevy_*` in `domain`, `behavior` and `application`
 
 | engine crate | imports in the core layers | verdict |
 | --- | ---: | --- |
-| `bevy_math` | 14 | fine — it is a maths crate (`Vec3`, `Mat3`), not engine runtime |
-| `bevy_tasks` | 1 | fine — a thread-pool abstraction the core needs, not a Bevy app |
+| `bevy_math` | 14 | fine, it is a maths crate (`Vec3`, `Mat3`), not engine runtime |
+| `bevy_tasks` | 1 | fine, a thread-pool abstraction the core needs, not a Bevy app |
 | `bevy_ecs` | **3** | **drift: these must be rehomed** |
 
 The three ECS touch points are narrow and all of them are `Resource` derives, not systems:
 
-- `domain/memory.rs:506` — `#[cfg_attr(feature = "memory", derive(bevy_ecs::prelude::Resource))]`
-- `behavior/registry.rs:144` — `#[derive(Default, bevy_ecs::prelude::Resource)]`
-- `application/mod.rs:22` — `use bevy_ecs::prelude::*;` (the systems module, which belongs to the facade regardless)
+- `domain/memory.rs:506`, `#[cfg_attr(feature = "memory", derive(bevy_ecs::prelude::Resource))]`
+- `behavior/registry.rs:144`, `#[derive(Default, bevy_ecs::prelude::Resource)]`
+- `application/mod.rs:22`, `use bevy_ecs::prelude::*;` (the systems module, which belongs to the facade regardless)
 
 So the boundary as decided is *almost* true already: the core's logic has no engine dependency, and its data types carry one
 derive each. This is why `extract-core-crate` moves directories rather than rewriting them, and why `rehome-ecs-resources`
-is the task immediately after it rather than an afterthought — the three derives are the only thing standing between the core
+is the task immediately after it rather than an afterthought, the three derives are the only thing standing between the core
 and `cargo build -p bevy-flock-core` with no Bevy app in the graph.
 
 Two modules added by phases 2-5 were not in the original module list and are confirmed inside the boundary rather than
@@ -164,7 +164,7 @@ The audit above found three `bevy_ecs` mentions in the core layers, all `Resourc
 tried against the real compiler, and only one survives:
 
 1. **A hand-written `impl Resource` in the adapter.** Fails. In Bevy 0.20 `Resource` is `trait Resource: Component {}`,
-   so a resource needs *both* impls — and even with a hand-written `Component` (`STORAGE_TYPE = Table`,
+   so a resource needs *both* impls, and even with a hand-written `Component` (`STORAGE_TYPE = Table`,
    `Mutability = Mutable`), `App::insert_resource` followed by a `Res<SimClock>` parameter fails system validation with
    "Resource does not exist". Whatever `#[derive(Resource)]` registers is not reproducible from the public surface.
 2. **Newtype wrappers in the adapter** (`struct Clock(SimClock)`). Works, but moves every system signature in the
@@ -177,7 +177,7 @@ tried against the real compiler, and only one survives:
 
 The gate is enforced rather than asserted: `core_mentions_of_the_engine_are_feature_gated` in `tests/core_boundary.rs`
 fails if any `bevy_ecs` token in a core file is not on a line naming `feature = "ecs"`. A bare derive would compile,
-pass the ledger check, and silently put the engine back in the core's graph — so the ledger alone was not enough.
+pass the ledger check, and silently put the engine back in the core's graph, so the ledger alone was not enough.
 
 `advance_clock` moved with the decision: it is a system, not a value, so it now lives in `src/adapters/primary/clock.rs`
 and `application` has no `bevy_ecs` type in any signature.
@@ -195,7 +195,7 @@ history follows the code. The facade's root does what this ADR said it would:
 pub use bevy_flock_core::{application, behavior, domain, error};
 ```
 
-A `pub use` puts the name in the root namespace, so the facade's own `crate::domain::…` paths kept working too — one move,
+A `pub use` puts the name in the root namespace, so the facade's own `crate::domain::…` paths kept working too, one move,
 two audiences, zero call-site edits in either the facade or a downstream game.
 
 Verified, not asserted:
@@ -209,7 +209,7 @@ Verified, not asserted:
 | clippy | `--all-targets --all-features -D warnings`, clean |
 
 Feature forwarding is by name in both directions: `simd`, `threads`, `memory`, `serde`, `navmesh` and `ecs`. The core's
-defaults are `simd` and `threads` and deliberately not `ecs` — the derives that need the engine arrive only when the
+defaults are `simd` and `threads` and deliberately not `ecs`, the derives that need the engine arrive only when the
 facade asks for them, which is what keeps a headless consumer's graph clean.
 
 What the split does *not* do: shrink the facade. `bevy_flock::adapters`, `::boids` and `::prelude` are still engine code

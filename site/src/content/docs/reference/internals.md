@@ -3,8 +3,8 @@ title: Where the internals live
 description: The map of the repository's development documentation, and why it is not on this site.
 ---
 
-This site is the adoption path: install, first crowd, concepts, guides. The material a maintainer needs — why a decision
-was made, what it cost, which alternatives were measured and rejected — lives in the repository under `docs/dev/`, and is
+This site is the adoption path: install, first crowd, concepts, guides. The material a maintainer needs, why a decision
+was made, what it cost, which alternatives were measured and rejected, lives in the repository under `docs/dev/`, and is
 linked rather than republished so there is exactly one copy of every number.
 
 ```text

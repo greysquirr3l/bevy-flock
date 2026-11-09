@@ -53,10 +53,10 @@ let clock = *app.world().resource::<SimClock>();
 println!("tick {}", clock.tick);
 ```
 
-`flock_stats()` is a cheap read of the crowd resource. For per-NPC data, query the components — `Npc`, `NpcVelocity`,
-`NpcNeeds`, `NpcTemperament` — exactly as you would query anything else in Bevy.
+`flock_stats()` is a cheap read of the crowd resource. For per-NPC data, query the components, `Npc`, `NpcVelocity`,
+`NpcNeeds`, `NpcTemperament`, exactly as you would query anything else in Bevy.
 
 ## Next
 
-- [Concepts](/bevy-flock/start/concepts/) — why the crowding looks right and what the tiers are for
-- [Behaviour that varies](/bevy-flock/guides/behaviour/) — make individuals act differently
+- [Concepts](/bevy-flock/start/concepts/), why the crowding looks right and what the tiers are for
+- [Behaviour that varies](/bevy-flock/guides/behaviour/), make individuals act differently

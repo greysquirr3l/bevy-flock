@@ -24,12 +24,12 @@ bevy-flock-core = { version = "0.1", default-features = false }
 
 - **A normal game:** defaults. Add `memory` if NPCs should remember players, `serde` if you save.
 - **A dedicated server:** defaults plus `serde`; `memory` only if the server is authoritative for relationships.
-- **A replay/CI harness:** `bevy-flock-core` with `default-features = false` and `threads` off — one thread, one answer,
+- **A replay/CI harness:** `bevy-flock-core` with `default-features = false` and `threads` off, one thread, one answer,
   every time.
 - **wasm:** turn `simd` off. `wide` targets SSE2/NEON; there is no wasm-simd path, so the scalar kernel is the correct
   choice there.
 
 ## MSRV and profiles
 
-`rust-version = "1.97.1"`, built in CI. Debug builds of any crowd simulation are slow enough to mislead you — profile with
+`rust-version = "1.97.1"`, built in CI. Debug builds of any crowd simulation are slow enough to mislead you, profile with
 `--release`, or set `[profile.dev.package."*"] opt-level = 2` in your own manifest if you need debug builds to be usable.

@@ -20,15 +20,15 @@ own machine before quoting them.
 
 ## The spatial rebuild
 
-Five passes — clear, count, prefix, place — after the phase-5 fusion. At 1,000,000 bodies over 421,876 cells:
+Five passes, clear, count, prefix, place, after the phase-5 fusion. At 1,000,000 bodies over 421,876 cells:
 
 | configuration | total | notes |
 | --- | --- | --- |
 | 1 worker | 6.289 ms | serial reference |
 | 6 workers | **4.572 ms** | 1.38× |
 
-The honest read: the build is memory-bound, not thread-bound, and the two optimisations that looked best on paper —
-bucketing the scatter and sharded histograms — were measured and rejected. `docs/dev/tuning/performance.md` has the
+The honest read: the build is memory-bound, not thread-bound, and the two optimisations that looked best on paper -
+bucketing the scatter and sharded histograms, were measured and rejected. `docs/dev/tuning/performance.md` has the
 scatter probe that killed them, including the numbers that made the decision.
 
 ## Memory

@@ -3,7 +3,7 @@
 The executable half of [`docs/dev/meta/1.0-readiness.md`](1.0-readiness.md). That file says what 1.0 *means*; this one is the sequence
 of commands and decisions that gets there, in order, with the state of each step written down rather than remembered.
 
-This is not the 0.1.0 checklist in [`release-checklist.md`](release-checklist.md) — that one signs off the
+This is not the 0.1.0 checklist in [`release-checklist.md`](release-checklist.md), that one signs off the
 one-million-inhabitant milestone against ADR 0018's nine gates and stays as the record of it. This one signs off a *library
 release*: the API, the packaging, the promise.
 
@@ -32,7 +32,7 @@ Plus a compile-only check that the documented paths are the promised ones: `test
 `bevy_flock::domain::…`, `::behavior::…`, `::application::…`, `::adapters::…` and `::prelude::*`, and assert a few type
 identities. It does not exercise behaviour; it fails when a path stops resolving, which is the 1.0 promise in one file.
 
-**Status:** the re-export is in place and 550 tests pass through it. `tests/facade_paths.rs` does not exist yet — write it
+**Status:** the re-export is in place and 550 tests pass through it. `tests/facade_paths.rs` does not exist yet, write it
 before the tag, because it is the only test that fails if a published path is accidentally renamed.
 
 ## 2. The MSRV is a promise
@@ -44,7 +44,7 @@ cargo +1.97.1 test --workspace --all-features --no-run
 ```
 
 **Status:** `rust-version = "1.97.1"` in both manifests, `rust-toolchain.toml` pins the same. Not yet run on a machine that
-has *only* 1.97.1 — worth doing once, since a crate that builds on the author's newer toolchain says nothing about its floor.
+has *only* 1.97.1, worth doing once, since a crate that builds on the author's newer toolchain says nothing about its floor.
 
 ## 3. A stranger is running a crowd in five minutes
 
@@ -57,7 +57,7 @@ cargo run --release
 
 The rule: the block is copied, not adapted. If it needs an edit to compile, the README is wrong.
 
-**Status:** `examples/hello_flock.rs` is the honest version; the README does not lead with it yet. Fix that before the tag —
+**Status:** `examples/hello_flock.rs` is the honest version; the README does not lead with it yet. Fix that before the tag -
 it is the only step a prospective user runs before deciding.
 
 ## 4. Errors a caller can act on
@@ -76,10 +76,10 @@ remaining question here is documentation, not safety: each public error variant 
 
 Create `docs/guarantees.md`: one page, each claim followed by the test that enforces it.
 
-- deterministic output for a seed — `tests/determinism.rs`
-- byte-identical spatial windows across worker counts — `spatial::every_thread_count_builds_identical_windows`
-- zero steady-frame allocation — the allocation counters in `tests/band_continuity.rs`, `tests/tree_no_alloc.rs`
-- budgets at 1k / 10k / 100k / 1M — `docs/dev/tuning/performance.md`, with the fixture each number came from
+- deterministic output for a seed, `tests/determinism.rs`
+- byte-identical spatial windows across worker counts, `spatial::every_thread_count_builds_identical_windows`
+- zero steady-frame allocation, the allocation counters in `tests/band_continuity.rs`, `tests/tree_no_alloc.rs`
+- budgets at 1k / 10k / 100k / 1M, `docs/dev/tuning/performance.md`, with the fixture each number came from
 
 **Status:** every property exists and is tested; the page that states them for an adopter does not.
 
@@ -106,7 +106,7 @@ python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
 ```
 
 **Status:** our row exists; the other two need one afternoon on a single machine. Until then the README says "in the band
-the published Godot result occupies" and nothing stronger. The comparison script refuses to mix machines — that refusal is
+the published Godot result occupies" and nothing stronger. The comparison script refuses to mix machines, that refusal is
 the feature.
 
 ## 8. Release mechanics
@@ -129,7 +129,7 @@ first `publish`:
   `readme` and `[package.metadata.docs.rs]` are filled in the way the facade's are.
 - Readiness items 1–5 are closed, because a `1.0.0` cannot be unpublished.
 
-**Status:** not ready — the core is `publish = false` by design during phase 6.
+**Status:** not ready, the core is `publish = false` by design during phase 6.
 
 ## 9. After the tag
 

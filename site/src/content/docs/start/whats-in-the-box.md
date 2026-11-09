@@ -25,7 +25,7 @@ The crate is wide but the surface you use daily is small. This page is the hones
 ## The things you should not touch
 
 `adapters` is where the ECS plumbing lives: systems, resources, the components. It is public because the crate is a
-library and hiding it would only make debugging harder, but its shape is not a promise — if you find yourself matching on
+library and hiding it would only make debugging harder, but its shape is not a promise, if you find yourself matching on
 internals, open an issue instead.
 
 ## Modules by layer

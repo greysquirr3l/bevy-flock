@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: The four ideas the crate is built on — the tick, the grid, the tiers, and the bands.
+description: The four ideas the crate is built on, the tick, the grid, the tiers, and the bands.
 ---
 
 Four ideas explain almost all of the crate's behaviour. Read them once and the configuration makes sense.
@@ -8,7 +8,7 @@ Four ideas explain almost all of the crate's behaviour. Read them once and the c
 ## The tick
 
 `SimClock` counts ticks, not seconds. Everything in the simulation is a function of the tick number, so a run is
-reproducible from `(seed, feature set, platform)` alone — no wall clock, no thread scheduling, no float non-determinism
+reproducible from `(seed, feature set, platform)` alone, no wall clock, no thread scheduling, no float non-determinism
 from `std`'s transcendentals (the crate uses `libm` for that reason).
 
 This is the property that makes saves, replays and CI assertions possible. It also constrains you: anything you add to
@@ -17,7 +17,7 @@ the simulation that reads the clock or the OS breaks it, and the crate cannot st
 ## The grid
 
 `SpatialGrid` is a uniform grid over the simulated volume. Each rebuild sorts bodies into cells, then each NPC's
-neighbour queries look at a 27-cell neighbourhood instead of the population — the difference between O(n) and O(n²).
+neighbour queries look at a 27-cell neighbourhood instead of the population, the difference between O(n) and O(n²).
 
 The grid coarsens itself when the configured cell size would need more than `max_cells` slots, so a large world costs
 larger cells rather than more memory. `SpatialGridConfig` is where you set the volume, the target cell size and the
@@ -51,8 +51,8 @@ Above roughly 250,000 inhabitants, individual NPCs stop existing at distance and
 continuum that is cheap to advance and indistinguishable at range. As the camera approaches, the field manifests
 individuals; as it leaves, they fold back in.
 
-That is the "a million when you need them" claim. The guarantees that matter — no pop-in at the boundary, anchors never
-fold, the population is conserved exactly — are what the continuity test suite drives a camera through for 10,000 ticks.
+That is the "a million when you need them" claim. The guarantees that matter, no pop-in at the boundary, anchors never
+fold, the population is conserved exactly, are what the continuity test suite drives a camera through for 10,000 ticks.
 
 ## Where the tuning lives
 

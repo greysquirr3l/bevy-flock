@@ -24,7 +24,7 @@ server.
 cargo run --example hello_flock
 ```
 
-The example is deliberately headless — no window, no GPU, no assets — and prints what the simulation produced:
+The example is deliberately headless, no window, no GPU, no assets, and prints what the simulation produced:
 
 ```text
 bevy-flock 0.1.0
@@ -35,7 +35,7 @@ bevy-flock 0.1.0
 ```
 
 If `moving` is equal to `population` after two seconds, steering is running. If `population` is zero, the preset's spawn
-volume did not intersect your grid — see [Concepts](/bevy-flock/start/concepts/#the-grid).
+volume did not intersect your grid, see [Concepts](/bevy-flock/start/concepts/#the-grid).
 
 ## Two crates, one import
 
@@ -43,7 +43,7 @@ Since the phase-6 split there are two packages:
 
 | crate | engine | use it for |
 | --- | --- | --- |
-| `bevy-flock` | Bevy | anything with an `App` — the normal case |
+| `bevy-flock` | Bevy | anything with an `App`, the normal case |
 | `bevy-flock-core` | none | headless servers, replay tools, CI harnesses, tests |
 
 `bevy-flock` re-exports everything from the core, so `bevy_flock::domain::…` and `bevy_flock::behavior::…` resolve in

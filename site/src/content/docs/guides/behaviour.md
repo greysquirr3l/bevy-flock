@@ -9,13 +9,13 @@ different amounts, so use the cheapest one that gets the effect.
 ## 1. Temperament
 
 Every NPC carries `NpcTemperament`: a handful of traits that scale steering weights and need decay. Two NPCs with the
-same tree but different temperaments already behave differently — one crowds, one keeps distance, one's needs drain
+same tree but different temperaments already behave differently, one crowds, one keeps distance, one's needs drain
 faster. This is the cheapest variety you can buy and the one most crowds actually need.
 
 ## 2. Archetypes
 
 `Archetype` is the role: `Guard`, `Civilian`, `Merchant` and friends. An archetype supplies a default behaviour tree
-*and* the virtual cost of one think, which is what lets the scheduler budget honestly — a guard that runs a complex tree
+*and* the virtual cost of one think, which is what lets the scheduler budget honestly, a guard that runs a complex tree
 consumes more of the per-tick budget than a civilian that wanders.
 
 ```rust
@@ -28,7 +28,7 @@ let guard = Archetype::Guard
 ```
 
 `register_standard_leaves` gives you the built-in leaves; `Archetype::logic` builds the tree an archetype ships with.
-When you want your own, implement `LeafBehavior` and register it — the cost closure then reports *your* cost, not a guess.
+When you want your own, implement `LeafBehavior` and register it, the cost closure then reports *your* cost, not a guess.
 
 ## 3. Trees and machines
 
@@ -51,12 +51,12 @@ state am I in" is a question you want to answer by reading one field.
 
 ## Where to look
 
-- `examples/custom_behavior.rs` — a leaf you write yourself, registered and costed
-- `examples/tavern_dialog.rs` — dialogue driven from the same blackboard
-- `docs/dev/adr/` — ADR 0005 (trees), 0009 (cost stride), 0017 (tiers)
+- `examples/custom_behavior.rs`, a leaf you write yourself, registered and costed
+- `examples/tavern_dialog.rs`, dialogue driven from the same blackboard
+- `docs/dev/adr/`, ADR 0005 (trees), 0009 (cost stride), 0017 (tiers)
 
 ## The trap
 
 Do not give every NPC a unique tree. A tree is data, but a thousand distinct trees is a thousand cache misses and a
-budget you cannot predict. Vary temperament, vary archetype, and let the scheduler pick who thinks — that is what the
+budget you cannot predict. Vary temperament, vary archetype, and let the scheduler pick who thinks, that is what the
 tier system is for.
