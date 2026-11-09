@@ -436,3 +436,22 @@ remaining passes are clear (2.48) and place (2.04). A perfect six-way split of t
 so the 5x target is arithmetically reachable but is not reachable by removing dispatches — which was the last of them
 that could be removed. T06 should re-derive its gate before it is measured against it.
 """
+
+[[completed]]
+task = "phase-5 T06 build-5x-gate (clear's division removed; gate met against the pre-fix serial build)"
+delivered_in = "perf/t06-clear-reciprocal"
+note = """
+ADR 0060 measured the scaling curve and predicted that `clear` was compute-bound on three f32 divisions per body. It was,
+and worse than predicted: `clear` is 13.034 -> 2.767 ms serially and 2.463 -> 0.739 at six workers once the fill pass
+multiplies by a cached reciprocal and clamps with one `max` plus a saturating convert instead of two branches per axis.
+The rebuild is 6.289 -> 4.572 ms, which is 5.02x against the 22.943 ms serial baseline the gate was written against.
+The denominator is the story: the same binary is 2.67x against its own serial path, because a third of the serial work
+stopped existing. The ratio fell while the wall clock improved by 27%, and a gate phrased as "5x against the serial
+build" cannot say which of those it means -- which is why ADR 0060 asked for the target to be re-derived rather than
+merely met. Both figures are recorded in docs/performance.md so neither can be quoted alone.
+`count` was analysed rather than "fixed". Its 1.21x is bandwidth: six workers scan 24 MB to place 4 MB, at the 14 GB/s
+this machine sustains, because the alternative -- private per-worker histograms -- was measured at 4.90 ms against
+today's 1.66, and fusing `clear` into that structure is 8.90. The increment lands in an L2-resident window each worker
+owns; that locality is what the redundancy buys. A bucketing pass (12 MB instead of 24) is the only structure left that
+reduces the bytes without losing it, and it would help `place` more than `count`; it is scoped as its own task.
+"""

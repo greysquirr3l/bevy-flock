@@ -1702,3 +1702,51 @@ pool this phase was chartered to build would be chasing a fifth of a millisecond
 2.04, the two remaining passes are 70% of the rebuild and neither is a scan. Whatever the 5x gate is going to be, it is
 not going to be met by removing dispatches: 6.488 ms is 3.5x, and the arithmetic caps a perfect six-way split of these
 passes well short of 4.72 ms.
+
+## The division was most of the rebuild (T06, `clear`)
+
+ADR 0060 identified `clear` as compute-bound on `(position - min) / cell_size` — three f32 divisions per body — and
+estimated 2.46 → 1.2–1.5 ms. The estimate was directionally right and much too small.
+
+| | before | after | |
+| --- | ---: | ---: | --- |
+| `clear`, 1 worker | 13.034 ms | **2.767 ms** | 4.7x faster serially |
+| `clear`, 6 workers | 2.463 ms | **0.739 ms** | 3.3x |
+| `count` | 1.730 ms | 1.749 ms | unchanged |
+| `prefix` | 0.112 ms | 0.110 ms | unchanged |
+| `place` | 1.984 ms | 1.975 ms | unchanged |
+| **total, 6 workers** | **6.289 ms** | **4.572 ms** | −27% |
+
+The change is a multiply by a cached `1.0 / cell_size` instead of a divide, and a `clamp_axis` that lifts to zero with one
+`max` and truncates with a saturating convert instead of compare-and-branching twice per axis. The serial pass fell by
+4.7x, not the ~2x the probe suggested: the real loop inlines the kernel, while the probe called it through a `fn` pointer
+and paid an indirect call per body, which inflated every fast variant it measured.
+
+Against the pre-fix serial build this is **5.02x** — the phase 5 gate.
+
+**The gate's denominator moved with it.** The serial path is now 12.229 ms rather than 22.943, so the same binary is
+2.67x against its own serial control. Both numbers are true and they answer different questions: wall clock fell 27%,
+while the parallel speedup ratio fell because a third of the serial work disappeared. A gate phrased as "5x against the
+serial build" has to say *which* serial build, which is the substance of ADR 0060's recommendation to re-derive it.
+
+## `count` cannot be rescued by private histograms (measured, and worse)
+
+`count` is 1.21x on six workers because every worker scans all 1M `cells` entries and filters for its own window: six
+4 MB scans, 24 MB, at the 14 GB/s this machine sustains — so it is at bandwidth, not badly scheduled. The obvious fix is
+to make it body-partitioned with a private histogram per worker and merge afterwards. Measured on the same shape
+(1M bodies, 421,875 cells), it is three times *worse*:
+
+| structure | 1 thread | 6 threads |
+| --- | ---: | ---: |
+| today (scan all, filter own window) | 5.446 ms | **1.658 ms** |
+| private histogram per worker + merge | 6.664 ms | 4.902 ms |
+| fused `clear`+`count` with private histograms | 20.496 ms | 8.899 ms |
+
+The reason is the one the numbers make obvious in hindsight: today's workers increment a window they own, 70k cells of
+L2-resident table each, and pay for it with a redundant 4 MB read that the memory system delivers at full speed. Six
+private histograms are 10 MB, so every increment becomes a cache miss, and the merge adds 2.5M more reads on top.
+
+So `count`'s low speedup is the price of its locality, not a defect in it. The only structure that reduces the bytes
+without losing the locality is a bucketing pass — scatter bodies into per-worker buckets once, then let each worker scan
+its own — which is 12 MB of traffic instead of 24 and would help `place` (the same rescan, 1.975 ms) more than `count`.
+That is a task with its own record, not a gate.

@@ -104,3 +104,25 @@ body order that survives a rebuild, or a placement that consumes one), not folde
   former is today's three-run sweep, the latter the alternating-pairs comparison that produced the T05 record. The 3%
   between them is run-to-run spread on this sandbox, and it is the same order as the margin this gate is being argued
   over — which is part of the case for re-deriving it rather than defending it.
+
+## Outcome
+
+The `clear` fix landed: a cached reciprocal instead of three divisions, and a `clamp_axis` that needs no branch per axis.
+`clear` went 13.034 → 2.767 ms serially and 2.463 → 0.739 at six workers, taking the rebuild from 6.289 to **4.572 ms**.
+
+Against the pre-fix serial build that is **5.02x**, so the gate as written is met. Against the *new* serial build
+(12.229 ms) the same binary is 2.67x, because a third of the serial work stopped existing. This is the clearest possible
+argument for the re-derivation this ADR recommended: the ratio falls while the wall clock improves, and which number a
+gate names decides whether the work looks like a success.
+
+The estimate in this record was right in direction and wrong by half: it predicted 2.46 → 1.2–1.5 ms from a probe, and
+the real change delivered 0.74 ms. The probe was wrong because it called the kernel through a `fn` pointer, which
+prevents inlining and inflated every variant it measured except the one dominated by divisions — the one being compared
+against. Probes written to price a kernel have to inline it.
+
+**`count` was analysed and the recommended fix was measured and rejected.** Per-worker histograms with a merge are
+4.90 ms at six workers against today's 1.66, and fusing `clear` into that structure is 8.90. Today's layout — every
+worker scanning all bodies, but incrementing an L2-resident window it owns — is at the machine's bandwidth (24 MB at
+14 GB/s) and wins on locality. `count`'s 1.21x is the price of that locality, not a scheduling defect. The remaining
+option is a bucketing pass that pays 12 MB instead of 24, which would help `place` more than `count`, and it belongs in
+its own record.
