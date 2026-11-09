@@ -9,6 +9,10 @@
 //! with their own artwork; a crowd library that names four slots and a blend space can drive an
 //! orc, a city crowd or a flock of birds without knowing what any of them look like.
 //!
+//! The adoption guide is the book chapter `docs/book/src/animation.md`: the three interfaces, the
+//! tick rule, culling and resumption, root motion, and what to do when a rig does not match the
+//! assumptions this crate makes about it.
+//!
 //! # The shape of it
 //!
 //! * [`LocomotionProfile`] is authored data — walking and running speeds, stride length, the turn
@@ -55,6 +59,9 @@
 //! differently on somebody else's machine. When a transition needs to be gradual, the profile's
 //! numbers make it gradual in *space* — a longer blend band — and the tick counts in the binding
 //! make it gradual in *time*.
+//!
+//! The adoption guide is the book chapter `docs/book/src/animation.md`: the three interfaces, the
+//! tick rule, culling, root motion and what to do when a rig does not match the assumptions.
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]

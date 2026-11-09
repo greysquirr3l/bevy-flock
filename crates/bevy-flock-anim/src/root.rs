@@ -8,10 +8,10 @@
 //! So the choice is explicit, per profile, and the default is the one that keeps a deterministic
 //! replay intact:
 //!
-//! * [`RootMotion::Simulation`] — the simulation owns movement. The clip's translation is **dropped**
+//! * [`crate::profile::RootMotion::Simulation`] — the simulation owns movement. The clip's translation is **dropped**
 //!   on the tick it arrives, so a game that ships a root-motion clip without opting in gets a body
 //!   that walks where the steering put it, not twice as far.
-//! * [`RootMotion::Clip`] — the clip owns movement. The translation is quantised to
+//! * [`crate::profile::RootMotion::Clip`] — the clip owns movement. The translation is quantised to
 //!   [`QUANTUM_METRES`], added to the body's transform, and added to the locomotion's distance
 //!   walked, so the next tick's steering starts from where the clip left the body instead of
 //!   dragging it back.

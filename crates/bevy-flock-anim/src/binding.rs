@@ -18,7 +18,7 @@
 //!  └── turn        a pivot on the spot, played when a stationary body turns
 //! ```
 //!
-//! `LocomotionProfile` is an [`Asset`]; the node indices are not, because an asset cannot name a
+//! `LocomotionProfile` is an [`Asset`](bevy_asset::Asset); the node indices are not, because an asset cannot name a
 //! node in a graph it has never seen. A game builds the graph, adds the clips, resolves the four
 //! labels to `AnimationNodeIndex` values and stores them in [`ClipBindings`].
 //!
