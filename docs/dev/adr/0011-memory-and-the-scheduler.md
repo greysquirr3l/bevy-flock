@@ -1,4 +1,4 @@
-# ADR 0011 — Social memory enters the scheduler as cost and weight, never as a tier
+# ADR 0011, Social memory enters the scheduler as cost and weight, never as a tier
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -44,7 +44,7 @@ other leaf does.
 
 A store read costs about 8.5 ns (ADR 0010), so those leaves declare roughly 8 vns
 against a predicate's 2. That makes a guard with a grudge branch go from 27 vns to
-about 44 — a number that must be re-pinned in `Archetype::logic`'s cost table, and
+about 44, a number that must be re-pinned in `Archetype::logic`'s cost table, and
 which the ±20% calibration gate then defends.
 
 The scheduler needs no new code for this. Cost is already per-NPC and recomputed
@@ -57,7 +57,7 @@ next to it is using.
 ### 2. Writes belong to perception; reads belong to cognition; the budgets do not mix
 
 `remember` (7.7 ns) is called from the perception stage, charged to the frame, and
-bounded by the encounter rate limiter — one encounter per (NPC, subject) pair per
+bounded by the encounter rate limiter, one encounter per (NPC, subject) pair per
 configured interval. In the worst realistic case, five hundred NPCs in radius,
 four subjects, a thirty-tick limiter, that is tens of writes per tick: under a
 microsecond.
@@ -76,7 +76,7 @@ explicitly outside it:
 
 ### 3. The scheduler owns tiers and eligibility; memory follows
 
-ADR 0009 makes tier an *output* — derived from measured think share and distance,
+ADR 0009 makes tier an *output*, derived from measured think share and distance,
 with hysteresis, feeding weight. ADR 0010 makes eligibility the thing that sizes
 the store. The dependency therefore runs one way only:
 
@@ -144,7 +144,7 @@ At the ADR 0009 example budget of 2,000,000 vns per tick:
 | Guards, no memory branches | 27 vns | 270,000 | 74,074 |
 | Guards with a grudge branch | 44 vns | 440,000 | 45,454 |
 
-So at 10,000 NPCs — the population this crate is built for — a grudge branch costs
+So at 10,000 NPCs, the population this crate is built for, a grudge branch costs
 nothing in scheduling terms: every guard still thinks every tick, with 78% of the
 budget left over. The ceiling moves from 74k NPCs to 45k, and it moves *gradually*,
 per NPC, which is exactly the property ADR 0009 chose SFQ for. A tiered scheduler
@@ -176,7 +176,7 @@ as they cover position.
 - **Every archetype that gains a branch re-pins its declared cost.** That is the
   intended friction: the table is the scheduler's model of the crowd, and it should
   not change by accident.
-- **Recomputing a cost must not reset the tag.** A tag reset is a fairness event —
+- **Recomputing a cost must not reset the tag.** A tag reset is a fairness event , 
   it hands the NPC a fresh, low tag and lets it jump the queue. If a game swaps
   trees when a relationship crosses a threshold, the swap changes `cost` and leaves
   `s` alone; otherwise an NPC that keeps meeting the player keeps jumping the queue.

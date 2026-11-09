@@ -1,4 +1,4 @@
-# ADR 0023 — Four-agent SIMD steering behind a cell-major order
+# ADR 0023, Four-agent SIMD steering behind a cell-major order
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
@@ -10,7 +10,7 @@
 After ADR 0022's profiling pass the steering kernel was 93% of a 1,000,000-inhabitant frame
 in self time. The remaining cost was the neighbour scan: nine buckets, a linked-list walk per
 bucket, roughly fifteen to twenty candidates per agent. The obvious next move is to do the
-same work for four agents at once, and on paper it is a clean four-fold win — the arithmetic
+same work for four agents at once, and on paper it is a clean four-fold win, the arithmetic
 per candidate is independent per agent.
 
 It is not clean. Two things get in the way, and both are measurable:
@@ -20,7 +20,7 @@ It is not clean. Two things get in the way, and both are measurable:
    neighbourhoods then covers far more cells than the four scans it replaces, and the block
    does more work than the scalar path would have.
 2. **The masking costs money.** A lane that should not see a cell needs a mask, and building
-   four-lane masks per cell per block is not free — it dominated at small populations.
+   four-lane masks per cell per block is not free, it dominated at small populations.
 
 ## Decision
 
@@ -30,7 +30,7 @@ by-product of the grid, and with two deliberate fast paths.
 ### The order
 
 `build_grid` already walks every bucket to fill the chains; collecting those indices as it
-goes produces a cell-major order for free — a counting sort that is already being paid for.
+goes produces a cell-major order for free, a counting sort that is already being paid for.
 Blocks are taken from that order, so the four agents in a block are nearly always in the same
 cell, and the union box is 3x3 rather than something sprawling. If the box does exceed 12
 cells, the block is handed back to the scalar path: the fallback is a rule, not a hope.
@@ -45,7 +45,7 @@ keep  = (dx*dx + dy*dy <= radius²) & inside & (candidate != identity)
 ```
 
 `inside` is the per-lane entitlement to look in this cell at all. When all four agents share a
-cell — the common case — it is all-ones and is computed once for the block instead of once per
+cell, the common case, it is all-ones and is computed once for the block instead of once per
 cell. That single check was worth 10% on its own.
 
 ### Bit parity, not approximate parity
@@ -80,10 +80,10 @@ bucket walk across four agents, and a sparse crowd has little walk to share.
 
 ### What did not work, in order
 
-1. **Blocking in index order.** 1.40 ms at 5,000 — *slower* than the scalar 1.31 ms, because
+1. **Blocking in index order.** 1.40 ms at 5,000, *slower* than the scalar 1.31 ms, because
    scattered blocks produced sprawling boxes and fell back to scalar anyway.
 2. **Blocking in cell order without the same-cell fast path.** 1.36 ms at 5,000 and 62.9 ms at
-   50,000 — the big crowd was already winning, the small ones were still losing to mask
+   50,000, the big crowd was already winning, the small ones were still losing to mask
    construction.
 3. **Computing the pair count per candidate**, as a blend plus a four-float store plus a
    reduction. Removing it in favour of summing the lane totals at the end was worth ~10% at

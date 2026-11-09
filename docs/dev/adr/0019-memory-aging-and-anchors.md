@@ -8,7 +8,7 @@
 ## Context
 
 A player leaves a village for an hour of game time. The NPCs they wronged are never
-simulated again — they are far away, and with ADR 0018 they may be folded into the
+simulated again, they are far away, and with ADR 0018 they may be folded into the
 continuum entirely. What happens to their memories?
 
 Two properties already held, and one did not.
@@ -20,13 +20,13 @@ is an hour old. There was never a staleness bug here.
 
 **Reclamation was not independent of simulation.** A row in `MemoryStore` is freed by
 `sweep`, and `sweep` is called by whoever thinks to call it. Per-entity code cannot call it
-for an NPC that is not ticked. So the row — and its subject slots, of which there are at
-most 64 per NPC (ADR 0016) — sat there until the store filled, at which point `enrol`
+for an NPC that is not ticked. So the row, and its subject slots, of which there are at
+most 64 per NPC (ADR 0016), sat there until the store filled, at which point `enrol`
 returned `None` and *new* NPCs stopped having memories at all. Long absences leaked the one
 resource the design is sized by.
 
 **And the obvious fix would have destroyed the feature.** A naive "sweep everything that
-has faded" pass reclaims the absent NPC's row — including the grudge against the player the
+has faded" pass reclaims the absent NPC's row, including the grudge against the player the
 game promised to remember. Distance plus time equals forgiveness, silently.
 
 ## Decision
@@ -52,7 +52,7 @@ Three consequences, each with a test:
    grows.
 2. **Anchors survive fading.** `keep` is the anchoring seam from ADR 0018. A protected row
    is never freed: its *warmth* decays to zero through `recall_decayed`, while its *record*
-   — the meeting happened, it was an attack, on this date — survives intact.
+  , the meeting happened, it was an attack, on this date, survives intact.
 3. **Warmth and history are different things.** The tested behaviour after 60 game-minutes
    of absence: `recall_decayed` returns nothing worth acting on, `recall` still returns a
    grudge, `last_seen` is unchanged, and `encounters()` still counts one. A game can say
@@ -77,11 +77,11 @@ entities (ADR 0018) and subjects named by a save file (ADR 0014).
 
 The memory feature is now safe to combine with the continuum: an NPC can be a density field
 for an hour and come back with a faded but intact history. The cost is one store-wide pass
-every ten seconds — 16 rows per NPC-eighth-second, which the memory benchmarks already show
+every ten seconds, 16 rows per NPC-eighth-second, which the memory benchmarks already show
 is noise next to the per-encounter path.
 
 The remaining hazard is the seam itself: `keep` is a caller-supplied predicate, and a game
-that passes `|_| false` gets exactly the leak-free, anchor-less behaviour — every grudge
+that passes `|_| false` gets exactly the leak-free, anchor-less behaviour, every grudge
 eventually reclaimed. That is the right default for a crowd and the wrong one for a story,
 which is why ADR 0018 makes anchoring a design-visible constant rather than an internal
 optimisation.

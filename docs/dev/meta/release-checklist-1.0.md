@@ -57,8 +57,9 @@ cargo run --release
 
 The rule: the block is copied, not adapted. If it needs an edit to compile, the README is wrong.
 
-**Status:** `examples/hello_flock.rs` is the honest version; the README does not lead with it yet. Fix that before the tag -
-it is the only step a prospective user runs before deciding.
+**Status:** done in the documentation release. `README.md` leads with the five-line block, then a ten-minute verification
+path. Not yet re-run from a genuinely empty crate on a machine with no cached dependencies, which is the last confirmation
+this step wants before the tag.
 
 ## 4. Errors a caller can act on
 
@@ -74,7 +75,7 @@ remaining question here is documentation, not safety: each public error variant 
 
 ## 5. Guarantees stated where an adopter reads them
 
-Create `docs/guarantees.md`: one page, each claim followed by the test that enforces it.
+Published as `site/src/content/docs/reference/guarantees.md`: eleven claims, each followed by the test that enforces it.
 
 - deterministic output for a seed, `tests/determinism.rs`
 - byte-identical spatial windows across worker counts, `spatial::every_thread_count_builds_identical_windows`

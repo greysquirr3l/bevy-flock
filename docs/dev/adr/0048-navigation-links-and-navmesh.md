@@ -1,4 +1,4 @@
-# 0048 — Links as search edges, and a navmesh for games that want polygons
+# 0048, Links as search edges, and a navmesh for games that want polygons
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -17,8 +17,8 @@ a gap.
 ### Links are edges in the search, not post-processing
 
 `domain::links::NavLink { from, to, cost, tag }` with `LinkTag(u16)` so a game can read back what
-kind of traversal a route uses. `LinkTable` keeps the links in two arrays — sorted by `from` then
-`to`, and by `to` then `from` — so a forward expansion and a backward expansion are both a binary
+kind of traversal a route uses. `LinkTable` keeps the links in two arrays, sorted by `from` then
+`to`, and by `to` then `from`, so a forward expansion and a backward expansion are both a binary
 search over a contiguous slice, and neither needs a map.
 
 The flow solver relaxes links as ordinary edges: when it expands a cell it appends
@@ -42,7 +42,7 @@ rather than served stale.
 rasterise it into a grid to get a sensible route: the funnel cuts corners a grid cannot.
 
 The funnel follows the standard portal-walking algorithm. Its two restart branches are the part
-that is easy to get wrong — when one side pinches, the *opposite* corner becomes the new apex and
+that is easy to get wrong, when one side pinches, the *opposite* corner becomes the new apex and
 both sides restart at the portal that pinched them. Setting the indices to the new apex instead
 leaves the funnel reading a portal it has just left, which produces a route that cuts a corner
 through a wall. That bug was present in the first draft and is fixed here.

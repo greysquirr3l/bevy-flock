@@ -11,7 +11,7 @@ not claimed.
 | Any target Rust can build `bevy_ecs` for | No OS-specific code in `src/` at all: no `cfg(windows)`, no `cfg(unix)`, no `libc`, no `std::os`. |
 | `wasm32-unknown-unknown` | `cargo check --target wasm32-unknown-unknown` in every feature configuration below. |
 | The feature matrix is orthogonal | Nine configurations compile; the two features that gate code (`memory`, `serde`) are checked with and without each other. |
-| No hidden engine dependency | `cargo tree` shows `bevy_ecs`, `bevy_app`, `bevy_math`, `bevy_transform` and `bevy_utils` — no renderer, no physics, no windowing. |
+| No hidden engine dependency | `cargo tree` shows `bevy_ecs`, `bevy_app`, `bevy_math`, `bevy_transform` and `bevy_utils`, no renderer, no physics, no windowing. |
 
 ## The audit
 
@@ -35,7 +35,7 @@ Run on 2026-11-05, Rust 1.97.1 (the pinned MSRV) with `--locked`, from a clean
 The two `--no-default-features` rows are the ones that used to fail: the memory leaves
 read encounter flags and the diagnostics read a memory row, and both were reaching into
 `memory`-gated modules without saying so. The audit found it, and the fix is the pattern
-the whole crate uses — restate the wire values (`FLAG_ATTACKED`, `FLAG_ROBBED`) with a
+the whole crate uses, restate the wire values (`FLAG_ATTACKED`, `FLAG_ROBBED`) with a
 test that pins them to `EncounterKind::flag`, rather than import a gated module.
 
 ### `wasm32-unknown-unknown`

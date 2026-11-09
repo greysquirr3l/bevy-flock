@@ -12,13 +12,13 @@ One number per engine: **the median wall time of one steady-state simulation tic
 machine. Not frames per second (which hides the tail), not a kernel microbenchmark (which hides the schedule), not the
 spawn burst.
 
-Six statistics, always together — `median`, `p95`, `p99`, `max`, `over_budget_pct`, `ns_per_agent`. A run that reports only
+Six statistics, always together, `median`, `p95`, `p99`, `max`, `over_budget_pct`, `ns_per_agent`. A run that reports only
 the median is not a result; the interesting number for a crowd is the tail, because a crowd that holds 5 ms median and
 50 ms at p99 is a crowd that hitches.
 
 Frame budget is **16.6 ms** (60 Hz) in every harness.
 
-## W1 — fixed-tick crowd
+## W1, fixed-tick crowd
 
 The workload both engines run:
 
@@ -28,12 +28,12 @@ The workload both engines run:
    local avoidance.
 4. Record the wall time of each measured tick. Sort. Report the six statistics.
 
-**What counts as the tick:** the engine's own loop entry point — `App::update` here, `_physics_process` in Godot, `Tick`
+**What counts as the tick:** the engine's own loop entry point, `App::update` here, `_physics_process` in Godot, `Tick`
 in Unreal. Not a hand-rolled call to the steering kernel. The point is to compare what a game would actually pay at that
 entry point.
 
 **What is excluded everywhere:** rendering, skeletal animation, audio, networking, physics bodies, file I/O. Every harness
-in this document excludes the same list, which is what makes the numbers comparable at all — as soon as one side includes
+in this document excludes the same list, which is what makes the numbers comparable at all, as soon as one side includes
 its renderer, the table stops meaning anything.
 
 **What is included and differs:** `bevy-flock` pays for its own spatial rebuild inside the tick; Godot's shared-field
@@ -80,14 +80,14 @@ prints the same JSON line.
    results; export a release template or run `--headless` with a release build).
 3. `godot --headless --quit-after 1200 res://main.tscn` prints the JSON line to stdout.
 
-Report the engine version and the CPU exactly as Godot's own `OS.get_processor_name()` returns them — do not retype it.
+Report the engine version and the CPU exactly as Godot's own `OS.get_processor_name()` returns them, do not retype it.
 
 ## Running the Unreal side
 
 Mass Entity is the fair comparison, and the fixture is small enough to build in C++ without a project template of its own:
 
 1. `UCrossBenchSubsystem : UTickableWorldSubsystem`, or a `AActor` with `PrimaryActorTick`.
-2. Hold the crowd in `TArray<FVector>` (positions) and `TArray<FVector>` (velocities) — SoA, as Mass would — not an array
+2. Hold the crowd in `TArray<FVector>` (positions) and `TArray<FVector>` (velocities), SoA, as Mass would, not an array
    of actors. An array of `AActor*` measures UObject overhead, not crowd simulation.
 3. Per tick: integrate toward the shared goal, run the engine's broadphase (Mass's `FMassEntityQuery` or a
    `TArray<FBox>` grid) and local avoidance, then record `FPlatformTime::Seconds()` deltas.

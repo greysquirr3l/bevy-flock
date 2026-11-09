@@ -3,7 +3,7 @@
 **Date:** 2026-11-08
 **Context:** Phase 1 shipped a crowd that moves correctly and looks like a scatter plot. Every NPC
 is a box that slides from A to B, because nothing in the crate knows what a body does when it walks.
-The obvious fix — add animation — is where crowd libraries usually become unusable: the moment a
+The obvious fix, add animation, is where crowd libraries usually become unusable: the moment a
 library owns a skeleton, it owns an opinion about rigs, clip names, retargeting and asset pipelines,
 and a game with its own artwork has to fork it or give up. Unity's crowd tools and Unreal's Mass
 both escape this by owning the whole engine. This crate does not have that luxury and should not
@@ -16,13 +16,13 @@ because a run must replay. A crowd that animates differently at 30 fps than at 1
 replays are not reproducible in the only sense a player can see.
 ## Decision
 The library names the parameters. The game supplies the clips, the skeleton and the graph. Every
-binding is a pure function of simulation state, and the tick — never the frame — is the clock.
+binding is a pure function of simulation state, and the tick, never the frame, is the clock.
 ### Three interfaces, and nothing else in the contract
 | Interface | Crate | Owner | What it is |
 |---|---|---|---|
 | `Locomotion` | `bevy-flock` (core) | library | A component: planar speed, turn rate, acceleration and distance travelled, derived from the velocity integration wrote. Phase is `distance / stride`, because the stride belongs to the artwork. |
 | `LocomotionProfile` | `bevy-flock-anim` | game, as data | Validated authored numbers: walking speed, running speed, stride length, turn band. No clip names, no asset handles, no node indices. |
-| `ClipSlot` | `bevy-flock-anim` | library | Four names — idle, walk, run, turn-in-place — that a game maps onto nodes in its own `AnimationGraph`. |
+| `ClipSlot` | `bevy-flock-anim` | library | Four names, idle, walk, run, turn-in-place, that a game maps onto nodes in its own `AnimationGraph`. |
 The game writes the fourth thing: a binding from `ClipSlot` to `AnimationNodeIndex`, because only it
 knows how its graph was built. Everything else is the library's.
 ### The blend is a pure function, and that is the whole determinism argument
@@ -56,7 +56,7 @@ rather than assuming one: a stride is a property of the artwork, and the core ha
 A clip may carry its own translation. The default is to ignore it: the steering solution is
 authoritative, the spatial index stays correct, and the replay stays deterministic. A profile may
 opt into extraction, in which case the offset is quantised per tick, added to the transform, and the
-steering target advanced to match — never both added, because that is how a crowd ends up moving at
+steering target advanced to match, never both added, because that is how a crowd ends up moving at
 double speed for reasons nobody can reproduce on their machine. The default exists because root
 motion is the single most common way an animation layer breaks a simulation.
 ### Gaze comes from perception, not from the camera
@@ -70,7 +70,7 @@ culling, measured on the reference machine in `docs/dev/tuning/performance.md`. 
 allocates after warm-up; `tests/no_alloc.rs` asserts it with the counting allocator.
 
 Measured on 2026-11-09 against that budget: the 10,000-with-culling case holds (0.94 ms for the blend,
-0.28 ms with the camera outside the plaza), and the 2,000 case does not — 0.18 ms of blend plus
+0.28 ms with the camera outside the plaza), and the 2,000 case does not, 0.18 ms of blend plus
 0.36 ms of gaze is 0.55 ms against a 0.30 ms ceiling. The budget is not rewritten to match the
 measurement. The two causes are named in `docs/dev/tuning/performance.md`: per-bone sparse-set lookups in the
 gaze solve, and four hash-map lookups per body in the blend. Both are data-layout changes to two
@@ -79,7 +79,7 @@ public entry points and belong in their own measured pass.
 **Positive.** A game keeps its artwork, its rig and its graph; the library cannot go stale against
 an asset pipeline it does not own. The animation layer inherits the determinism guarantee instead of
 quietly undermining it. The blend is exhaustively testable without a GPU, a window or a clip
-asset — the property tests run in milliseconds.
+asset, the property tests run in milliseconds.
 **Negative.** The game writes the slot-to-node binding and the clip playback plumbing, which is
 perhaps forty lines and the first thing anybody gets wrong. The book chapter exists because of this,
 and the example exists to be copied. The library also cannot fix a bad rig: a wrong joint order, a
@@ -102,6 +102,6 @@ business of adjudicating between two graphs.
 **Ignore root motion entirely.** Tempting and simpler, but it breaks mocap-derived clips, which are
 what a real project has. The opt-in exists, defaults off, and documents its cost.
 ## References
-- `crates/bevy-flock-anim/src/profile.rs` — the blend space and its property tests.
+- `crates/bevy-flock-anim/src/profile.rs`, the blend space and its property tests.
 - ADR 0004 (determinism), ADR 0008 (pluggable logic), ADR 0009 (virtual-cost scheduler).
-- `docs/book/src/animation.md` — the adoption chapter, written after the example.
+- `docs/book/src/animation.md`, the adoption chapter, written after the example.

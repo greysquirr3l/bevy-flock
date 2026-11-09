@@ -14,7 +14,7 @@ steering, the pace at which its needs move, and the archetype it was spawned as.
 
 ### The bias is multiplicative on the configured weights
 
-`Temperament::steering_bias(gain)` returns a `WeightBias` — five multipliers on
+`Temperament::steering_bias(gain)` returns a `WeightBias`, five multipliers on
 `[separation, alignment, cohesion, seek, arrive]`, each centred on `1.0` and clamped to
 `0.25 ..= 4.0`. The kernel scales `CrowdParams::weights` per agent:
 
@@ -32,7 +32,7 @@ documentation would stop meaning what it said.
 `Crowd` holds `bias: Vec<[f32; 5]>`, cleared in `begin()`. It grows only as far as the highest
 biased agent index, so a crowd nobody gave a personality to carries an empty vector and pays one
 `Option::get` per agent. The resolve happens once per agent per frame, in `resolve_weights`,
-shared by all three roads — a bias applied on one road and not another would be two different
+shared by all three roads, a bias applied on one road and not another would be two different
 crowds depending on a hardware decision.
 
 `set_bias` clamps NaN to neutral and everything else into the band. It is a per-frame setter on a
@@ -45,7 +45,7 @@ crowd that steers oddly for a tick.
 same arithmetic as eight single-tick passes to within float rounding. `BoidsConfig::needs` is
 `Option<NeedsDecay>`, defaulting to eight ticks.
 
-Needs decay is **on by default**, which is a behaviour change. The alternative — off by default —
+Needs decay is **on by default**, which is a behaviour change. The alternative, off by default , 
 leaves the drive reading a constant, and every NPC reads as content forever, which is exactly the
 state this ADR exists to end. A game with its own economy turns it off with
 `BoidsConfig::with_needs_decay(None)` and writes `NpcNeeds` itself.
@@ -76,7 +76,7 @@ Bias the drive asks for, per archetype, at the shipped `TemperamentDrive::defaul
 
 The direction surprised the plan: a guard does not push harder, it jostles *less* and follows the
 crowd's heading more. Discipline is formation-keeping, and the table is what the demo's
-`ashfall.run.json` reports for 2,000 NPCs over 600 ticks — guards arrive with the highest alignment
+`ashfall.run.json` reports for 2,000 NPCs over 600 ticks, guards arrive with the highest alignment
 (1.164) and the lowest separation (0.918), urchins the reverse, and mean `company` falls from 1.0 to
 0.74–0.77 as needs decay.
 
@@ -90,7 +90,7 @@ crowd's heading more. Discipline is formation-keeping, and the table is what the
 | every agent biased | 1.8772 ms |
 
 Within noise (0.03%), against a 1.88 ms frame: one slice lookup and five multiplies per agent. The
-zero-allocation claim survives it — `tests/crowd_no_alloc.rs` runs a frame with every agent biased
+zero-allocation claim survives it, `tests/crowd_no_alloc.rs` runs a frame with every agent biased
 and asserts zero allocations after warm-up.
 
 ## Consequences

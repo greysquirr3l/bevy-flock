@@ -1,4 +1,4 @@
-# ADR 0007 — No renderer, no physics, no networking in this crate
+# ADR 0007, No renderer, no physics, no networking in this crate
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -33,8 +33,8 @@ one way and nothing in `domain/` knows a renderer exists.
 
 ## Alternatives rejected
 
-- **Bundle a default renderer behind a feature** — becomes the only renderer
+- **Bundle a default renderer behind a feature**, becomes the only renderer
   anyone tests, then the default, then a liability.
-- **Depend on a specific physics engine** — avian and rapier users would each
+- **Depend on a specific physics engine**, avian and rapier users would each
   need a fork. Steering produces a desired velocity; what consumes it is the
   game's choice.

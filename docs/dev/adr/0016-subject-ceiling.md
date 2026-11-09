@@ -1,4 +1,4 @@
-# 0016 — Sixty-four subjects, and a footprint games can budget from
+# 0016, Sixty-four subjects, and a footprint games can budget from
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -14,7 +14,7 @@ and a pet is nineteen before anybody has met anyone twice.
 
 The cap did not announce itself. It is a clamp inside `MemoryStore::new`, so a game
 asking for twenty-four subjects gets sixteen and a store that silently refuses the
-eighth relationship — `remember` returns `false`, which a caller is free to ignore.
+eighth relationship, `remember` returns `false`, which a caller is free to ignore.
 ADR 0015's diagnostic found it the only way such a thing is ever found: by simulating
 a crowd, seeing that half the encounters vanished, and tracing the loss back to a
 constant. A ceiling that rejects data quietly is worse than one that refuses to
@@ -51,7 +51,7 @@ does not scale with subjects:
 | 64 (after) | 9.84 MiB | 59.0 MiB | 1024 B (16 lines) |
 
 The quadrupling is real and it is the whole cost. Sixty-four subjects at 60,000 rows
-is 59 MiB — the size of a modest texture — and it buys a cast list long enough that a
+is 59 MiB, the size of a modest texture, and it buys a cast list long enough that a
 game stops designing around the store. Sixteen subjects at the same capacity was 15
 MiB, so the change costs 44 MiB *for a game that asks for all of it* and nothing for
 one that does not.
@@ -67,7 +67,7 @@ one that does not.
 
 The first row is the surprise and the reason this was measured rather than assumed: a
 sweep short-circuits rows that hold nothing, so the population a crowded store mostly
-consists of — NPCs who have met nobody — costs the same at sixty-four subjects as at
+consists of, NPCs who have met nobody, costs the same at sixty-four subjects as at
 sixteen. The stride is only walked for rows that hold something, and there the cost is
 the 3.3× the cache arithmetic predicts (not 4×, because the per-row overhead does not
 scale).
@@ -124,14 +124,14 @@ exactly what they were.
 - **Keep sixteen and let games run two stores.** Splits the capacity budget, doubles
   the sweep, and makes "who does this NPC remember" a question with two answers.
 - **A sparse map per row.** Memory becomes proportional to relationships rather than
-  to the ceiling, which is attractive at 1% occupancy — and `recall`, the hot path
+  to the ceiling, which is attractive at 1% occupancy, and `recall`, the hot path
   called per think, becomes a hash lookup with an unpredictable cache footprint. The
   flat array's whole justification is that recall is `base + subject × 16`.
 - **Columnar storage: one array per subject.** Shrinks memory for unused subjects and
   turns a row scan into a strided gather across up to sixty-four arrays. The sweep
   would win; recall would lose. Recall is the hot path.
 - **Grow the array on demand.** Reallocating a 59 MiB array mid-frame is a hitch
-  nobody can budget for, and the store's contract — no allocation after construction —
+  nobody can budget for, and the store's contract, no allocation after construction , 
   is what makes it usable inside a frame at all.
 - **Make the ceiling a const generic parameter.** `MemoryStore<64>` would push the
   number into every type signature in the public API to save a clamp, and a game that

@@ -1,4 +1,4 @@
-# ADR 0002 — A PCG32 stream per NPC, derived from `(seed, NpcId)`
+# ADR 0002, A PCG32 stream per NPC, derived from `(seed, NpcId)`
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -42,10 +42,10 @@ implementation for ten thousand draws and pinned by a golden vector.
 
 ## Alternatives rejected
 
-- **One global `RngStream` resource** — fast, simple, and fails property 2
+- **One global `RngStream` resource**, fast, simple, and fails property 2
   completely.
-- **`rand::rngs::StdRng`** — no stability guarantee across `rand` versions; a
+- **`rand::rngs::StdRng`**, no stability guarantee across `rand` versions; a
   dependency bump would silently invalidate every replay. `rand_pcg` would work
   but adds a dependency and a version-stability promise we would rather own.
-- **`Hash(NpcId) ^ seed` as the stream seed** — correlated streams for
+- **`Hash(NpcId) ^ seed` as the stream seed**, correlated streams for
   neighbouring identifiers; tested against, and it fails the independence test.

@@ -28,16 +28,16 @@ app.add_plugins(FlockPlugin::new(FlockConfig::preset(CrowdPreset::CityAmbient)))
 
 A `Band` owns:
 
-- **An anchor** — usually the player. The anchor's presence keeps a manifested NPC alive even
+- **An anchor**, usually the player. The anchor's presence keeps a manifested NPC alive even
   when it drifts outside the ring, because an NPC you can see must not vanish (ADR 0019).
-- **A near ring** — real entities with brains and steering, sized by `BandConfig`.
-- **A middle ring** — entities with movement but a cheaper path, kept wide so the transition
+- **A near ring**, real entities with brains and steering, sized by `BandConfig`.
+- **A middle ring**, entities with movement but a cheaper path, kept wide so the transition
   is a change of cost rather than a change of appearance.
-- **A far field** — `AmbientField`, a grid of `CellState`s holding `Occupation` (how many, how
+- **A far field**, `AmbientField`, a grid of `CellState`s holding `Occupation` (how many, how
   busy) rather than anyone in particular.
 
 The fold is the operation that matters: when a cell's population changes, the field is
-updated and the manifest list is reconciled — residents that should exist are spawned,
+updated and the manifest list is reconciled, residents that should exist are spawned,
 residents that should not are absorbed into the field. That reconciliation used to churn
 (a resident spawned, then folded, then respawned), and ADR 0025 fixed it with hysteresis:
 a fold only happens when the cell is over its threshold by a margin, and a manifest entry is
@@ -53,8 +53,8 @@ Measured, on the reference host:
 | 1,000,000 total, 5,000 manifested | **3.78 ms** |
 
 The number that matters is the second column: **the cost tracks what is manifested, not what
-exists.** A million inhabitants cost what five thousand cost — 3.72 ms at a hundred thousand
-in total and 3.78 ms at a million is a 1.6% difference for ten times the population — because
+exists.** A million inhabitants cost what five thousand cost, 3.72 ms at a hundred thousand
+in total and 3.78 ms at a million is a 1.6% difference for ten times the population, because
 only five thousand of them are entities. The 1,000,000 row re-measured at 3.80 ms during the
 reproducibility pass, which is the intended relationship between a table and a re-run.
 
@@ -100,11 +100,11 @@ condition(|ctx| ctx.field_link_tag() == Some(LinkTag::new(1)))
 holding an occupation count, a mood, an alarm level and a couple of stamps. Nine gates keep
 it honest (recorded in `docs/dev/tuning/gates/continuum.md`), and the five that matter to a game are:
 
-1. **No allocation per tick** — the field is sized once; folding and advection reuse buffers.
-2. **Conservation** — people are moved between cells, never created or destroyed.
-3. **Continuity** — a cell crossing a density threshold does not teleport its occupants.
-4. **Anchor exemption** — a manifested NPC near the player is never folded away.
-5. **Bounded growth** — a crowd left running for hours does not creep upward in population.
+1. **No allocation per tick**, the field is sized once; folding and advection reuse buffers.
+2. **Conservation**, people are moved between cells, never created or destroyed.
+3. **Continuity**, a cell crossing a density threshold does not teleport its occupants.
+4. **Anchor exemption**, a manifested NPC near the player is never folded away.
+5. **Bounded growth**, a crowd left running for hours does not creep upward in population.
 
 Advection is the tick's only expensive step and it is `O(cells)`, with cells bounded by the
 `AmbientField`'s configured extent rather than by the population.
@@ -122,7 +122,7 @@ Advection is the tick's only expensive step and it is `O(cells)`, with cells bou
 ## The number to remember
 
 Per-agent cost is flat and slightly *falls* with population: 0.92 µs at ten thousand, 0.90 µs
-at a hundred thousand. The reason is locality — every agent's work is its own cell and its
+at a hundred thousand. The reason is locality, every agent's work is its own cell and its
 neighbours, so a bigger crowd does not make any one agent more expensive. That is the property
 that makes bands possible at all: if per-agent cost grew with population, adding a ring would
 never help.

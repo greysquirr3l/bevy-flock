@@ -1,47 +1,48 @@
 ---
 title: Scaling to a million
-description: Which knob matters at which population, and where the tiers and bands start carrying the load.
+description: Three regimes, one knob each, and the numbers that bound them.
 ---
 
-The crate scales in three regimes, and the right knob changes with each. Picking the wrong one is how a crowd engine
-becomes a physics demo.
+Which knob matters depends on how many NPCs you have. Picking the wrong one is how a crowd engine becomes a physics
+demo. The boundaries below are where the cost moves, not where anything breaks.
 
-## Up to ~10,000: steering dominates
+## Up to 10,000: steering
 
-Rebuild the spatial grid every frame, keep cognition on a modest budget, and the frame belongs to steering. This is the
-regime where the wide (SIMD) kernel earns its keep; it is on by default, and it is worth roughly 19–31% of a steering
-pass at 100k agents depending on cell size.
+The frame belongs to steering. Rebuild the spatial grid every frame, keep cognition on a modest budget, and that is the
+whole story. The wide kernel is on by default and is worth roughly 19 to 31% of a steering pass at 100k agents depending
+on cell size.
 
-If your crowd is much smaller than 10,000, do not enable the wide kernel expecting the headline number, its advantage
-scales with density.
+Below 10,000, do not enable it expecting the headline. Its advantage scales with density: at 1,000 agents it is a few
+percent, and a few percent of a small number is a rounding error with extra code.
 
-## 10,000 → 250,000: the budget is the knob
+## 10,000 to 250,000: the cognition budget
 
-At this size the question stops being "how fast is steering" and becomes "how many NPCs think this tick". The scheduler
-spends a virtual-cost budget per tick across candidates chosen by tier and distance. Raise the budget for a smarter
-crowd at a higher cost; lower it for a bigger one at the same cost.
+The question stops being "how fast is steering" and becomes "how many NPCs think this tick". The scheduler spends a
+virtual-cost budget across candidates chosen by tier and distance. Raise the budget for a smarter crowd at higher cost;
+lower it for a bigger one at the same cost.
 
-Practical advice: measure at your real population, not at 100k, and watch the *variance* rather than the mean, a budget
-that fits on average will still spike.
+Measure at your real population, and watch variance rather than the mean. A budget that fits on average will still spike
+on the frame where a crowd of NPCs all decide at once.
 
 ## Above 250,000: the bands
 
-Past a few hundred thousand, individual NPCs at distance stop existing. The continuum advances a density and velocity
-field cheaply, and manifests individuals only where the camera can see them; anchors you pin are always manifested and
-never folded.
+Distant NPCs stop existing individually. The continuum advances a density and velocity field cheaply and manifests
+individuals only near the camera; anchors are always manifested and never folded.
 
-The guarantees here are the ones that matter: population is conserved exactly, nothing pops at the boundary, and a far
-field cannot leak into the near field. They are tested by driving a camera through band transitions for 10,000 ticks and
-asserting the invariants every tick.
+| guarantee | how it is enforced |
+| --- | --- |
+| population conserved exactly | conservation test over 10,000 strides |
+| nothing pops at the boundary | count delta under 2% across transitions |
+| a far field cannot leak near | parity test against full simulation |
+| anchors never fold | 10 km anchor test, 10,000 ticks |
 
-## The honest ceiling
+The continuity suite drives a camera through band transitions for 10,000 ticks and asserts these every tick.
 
-On the reference machine, a 1,000,000-inhabitant band frame costs **3.78 ms** with the wide kernel and **4.75 ms**
-scalar, against a 6 ms gate. A 1M-body spatial rebuild costs **4.572 ms**. Those numbers come with their fixture and
-machine in [Performance](/bevy-flock/reference/performance/), treat them as shape and ratios, then measure your own.
+## The measured ceiling
 
-## Where to look
+On the reference machine a 1,000,000-inhabitant band frame costs <span class="figure">3.78 ms</span> with the wide
+kernel and 4.75 ms scalar, against a 6 ms gate. A 1M-body spatial rebuild costs <span class="figure">4.572 ms</span> at
+six workers. Both come with their fixtures in [Performance](/bevy-flock/reference/performance/).
 
-- `examples/horde_100k.rs`, `examples/ambient_metropolis.rs`, the two regimes, runnable
-- `examples/cross_bench.rs`, the harness used for cross-engine comparison
-- `docs/dev/tuning/performance.md`, every measurement, including the optimisations that were tried and rejected
+Runnable: `examples/horde_100k.rs`, `examples/ambient_metropolis.rs`, `examples/cross_bench.rs`. Every measurement,
+including the optimisations that lost, is in `docs/dev/tuning/performance.md`.

@@ -1,4 +1,4 @@
-# ADR 0004 — `libm` instead of `std` for `sin`, `cos`, `sqrt`, `atan2`
+# ADR 0004, `libm` instead of `std` for `sin`, `cos`, `sqrt`, `atan2`
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -36,8 +36,8 @@ port of the MUSL implementations, so the bits are identical everywhere.
 
 ## Alternatives rejected
 
-- **Platform `std` maths** — fails the guarantee, non-negotiably.
-- **Fixed-point trigonometry** — deterministic and fast, but changes every API
+- **Platform `std` maths**, fails the guarantee, non-negotiably.
+- **Fixed-point trigonometry**, deterministic and fast, but changes every API
   signature and loses the precision that steering needs at small separations.
-- **`micromath`** — faster on embedded, less accurate, and its `atan2` error is
+- **`micromath`**, faster on embedded, less accurate, and its `atan2` error is
   large enough to visibly change steering behaviour.

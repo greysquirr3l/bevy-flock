@@ -68,7 +68,7 @@ bigger budget.
 Distance and engagement pick the tier (`TierPolicy`), each tier gets a guaranteed share of
 the budget (`BudgetShares`), and promotions are rate-limited (`promotions_per_tick`, default
 16) so that a player rounding a corner into a packed square does not promote four hundred
-NPCs in one frame and drop it. Demotion has hysteresis — a wider band than promotion — so an
+NPCs in one frame and drop it. Demotion has hysteresis, a wider band than promotion, so an
 NPC standing exactly on a boundary does not oscillate between tiers and pay both costs
 forever.
 

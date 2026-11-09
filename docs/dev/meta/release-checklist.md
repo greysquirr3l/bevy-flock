@@ -1,4 +1,4 @@
-# Release checklist — 0.1.0, the one-million-inhabitant milestone
+# Release checklist, 0.1.0, the one-million-inhabitant milestone
 
 **Milestone:** a library that steers 1,000,000 inhabitants inside a 6 ms frame, with 5,000 of
 them thinking and steering at 60 Hz, and a crowd model a game can plug behaviour, memory and
@@ -13,7 +13,7 @@ Gates are from ADR 0018; evidence lives in `docs/dev/tuning/gates/continuum.md` 
 | # | Gate | Target | Measured | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 1M ambient, advection stride | < 0.5 ms | 0.315 ms | **PASS** | `benches/continuum.rs` |
-| 1b | Manifest 2,000 identities | — | 10.5 µs | **PASS** | `benches/continuum.rs` |
+| 1b | Manifest 2,000 identities |, | 10.5 µs | **PASS** | `benches/continuum.rs` |
 | 2 | Conservation over 10,000 strides | exact | exact | **PASS** | unit test |
 | 3 | Determinism of manifest ids | exact | exact | **PASS** | unit test |
 | 4 | Parity vs full simulation | 1% cells, 5% velocity | passes | **PASS** | `tests/band_continuity.rs` |
@@ -38,8 +38,8 @@ before quoting them in marketing.
 | 1,000,000 band frame, `--features simd` | **3.78 ms** | < 6 ms | PASS (37% headroom) |
 | 1,000,000 band frame, scalar | 4.75 ms | < 6 ms | PASS (21% headroom) |
 | 100,000 with 5,000 manifested | 3.37 ms | < 8 ms | PASS |
-| Packed steer, 50,000 agents | 56.5 ms (wide) / 138 ms (scalar) | — | reference only |
-| Planner (100k think budget) | 84 µs | — | PASS |
+| Packed steer, 50,000 agents | 56.5 ms (wide) / 138 ms (scalar) |, | reference only |
+| Planner (100k think budget) | 84 µs |, | PASS |
 | Reflex tier ceiling | 64,000 / tick | 64,000 | PASS, at the ceiling |
 
 `docs/dev/tuning/performance.md` carries the history: what each optimisation bought, and the three that
@@ -70,7 +70,7 @@ contract, and the README quotes it.
 
 ## 4. Correctness and determinism
 
-- [x] `cargo test --all-features` — 268 library tests plus the integration suites
+- [x] `cargo test --all-features`, 268 library tests plus the integration suites
       (`spawning`, `determinism`, `cognition`, `save_compat`, `memory_aging`,
       `band_continuity`, `tree_no_alloc`).
 - [x] Scalar and wide kernels assert bit equality (`the_vectorised_kernel_agrees_with_the_scalar_one`).
@@ -105,7 +105,7 @@ contract, and the README quotes it.
       examples, so a reader can run what the README claims.
 - [x] The book (`docs/book/src`) covers zero-to-tuned in eight chapters, and the README's
       ten-minute verification section links every claim to the artifact that pins it.
-- [ ] `cargo package` / `cargo publish --dry-run` — to run immediately before tagging.
+- [ ] `cargo package` / `cargo publish --dry-run`, to run immediately before tagging.
 - [ ] CHANGELOG entry for `0.1.0` moved out of `[Unreleased]`.
 
 ## 6. Known limitations, stated before anyone finds them
@@ -133,11 +133,11 @@ contract, and the README quotes it.
 | Area | Verdict | By |
 | --- | --- | --- |
 | Gates (9/9) | PASS | Nick Campbell |
-| Performance (1M < 6 ms) | PASS — 3.78 ms wide, 4.75 ms scalar | Nick Campbell |
+| Performance (1M < 6 ms) | PASS, 3.78 ms wide, 4.75 ms scalar | Nick Campbell |
 | Memory (0 allocs, 32 B/agent) | PASS | Nick Campbell |
 | Determinism | PASS | Nick Campbell |
 | Documentation and packaging | PASS except `cargo package` dry run | Nick Campbell |
-| Known limitation 1 (churn) | **Closed** — fixed in ADR 0025, pinned by `tests/band_churn.rs` | Nick Campbell |
+| Known limitation 1 (churn) | **Closed**, fixed in ADR 0025, pinned by `tests/band_churn.rs` | Nick Campbell |
 
 **Release 0.1.0 as the crowd milestone.** The churn finding that was blocking 1.0 is fixed and
 covered; the remaining limitations are documented and accepted.

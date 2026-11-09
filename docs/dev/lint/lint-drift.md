@@ -9,7 +9,7 @@ Two things make this page necessary rather than pedantic.
 
 The first is that "we would fix it if we saw it" is not a policy. A warning that only exists on a
 toolchain nobody builds with is invisible to review, survives every CI run, and lands in the commit
-that moves the pin — the commit that should be a one-line version bump. Cataloguing it with a named
+that moves the pin, the commit that should be a one-line version bump. Cataloguing it with a named
 task is the difference between debt and a surprise.
 
 The second is that this table is checked. `scripts/lint_drift.py --check` runs clippy under stable,
@@ -38,8 +38,8 @@ reports **11 warnings** across 5 lints: `assert_is_empty` × 6, `chunks_exact_to
 
 ## What is deliberately not here
 
-The three lints the pin cannot name — `clippy::unnecessary_rest_pattern`,
-`clippy::rest_pattern_accessible_field` and rustc's `raw_borrows_via_references` — are not drift,
+The three lints the pin cannot name, `clippy::unnecessary_rest_pattern`,
+`clippy::rest_pattern_accessible_field` and rustc's `raw_borrows_via_references`, are not drift,
 because the tree is already clean for them: 51 sites were rewritten when the forward job was made to
 work, and `lint-future` denies all three. Drift is what is left when the tree is still living with
 the newer answer.

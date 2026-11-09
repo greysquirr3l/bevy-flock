@@ -130,8 +130,8 @@ cache-friendly for iteration while sparse sets favour insertion and removal [46]
 should use narrow filters and minimal mutable access with change detection rather than broad
 optional-component or `EntityRef` queries in hot paths [47], and `par_iter`/`par_iter_mut` plus
 the `contiguous_iter` forms expose dense parallel iteration with no guaranteed ordering or
-thread assignment [48]. The task pools — ComputeTaskPool, AsyncComputeTaskPool and IoTaskPool
-— are latency classes, not AI schedulers [49]. AssetServer exposes direct and recursive
+thread assignment [48]. The task pools, ComputeTaskPool, AsyncComputeTaskPool and IoTaskPool
+,  are latency classes, not AI schedulers [49]. AssetServer exposes direct and recursive
 dependency load-state checks, not a world-streaming system [50].
 
 Release-level work is rendering-oriented. Bevy 0.16 improved transform propagation with
@@ -158,9 +158,9 @@ Star Citizen's official 2021 Social AI presentation covers engineering tasks, us
 game tags and logic, animation through Mannequin, simulated broken objects and interaction
 routing [58]. It is evidence of a task-and-interaction authoring workflow, not of a published
 crowd architecture or population limit [58]. EA's public Frostbite page supports only broad
-claims — large-scale multiplayer interactions in dynamic destructible environments, and highly
+claims, large-scale multiplayer interactions in dynamic destructible environments, and highly
 configurable workflows and runtimes spanning audio, animation, physics, destruction and
-rendering — and publishes no AI or crowd manual [59].
+rendering, and publishes no AI or crowd manual [59].
 
 Havok Navigation documents large-crowd collision avoidance with emergent lanes and swirling,
 ground and volumetric navigation, hierarchical pathfinding, runtime navmesh updates, runtime
@@ -190,7 +190,7 @@ precomputed roadmap, and one paper reports emergent lane formation from a least-
 | CryEngine 3.8.6 | Navigation with quotas and time limits [57] | ORCA-related switches, avoidance ranges and horizons [57] | Modular behaviour trees, perception, target tracking [56][57] | Update intervals, pathfinder quotas, nav multithreading [57] |
 | Havok Navigation | Hierarchical routing, streaming, cluster graphs, multi-radius [60] | Large-crowd avoidance with emergent lanes [60] | Not documented in the cited pages [60] | Multithreaded generation, async time-budgeted processing [60][61] |
 | Bevy crates | `vleue_navigator` Polyanya navmesh, `bevy_landmass` islands [42][40] | `detour-crowd-rs` RVO and adaptive sampling [43] | `bevy_behave` trees, `big-brain` utility AI [37][38] | Bevy ECS parallelism and weak ordering [44][45] |
-| bevy-flock 0.1 | Grid flow fields per destination; polygon navmesh only if the game supplies one through the port | Separation, alignment, cohesion, seek, arrive — no reciprocal avoidance | Compiled trees, utility scoring, guarded state machines, dialogue graphs | Virtual-cost scheduler, four cognition tiers, bands and continuum, cell-major SIMD |
+| bevy-flock 0.1 | Grid flow fields per destination; polygon navmesh only if the game supplies one through the port | Separation, alignment, cohesion, seek, arrive, no reciprocal avoidance | Compiled trees, utility scoring, guarded state machines, dialogue graphs | Virtual-cost scheduler, four cognition tiers, bands and continuum, cell-major SIMD |
 
 ## Where bevy-flock already matches
 
@@ -237,9 +237,9 @@ whom and for how long, and a world director that drives mood and events (ADR 002
 Headless operation is where the architecture matches the server-side half of these engines.
 Unity's rendering path is the Entities Graphics package [8]; Godot's is RenderingServer and
 MultiMesh [27][28]; Bevy's is its renderer with automatic instancing [55]. `bevy-flock` has no
-renderer dependency at all and exposes physics, replication and rendering as ports — a
+renderer dependency at all and exposes physics, replication and rendering as ports, a
 `RenderPlan` of sorted, culled instances, a fixed-width `NpcNetState` wire format, and a
-per-frame velocity export (ADR 0040) — so a dedicated server runs the identical simulation with
+per-frame velocity export (ADR 0040), so a dedicated server runs the identical simulation with
 `default-features = false`.
 
 Three capabilities in the crate have no documented counterpart in the sources reviewed here:
@@ -262,7 +262,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    Bevy 0.20 [42]; `bevy_landmass` derives desired movement from navmesh islands [40]; Havok
    adds hierarchical routing and multi-radius navigation [60]. Without it, every game writes
    the same adapter before its crowd can walk around a building, which is the first thing a
-   crowd is asked to do. **Cost: large** — bake pipeline, polygon adjacency, corridor
+   crowd is asked to do. **Cost: large**, bake pipeline, polygon adjacency, corridor
    following, and a determinism story for tie-breaking, none of which the current grid code
    transfers to.
 
@@ -274,7 +274,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    DetourCrowd port with adaptive velocity-space sampling [43], and ORCA formalises the
    half-responsibility linear program [63]. A crowd library whose avoidance is purely
    force-based produces visible interpenetration in doorways and at corners, which is where
-   crowds are most visible. **Cost: medium** — the neighbour buffer and SIMD layout already
+   crowds are most visible. **Cost: medium**, the neighbour buffer and SIMD layout already
    exist; the work is the velocity-obstacle solve, per-agent priority and a determinism
    strategy for sampling.
 
@@ -282,7 +282,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    `bevy_landmass` documents animation links and pause markers [40], and Godot's navigation
    agents report reaching a `NavigationLink3D` as a path segment [23]. A flow field over a grid
    cannot express "this ledge is a shortcut" or "the ladder costs 4 seconds", so level designers
-   either flatten their levels or add behaviour-tree hacks for traversal. **Cost: small** —
+   either flatten their levels or add behaviour-tree hacks for traversal. **Cost: small** , 
    the port already carries the notion of cells and costs; a link table plus a cost injection
    into the Dijkstra is a contained change.
 
@@ -293,7 +293,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    NavMesh for stationary blockers and documents the cost [2], Havok exposes runtime navmesh
    updates and dynamic edges [60]. In practice the game must rebuild and re-stamp its
    `NavSource` by hand, and forgetting to is a silent bug where the crowd walks through a wall.
-   **Cost: small** — the versioning and cache invalidation exist; the work is a built-in
+   **Cost: small**, the versioning and cache invalidation exist; the work is a built-in
    obstacle-driven source and a documented rebuild budget.
 
 5. **Representation LOD and pooling as a contract.** Unreal documents a four-way choice
@@ -302,7 +302,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    visibility and visibility ranges for LOD [28][29][30]; Bevy documents visibility-range LOD
    and automatic instancing in the renderer [54][55]. `bevy-flock` emits a `RenderPlan` and
    leaves the decision entirely to the adapter (ADR 0040), so every game reinvents the
-   distance thresholds and the variant switch. **Cost: medium** — the data already exists in
+   distance thresholds and the variant switch. **Cost: medium**, the data already exists in
    the plan and in the tiers; what is missing is a documented band-to-variant mapping that
    adapters can share.
 
@@ -311,24 +311,24 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    documents sight, hearing, damage, prediction, team and touch stimuli with age and
    expiration [21], and CryEngine exposes perception ranges, alertness and target tracking
    [57]. Without occlusion, hearing radii and stimulus decay, stealth and guard behaviour ends
-   up as a special case inside a behaviour tree. **Cost: medium** — it needs a query against
+   up as a special case inside a behaviour tree. **Cost: medium**, it needs a query against
    the existing spatial grid plus per-NPC stimulus state, and it interacts with the scheduler
    because perception cannot run at reflex cadence for every NPC.
 
 7. **A navigation work budget with coherent commits.** Cognition is budgeted; navigation is
    not. Havok documents spreading pathfinding and navmesh work across frames inside a time
    budget, committing in coherent batches so groups never observe a half-updated navigation
-   state, and lists the tradeoffs explicitly — briefly stale routes, shifted emergent timing,
+   state, and lists the tradeoffs explicitly, briefly stale routes, shifted emergent timing,
    and temporary memory overlap during streaming [61]. CryEngine documents the same idea as
    pathfinder quotas and time limits [57]. The crate's flow-field solver is already resumable
    with a node budget per call, so the missing part is a per-frame budget across many fields
-   and a commit point that observers can rely on. **Cost: medium** — mostly scheduler work,
+   and a commit point that observers can rely on. **Cost: medium**, mostly scheduler work,
    but it must be expressed in virtual cost to keep the determinism guarantee intact.
 
 8. **Environment queries in the EQS sense.** Unreal's EQS selects among candidate environment
-   items through Generators, Contexts and Tests [20]. Crowds ask this constantly — which
-   bench, which cover point, which stall — and today each game writes it against the spatial
-   grid. **Cost: medium** — the grid supplies candidates cheaply; the work is a scoring
+   items through Generators, Contexts and Tests [20]. Crowds ask this constantly, which
+   bench, which cover point, which stall, and today each game writes it against the spatial
+   grid. **Cost: medium**, the grid supplies candidates cheaply; the work is a scoring
    vocabulary and a way to keep queries out of the per-tick path.
 
 9. **Visual authoring and live graph debugging.** Unity Behavior ships graph authoring,
@@ -336,7 +336,7 @@ Ranked by what a game developer hits first, not by what is easiest to build.
    resources, a visual debugger, in-game tree visualisation and performance monitors [32][33];
    CryEngine documents behaviour-tree debug drawing and failed-action views [57]. The crate
    offers `explain_npc` as a one-call state dump and a debug overlay as data (ADR 0042), which
-   is the runtime half of the story, but authoring is still Rust source. **Cost: large** — an
+   is the runtime half of the story, but authoring is still Rust source. **Cost: large**, an
    editor is a product of its own, and Bevy has no first-party node-graph editor to build on.
    Ranked last because Bevy teams are used to authoring in code, and a bad editor is worse than
    none.
@@ -382,7 +382,7 @@ adopted this for steering in ADR 0044 (2.0x at 10,000 agents, 2.8x at 100,000 on
 a rule worth keeping: per-entity writes only, and any reduction sorted before accumulation, per the
 architecture's determinism clause. Risk elsewhere: every new use of the pool has to answer the same
 question about which state is canonical, and a pool with one thread is indistinguishable from no
-pool at all — which is exactly what the `bevy_tasks` `multi_threaded` feature defaults to.
+pool at all, which is exactly what the `bevy_tasks` `multi_threaded` feature defaults to.
 
 **Narrow queries, change-detection filters and contiguous iteration.** Bevy documents
 change-detection filtering at O(a+n) [47], contiguous dense iteration suitable for vectorisation

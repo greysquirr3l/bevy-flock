@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **Documentation is now three things instead of one pile.** An Astro + Starlight site in `site/` covers install, a first
+  crowd, concepts, guides and reference, published at <https://greysquirr3l.github.io/bevy-flock/>. Everything written for
+  maintainers moved under `docs/dev/` (ADRs, tuning journals, gates, benchmarks, lint policy, release checklists) and is
+  linked from the site rather than duplicated. `README.md` was cut to what a newcomer needs: the logo, the five-line
+  example, what the crate does, how to verify it in ten minutes, and where to read next.
+- **Neither ships.** Both crates exclude `docs/`, `site/`, `benchmarks/`, `crates/`, `scripts/` and the demo crates from the
+  package tarball. `cargo package --list` for `bevy-flock` contains no documentation directory.
 - **The simulation is its own crate.** `bevy-flock-core` now holds `domain`, `behavior`, `application`, `error` and
   `testkit` with no Bevy app in its dependency graph, so a headless server, a replay tool or a test harness can run a crowd
   without an engine. `bevy-flock` re-exports every path that moved, so existing code compiles unchanged; the only edit

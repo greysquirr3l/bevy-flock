@@ -1,4 +1,4 @@
-# ADR 0005 — Budgeted spawning from a queue of ranges
+# ADR 0005, Budgeted spawning from a queue of ranges
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -39,8 +39,8 @@ Identity allocation is a pure function of the batch's start index and its mode:
 
 ## Alternatives rejected
 
-- **Spawn everything in one frame** — the freeze, and no way to show progress.
-- **Pre-generate all blueprints** — turns a spawn budget problem into a memory
+- **Spawn everything in one frame**, the freeze, and no way to show progress.
+- **Pre-generate all blueprints**, turns a spawn budget problem into a memory
   problem and makes the queue the largest allocation in the program.
-- **Round-robin over frames without an index contract** — the individual an
+- **Round-robin over frames without an index contract**, the individual an
   identity belongs to would depend on frame timing, breaking determinism.

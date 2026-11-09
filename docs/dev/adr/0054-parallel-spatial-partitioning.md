@@ -4,7 +4,7 @@
 **Date:** 2026-11-09
 **Context:** The spatial grid is the largest single-threaded structure in the frame. It is built once per
 tick over whatever population is active, then queried once per manifest body, and every number the crate
-publishes about a million inhabitants — 4.75 ms, 6 ms, the 8 ms manifested tier — was measured with one
+publishes about a million inhabitants, 4.75 ms, 6 ms, the 8 ms manifested tier, was measured with one
 thread doing both. Phase 3 (plan.phase3.toml) exists to change that.
 
 The risk is not whether threads can be spawned. It is that a threaded build is the first place the
@@ -20,7 +20,7 @@ each one. A task that cannot point at its test does not land.
 ## Decision
 
 ### 1. Cell membership is a pure function of position, and the build never re-derives it
-A body's cell is `cell_of(position)` — integer arithmetic on a position, defined in
+A body's cell is `cell_of(position)`, integer arithmetic on a position, defined in
 `src/domain/spatial.rs`, unchanged by the build. The build's job is to *group* bodies by that answer. A
 parallel build may therefore partition work by cell with no coordination at all, because no thread's
 decision can change another's input. Anything that would make the cell depend on the build (an adaptive
@@ -34,7 +34,7 @@ output element by element, so order is load-bearing even though no doc comment p
 
 The decision: **membership is the contract, order is a stable internal property.** The parallel path
 must produce the same order as the serial one, because the parity harness compares sequences and because
-the packed kernel's accumulation order — and therefore its float result — depends on it. Making order
+the packed kernel's accumulation order, and therefore its float result, depends on it. Making order
 public is a separate decision that this ADR explicitly declines: promising it would freeze the bucket
 layout into the API.
 
@@ -42,7 +42,7 @@ layout into the API.
 Each worker counts its cells into a private histogram, prefix-sums locally, and the assembly step
 concatenates per-cell runs **in ascending cell index**, then within a cell in entry order. A shared
 atomic cursor is banned: it is the one-line shortcut that makes the grid depend on scheduling, and it is
-not faster — the measurement in `docs/dev/tuning/performance.md` is what decides, but the invariant comes first.
+not faster, the measurement in `docs/dev/tuning/performance.md` is what decides, but the invariant comes first.
 
 Corollary: the number of threads must not appear in the output. The test builds the same fixture at 1,
 2, 3 and 8 threads and compares the raw buffers, not a summary: `parallel_build_matches_serial_bytes`.
@@ -66,7 +66,7 @@ looks parallel.
 
 ### 7. The RNG stream is consumed per body, never per grid slot
 A body's stream is keyed by `NpcId` (ADR 0001), so it does not matter which thread updates it or in what
-order bodies are visited. A build that draws from a shared generator — even deterministically seeded —
+order bodies are visited. A build that draws from a shared generator, even deterministically seeded , 
 breaks this, because the number of draws per body would depend on the partition.
 
 ### 8. Thread count is configuration; a serial path stays
@@ -93,7 +93,7 @@ histogram merge is cheap (it is a prefix sum over cells, not over bodies), and t
 been paid for by the SIMD work, which needed the same discipline.
 
 **Neutral.** Invariant 2 declines to make neighbour order public. If it later becomes public, the bucket
-layout in the contract and the parallel path must preserve it — which it does anyway, because the parity
+layout in the contract and the parallel path must preserve it, which it does anyway, because the parity
 harness compares sequences.
 
 ## Alternatives considered
@@ -104,7 +104,7 @@ diverging replay. The parity harness would then need a tolerance, and a toleranc
 is how determinism is lost.
 
 **Atomic slot allocation with a shared cursor.** Rejected by invariant 3. It is the standard lock-free
-build and it is not wrong *in general* — it is wrong here because it makes output order a function of
+build and it is not wrong *in general*, it is wrong here because it makes output order a function of
 thread scheduling, and this crate's entire published performance record is defended by replay.
 
 **Partition by entity index instead of by cell.** Considered and rejected: an entity's cell requires a
@@ -120,8 +120,8 @@ competitive gap names. The baseline task exists to make the decision measurable 
 
 ## References
 
-- `benches/spatial.rs` — the serial baseline this phase is measured against, with build, query and
+- `benches/spatial.rs`, the serial baseline this phase is measured against, with build, query and
   kernel separable.
 - ADR 0001 (identifiers and streams), ADR 0004 (determinism), ADR 0009 (virtual-cost scheduler),
   ADR 0021 (multi-band scaling), ADR 0024 (SIMD layout and parity), ADR 0031 (cell sizing).
-- `plan.phase3.toml` — the tasks that implement this, each naming the test that holds its invariant.
+- `plan.phase3.toml`, the tasks that implement this, each naming the test that holds its invariant.

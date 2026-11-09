@@ -1,4 +1,4 @@
-# 0042 — Explain on demand, draw nothing, fuzz the decoders
+# 0042, Explain on demand, draw nothing, fuzz the decoders
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -25,15 +25,15 @@ The shared shape: each answer is expensive, rare, and must not be on the hot pat
 ### 1. Explain is a function, not a component
 
 `explain_npc(&mut World, Entity) -> Result<String, ExplainError>` walks the entity's
-components — identity, tier, think weight, tree size and cursor depth, mood, needs, group,
-every blackboard slot sorted by key, memory row — and formats one human-readable block.
+components, identity, tier, think weight, tree size and cursor depth, mood, needs, group,
+every blackboard slot sorted by key, memory row, and formats one human-readable block.
 
 It takes `&mut World` because the answer spans components no single system owns, and it
 allocates a `String` because the consumer is a log line, a test assertion or a debug
 overlay. That is affordable precisely because nothing calls it per frame: the budget is
 "when a human asks".
 
-The alternative — a `WhyDidThat` component kept up to date every tick — would cost every
+The alternative, a `WhyDidThat` component kept up to date every tick, would cost every
 NPC every frame to answer a question about one NPC per playtest.
 
 ### 2. The overlay is data; the crate draws nothing
@@ -51,15 +51,15 @@ would put a renderer in a crowd crate that deliberately has none.
 
 Two layers, because one of them is not enough:
 
-- **`fuzz/`** — three libFuzzer targets (`save_decode`, `tree_ron`, `dialog_ron`) with the
+- **`fuzz/`**, three libFuzzer targets (`save_decode`, `tree_ron`, `dialog_ron`) with the
   contract "error, never panic, never allocate wildly". Coverage-guided, nightly, run by
   hand or on a schedule.
-- **`tests/fuzz_decoders.rs`** — the same contract on stable, with deterministic
+- **`tests/fuzz_decoders.rs`**, the same contract on stable, with deterministic
   generators: every truncation of a valid file, one flipped bit per sampled byte, a lying
   header and version, 512 pseudo-random byte strings. These run in CI on every push.
 
 The stable suite earns its place by being the layer that cannot be forgotten. It also
-catches the specific failure that matters most for saves — a decoder that accepts a
+catches the specific failure that matters most for saves, a decoder that accepts a
 *truncated* file, which is what a half-flushed write or a killed process produces. The
 test asserts that **zero** truncations decode, and that every successful decode can be
 re-encoded and decoded again, which is the save/load/save cycle a player actually performs.

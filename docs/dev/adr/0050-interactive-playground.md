@@ -1,4 +1,4 @@
-# ADR 0050 — Exploring the playground without a window
+# ADR 0050, Exploring the playground without a window
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -14,7 +14,7 @@ be inspected, but not *explored*. A person looking at `district.png` cannot walk
 shows, and a person evaluating the crowd cannot see it move.
 
 Two front ends were asked for: interactive camera controls, or a command-line playback mode. There is
-also a candidate library for the first — `bevy-archie`, another crate by the same author — and a
+also a candidate library for the first, `bevy-archie`, another crate by the same author, and a
 second request that came with it: measure the CPU cost of the software rasteriser against a wgpu
 pipeline.
 
@@ -38,13 +38,13 @@ constraint is not a sandbox quirk, either: the same is true of CI, of a remote s
    `cols × rows` terminal shows `cols × rows·2` square pixels at roughly 20 kB a frame. No image
    protocol is assumed, because half of the terminals people actually use do not have one.
 4. **A draw budget, not a smaller scene.** The interactive path changes the *shots*, not the world:
-   420 bodies inside 240 m, ruins inside 300 m, triangles under 0.75 px dropped, and — the change that
-   mattered — anything past 24 m drawn as a two-triangle camera-facing billboard. The same scene at
+   420 bodies inside 240 m, ruins inside 300 m, triangles under 0.75 px dropped, and, the change that
+   mattered, anything past 24 m drawn as a two-triangle camera-facing billboard. The same scene at
    full detail costs 850 ms a frame at 600×375 and about 1,100 ms at the district view's own
    resolution; the budget costs 19.0 ms at 112×72, which is 53 fps, and 38 ms in a real 112×88-pixel
    terminal, which is 26 fps measured.
 5. **Playback is the same loop with a camera on a rail.** `--play N` steps the scripted flight, writes
-   a PNG per frame plus `playback.json`, and needs no tty — so the feature can be exercised in CI, and
+   a PNG per frame plus `playback.json`, and needs no tty, so the feature can be exercised in CI, and
    the images can be assembled into a video without a screen recorder.
 6. **`bevy-archie` is not wired in, and the seam is named.** Archie is a windowed, gamepad-and-keyboard
    front end: it needs a window, and the crate in this environment cannot open one. What it needs from
@@ -86,7 +86,7 @@ the GPU work, which cannot be measured without a GPU. Read the table as two fact
 - The software path spends 850 ms on the full-detail frame and 19.0 ms on the terminal frame, because
   everything a GPU would parallelise it does on one core, one triangle at a time.
 
-The ratio — 550× at terminal size, 25,000× at full detail — is not "wgpu is faster." It is the shape
+The ratio, 550× at terminal size, 25,000× at full detail, is not "wgpu is faster." It is the shape
 of the cost: per-pixel and per-triangle work moves to the device, and the CPU keeps a fixed,
 population-proportional cost that the impostor budget also attacks (a body past 24 m is two triangles
 instead of 11,000).
@@ -107,7 +107,7 @@ which is why the benchmark keeps both cases.
   the quad claiming an increasing share of the pixels while the mesh gives its own share up. The fade
   is an 8 by 8 ordered dither resolved per pixel (`Renderer::triangle_coverage`), not a blend, and a
   defect rather than a taste decided that: the first implementation composited a faded mesh, which
-  turns the depth write off, and a body then stops occluding *itself* — a hidden facet overpainted a
+  turns the depth write off, and a body then stops occluding *itself*, a hidden facet overpainted a
   visible one and faded bodies went blotchy. Coverage keeps every fragment opaque, so a fading body
   still writes depth, still hides its own back faces, and every pixel of the dissolve belongs to
   exactly one representation. The price is a hole or two at the silhouette, where the mesh has given a
@@ -115,9 +115,9 @@ which is why the benchmark keeps both cases.
   zero while the steered front end sets it: at 112 cells a body is three or four pixels and the
   dissolve is invisible; on a 300-cell terminal it is the difference between a pop and a fade. The band
   costs one comparison per pixel and a second draw for the bodies inside it, and the interactive frame
-  measures the same either way — 19.39 ms with the band against 19.63 ms without, which is this
+  measures the same either way, 19.39 ms with the band against 19.63 ms without, which is this
   machine's noise floor (see `docs/dev/tuning/performance.md`). The distance is eye to feet, not to silhouette, so
-  a tall body crosses a fraction late — under a pixel at 24 m.
+  a tall body crosses a fraction late, under a pixel at 24 m.
 - **Five tests pin the switch instead of leaving it to inspection.** The hard switch is monotone in the
   threshold and exact at two triangles per billboard; the quad's projection matches the camera's own
   matrix to within 2.5 px at a 0.26 width-to-height ratio; a band of zero is byte-for-byte the hard
@@ -140,7 +140,7 @@ which is why the benchmark keeps both cases.
 
 ## Amendment, 2026-11-06: the machine grew a GPU, and so did the playground
 
-The decision above stands — the interactive front end is a terminal client over a framebuffer, and
+The decision above stands, the interactive front end is a terminal client over a framebuffer, and
 the software rasteriser stays the artefact producer. Two of its premises have changed, and a record
 that quietly keeps them would be wrong.
 
@@ -149,8 +149,8 @@ that quietly keeps them would be wrong.
 loader finds `lvp_icd.json`. What it resolves to is `llvmpipe (LLVM 20.1.2, 128 bits)` with
 `device_type: Cpu`, and there is still no `/dev/dri` render node: this is a *software* Vulkan driver,
 not a graphics card. The sentence above about `libvulkan` and `libxkbcommon` being absent was true when
-it was written and is now false; the conclusion it supported — that no GPU frame time can be claimed
-here — is still true, for the narrower reason that the only adapter is a CPU.
+it was written and is now false; the conclusion it supported, that no GPU frame time can be claimed
+here, is still true, for the narrower reason that the only adapter is a CPU.
 
 **A second front end exists.** `demo-gpu/` renders the same city, crowd, meshes and `Shot` table
 through an instanced `wgpu` pipeline, with `Backend::{Auto, Vulkan, Gl, Noop}`. It shares the scenario
@@ -173,8 +173,8 @@ metres. Those three differences are the honest cost of the second front end bein
 than a replacement.
 
 Read those as a statement about `llvmpipe` and nothing else. The interesting part is not that a CPU
-Vulkan driver is about as fast as the software rasteriser — it is the same kind of work on the same
-kind of processor — but that throughput and latency are the same number here: with no separate
+Vulkan driver is about as fast as the software rasteriser, it is the same kind of work on the same
+kind of processor, but that throughput and latency are the same number here: with no separate
 processor, a frame has no pipeline to fill. That is also why an earlier version of this benchmark,
 which submitted frames without draining the queue, reported 992 ms for a case it called `encode`: it
 was measuring queue saturation, not encoding. The case names were changed to say what the loop does,
@@ -185,5 +185,5 @@ every command and executes none, so CI proves the pipeline state on a runner wit
 
 What this does **not** change: the shipped images in `docs/demo/` are still produced by the software
 rasteriser, the terminal client is still the interactive front end, and no claim is made about
-hardware frame times. What it does add is a measured reference for the day a real adapter appears —
+hardware frame times. What it does add is a measured reference for the day a real adapter appears , 
 the encode path is already written, tested and costed, and only the adapter line in the results changes.

@@ -1,4 +1,4 @@
-# 0015 — Waste is measured in integers and drawn outside the library
+# 0015, Waste is measured in integers and drawn outside the library
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -10,7 +10,7 @@ The store is bounded, so every row it holds is a row it cannot give to somebody
 else. Two kinds of waste fill it, both invisible to a game that does not look:
 
 1. **Rows that hold nothing.** Games enrol on spawn and remember on encounter.
-   Between those two moments — which for a wave of new arrivals is most of them —
+   Between those two moments, which for a wave of new arrivals is most of them , 
    the store is full of NPCs who have met nobody. Nothing is wrong with any single
    row; ten thousand of them is a store that cannot remember the captain.
 2. **Slots pointing at subjects that no longer exist.** A save file translates
@@ -44,8 +44,8 @@ behind a healthy-looking percentage.
 ### Where it lives
 
 `domain::telemetry` returns a [`Sample`] of plain integers from
-[`measure`]. `examples/registry_telemetry` simulates a world over twelve sessions —
-spawning eagerly, meeting rarely, retiring seven characters in two patches — prints a
+[`measure`]. `examples/registry_telemetry` simulates a world over twelve sessions , 
+spawning eagerly, meeting rarely, retiring seven characters in two patches, prints a
 table and writes an SVG with two panels: accumulation over time, and references per
 subject with retired ones marked.
 
@@ -86,7 +86,7 @@ written then will drop those relationships on the next load.
 
 The first run reported a fifth of arrivals meeting somebody when the fixture asked
 for two fifths, and half the subject identifiers never referenced. The cause was not
-the fixture's randomness — it was `MAX_SUBJECTS`, then 16: the store clamps its subject
+the fixture's randomness, it was `MAX_SUBJECTS`, then 16: the store clamps its subject
 stride, and the fixture's thirty-two subjects meant every encounter past the ceiling
 was silently rejected by `remember` returning `false`.
 
@@ -95,7 +95,7 @@ literal, so the tool cannot lie about the cap again. And the cap is worth statin
 where games will read it: the subject count is a hard ceiling, not a default (raised to
 sixty-four by ADR 0016), and a
 game that wants a player plus twenty regulars needs the subject list designed around
-it — which is a design consequence of the flat slot array in ADR 0010, not a bug in
+it, which is a design consequence of the flat slot array in ADR 0010, not a bug in
 it.
 
 ## Consequences

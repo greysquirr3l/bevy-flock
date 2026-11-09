@@ -1,4 +1,4 @@
-# Memory profile — the packed kernel, scalar and wide
+# Memory profile, the packed kernel, scalar and wide
 
 Measured 2026-11-04, sandbox x86_64, `memory_probe` example, `--release`.
 
@@ -65,7 +65,7 @@ cells each in insertion order, so the same 64-byte line serves four lanes rather
 agent, and the positions it reads are contiguous instead of scattered across the array.
 
 The 73% D1 miss rate on the scalar path is the number worth remembering. It means the old
-kernel spent three quarters of its data references *missing the L1 cache* — a linked list of
+kernel spent three quarters of its data references *missing the L1 cache*, a linked list of
 indices walked in insertion order, re-reading positions that lie in random array order. The
 arithmetic in that kernel was almost irrelevant; the layout was everything.
 
@@ -92,7 +92,7 @@ asks it several times a tick from arbitrary branches, so the answer is lifted ou
 `adapters::primary::memory_bridge` writes the strongest subject's valence, familiarity and
 encounter flags into three blackboard slots (`KEY_MEMORY_*`), and
 `behavior::memory_leaves::Remembered::read` turns them into one small struct with three
-predicates — `is_known`, `is_friend`, `is_grudge`.
+predicates, `is_known`, `is_friend`, `is_grudge`.
 
 Three rules make the view safe to read blindly:
 

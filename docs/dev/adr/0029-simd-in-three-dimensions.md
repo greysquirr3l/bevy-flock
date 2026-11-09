@@ -1,4 +1,4 @@
-# ADR 0029 — SIMD against the three-dimensional kernel: measured, and not adopted
+# ADR 0029, SIMD against the three-dimensional kernel: measured, and not adopted
 
 **Status:** Rejected for the crowd kernel; the harness stays (2026-11-04)
 **Related:** ADR 0023 (SIMD in the band kernel), ADR 0026 (cell-major crowd kernel), ADR 0028 (3D)
@@ -16,8 +16,8 @@ I built it and measured it. The answer is no, and the code is not in the tree.
 A `simd`-gated variant of `Crowd::scan`: the same node order, the same window, the same model, but
 with a structure-of-arrays copy of the crowd (`x, y, z, vx, vy, vz, agent`) written during the
 counting sort, so four neighbours are contiguous in memory and can be loaded without gathering.
-The scan then masks four neighbours at a time — `keep = d² ≤ r² & id ≠ self`, weight by
-`keep.select(1, 0)`, accumulate centres, headings and the `1/d²` separation push — with a scalar
+The scan then masks four neighbours at a time, `keep = d² ≤ r² & id ≠ self`, weight by
+`keep.select(1, 0)`, accumulate centres, headings and the `1/d²` separation push, with a scalar
 tail of at most three neighbours per bucket. Parity was held two ways: `steer_reference` kept the
 scalar road reachable in the same process, and a test asserted identical `steered`, `isolated`,
 `cells` and `pairs`, and desired velocities within 1e-4.
@@ -52,7 +52,7 @@ Three reasons, and only the first is about the machine:
 3. **The SoA copy is a whole extra pass** over 10,000 agents and six components per frame, paid by
    every case whether or not any bucket fills a block.
 
-Even the dense case — 40-odd neighbours each, where lanes are nearly always full — loses 8%. That
+Even the dense case, 40-odd neighbours each, where lanes are nearly always full, loses 8%. That
 is the strongest evidence: the win in ADR 0023 was about sharing a neighbour across lanes, not
 about vector arithmetic as such.
 
@@ -78,5 +78,5 @@ The shape that could work is the band kernel's: block four agents of the same ce
 neighbour window once, and broadcast each neighbour into four lanes that are all doing real work.
 That needs agents clustered four-deep in a cell, which the default density does not provide and a
 hand-tuned cell size might. It would be a different algorithm, not a vectorised loop, and it should
-be justified by a profile showing the scan dominates — at 9.18 ms for 10,000 agents the scan does,
+be justified by a profile showing the scan dominates, at 9.18 ms for 10,000 agents the scan does,
 but the waste is in the rejection rate rather than in the arithmetic width.

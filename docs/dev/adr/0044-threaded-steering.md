@@ -33,7 +33,7 @@ indistinguishable from code that does not use it.
 
 A frame is cut into contiguous slices of agents and the slices are handed to the ECS compute pool.
 
-1. `Crowd` grows a [`SteeringRoad`] with four variants — `Auto`, `Wide`, `Threads`, `Scalar` — and
+1. `Crowd` grows a [`SteeringRoad`] with four variants, `Auto`, `Wide`, `Threads`, `Scalar`, and
    `steer()` dispatches on it. `Auto` ships: threads when the crowd and the pool are worth it, the
    wide road otherwise. The road is set from `BoidsConfig::with_road`, so a game can pin it.
 2. The per-agent step is factored into `steer_agent`, called by both the scalar loop and the
@@ -60,10 +60,10 @@ All four roads on the same host (6 vCPU, `--locked`, release, 20 samples, `--war
 
 | Road | 10,000 agents | 100,000 agents |
 | --- | --- | --- |
-| `wide` — the old default | 8.48 ms | 84.05 ms |
-| `scalar` — reference, one thread | 9.73 ms | 92.99 ms |
-| `threads` — reference, six threads | 4.31 ms | 30.00 ms |
-| `auto` — what ships | **4.23 ms** | **29.61 ms** |
+| `wide`, the old default | 8.48 ms | 84.05 ms |
+| `scalar`, reference, one thread | 9.73 ms | 92.99 ms |
+| `threads`, reference, six threads | 4.31 ms | 30.00 ms |
+| `auto`, what ships | **4.23 ms** | **29.61 ms** |
 
 Against the road this supersedes, `Auto` is 2.0× faster at 10,000 agents and 2.8× at 100,000. The
 frame-level figures in `docs/dev/tuning/performance.md` move accordingly. Ten thousand agents now cost a
@@ -112,9 +112,9 @@ for the bandwidth reason above.
 
 ## See also
 
-- ADR 0009 — virtual-cost stride scheduler: the same principle, applied to *when* work runs rather
+- ADR 0009, virtual-cost stride scheduler: the same principle, applied to *when* work runs rather
   than *where*.
-- ADR 0026 — the cell-major kernel that defined the per-agent step this splits.
-- ADR 0030, ADR 0031 — the transposed wide road and the cell sizing this supersedes as the default.
-- `docs/dev/tuning/research/competitive-analysis.md` — the task-pool guidance this follows, and the gaps that
+- ADR 0026, the cell-major kernel that defined the per-agent step this splits.
+- ADR 0030, ADR 0031, the transposed wide road and the cell sizing this supersedes as the default.
+- `docs/dev/tuning/research/competitive-analysis.md`, the task-pool guidance this follows, and the gaps that
   remain.

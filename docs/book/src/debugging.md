@@ -78,7 +78,7 @@ the cause is one of:
 - **Something read the clock.** `Instant::now` in a leaf, a system or a provider.
 - **Something iterated a `HashMap`.** Iteration order of a hash map is not a contract.
 - **Something used a global RNG.** `rand::thread_rng` is not seeded by the world.
-- **Something depended on spawn order** without using the seeded stream — an `Entity` id is
+- **Something depended on spawn order** without using the seeded stream, an `Entity` id is
   not stable across runs, an `NpcId` is.
 - **Something used `f32` transcendentals** compiled differently; the crate uses `libm` for
   exactly this reason.

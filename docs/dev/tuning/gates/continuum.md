@@ -6,7 +6,7 @@ machine, and every gate the code cannot yet attempt is marked open rather than a
 | # | Gate | Target | Measured | Status |
 | --- | --- | --- | --- | --- |
 | 1 | 1M ambient, advection stride | < 0.5 ms | **0.315 ms** | **PASS** |
-| 1 | Manifest 2,000 identities | — | 10.5 µs | **PASS** |
+| 1 | Manifest 2,000 identities |, | 10.5 µs | **PASS** |
 | 2 | Conservation over 10,000 strides | exact | exact | **PASS** (unit test) |
 | 3 | Determinism of manifest ids | exact | exact | **PASS** (unit test) |
 | 4 | Parity vs full simulation | 1% cells, 5% velocity | passes | **PASS** | `tests/band_continuity.rs` |
@@ -27,7 +27,7 @@ with advection paid on its stride:
 | 5,000 manifested | **9.47 ms** |
 
 Advection contributes 0.315/8 ≈ 0.04 ms amortised. The other 9.4 ms is the crowd path on
-5,000 entities — about **1.9 ms per 1,000 steered NPCs**, which is consistent with the
+5,000 entities, about **1.9 ms per 1,000 steered NPCs**, which is consistent with the
 earlier `flock_frame` numbers (1,000 → 1.0 ms, 10,000 → 18.4 ms).
 
 So the 5,000-manifested target cannot be met by folding harder. Folding 95,000 agents out
@@ -82,13 +82,13 @@ below it is now measured.
 ## Gate 8 closed (2026-11-04)
 
 The band plugin (ADR 0020) is wired: 100,000 inhabitants with 5,000 manifested measure
-**3.37 ms**, and 250,000 measure **3.37 ms** — the frame is flat in total population because
+**3.37 ms**, and 250,000 measure **3.37 ms**, the frame is flat in total population because
 it depends on the band, not the world. ADR 0021 takes this past 250,000 with concentric
 bands at independent cadence.
 
 ## ADR 0021 gate (2026-11-04)
 
-1,000,000 inhabitants — 5,000 near, 15,000 mid, 980,000 as density — measure **5.02 ms**,
+1,000,000 inhabitants, 5,000 near, 15,000 mid, 980,000 as density, measure **5.02 ms**,
 under the 6 ms gate, with the near band's agent count unchanged from the 100,000 case.
 
 Two defects surfaced on the way, both invisible without the number:
@@ -114,7 +114,7 @@ Two real defects fell out, neither of which any unit test could have found:
 
 1. **Anchors were steered.** `band_steer` queried every `BandAgent`, anchor included, and
    the packed grid clamps a position outside its extent into the edge cell. Gate 6 watched
-   an anchor at x = 10,256 become x = 16 in a single tick — a story character teleported
+   an anchor at x = 10,256 become x = 16 in a single tick, a story character teleported
    ten kilometres by the crowd system. Anchors are now excluded from both steering passes.
 2. **The field could not cover its own fold radius.** With `extent` 512 and a fold radius of
    290 m, no cell existed beyond 256 m from centre, so an agent that walked out had nowhere
@@ -124,7 +124,7 @@ Two real defects fell out, neither of which any unit test could have found:
 
 The harness left one finding open: with the default configuration the band manifested 256
 agents a tick and folded 256 the next. Population was conserved and every gate passed, which is
-exactly why it survived five gate reviews — the *work* was cancelling, not the population. Gate
+exactly why it survived five gate reviews, the *work* was cancelling, not the population. Gate
 9 sidestepped it by folding with `target: 0`.
 
 Reproduced and root-caused, it was three defects:

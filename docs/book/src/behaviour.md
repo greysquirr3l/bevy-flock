@@ -47,7 +47,7 @@ Three properties the tests pin:
 
 - **A tick never allocates** (`tests/tree_no_alloc.rs` counts allocations with a custom global
   allocator).
-- **Depth is bounded at compile time** — a tree deeper than `MAX_DEPTH` fails to compile with
+- **Depth is bounded at compile time**, a tree deeper than `MAX_DEPTH` fails to compile with
   an error naming the depth, rather than blowing the stack at runtime.
 - **A panic in a leaf is a panic**, not a silently failed branch. Leaf authors get to be
   wrong loudly.
@@ -103,7 +103,7 @@ selector((
 
 Hearing works the same way with `StimulusSource::sound`, which is not narrowed by the sight cone
 and ignores occlusion: a shout through a wall is still a shout. Anything the tree needs beyond
-that — "is it my team", "is it the alarm bell" — is a filter at the leaf, which keeps the hot loop
+that, "is it my team", "is it the alarm bell", is a filter at the leaf, which keeps the hot loop
 free of per-game predicates.
 
 ## Utility scoring
@@ -126,7 +126,7 @@ let score = entry.set.score(&blackboard);
 ```
 
 - **Curves** shape a raw input into an opinion: linear, exponential, inverse, logistic, step.
-- **Inhibition** lets one option *cancel* another rather than merely outscore it — a
+- **Inhibition** lets one option *cancel* another rather than merely outscore it, a
   "flee" option with an inhibition against "eat" means a frightened NPC does not eat, no
   matter how hungry.
 - **Count compensation** divides an option's score by how many NPCs already chose it, which
@@ -189,8 +189,8 @@ world and you get the same afternoon.
 - **Barks** are a separate, bounded channel: a queue with per-category cooldowns and a
   per-frame cap, so a market of four hundred people does not produce four hundred lines when
   the player walks in. Two, and the rest are dropped and counted.
-- **`DialogProvider`** is the seam for a slow line source — a language model, a localiser, a
-  table that lives on disk — with a reply queue drained on the tick, so latency never blocks
+- **`DialogProvider`** is the seam for a slow line source, a language model, a localiser, a
+  table that lives on disk, with a reply queue drained on the tick, so latency never blocks
   a frame.
 
 ## Groups and factions

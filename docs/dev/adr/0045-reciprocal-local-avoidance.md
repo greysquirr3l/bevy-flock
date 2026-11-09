@@ -1,4 +1,4 @@
-# 0045 — Reciprocal local avoidance: half the responsibility each
+# 0045, Reciprocal local avoidance: half the responsibility each
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -10,8 +10,8 @@
 Boids separation is a force. It pushes agents apart *after* they are already too close, it fights
 cohesion and seek for the same velocity budget, and it has no idea where anyone is going: two
 agents walking at each other in a corridor both slow down (or neither does), and the pair ends up
-sharing space. Every engine a player compares us to — Unreal's Detour crowd, Unity's
-NavMeshAgent avoidance, RVO2, ORCA — solves this as a *velocity* problem over a time horizon.
+sharing space. Every engine a player compares us to, Unreal's Detour crowd, Unity's
+NavMeshAgent avoidance, RVO2, ORCA, solves this as a *velocity* problem over a time horizon.
 Without it, a crowd library looks wrong in the one situation players test first: walking at
 someone.
 
@@ -38,7 +38,7 @@ For a pair `(a, b)` with positions `pa, pb`, intended velocities `va, vb` and pr
 6. Apply `va -= Δa · n`, `vb += Δb · n`, each clamped to `max_adjust`.
 
 Because each agent is corrected by its own share, the pair resolves at the combined rate without
-either agent needing to know what the other decided — the reciprocal assumption, and the reason
+either agent needing to know what the other decided, the reciprocal assumption, and the reason
 two agents do not both swerve the same way.
 
 In the kernel the pair is visited twice (once from each agent). Both visits compute the same

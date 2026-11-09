@@ -1,4 +1,4 @@
-# ADR 0033 — The group capping policy, and what CI validates about it
+# ADR 0033, The group capping policy, and what CI validates about it
 
 **Status:** Accepted (2026-11-05). Supersedes the policy sections of ADR 0032; the measurements stay
 there.
@@ -13,7 +13,7 @@ and it has to say which parts a machine checks.
 cap = clamp(1, nproc, floor(nproc / threads_per_task))
 ```
 
-Take `cap` tasks from a group at a time. `threads_per_task` is **measured, not assumed** — one run of
+Take `cap` tasks from a group at a time. `threads_per_task` is **measured, not assumed**, one run of
 the task through `scripts/group_cap.py --measure "<command>"`, which divides total CPU by wall clock.
 The two shapes that matter differ by 2× in the same group size:
 
@@ -71,7 +71,7 @@ than no tool.
 2. Re-derive: a finished task's dependants become eligible, which usually changes the group.
 3. Partition by file ownership (ADR 0032), and let exactly one task commit.
 4. `CARGO_TARGET_DIR` isolation is for tasks that must not share feature unification, or for a corrupt
-   cache — not for speed. Measured: 46 s isolated against 43 s shared.
+   cache, not for speed. Measured: 46 s isolated against 43 s shared.
 
 The plan stays capacity-blind on purpose. `depends_on` is a dependency graph; a schedule is a
 different artefact, and a plan that encoded wall-clock capacity would be wrong on every machine but
@@ -95,8 +95,8 @@ is the contract, and it fails the build on:
 
 **Capacity is deliberately not a CI gate.** Runners have two to four cores, so any strict check would
 fail there and be disabled within a week; `--strict` exists for a developer machine, where the cores
-are the ones being scheduled. What CI can check objectively — that the rule matches its evidence, that
-the plan parses, that groups derive — it checks on every push.
+are the ones being scheduled. What CI can check objectively, that the rule matches its evidence, that
+the plan parses, that groups derive, it checks on every push.
 
 ## Consequences
 

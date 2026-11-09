@@ -1,4 +1,4 @@
-# 0041 — Memory reaches a tree through three integers, not a store handle
+# 0041, Memory reaches a tree through three integers, not a store handle
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -12,7 +12,7 @@
 The store from ADR 0010 answers "what does this NPC remember about that person" in
 `O(subjects)` per row. A behaviour tree asks a different question, several times per
 tick, from arbitrary branches: *do I know you, do I like you, did you hurt me?* Handing
-the tree a `&MemoryStore` would answer it correctly and ruin two earlier decisions — the
+the tree a `&MemoryStore` would answer it correctly and ruin two earlier decisions, the
 tree's tick would stop being allocation-free and slot-bounded (ADR 0035), and leaves
 would need to know about decay, ticks and subject identity to interpret what they read.
 
@@ -55,8 +55,8 @@ the leaves would have forced every downstream game to fork its trees per feature
 ## Enrolment is by proximity and budget
 
 `enrol_the_present` shortlists the NPCs that have seen a player within `publish_radius`,
-sorts them with `domain::memory::enrolment_order` — the same comparator `select_enrolment`
-uses, exported so the ECS path cannot drift from the pure one — and creates at most
+sorts them with `domain::memory::enrolment_order`, the same comparator `select_enrolment`
+uses, exported so the ECS path cannot drift from the pure one, and creates at most
 `enrol_budget` rows per tick. Two consequences, both deliberate:
 
 - **Rows are a resource, granted nearest-first.** A player who teleports into a packed
@@ -64,7 +64,7 @@ uses, exported so the ECS path cannot drift from the pure one — and creates at
   thousand-row spike in one frame.
 - **The store can be full and that is not an error.** `MemoryStore::enrol` returns `None`,
   the loop stops, and `MemoryBridgeStats::budget_bound` reports that the crowd outgrew its
-  memory. The alternative — evicting the oldest row — would delete the relationship the
+  memory. The alternative, evicting the oldest row, would delete the relationship the
   player spent the longest building.
 
 ## Clearing is not forgetting
@@ -96,5 +96,5 @@ Measured on the reference host (see `docs/dev/tuning/memory.md` and `docs/dev/tu
 - **No cross-save translation.** Identifier stability is ADR 0013's problem; the bridge
   publishes whatever the row holds after the registry has been applied at load.
 - **No per-subject detail.** The strongest subject wins. A game that needs "which of the
-  three players in front of me is the one who robbed me" must use the store directly —
+  three players in front of me is the one who robbed me" must use the store directly , 
   and accept the `O(subjects)` cost on the NPCs that matter.

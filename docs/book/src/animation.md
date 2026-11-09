@@ -4,8 +4,8 @@ The simulation moves bodies. Animation makes them look like they are walking rat
 the whole design of `bevy-flock-anim` follows from one refusal: it will not own your skeleton.
 
 You keep your rig, your clips, your `AnimationGraph` and your asset pipeline. The crate owns the
-numbers a crowd needs — how fast a stride is, when a body is turning on the spot, how far away a body
-can be before animating it is a waste — and applies them through your graph. That is the contract in
+numbers a crowd needs, how fast a stride is, when a body is turning on the spot, how far away a body
+can be before animating it is a waste, and applies them through your graph. That is the contract in
 ADR 0052, and this chapter is how you adopt it.
 
 ## The three interfaces
@@ -14,7 +14,7 @@ ADR 0052, and this chapter is how you adopt it.
 | --- | --- | --- | --- |
 | `Locomotion` | `bevy-flock` (core) | the simulation | speed, turn rate, acceleration and distance travelled, derived from the velocity integration wrote |
 | `LocomotionProfile` | `bevy-flock-anim` | you, as data | validated authored numbers: walking speed, running speed, stride, turn band, LOD distances |
-| `ClipSlot` | `bevy-flock-anim` | the crate | four names — idle, walk, run, turn-in-place — that you map onto nodes in *your* graph |
+| `ClipSlot` | `bevy-flock-anim` | the crate | four names, idle, walk, run, turn-in-place, that you map onto nodes in *your* graph |
 
 The fourth thing is yours too: `ClipBindings`, the map from `ClipSlot` to `AnimationNodeIndex`. Only
 your code knows how your graph was built, so the crate refuses to guess.
@@ -44,8 +44,8 @@ clock, holds no state, allocates nothing, and takes `(speed, turn_rate)` in and 
 is why a replay at 20 fps and a replay at 200 fps produce the same pose at the same tick, and why the
 book can promise it: `replay_at_two_frame_rates_gives_identical_weights`.
 
-Where a transition cannot be a pure function — starting and stopping looks like a snap if the weight
-jumps — the crate spends *ticks*, not seconds:
+Where a transition cannot be a pure function, starting and stopping looks like a snap if the weight
+jumps, the crate spends *ticks*, not seconds:
 
 ```rust
 use bevy_flock_anim::BlendWindows;
@@ -107,7 +107,7 @@ root motion is the most common way an animation layer breaks a simulation.
 
 Gaze aims a two-bone chain at whatever cognition already selected, never at the camera directly: the
 aim comes from the stimulus set through `GazeAim`, so replacing perception does not break the face.
-Gestures are a channel on the blackboard — a behaviour leaf asks for one, `bevy-flock-anim` plays the
+Gestures are a channel on the blackboard, a behaviour leaf asks for one, `bevy-flock-anim` plays the
 clip at a weight the gesture's urgency sets, and the blend leaves it alone.
 
 ## The envelope, and what to do with it
@@ -115,7 +115,7 @@ clip at a weight the gesture's urgency sets, and the blend leaves it alone.
 At 2,000 bodies the blend costs about 0.09 ms per tick and the gaze solve about 0.18 ms on the
 reference machine in `docs/dev/tuning/performance.md`; at 10,000 the blend is 0.94 ms with the LOD band on and
 0.28 ms with the camera outside the plaza. The plan's 0.3 ms ceiling for blend plus gaze at 2,000 is
-*not* met — the measured pair is 0.55 ms — and the same document says so with the per-case table and
+*not* met, the measured pair is 0.55 ms, and the same document says so with the per-case table and
 names the two causes: per-bone sparse-set lookups in the gaze solve and hash-map node lookups in the
 blend. If you need the budget today, cull harder: the band is what turns 0.94 ms into 0.28 ms.
 

@@ -1,4 +1,4 @@
-# ADR 0039 — The world director decides, and something else applies
+# ADR 0039, The world director decides, and something else applies
 
 **Status:** Accepted
 **Date:** 2026-11-05

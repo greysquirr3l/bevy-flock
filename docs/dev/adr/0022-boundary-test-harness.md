@@ -11,11 +11,11 @@ boundary* over time, not about what any single function returns. Parity, pop-in,
 at distance, allocation and fold completeness cannot be unit-tested honestly, because each
 is a property of a running world:
 
-- **Parity (4)** — the continuum's aggregate must agree with full simulation.
-- **Pop-in (5)** — a camera crossing the edge at speed must not spend a frame spawning.
-- **Anchoring (6)** — an anchored NPC at distance must still be an entity after 10,000 ticks.
-- **No allocation (7)** — a steady-state band frame must not touch the allocator.
-- **Fold completeness (9)** — a folded NPC must match no query.
+- **Parity (4)**, the continuum's aggregate must agree with full simulation.
+- **Pop-in (5)**, a camera crossing the edge at speed must not spend a frame spawning.
+- **Anchoring (6)**, an anchored NPC at distance must still be an entity after 10,000 ticks.
+- **No allocation (7)**, a steady-state band frame must not touch the allocator.
+- **Fold completeness (9)**, a folded NPC must match no query.
 
 Each is also the kind of invariant that fails quietly: a leak shows up as a stutter three
 minutes in, a popping boundary as a visual artefact nobody files, an allocation as a
@@ -30,7 +30,7 @@ library, because it is a test rig and not a feature.
 ### The camera
 
 A sine path across the band edge rather than a straight line: `x = centre + A·sin(ωt)`.
-A straight line leaves the field, after which nothing folds because nothing is in a cell —
+A straight line leaves the field, after which nothing folds because nothing is in a cell , 
 a test that measures the absence of the thing it is testing. Oscillation crosses the
 manifest and fold radii repeatedly, which is where the defects are.
 
@@ -61,6 +61,6 @@ The harness is the first thing in this repository that tests *time*: 10,000 tick
 It is deliberately headless and single-threaded, so a failure is reproducible rather than
 intermittent.
 
-What it cannot prove is visual quality — that a manifested NPC looks like it was always
+What it cannot prove is visual quality, that a manifested NPC looks like it was always
 there. That is the one part of pop-in that stays a human judgement, and this record says so
 rather than pretending a counter covers it.

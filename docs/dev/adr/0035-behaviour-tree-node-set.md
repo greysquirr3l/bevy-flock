@@ -1,4 +1,4 @@
-# ADR 0035 — The behaviour tree node set, and why leaves are shared
+# ADR 0035, The behaviour tree node set, and why leaves are shared
 
 **Status:** Accepted
 **Date:** 2026-11-05
@@ -19,16 +19,16 @@ are boxed per NPC cannot be shared across a crowd that all run the same brain.
 
 ## Decision
 
-Ship six composites and four decorators — `Sequence`, `Selector`, `Parallel`,
+Ship six composites and four decorators, `Sequence`, `Selector`, `Parallel`,
 `SequenceWithMemory`, `SelectorWithMemory`, `RandomSelector`; `Inverter`,
-`Succeeder`, `Repeat`, `Timeout` — and no more. A node that only one game needs is a
+`Succeeder`, `Repeat`, `Timeout`, and no more. A node that only one game needs is a
 node that game should write, which is why `LeafBehavior` is public and the node set is
 not extensible by design.
 
 Leaves are **stateless and shared**. `LeafBehavior::tick` takes `&self`: one instance
 serves every NPC running it. All per-NPC memory lives in the `Blackboard`, keyed by
 `BlackboardKey`, bounded at sixteen slots. A leaf that kept a countdown in a field
-would give the whole crowd one countdown — a bug that is invisible until two NPCs move
+would give the whole crowd one countdown, a bug that is invisible until two NPCs move
 in lockstep, which is why the contract is stated in the trait's documentation rather
 than left as folklore.
 

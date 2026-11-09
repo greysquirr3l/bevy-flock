@@ -1,4 +1,4 @@
-# ADR 0025 — The manifest window is a disc inside the fold radius
+# ADR 0025, The manifest window is a disc inside the fold radius
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
@@ -32,13 +32,13 @@ just folded.
 1. **The manifest window was square.** It walked Chebyshev rings out to
    `ceil(radius / spacing)` cells, which reaches `radius * sqrt(2)` into the corners: 1.41
    radius against a 1.15 radius fold bound. At the default geometry, 2,576 of the 12,517 cells
-   the window visited were between the two radii and **1,548 were beyond the fold radius** — so
+   the window visited were between the two radii and **1,548 were beyond the fold radius**, so
    a spawn there was born outside the band and folded on the next tick.
 2. **`seed_field` filled the field from the origin and stopped when it ran out.** 40,000 people
    over a 256×256 field is 0.61 per cell, so the utility piled them into the first forty
    thousand cells in row-major order: everything within about 150 rows of the origin. A camera
    at the centre of the map stood in empty country, the manifest found nothing within its
-   radius, and the *square* window kept reaching until it found someone — usually far away.
+   radius, and the *square* window kept reaching until it found someone, usually far away.
 3. **Nothing checked the spawn point against the fold bound at all.** Even a correct window
    would have let `fold_slack: 1.0` spawn agents exactly on the boundary, to be folded as soon
    as they were steered.
@@ -53,7 +53,7 @@ when there is density near the camera, and every fixture that used `seed_field` 
 - walks Chebyshev rings for iteration order only, and **skips any cell whose centre is farther
   than `radius` from the focus** (squared distance, no square root);
 - skips any cell whose centre is at or beyond `fold_radius`, which only bites when a caller
-  sets `fold_slack` to 1.0 — nobody is manifested onto ground they would immediately leave;
+  sets `fold_slack` to 1.0, nobody is manifested onto ground they would immediately leave;
 - breaks out of the ring walk once even the nearest point of a shell exceeds the radius;
 - spawns at the *same* point it vetted, so the check and the spawn cannot disagree.
 

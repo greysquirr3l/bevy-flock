@@ -1,4 +1,4 @@
-# ADR 0008 — Parse, don't validate, and no panic paths in library code
+# ADR 0008, Parse, don't validate, and no panic paths in library code
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -21,8 +21,8 @@ crash in a shipped game.
    is documented as being for provably-in-range literals.
 2. **Every error names the field, the value, and the valid range.**
 3. **No `unwrap`, `expect`, `panic!`, `todo!` or panicking index in library
-   code.** Where an invariant cannot be expressed in the type system — an
-   authored tree that is empty, a leaf id that does not exist — the engine fails
+   code.** Where an invariant cannot be expressed in the type system, an
+   authored tree that is empty, a leaf id that does not exist, the engine fails
    the evaluation or the registration, records it, and keeps simulating.
 4. **Tests may panic freely.** The crate-level `cfg_attr(test, expect(...))`
    says so once, rather than sprinkling `#[expect]` over every test module.
@@ -45,9 +45,9 @@ crash in a shipped game.
 
 ## Alternatives rejected
 
-- **Clamping silently** — the reason this ADR exists; it hides the bug.
-- **Panicking constructors** — a config typo becomes a crash in a shipped game,
+- **Clamping silently**, the reason this ADR exists; it hides the bug.
+- **Panicking constructors**, a config typo becomes a crash in a shipped game,
   and Bevy's plugin `build` cannot return a `Result`, so an invalid config would
   take down `App::new()` for a reason unrelated to the game.
-- **`Result` on everything, including infallible cases** — noise that trains
+- **`Result` on everything, including infallible cases**, noise that trains
   callers to ignore the error.

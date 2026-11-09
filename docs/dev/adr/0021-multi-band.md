@@ -7,13 +7,13 @@
 ## Context
 
 The band plugin meets gate 8: **3.37 ms** for 100,000 inhabitants with 5,000 manifested,
-and **3.37 ms** for 250,000 — flat, because the frame now depends on the band, not the world
+and **3.37 ms** for 250,000, flat, because the frame now depends on the band, not the world
 (`benches/band.rs`).
 
 Two ceilings appear past that. **Neighbours**: the packed kernel is bound by neighbours, not
 agents (10.92 ms for 5,000 in a 128 m square). **Radius**: `radius = sqrt(target / (density
 * PI))` grows with the square root of the target, so 250,000 manifested at the default
-density needs a 1788 m radius, and the cell grid must cover it — 800,000 cells at 4 m, or
+density needs a 1788 m radius, and the cell grid must cover it, 800,000 cells at 4 m, or
 9.6 MB, advected every stride.
 
 Raising density instead returns the neighbour problem. Neither knob alone scales.
@@ -44,7 +44,7 @@ Budget: near 2 ms, mid 1 ms, far 0.5 ms, total 3.5 ms for a million inhabitants.
 ## The gate
 
 1,000,000 inhabitants, 5,000 near, 15,000 mid, rest far: frame under 6 ms, and the near
-band's agent count unchanged from the 100,000 case — the flatness must survive the
+band's agent count unchanged from the 100,000 case, the flatness must survive the
 partition, or the bands have only moved the cliff.
 
 ## Rejected
@@ -59,6 +59,6 @@ partition, or the bands have only moved the cliff.
 
 ## Consequences
 
-Population becomes unbounded in the only sense that matters — a frame that does not grow —
+Population becomes unbounded in the only sense that matters, a frame that does not grow , 
 while individual presence stays capped at 20,000. The far band is density, so nothing there
 can be asked a question, which is ADR 0018's trade applied twice.

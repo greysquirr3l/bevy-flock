@@ -1,4 +1,4 @@
-# ADR 0024 — The packed layout, the ordering constraints, and how parity is proven
+# ADR 0024, The packed layout, the ordering constraints, and how parity is proven
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
@@ -41,7 +41,7 @@ and it is quoted in the README and the milestone sign-off.
 Array-of-structures (`Vec<Agent>` with a 24-byte struct) would be simpler and was rejected.
 The wide path loads four lanes with four scalar loads because the fields are already separated;
 an interleaved struct would need a gather per candidate, which is exactly the operation the
-measured cache profile says we cannot afford. This rejection is *argued*, not measured — the
+measured cache profile says we cannot afford. This rejection is *argued*, not measured, the
 SoA layout was chosen before the SIMD work existed, for the scalar kernel's sake, and the
 cache profile has since confirmed it.
 
@@ -53,7 +53,7 @@ constraints this imposes, and the guarantees that follow:
 - **Indices are stable for the life of the pack.** `push` appends; nothing renumbers. A game
   that stores `NpcId` → index mappings keeps them.
 - **A caller may mutate positions between ticks**, including teleporting an agent. The order is
-  rebuilt, so this is not corrupting — at worst a block is no longer spatially compact and
+  rebuilt, so this is not corrupting, at worst a block is no longer spatially compact and
   falls back to the scalar path for that block.
 - **Determinism requires the same insertion order and the same parameters.** The order is
   derived from the grid, which is derived from positions, which are integer-cell-quantised;

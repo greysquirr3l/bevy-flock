@@ -1,7 +1,7 @@
 # The Bevy playground: building and running it on Metal
 
 `playground/` draws the Ashfall city and its crowd through Bevy's own PBR pipeline in a window. This
-page is the operational half — how to build it, how to run it on a Mac, how to read what it prints,
+page is the operational half, how to build it, how to run it on a Mac, how to read what it prints,
 and what to do when a window opens onto nothing. The crate's own page,
 [`playground/README.md`](../../../playground/README.md), covers what is simulated there and which parts
 have tests.
@@ -28,7 +28,7 @@ The first build compiles Bevy's crates and takes a while; the second is a rebuil
 
 ### macOS, Metal specifically
 
-Nothing in the build is platform-specific — `wgpu` picks Metal on macOS — but three things are worth
+Nothing in the build is platform-specific, `wgpu` picks Metal on macOS, but three things are worth
 knowing before the first run:
 
 ```sh
@@ -69,14 +69,14 @@ cargo run --manifest-path playground/Cargo.toml -- --help
 
 The window is a running simulation, not a snapshot: each frame calls `Playground::tick(1)` and writes
 every body's position and yaw onto its entity, plus a 4 cm walk bob whose phase advances with the
-distance that body covered since the last frame — a stride is 1.5 m, two steps, one rise each.
+distance that body covered since the last frame, a stride is 1.5 m, two steps, one rise each.
 Scenery does not move: pylons, shelters, stalls and blocks are spawned without a link. `--ticks` only
 decides how dispersed the crowd is when the window opens.
 
 One tick per rendered frame, with the library's fixed timestep consuming the wall time since the last
 frame: the crowd crosses the city at the same speed regardless of frame rate, and only the smoothness
 changes. On a software rasteriser that is a quarter-second step per frame, which reads as coarse
-motion rather than as a different speed — worth knowing before judging a capture.
+motion rather than as a different speed, worth knowing before judging a capture.
 
 ## Reading the run
 
@@ -93,7 +93,7 @@ ashfall-playground: 300 frames at 1280x800 — median 4.1 ms (243.9 fps), mean 5
 ```
 
 The **median** is the number to quote. The mean carries the first frames, which include shader
-compilation and pipeline creation — on a cold start that is tens of milliseconds per frame for the
+compilation and pipeline creation, on a cold start that is tens of milliseconds per frame for the
 first handful, and it will dominate a short run. The **p95** is the stutter ceiling: a walk through a
 crowd is judged by its worst frames, not its best.
 
@@ -128,13 +128,13 @@ failure mode is a black or flat-coloured window with no error.
 
 | Symptom | Missing |
 |---|---|
-| Everything draws, all of it black | `bevy_light::LightPlugin` — no `GlobalAmbientLight`, and `PbrPlugin` panics trying to read it |
-| A panic in `VolumetricFogPlugin::build` | `bevy_mesh::MeshPlugin` — no `Assets<Mesh>` before the pipeline exists |
-| A perfect scene that draws nothing at all | `bevy_camera::CameraPlugin` — no visibility propagation, so every `ViewVisibility` stays false |
+| Everything draws, all of it black | `bevy_light::LightPlugin`, no `GlobalAmbientLight`, and `PbrPlugin` panics trying to read it |
+| A panic in `VolumetricFogPlugin::build` | `bevy_mesh::MeshPlugin`, no `Assets<Mesh>` before the pipeline exists |
+| A perfect scene that draws nothing at all | `bevy_camera::CameraPlugin`, no visibility propagation, so every `ViewVisibility` stays false |
 | `Res<ClearColor>` failed validation | nothing inserts it for you; the crate sets it to the fog's colour |
 | `TonyMcMapFace tonemapping requires the tonemapping_luts feature` | the camera asks for the default tonemapper; this crate selects `Tonemapping::AcesFitted`, which is a curve in code |
 | `Plugins<_>` is not satisfied | more than sixteen plugins in one `add_plugins` tuple; split it |
-| A glTF character spawns — `Mesh3d`, skin, bones all present — and draws nothing | `bevy_pbr`'s `bevy_gltf` feature, plus `GltfPlugin` added *before* `PbrPlugin`. `PbrPlugin` is what registers the hook that attaches `MeshMaterial3d` to a glTF primitive, and it registers it into the extension registry `GltfPlugin` owns: without the feature the primitives come out material-less, and in the wrong order the hook is installed into a registry nobody reads |
+| A glTF character spawns, `Mesh3d`, skin, bones all present, and draws nothing | `bevy_pbr`'s `bevy_gltf` feature, plus `GltfPlugin` added *before* `PbrPlugin`. `PbrPlugin` is what registers the hook that attaches `MeshMaterial3d` to a glTF primitive, and it registers it into the extension registry `GltfPlugin` owns: without the feature the primitives come out material-less, and in the wrong order the hook is installed into a registry nobody reads |
 | `world contains the unregistered type ...` when a scene instantiates | a dynamic scene re-applies components as reflect data, which does not run required-component insertion; register every component the scene can carry, `ChildOf` and `Children` included |
 
 The order is Bevy's own: task pool and log, then time/transform/input, then window, assets, image,
@@ -151,7 +151,7 @@ advance, wrapping, and the bob's amplitude), and the refusal of a capture format
 encode.
 
 The window itself is not covered, and cannot be: it needs a display and a driver. The capture above
-is the closest thing to a test — it was produced by running the real binary on a real Vulkan driver
+is the closest thing to a test, it was produced by running the real binary on a real Vulkan driver
 (`llvmpipe`, Mesa 25.2) under Xvfb, at 1280x800, with 2,000 simulated bodies, and it is committed so
 a regression that empties the frame is visible as an image rather than as a discussion. What it does
 **not** show: anti-aliasing quality, shadow filtering, or a frame time that means anything. Those are
@@ -165,7 +165,7 @@ cannot step, and no amount of keyframes fixes that.
 
 Two rigs ship, and the flag picks between them:
 
-- `--rig avatar` (default) loads the three Meshy characters in `demo/assets/npcs/rigged` — textured
+- `--rig avatar` (default) loads the three Meshy characters in `demo/assets/npcs/rigged`, textured
   mesh, 24 bones, one GLB per clip (`-idle`, `-walk`, `-run`). Bevy's glTF loader builds the scene,
   skeleton, skin and clips; the example rewrites each bone's `AnimatedBy` to its body so the blend
   and the gate see one entity per NPC. Default population is 300, because nine thousand triangles
@@ -198,9 +198,9 @@ xvfb-run -a ./target/debug/skinned --rig avatar --npc 40 --frames 140 --assert-m
 ```
 
 The numbers are the gate: something moved, something blended walk or run above half weight, a
-gesture cue reached a clip, and someone aimed their gaze. The last two are the mannequin's to prove —
+gesture cue reached a clip, and someone aimed their gaze. The last two are the mannequin's to prove , 
 its clip set contains the gesture and gaze channels, while an avatar rig has Meshy's idle, walk and
-run and no clip bound to a cue — so the gate asks each rig only for what that rig can actually show.
+run and no clip bound to a cue, so the gate asks each rig only for what that rig can actually show.
 Drop `--assert-motion` and the same line prints as a measurement instead of a verdict.
 
 The skinned example also prints `peak foot slide` in its headless summary. It is the largest
@@ -208,4 +208,4 @@ single-tick distance a body covered that its stride clips did not account for, m
 simulation tick rather than a frame. A straight walk reports under a millimetre over three hundred
 ticks; the plaza reports tens of millimetres because bodies are constantly starting and stopping, and
 the start window is what trades that slide for the absence of a pop. A demo image is not the check for
-this — the summary line is.
+this, the summary line is.

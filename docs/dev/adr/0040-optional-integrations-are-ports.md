@@ -1,4 +1,4 @@
-# ADR 0040 — Optional integrations are ports, not dependencies
+# ADR 0040, Optional integrations are ports, not dependencies
 
 **Status:** Accepted
 **Date:** 2026-11-05
@@ -47,7 +47,7 @@ none of them pulls an engine dependency in.
 ## Alternatives considered
 
 * **Optional feature-gated adapters.** Tempting, and it turns every Avian release into a
-  patch release of this crate. Rejected on maintenance grounds, not on principle — a
+  patch release of this crate. Rejected on maintenance grounds, not on principle, a
   maintained integration is welcome as a separate crate that implements the port.
 * **A callback per integration.** Loses the typed contract and the object safety that
   make the bridge cheap to store.

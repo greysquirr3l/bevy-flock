@@ -2,7 +2,7 @@
 
 The crate is linted at one setting, in one place: `[lints]` in `Cargo.toml`. CI runs
 `cargo clippy --all-targets --all-features -- -D warnings`, and again with `--no-default-features`,
-so a warning anywhere — in `src`, `tests`, `benches` or `examples` — is a build failure.
+so a warning anywhere, in `src`, `tests`, `benches` or `examples`, is a build failure.
 
 This page says what is enabled, why each exception exists, and how the exceptions are policed.
 
@@ -50,10 +50,10 @@ Three lints are missing from that list on purpose: `raw_borrows_via_references`,
 
 The `lint-future` job closes that gap. It probes each of the three on a throwaway file with
 `+stable`, then runs `cargo +stable clippy --all-targets --all-features` denying the ones that exist
-— so the tree is already clean for them, and moving the pin is a version bump instead of a sweep. It
+,  so the tree is already clean for them, and moving the pin is a version bump instead of a sweep. It
 denies *only* those three: a newer stable also carries newer nursery lints, and a forward check that
 fails on tomorrow's diagnostics would be noise rather than a gate. Those are catalogued instead, each
-with its site and what it wants, in [lint-drift.md](lint-drift.md) — and `scripts/lint_drift.py`
+with its site and what it wants, in [lint-drift.md](lint-drift.md), and `scripts/lint_drift.py`
 fails CI if that catalogue stops matching what stable reports, in either direction.
 
 Everything in the job is pinned with `+stable` or `rustup run stable`, deliberately.
@@ -71,7 +71,7 @@ The last group is the one this page argues for. Those nine lints were `allow`ed 
 justification each, and every one of those paragraphs was a description of a deviation rather than a
 reason: "an `f32` simulation converts at audited boundaries" is an argument for a conversion module,
 not for three hundred casts. They are denied now, the conversion module exists, and the exceptions
-that remain are `#[expect]`s the audit checks by rule — see [The exceptions](#the-exceptions).
+that remain are `#[expect]`s the audit checks by rule, see [The exceptions](#the-exceptions).
 
 ## How a test fails
 
@@ -111,12 +111,12 @@ these four by name and fails on a fifth.
 
 Everything else was removed rather than documented. The last two clippy expectations were
 `indexing_slicing` in `src/application/packed.rs` (44 index expressions) and in the wide kernel of
-`src/application/crowd.rs` (18). Both were defensible — every index was bounded by a length check
-earlier in the same function — but "defensible" is not the standard the manifest sets, so
+`src/application/crowd.rs` (18). Both were defensible, every index was bounded by a length check
+earlier in the same function, but "defensible" is not the standard the manifest sets, so
 `kernel-bounds-checks` removed them:
 
 - Values that were `buffer[index]` became `buffer.get(index)`, with a `let … else` arm for the case
-  that cannot happen. This is not extra work when the bound sits outside a loop — but the first
+  that cannot happen. This is not extra work when the bound sits outside a loop, but the first
   attempt put a `get` at the top of the neighbour scan and measured **19% slower** on a dense crowd:
   seven `Option<&f32>` in a tuple pattern, each with its own exit branch, is not seven subscripts
   whose checks the optimizer merges. The fix was to slice the bucket's range once per cell and walk
@@ -168,12 +168,12 @@ only case where an exception is correct at all:
 
 | Was allowed | What replaced it |
 | --- | --- |
-| `needless_pass_by_value` | `#[expect]` on the system itself — `&Res<T>` is not a `SystemParam`, so the signature is the framework's |
+| `needless_pass_by_value` | `#[expect]` on the system itself, `&Res<T>` is not a `SystemParam`, so the signature is the framework's |
 | `cast_precision_loss` | `src/domain/num.rs`, which converts at one boundary and says what each conversion does |
 | `cast_possible_truncation` | the same module, plus `u64_to_low_u32` where truncation *is* the operation (hashes, PRNG words) |
 | `cast_sign_loss` | the same module: `i32_to_usize` and friends clamp the negative case in a branch |
 | `cast_possible_wrap` | the same module |
-| `float_cmp` | `.to_bits()` on both sides — exact comparison, spelled as bit equality, which is what a determinism test means |
+| `float_cmp` | `.to_bits()` on both sides, exact comparison, spelled as bit equality, which is what a determinism test means |
 | `significant_drop_tightening` | the benchmark group's scope is the measurement; the guard is dropped where the timing ends |
 | `missing_const_for_fn` | `const` is now on the functions where it costs nothing, and the conversion helpers are `const` so a `const fn` can call them |
 
@@ -210,7 +210,7 @@ Four `#[expect]`s are therefore permitted, and the audit checks all four:
 The manifest already allows `suboptimal_flops` crate-wide, so the attribute looks redundant. It is
 not, and the reason is how rustc applies lint flags.
 
-Cargo turns a `[lints]` table into command-line flags — `--allow=clippy::suboptimal_flops` — and
+Cargo turns a `[lints]` table into command-line flags, `--allow=clippy::suboptimal_flops`, and
 those flags sit *before* anything a caller appends after `--`. rustc applies command-line lint
 flags left to right, last one wins, so an editor that adds `-W clippy::nursery` re-enables every
 nursery lint, `suboptimal_flops` included, and the manifest's `allow` is overridden. The editor then
@@ -237,8 +237,8 @@ A bare `#[allow]` is never correct and the audit rejects one outright, `reason` 
 
 ## Policing the exceptions
 
-`scripts/lint_audit.py` scans every Rust file in the tree — `src`, `crates`, `tests`, `benches`,
-`examples`, `compat`, `fuzz`, `demo`, `demo-gpu`, `playground` — for `#[allow(…)]` and `#[expect(…)]` of
+`scripts/lint_audit.py` scans every Rust file in the tree, `src`, `crates`, `tests`, `benches`,
+`examples`, `compat`, `fuzz`, `demo`, `demo-gpu`, `playground`, for `#[allow(…)]` and `#[expect(…)]` of
 **any** lint,
 clippy's or rustc's,
 including the ones wrapped in `cfg_attr`. Comments are blanked before scanning, because this page and
@@ -250,14 +250,14 @@ thing, and a reason.
 
 The `reason = "…"` argument is stripped as a unit before an attribute is split on commas, so a
 reason with a comma in it does not become a phantom lint name, and a name that is not an identifier
-is ignored — which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported. The
+is ignored, which is how a `cfg_attr(` prefix's stray paren is dropped rather than reported. The
 `#!` is read too, because it is what separates a crate-level attribute from one attached to a single
-item, and a `cfg_attr` wrapper marks the attribute conditional — a decision that holds under some
+item, and a `cfg_attr` wrapper marks the attribute conditional, a decision that holds under some
 configuration is not a crate-wide one, so the audit does not accept it as one.
 
-It also reads every manifest that carries the table — the library's `Cargo.toml`,
+It also reads every manifest that carries the table, the library's `Cargo.toml`,
 `crates/bevy-flock-anim/Cargo.toml`, `demo/Cargo.toml`, `demo-gpu/Cargo.toml` and
-`playground/Cargo.toml` — and fails if the policy there is not the policy this page describes, in
+`playground/Cargo.toml`, and fails if the policy there is not the policy this page describes, in
 both directions:
 
 - **Denied stays denied.** `unsafe_code` and `missing_docs` must be `deny`, as must `suspicious`,
@@ -267,8 +267,8 @@ both directions:
   a weakened manifest is not a passing audit.
 - **Allowed stays allowed, and nothing else.** The set of `allow` entries in the manifest must equal
   the `TOLERATED` table exactly, entry for entry, in both directions. Because a demo crate may be
-  *stricter* than the library — the GPU demo denies the groups rather than warning about them, since
-  it has no `-D warnings` step of its own — the comparison is against a strength order rather than
+  *stricter* than the library, the GPU demo denies the groups rather than warning about them, since
+  it has no `-D warnings` step of its own, the comparison is against a strength order rather than
   for equality, and no manifest may allow a lint that `TOLERATED` does not list. The tolerated set
   itself is checked once against all five manifests together, so an entry nothing allows any more
   still fails.
@@ -277,7 +277,7 @@ both directions:
 `allow`, an item-level `expect`, a `cfg_attr`-wrapped `expect`, a bare rustc lint in each of `allow`
 and `expect`, a documented cast expectation inside the conversion module, the same expectation
 without a reason, the same expectation in another file, a documented expectation on a Bevy system,
-one on a function that is not a system, and a reason wrapped across lines with a trailing `\` — the
+one on a function that is not a system, and a reason wrapped across lines with a trailing `\`, the
 shape that used to be split on its commas and read back as a list of lint names; then a crate-level
 expectation the manifest agrees with, one it does not, one outside a crate root, and a conditional
 one; then the sanction mechanism (a listed override passes, the same override unlisted fails, a

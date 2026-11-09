@@ -1,20 +1,20 @@
 # What it costs
 
 Every number here comes from `docs/dev/tuning/performance.md`, which names the host, the toolchain and
-the lockfile. The point of this chapter is not the absolute milliseconds — those belong to a
-machine — but the *ratios* and the *shape*, which belong to the design.
+the lockfile. The point of this chapter is not the absolute milliseconds, those belong to a
+machine, but the *ratios* and the *shape*, which belong to the design.
 
 ## The headline table
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 0.99 ms | — |
+| `flock_frame/1` | 0.99 ms |, |
 | `flock_frame/1000` | 1.73 ms | 1.7 µs |
 | `flock_frame/10000` | **9.18 ms** | 0.92 µs |
 | `flock_frame_large/100000` | 90.0 ms | 0.90 µs |
-| `spatial_query/radius_8m/1000` | 138 ns | — |
-| `spatial_query/radius_8m/100000` | 552 ns | — |
-| `steering_step/32_neighbours` | 152 ns | — |
+| `spatial_query/radius_8m/1000` | 138 ns |, |
+| `spatial_query/radius_8m/100000` | 552 ns |, |
+| `steering_step/32_neighbours` | 152 ns |, |
 
 Three things to read from it:
 
@@ -52,13 +52,13 @@ crowd and no brains:
 The expensive tiers are the *cheap* frames, because their reserved shares buy so few of them.
 Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
 Reflex is the only composition where everybody thinks every tick, and the only one that costs
-2 ms — which is why the reflex ceiling is ~64,000 per tick at 14 ms, measured at ~217 ns per
+2 ms, which is why the reflex ceiling is ~64,000 per tick at 14 ms, measured at ~217 ns per
 reflex think end to end in the ECS rather than the ~93,000 that dividing the budget by the
 declared 150 ns would suggest. Query traversal, blackboard access and change detection are
 real costs no declared hint includes.
 
 The declared costs in the leaf catalogue are calibrated to within 20% of the measured
-per-leaf cost — `benches/brain.rs` measures, `docs/dev/tuning/performance.md` records, and ADR 0009
+per-leaf cost, `benches/brain.rs` measures, `docs/dev/tuning/performance.md` records, and ADR 0009
 explains why a virtual cost rather than wall time is what the scheduler spends.
 
 ## The three rejected designs

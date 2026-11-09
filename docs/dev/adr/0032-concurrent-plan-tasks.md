@@ -1,6 +1,6 @@
-# ADR 0032 — Concurrent plan tasks: what the build pipeline tolerates
+# ADR 0032, Concurrent plan tasks: what the build pipeline tolerates
 
-**Status:** Accepted (2026-11-04). **Policy superseded by:** ADR 0033 — this record keeps
+**Status:** Accepted (2026-11-04). **Policy superseded by:** ADR 0033, this record keeps
 the measurements; the rule that follows from them lives in one place now.
 **Context:** wiggum schedules `cell-size-reopen-gate` and `examples-showcase` in the same execution
 group. Both were run concurrently, in one worktree, to find out what that actually costs.
@@ -27,14 +27,14 @@ tree (minutes). A concurrent group does not need matching feature sets.
 
 **The build lock serialises compile phases, which is what it is for.** Two `cargo` invocations in one
 target directory queue their builds and then run their benchmarks at full speed. The cost is
-latency — a long build delays the other task's build — not correctness. The pipeline tolerates it.
+latency, a long build delays the other task's build, not correctness. The pipeline tolerates it.
 
 ## What is not safe, measured
 
 **Two tasks cannot stage in the same worktree.** Forty files, three rounds, four parallel `git add`
 processes: **76 of 120 invocations failed** with `Unable to create index.lock: File exists`. Git's
 index is a single file guarded by a lock file; concurrent writers collide roughly two times in three,
-and the failure is silent in a script that does not check exit codes — the work is on disk but
+and the failure is silent in a script that does not check exit codes, the work is on disk but
 missing from the commit.
 
 That is the only hard rule this experiment produced.
@@ -51,7 +51,7 @@ That is the only hard rule this experiment produced.
    here is a property of an orchestrator sharing one worktree, which CI does not do.
 4. **Isolation remains available where it matters.** `CARGO_TARGET_DIR` per task, or a worktree per
    task, removes both the build-lock queue and the index hazard outright. This ADR does not require
-   it — 36 s of a group is not worth the setup — but a group whose tasks both build from cold should
+   it, 36 s of a group is not worth the setup, but a group whose tasks both build from cold should
    use it, because two cold builds serialise inside one target directory and overlap inside two.
 
 ## Amendment: three tasks, measured (same day)
@@ -60,8 +60,8 @@ Decision 4 above said a group building from cold "should use isolation, because 
 serialise inside one target directory and overlap inside two". Three tasks on a six-core machine say
 that is wrong, and this is the correction.
 
-Three genuinely different compile tasks — `--all-features`, `--no-default-features`,
-`--features memory,serde` — each configuration starting from a cold target directory so the numbers
+Three genuinely different compile tasks, `--all-features`, `--no-default-features`,
+`--features memory,serde`, each configuration starting from a cold target directory so the numbers
 measure compilation rather than cache warm-up:
 
 | configuration | wall | vs baseline | efficiency (3 tasks) |
@@ -79,7 +79,7 @@ anyway.
 **Isolation does not pay at this size (46 s vs 43 s).** Three cold target directories rebuild the
 dependency tree three times; on six cores, three `cargo` invocations each defaulting to `-j6`
 oversubscribe eighteen compiler threads onto six and the overlap is eaten by contention. Isolation
-bought a 44% win against *sequential isolated* work (82 s → 46 s), which is the wrong comparison —
+bought a 44% win against *sequential isolated* work (82 s → 46 s), which is the wrong comparison , 
 against the shared cache it bought nothing.
 
 **Feature subsets come free from a shared cache.** The third task (`memory,serde`, a subset of
@@ -95,7 +95,7 @@ group whose tasks share a feature lineage is cheaper together than apart.
   must prove it does not link an optional dependency).
 - **Cap a compile-heavy group at about half the cores.** Three tasks on six cores is at the edge;
   the plan's group 1 schedules *eleven*, which on this machine would spend its wall time in the
-  scheduler. The plan's grouping is dependency-derived and says nothing about capacity — that is a
+  scheduler. The plan's grouping is dependency-derived and says nothing about capacity, that is a
   gap, and it is now a known one rather than an assumed non-issue.
 - **Benchmark-bearing tasks still get their own group.** That part of the original decision stands
   and is strengthened: with three compilations running, the machine cannot measure 3% of a frame.
@@ -115,7 +115,7 @@ Eight independent codegen tasks, six cores, each task given its own target direc
 | capped at 6 | 10 s | 42% |
 | uncapped, 8 at once | 8 s | 33% |
 
-Twelve tasks — the size of the plan's group 1 — repeat it: sequential 24 s, capped at 3 15 s, capped
+Twelve tasks, the size of the plan's group 1, repeat it: sequential 24 s, capped at 3 15 s, capped
 at 6 9 s, uncapped 8 s. Capping at half the cores is the worst of the three concurrent options and
 still 1.9× better than sequential, which is why the wrong rule survived a casual read.
 
@@ -138,7 +138,7 @@ a rule about task count, and it was never measured.
 
 ## What this still does not answer
 
-Whether a group of *eleven* tasks — the size the plan actually schedules — is faster than eleven in
+Whether a group of *eleven* tasks, the size the plan actually schedules, is faster than eleven in
 sequence. Three tasks on six cores already show efficiency falling to 33% and isolation failing to
 recover it; the useful experiment at that size is a scheduler that admits work by CPU count rather
 than a dependency graph alone, and that is a change to the orchestration, not to this repository.

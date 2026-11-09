@@ -1,4 +1,4 @@
-# 0012 — Relationships persist as ages in a versioned binary record
+# 0012, Relationships persist as ages in a versioned binary record
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -37,7 +37,7 @@ stored as ages.**
 Format version 1, magic `BFLK`. All integers little-endian, fixed width, no
 padding, no alignment requirements on the reader.
 
-### Header — 24 bytes
+### Header, 24 bytes
 
 | Offset | Width | Field |
 | --- | --- | --- |
@@ -50,7 +50,7 @@ padding, no alignment requirements on the reader.
 | 18 | 2 | reserved, zero on write, ignored on read |
 | 20 | 4 | CRC32 of bytes 0..20 |
 
-### Records — `7 + 18 × slot_count` bytes each, ascending `npc`
+### Records, `7 + 18 × slot_count` bytes each, ascending `npc`
 
 | Width | Field |
 | --- | --- |
@@ -63,7 +63,7 @@ padding, no alignment requirements on the reader.
 Only non-empty slots are written. A record with one slot costs 25 bytes; the same
 record in a dense format costs 8 subjects × 16 bytes plus a fixed header.
 
-### Trailer — 8 bytes
+### Trailer, 8 bytes
 
 | Width | Field |
 | --- | --- |
@@ -75,7 +75,7 @@ record in a dense format costs 8 subjects × 16 bytes plus a fixed header.
 `age = saved_at_tick − stamp`, wrapped as `u32`. Restoring at `now` writes
 `stamp = now − age`. So a relationship saved at 100 ticks old reloads at 100 ticks
 old, whatever the new clock says, and a save/load round trip is lossless by
-construction — the ages are the same integers before and after.
+construction, the ages are the same integers before and after.
 
 **Decay is frozen across sessions by default.** A grudge does not fade because the
 player went to bed; the world is paused. A game that wants the world to have moved
@@ -98,12 +98,12 @@ deliberate act rather than an emergent consequence of how the file was written.
 3. Refuse a record count or slot count that cannot fit in the remaining bytes,
    before allocating.
 4. Refuse duplicate identities, out-of-range subjects, and a store too small to
-   hold the records — all as typed errors, all without partial mutation.
+   hold the records, all as typed errors, all without partial mutation.
 5. Verify the trailer CRC after parsing, so a truncated file cannot be mistaken for
    a short one.
 
-The crate produces and consumes bytes. It does not open files: durability — write
-to a temporary path, fsync, rename — is the game's job, and a simulation crate that
+The crate produces and consumes bytes. It does not open files: durability, write
+to a temporary path, fsync, rename, is the game's job, and a simulation crate that
 does file I/O has stopped being a simulation crate.
 
 ## Why not the obvious formats
@@ -116,7 +116,7 @@ does file I/O has stopped being a simulation crate.
   text against 430 KB of binary, parsed at save/load time on the main thread, and
   it invites floats into a format whose whole point is integers. A text form is
   still useful for inspection and mods, so one is planned behind `serde` with a
-  golden test that both decode to the same store — but it is not the shipping path.
+  golden test that both decode to the same store, but it is not the shipping path.
 - **SQLite or an embedded database.** A dependency, a file format we do not
   control, and a query engine for a table with one index.
 - **One file per NPC.** Ten thousand files, ten thousand open/close pairs, and a

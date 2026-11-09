@@ -45,11 +45,11 @@ networking-adapter, benchmark-suite, examples-showcase. ADRs 0035-0040 record wh
 * Bevy system parameters are by value. `clippy::needless_pass_by_value` is allowed at the
   crate level with the reason written next to it; do not "fix" a system signature.
 * Leaves are `&self` and shared. Per-NPC state belongs on the blackboard or the cursor
-  stack — a timer in a leaf field gives the whole crowd one timer.
+  stack, a timer in a leaf field gives the whole crowd one timer.
 * `NpcBlueprint` owns its strings. A `&'static str` field makes the type impossible to
   deserialise from a borrowed input, which is what broke the RON round trip.
 * `plan.toml` dependencies must name **open** tasks. Naming a completed task fails
-  validation with "unknown task dependency" — that is wiggum saying the edge is satisfied,
+  validation with "unknown task dependency", that is wiggum saying the edge is satisfied,
   not pending.
 * A phase whose tasks all close needs an explicit `tasks = []`, or the file stops parsing
   as the plan expects.

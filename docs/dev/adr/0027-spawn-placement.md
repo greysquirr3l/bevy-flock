@@ -1,4 +1,4 @@
-# ADR 0027 — Spawn placement
+# ADR 0027, Spawn placement
 
 **Status:** Accepted (2026-11-04)
 **Related:** ADR 0002 (deterministic RNG), ADR 0003 (spatial grid)
@@ -9,7 +9,7 @@ Placement started life as a free function, `spawn_position(index)`, returning th
 spiral. That is a good default and a poor only option. Three different customers want three
 different things on the first frame:
 
-- a **village**: people at the doorways, the well, the market stalls — positions a designer
+- a **village**: people at the doorways, the well, the market stalls, positions a designer
   authored, not a spiral;
 - an **ambient city**: a crowd scattered over a district, which reads as random even though it
   must replay identically;
@@ -57,7 +57,7 @@ produces_the_same_people` holds that.
 ### Determinism
 
 Each NPC draws from its own stream (`RngStream::for_npc(seed, id)`), never a shared one, so a
-placement is reproducible without reference to spawn order — the property ADR 0002 depends on. A
+placement is reproducible without reference to spawn order, the property ADR 0002 depends on. A
 counted sort, an authored list and a disc all replay identically, and
 `the_same_seed_places_the_same_crowd` asserts it through the plugin rather than the domain type.
 
@@ -66,7 +66,7 @@ counted sort, an authored list and a disc all replay identically, and
 `Fixed` cycles. Seven NPCs into one authored point puts all seven there, and separation pulls them
 apart on the opening frames. This is documented rather than refused: a level can legitimately
 author three doorways and expect the queue to sort itself out, and refusing would be a library
-deciding a game design question. The alternative — silently jittering authored points — would break
+deciding a game design question. The alternative, silently jittering authored points, would break
 "these positions are the level".
 
 ## Consequences
@@ -84,6 +84,6 @@ deciding a game design question. The alternative — silently jittering authored
 ## What was not done
 
 Placement is a two-dimensional decision. A game with a multi-storey building needs `y`, which means
-per-floor volumes and a grid that is not planar — the same assumption ADR 0026 records for the
+per-floor volumes and a grid that is not planar, the same assumption ADR 0026 records for the
 steering kernel. Doing one without the other would produce crowds that stack vertically and steer
 as one, so both wait for the same piece of work.

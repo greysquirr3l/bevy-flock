@@ -1,4 +1,4 @@
-# ADR 0030 — The transposed SIMD kernel: lanes are agents
+# ADR 0030, The transposed SIMD kernel: lanes are agents
 
 **Status:** Accepted, behind the `simd` feature (2026-11-04)
 **Supersedes:** ADR 0029's rejection (which rejected the *lane-per-neighbour* shape, not SIMD)
@@ -7,7 +7,7 @@
 
 ADR 0029 measured lane-per-neighbour vectorisation in the 3D crowd kernel and rejected it: 16–26%
 slower, 8% slower even on a crowd built to fill every lane. The diagnosis was not "SIMD is slow" but
-"these lanes share nothing" — four *neighbours* of one agent, with a masked accumulation throwing
+"these lanes share nothing", four *neighbours* of one agent, with a masked accumulation throwing
 away the work of every rejected neighbour, and a scalar scan that had been rejecting those
 neighbours for one compare and a branch.
 
@@ -19,13 +19,13 @@ are all doing real work. This ADR is that experiment, run and adopted.
 
 In `src/application/crowd.rs`, behind the existing `simd` feature (default off):
 
-- **A cell-major SoA copy**, built by the same counting sort that produces `order` — seven arrays of
+- **A cell-major SoA copy**, built by the same counting sort that produces `order`, seven arrays of
   `f32` (`x, y, z, vx, vy, vz, agent`). Four agents of a cell are contiguous, so a block loads
   without a gather.
 - **Blocks of four agents that share a cell.** Every neighbour in the cell's 3×3×3 neighbourhood is
   broadcast into all four lanes: `keep = d² ≤ r² & id ≠ self`, `weight = keep.select(1, 0)`, and the
   sums and the `1/d²` separation push accumulate per lane. Because all four lanes are in one cell,
-  the window is exact — nothing within the radius can be further than one cell away when the radius
+  the window is exact, nothing within the radius can be further than one cell away when the radius
   does not exceed the cell size, which the default configuration satisfies.
 - **A scalar road for whatever cannot fill a block**: buckets of one to three agents, and the tail
   of a larger bucket. A block containing an ambient-tier agent (a neighbour that is not itself
@@ -78,6 +78,6 @@ visible in the numbers: −29% when buckets are deep, −21% when they are shall
 The block requires four agents in one cell, and the cell size is chosen for the *grid*, not for the
 kernel (ADR 0003): at 10,000 agents it is 13.5 m and a bucket holds about two, so most agents take
 the scalar road and the gain above comes from the minority that do not. Sizing the cell for four-per-
-bucket would raise the blocking rate and also change the neighbour scan's cost in the ECS path — a
+bucket would raise the blocking rate and also change the neighbour scan's cost in the ECS path, a
 decision for the grid, not the kernel, and one worth taking with a profile of a real game rather than
 a synthetic crowd.

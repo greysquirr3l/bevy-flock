@@ -1,11 +1,11 @@
-# ADR 0038 — Barks are a budgeted, cooldown-gated channel
+# ADR 0038, Barks are a budgeted, cooldown-gated channel
 
 **Status:** Accepted
 **Date:** 2026-11-05
 
 ## Context
 
-Barks — "nice weather", "you again", "thief!" — are the cheapest way to make a crowd
+Barks, "nice weather", "you again", "thief!", are the cheapest way to make a crowd
 feel inhabited and the fastest way to make it unbearable. The failure mode is not a
 bug, it is arithmetic: two hundred NPCs noticing the player in the same second produce
 two hundred lines, the audio mixer saturates, and the player turns the voices off

@@ -1,4 +1,4 @@
-# ADR 0009 — Cognition is scheduled against a virtual cost in integer nanoseconds
+# ADR 0009, Cognition is scheduled against a virtual cost in integer nanoseconds
 
 - Status: Accepted, planner implemented in `application::schedule`
 - Date: 2026-11-04
@@ -24,8 +24,8 @@ that recorded the replay, so a different set of NPCs thinks on tick 4,112 and th
 world diverges. "Use an injectable clock in tests" does not help: tests are not
 replays.
 
-The other obvious implementation — tiered ticks, `Near` every tick, `Far` every
-16th — satisfies both requirements and caps quality: a tier promises a *cadence*,
+The other obvious implementation, tiered ticks, `Near` every tick, `Far` every
+16th, satisfies both requirements and caps quality: a tier promises a *cadence*,
 not a *cost*, so one expensive behaviour added to the `Near` tier blows the frame
 and the fix is always "make the far tier dumber". The interesting NPCs end up
 being the ones the player can see, which is the opposite of a crowd.
@@ -74,7 +74,7 @@ Three details matter and each is a bug avoided:
 
 Overshoot is bounded by one dispatch: the budget is checked *before* each think, so
 a frame can exceed it by at most the cost of the single most expensive registered
-tree — a number the game can read at startup.
+tree, a number the game can read at startup.
 
 ## Why this is replayable
 
@@ -84,7 +84,7 @@ are either in the snapshot or derived from it. Two machines with a 4× differenc
 in real speed dispatch the same NPCs in the same order, because neither machine's
 speed appears in the computation.
 
-Real time is still measured — in the stats resource only, never in a decision —
+Real time is still measured, in the stats resource only, never in a decision , 
 so a game can see that its budget of 2,000,000 vns costs it 1.7 ms on this
 hardware today.
 
@@ -99,7 +99,7 @@ max_wait_ticks = ceil(c · W / (B · w)) + 1
 
 The `+1` is the partial round in which it is queued but the budget ran out. That
 is a *bound*, not a hope: it is the property tiering cannot state, and it is
-asserted by a test rather than a comment — 10,000 NPCs, mixed weights, 1,000
+asserted by a test rather than a comment, 10,000 NPCs, mixed weights, 1,000
 ticks, no NPC exceeding the computed bound.
 
 It also degrades in the direction a crowd should: when the budget shrinks, every
@@ -129,13 +129,13 @@ So the model is checked, in CI, on a fixed runner:
 - A game tunes one number (`virtual_nanos`) and one weight policy, and the tier
   distribution falls out of it, visible in `ThinkStats`.
 - Adding an expensive behaviour is a *gradual* cost increase across the crowd
-  rather than a cliff at a tier boundary — and the calibration gate tells you
+  rather than a cliff at a tier boundary, and the calibration gate tells you
   immediately how much you just spent.
 - Per-NPC state grows by `ThinkWeight` + `tag` + `cost` (16 bytes).
 - Declared costs must be maintained. The gate makes that a build failure rather
   than a mystery slowdown, which is the best available answer.
 - Social memory enters this scheduler as per-leaf cost and a bounded weight boost,
-  never as eligibility — see ADR 0011 for the four rules and the feedback loop
+  never as eligibility, see ADR 0011 for the four rules and the feedback loop
   they close.
 - The scheduler is single-threaded by construction. Parallel dispatch would need
   the tag arithmetic to be order-independent; deferred until a profile demands
@@ -143,26 +143,26 @@ So the model is checked, in CI, on a fixed runner:
 
 ## Alternatives rejected
 
-- **Wall-clock budget with an injectable clock** — deterministic in tests, not in
+- **Wall-clock budget with an injectable clock**, deterministic in tests, not in
   replays, which is where it matters. The whole determinism budget of this crate
   would have been spent to save a cost model.
-- **Think-every-N-frames tiers** — the industry default, predictable, and a
+- **Think-every-N-frames tiers**, the industry default, predictable, and a
   quality ceiling: cost is unmodelled, so an expensive behaviour is a cliff.
-- **Priority queue with force-promotion at `max_staleness`** — starvation is
+- **Priority queue with force-promotion at `max_staleness`**, starvation is
   prevented by a second policy bolted on top, and the two policies can disagree
   (promoted NPCs starve the ones just below the threshold). SFQ needs no
   promotion rule because the bound is structural.
-- **Random subset each tick** — cheap, unbiased in expectation, and unbounded per
+- **Random subset each tick**, cheap, unbiased in expectation, and unbounded per
   individual: an NPC can wait arbitrarily long, which is exactly what a game with
   a quest NPC cannot tolerate.
-- **Floating-point weights and tags** — drift and platform variance in the one
+- **Floating-point weights and tags**, drift and platform variance in the one
   place determinism is hardest to debug.
 
 ## Implementation notes (2026-11-04)
 
 The planner is `application::schedule::ThinkScheduler`: a min-heap of
 `(virtual_finish_time, id)` with the id breaking ties, so the plan is reproducible
-without a sort. It is free of Bevy and of every clock — `plan` takes a budget and a
+without a sort. It is free of Bevy and of every clock, `plan` takes a budget and a
 cost function and returns the participants to run, which is what makes the fairness
 properties testable without a world.
 
@@ -170,7 +170,7 @@ Two things the implementation settled that this record did not.
 
 **A participant thinks once per tick; "as often as its cost allows" was wrong.** The
 first version advanced a participant's virtual time and put it straight back in the
-queue — textbook fair queueing — and produced 1,383 thinks for a single participant in
+queue, textbook fair queueing, and produced 1,383 thinks for a single participant in
 one tick, because the cost model said the budget could afford them. A think is not a
 packet: it produces a status the world reads once. Participants that have already run
 are now held out of the queue for the rest of the tick and returned at the same virtual

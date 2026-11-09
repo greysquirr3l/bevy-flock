@@ -1,40 +1,42 @@
 ---
 title: Memory and grudges
-description: Optional social memory, what it costs, and why it is feature-gated.
+description: Optional social memory, what it costs, and when not to turn it on.
 ---
 
-By default an NPC reacts to what it perceives this tick and forgets it immediately. That is the right default: memory is
-the single most expensive thing you can add per agent, and most crowds never need it.
-
-## What the feature buys
-
-With the `memory` feature, an NPC can hold a small number of remembered subjects, the player who robbed it, the guard who
-helped it, each with an opinion that decays over time. Decisions can then consult memory as well as perception, which is
-the difference between a crowd that flinches and a crowd that holds a grudge.
+By default an NPC reacts to what it perceives this tick and forgets it immediately. That default is correct for most
+crowds: memory is the most expensive thing you can add per agent.
 
 ```toml
 [dependencies]
 bevy-flock = { version = "0.1", features = ["memory"] }
 ```
 
-## The cost model
+## What changes when it is on
 
-Memory is bounded per NPC: a fixed number of slots, each a small record. It is not a log and it is not unbounded, an NPC
-that meets a thousand players remembers the ones that mattered by decay, not by history. Ageing runs on the same virtual
-cost scheduler as everything else, so memory work is inside the budget you already set rather than on top of it.
+An NPC can hold a small, fixed number of remembered subjects, each with an opinion that decays. Decisions can consult
+memory as well as perception, which is the difference between a crowd that flinches and a crowd that holds a grudge.
 
-Anchors, NPCs you have pinned as story-critical, are exempt from ageing and from the fold, so the NPC you gave a name
-does not forget the player while you are not looking.
+| property | without `memory` | with `memory` |
+| --- | --- | --- |
+| per-NPC storage | none | fixed slots, bounded |
+| per-tick work | perception only | perception plus ageing, inside the same budget |
+| anchors | exempt from folding | exempt from folding and from ageing |
+| save size | smaller | grows with remembered subjects |
 
-## When not to use it
+Ageing runs on the virtual cost scheduler, so memory work is inside the budget you already set rather than added on top
+of it. Anchors, the NPCs you pin as story-critical, never forget and never fold, so the character you gave a name is
+still holding the grudge when the player returns.
 
-- A crowd that never interacts with the player one-to-one: perception alone is enough.
-- A server simulating more NPCs than it has budget for: memory multiplies per-agent cost.
-- Anything where you need an audit trail. This is a simulation memory, not an event log; if you need history, record it
-  yourself from the events the crate emits.
+## Do not enable it when
 
-## Where to look
+- The crowd never interacts with the player one-to-one. Perception is enough.
+- The server simulates more NPCs than its budget covers. Memory multiplies per-agent cost and the multiplication is not
+  small.
+- You need an audit trail. This is a simulation memory, not an event log. If you need history, record it yourself from
+  the events the crate emits.
 
-- `examples/memory_probe.rs`, what the store costs per agent, measured
-- `docs/dev/adr/0011-*`, `0012-*`, `0013-*`, the schedule integration, the persistence format, the subject registry
-- `docs/dev/tuning/memory.md`, footprint and allocation numbers
+## Reading the numbers
+
+Per-agent footprint and allocation behaviour are in `docs/dev/tuning/memory.md`, measured by
+`examples/memory_probe.rs`. The decision records are `docs/dev/adr/0011-*` (schedule integration), `0012-*`
+(persistence) and `0013-*` (subject registry).

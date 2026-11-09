@@ -1,4 +1,4 @@
-# 0017 — Tiered cognition: from reptile to social
+# 0017, Tiered cognition: from reptile to social
 
 - Status: Accepted, implemented in `domain::cognition`, `application::tiered` and `adapters::primary::cognition`
 - Date: 2026-11-04
@@ -8,8 +8,8 @@
 ## Context
 
 ADR 0009 built a fair queue over a population of thinkers and priced them with one
-number each: the declared cost of a think. The planner works — 88.7% of 10,000 NPCs per
-tick inside a 16.6 ms budget, 12.1% of 100,000 — and the measurements say plainly what
+number each: the declared cost of a think. The planner works, 88.7% of 10,000 NPCs per
+tick inside a 16.6 ms budget, 12.1% of 100,000, and the measurements say plainly what
 it cannot do. A hundred thousand NPCs, each running a full behaviour tree, is not a
 budget problem that a better queue solves. At an average 2.25 µs per think the frame
 holds about 7,400 of them; a crowd of 100,000 therefore thinks about once every
@@ -18,7 +18,7 @@ ones they are not, because the only variable is *how often*.
 
 Weight alone is a fader: it changes cadence, not content. A background NPC and a
 foreground NPC run the same tree, so the only way to buy frames is to run the important
-one less often too. That is the wrong lever — the important one needs *more* thinking,
+one less often too. That is the wrong lever, the important one needs *more* thinking,
 and the background one needs *cheaper* thinking.
 
 The cockroach and the philosopher do not differ in how often they think. They differ in
@@ -44,8 +44,8 @@ agent" is a sentence a designer can write in a spec and a reviewer can check, wh
 
 ### How an NPC changes tier
 
-Promotion and demotion are functions of state — distance to the nearest focus,
-visibility, whether it is in a conversation, whether it is the target of a quest — and
+Promotion and demotion are functions of state, distance to the nearest focus,
+visibility, whether it is in a conversation, whether it is the target of a quest, and
 never of elapsed time, because a replay must reach the same tier at the same tick. The
 hysteresis rule in `domain::weight` applies unchanged and for the same reason: an NPC on
 a boundary must not oscillate, and tier oscillation is worse than weight oscillation
@@ -55,7 +55,7 @@ because it changes which logic runs, not merely when.
 deliberative suddenly needs a blackboard, a perception snapshot and a compiled tree. If a
 hundred of them are promoted in one tick, the budget is gone before anything thinks.
 Therefore promotions are themselves rationed: at most *K* per tick, cheapest first, with
-the rest queued. Demotion is free — the state is kept, and a demoted NPC keeps its
+the rest queued. Demotion is free, the state is kept, and a demoted NPC keeps its
 blackboard until its tier is re-promoted, which is what stops a player walking back and
 forth across a boundary from resetting a conversation.
 
@@ -73,7 +73,7 @@ social         5%      # guaranteed, so a conversation cannot be starved by a pa
 The shares are defaults and a game overrides them. The property that matters is that
 they are *reserved*: the social tier's 5% cannot be spent by the crowd, and the crowd
 cannot be starved by a long conversation. A single global queue gives the first and
-loses the second — which is exactly the failure a game notices, because it is the
+loses the second, which is exactly the failure a game notices, because it is the
 player's conversation that stutters.
 
 Within a tier, the scheduler is unchanged: virtual-cost fair queueing over the
@@ -82,7 +82,7 @@ participants in that tier.
 ### What this does to the numbers
 
 The measured ceiling stands: ~7,400 full deliberation thinks per 16.6 ms frame. Tiering
-does not raise that number — it lowers the *average* cost by moving most of the
+does not raise that number, it lowers the *average* cost by moving most of the
 population to tiers that cost 10–100× less, which is what lets a hundred thousand
 inhabitants all do *something* every tick:
 
@@ -111,13 +111,13 @@ inhabitants is 150 ms of frame.
 ## Alternatives rejected
 
 - **One tree, throttled by weight.** What exists now. Correct and measured, and it
-  cannot serve the foreground better than the background — only less badly than nothing.
+  cannot serve the foreground better than the background, only less badly than nothing.
 - **A continuous cost/weight curve instead of tiers.** Every NPC gets a unique weight,
   ties never happen, and the scheduler's stability (groups of equal weight, deterministic
   tie-break) is lost. It also makes the tuning surface a float per NPC, which no designer
   will maintain.
 - **Tier as an output only** (derive a tier from measured share, as ADR 0009 proposed,
-  for culling and stats). That is still worth having — it is the diagnostic — but it does
+  for culling and stats). That is still worth having, it is the diagnostic, but it does
   not reduce the work, which is the point here.
 - **Promotion without rationing.** Simple, and it produces the worst possible frame: the
   one where the player rounds a corner and a hundred NPCs are promoted in the same tick.
@@ -136,7 +136,7 @@ tier it holds and retries on the next tick. A missed promotion costs a tick; it 
 a cost spike or a leak, and there is no second structure to keep honest.
 
 **New participants enrol at reflex and climb.** Enrolling a spawned crowd straight into the
-tier its distance implies spends the entire budget on the frame the crowd appears — the
+tier its distance implies spends the entire budget on the frame the crowd appears, the
 exact spike the ration exists to prevent, arriving through the front door.
 
 ### Measured, and one claim that did not survive
@@ -165,8 +165,8 @@ ECS (query traversal, blackboard access, change detection), so 100,000 inhabitan
 
 - **~64,000 reflex thinkers per tick** at 14 ms measured (not 110,000).
 - **~7,000 deliberative** (unchanged; that one was measured from the start).
-- 100,000 inhabitants is reachable only by making the reflex pass cheaper than 140 ns —
-  which means not touching the blackboard for most of them — or by the ambient continuum,
+- 100,000 inhabitants is reachable only by making the reflex pass cheaper than 140 ns , 
+  which means not touching the blackboard for most of them, or by the ambient continuum,
   which is what ADR 0009 already said.
 
 Correcting the record rather than the arithmetic is the point of writing the numbers down.

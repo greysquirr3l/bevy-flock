@@ -1,4 +1,4 @@
-# ADR 0031 — Cell sizing for lane occupancy, and the transposed road as the default
+# ADR 0031, Cell sizing for lane occupancy, and the transposed road as the default
 
 **Status:** Accepted (2026-11-04)
 **Related:** ADR 0003 (the budgeted dense grid), ADR 0026 (cell-major crowd kernel), ADR 0030
@@ -40,7 +40,7 @@ cell sizes, two populations, one steering pass each, each road measured in its o
 
 "In blocks" is the share of agents that fill a four-lane block; the rest take the scalar road.
 End to end, through the plugin at 100,000 agents with the default grid: **79.07 ms** a frame with
-the transposed road, against the 90.0 ms recorded for the scalar road in ADR 0028's sign-off — a
+the transposed road, against the 90.0 ms recorded for the scalar road in ADR 0028's sign-off, a
 **−12% frame**, which is smaller than the kernel's −19% because the frame is not only steering.
 
 ## What the numbers say
@@ -48,13 +48,13 @@ the transposed road, against the 90.0 ms recorded for the scalar road in ADR 002
 **Three agents per bucket still pays.** At 5 m only 38–50% of agents fill a block, and the
 transposed road still wins 27–28%: the win is not gated on perfect occupancy, because the block
 that does form amortises its window across four agents and the scalar tail is the same code the
-scalar road runs. That removes the reason to keep the feature off — there is no density where it
+scalar road runs. That removes the reason to keep the feature off, there is no density where it
 lost, in five cell sizes and two populations.
 
 **Four per bucket is the minimum, not the optimum.** The kernel's best cell size here is 7–9 m,
 which is 6–10 agents per occupied bucket, 1.5–2.5 blocks. Two effects pull in opposite directions:
 
-- *Too fine* (5 m): half the agents fall to the scalar tail, and the bucket sweep grows — 31,596
+- *Too fine* (5 m): half the agents fall to the scalar tail, and the bucket sweep grows, 31,596
   buckets to walk instead of 10,049. Cheaper cells, more of them.
 - *Too coarse* (20 m): blocks fill almost perfectly (97%) and it is the **slowest** configuration on
   both roads. Work per agent grows with the number of agents in the cell, not with the number that
@@ -64,7 +64,7 @@ The optimum sits where a bucket holds a few blocks: 8–12 agents.
 
 **The production grid is about one and a half cells too coarse.** ADR 0003's budget (405,000 cells)
 pins a one-kilometre volume to 13.5 m, which is 19–25% better than scalar and 8–20% worse than 9 m.
-Getting 9 m needs about 1.4 million cells — 16 MB of grid arrays rather than 4.9 MB.
+Getting 9 m needs about 1.4 million cells, 16 MB of grid arrays rather than 4.9 MB.
 
 ## The decision
 
@@ -79,7 +79,7 @@ kernel's preference (6–10 agents per occupied cell) is now in `docs/dev/tuning
 `MAX_CELLS` is unchanged. Raising the budget is not obviously right: the grid's budget exists to
 bound *query* cost on the ECS path (ADR 0003), and tripling the cell count triples the per-query
 cell arithmetic and the memory traffic that path pays every tick. Buying 8–20% of the kernel at an
-unmeasured cost to the more frequently called path would be trading a measured number for a guess —
+unmeasured cost to the more frequently called path would be trading a measured number for a guess , 
 exactly what ADR 0029 was rejected for.
 
 The rule, then: **if your crowd is dense, size the cell so a bucket holds 6–10 agents and pass a
@@ -99,7 +99,7 @@ the budget in ADR 0003 exists to bound *query* cost. Measured, `flock_frame` gro
 
 **The frame is insensitive to cell size.** 1.4M cells costs nothing measurable at either
 population; 2.9M costs about 1% at 100,000 and nothing at 10,000. On the kernel side the same
-change was worth 8-20% of a steering pass — so where did it go?
+change was worth 8-20% of a steering pass, so where did it go?
 
 Two things absorb it, and both are already in the design:
 
@@ -125,12 +125,12 @@ smear and no cold cells for a fine one to waste: the choice is purely about agen
 
 ## The decision after the sweep
 
-- **`MAX_CELLS` stays at 2^20.** Not because 1.4M is expensive — it is free — but because it buys
+- **`MAX_CELLS` stays at 2^20.** Not because 1.4M is expensive, it is free, but because it buys
   nothing measurable in a frame, and a default that allocates 16 MB where 4.9 MB did the same job is
   a default that costs every user something for no one's benefit.
 - **The budget is now a per-config knob**: `SpatialGridConfig::max_cells`, set with
-  `with_cell_budget`. A game that steers a much larger share of its crowd — tiering tuned up, or a
-  game with no ambient tier — is exactly the case where the kernel's 9 m optimum is worth claiming,
+  `with_cell_budget`. A game that steers a much larger share of its crowd, tiering tuned up, or a
+  game with no ambient tier, is exactly the case where the kernel's 9 m optimum is worth claiming,
   and it can now be claimed without a fork.
 - **`BoidsConfig::with_grid`** exposes the whole grid config through the plugin, so this is reachable
   from `FlockConfig` rather than only from the domain types.
@@ -145,12 +145,12 @@ Re-open this decision if any of these become true, each with its own measurement
 
 1. **Tiering raises the steered share** (the scheduler's calibration gate moves): re-run
    `flock_frame_cell`; if 9 m is worth more than 3% of a frame, raise the default budget.
-2. **A game's volume is smaller than 1 km** — size the volume first (ADR 0003's advice), which makes
+2. **A game's volume is smaller than 1 km**, size the volume first (ADR 0003's advice), which makes
    fine cells affordable inside the existing budget without any change here.
 3. **The rebuild stops being cheap**: if a future grid rebuild grows superlinearly in cells, the
    2.9M case's 1% becomes the leading edge of something worse.
 
-Timeline: none of these are scheduled, because none of the triggers has fired — but trigger 1 is no
+Timeline: none of these are scheduled, because none of the triggers has fired, but trigger 1 is no
 longer something a human has to remember. It is a CI job (`cell-size-gate`), a script
 (`scripts/cell_size_gate.py`, 3% warn, 10% fail) and a plan task (`cell-size-reopen-gate`) that
 depends on the live `benchmark-suite` work. The thresholds are asymmetric on purpose: criterion on a

@@ -24,7 +24,7 @@ with provenance, and no narrative. Three specific problems:
   Markdown only, so it reads on a forge without a build; `mdbook build docs/book` is a
   convenience, not a requirement.
 - **The README's verification section maps every claim to an artifact.** Not "see the
-  performance doc" but "10,000 agents in 9.18 ms — `benches/crowd.rs`, table in
+  performance doc" but "10,000 agents in 9.18 ms, `benches/crowd.rs`, table in
   `docs/dev/tuning/performance.md`". Ten minutes of commands, in order, from a fresh clone.
 - **`RELEASING.md` is the only release document**, and it is a command list. The
   tag-triggered `release` CI job repeats it mechanically so the checklist cannot rot silently.
@@ -38,7 +38,7 @@ with provenance, and no narrative. Three specific problems:
   (`scripts/scaling_report.py --check`) that fails when the report and the code disagree.
 - The audit found a real defect on its first run: with `--no-default-features` the crate did
   not compile, because two modules reached into `memory`-gated code. That is the argument for
-  writing the audit as a document with a table rather than a paragraph claiming support — the
+  writing the audit as a document with a table rather than a paragraph claiming support, the
   table had to be filled in, and filling it in meant running the builds.
 - Shipping benches and examples inside the package increases it from 1.3 MiB to 1.5 MiB and
   removes nine publish warnings. The trade is deliberate: the README tells a reader to run

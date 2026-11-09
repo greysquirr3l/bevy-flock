@@ -2,7 +2,7 @@
 
 One file per decision that would be expensive to reverse. Each records the
 context, the decision, its consequences, and the alternatives that were rejected
-with the reason — the last part is the one that stops a decision being re-litigated
+with the reason, the last part is the one that stops a decision being re-litigated
 every six months.
 
 A decision is not edited after the fact. If it is reversed, a new ADR supersedes

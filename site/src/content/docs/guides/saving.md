@@ -1,11 +1,10 @@
 ---
 title: Saving a crowd
-description: What serialises, what does not, and how to keep a save loadable across versions.
+description: The format, the four rules that keep it loadable, and what a save does not contain.
 ---
 
-A crowd is state: positions, velocities, needs, temperaments, memory rows, the clock. The `serde` feature makes that
-state serialisable, and the format carries a version so a save written by an older build is either loaded correctly or
-rejected loudly, never silently misread.
+A crowd is state: positions, velocities, needs, temperaments, memory rows, the clock. The `serde` feature serialises it,
+and the format carries a version so an old save is either loaded correctly or rejected loudly.
 
 ```toml
 [dependencies]
@@ -14,25 +13,31 @@ bevy-flock = { version = "0.1", features = ["serde"] }
 
 ## What is in a save
 
-- the tick number and the seed material the run started from
-- per-NPC state: identity, transform, velocity, needs, temperament
-- social memory rows, if the `memory` feature is on
-- the subject registry, which maps remembered identities to rows
+```text
+version         format version (2)
+tick            the tick the save was taken at
+seed            material the run started from
+npcs[]          id, transform, velocity, needs, temperament
+memory[]        subject rows, only with the memory feature
+registry        subject id to row mapping
+```
 
-The registry is why v2 exists: v1 stored attributes positionally, so inserting a new attribute silently shifted every
-row's meaning. v2 keys by subject, so an unknown subject is rejected with an error rather than read as the wrong thing.
+The registry is why v2 exists. v1 stored attributes positionally, so adding one shifted the meaning of every row that
+followed it, silently. v2 keys by subject, and an unknown subject is an error rather than a misread value.
 
-## Rules that keep saves loadable
+## Four rules
 
-1. **Treat the format as an API.** Adding a field is fine; reordering or repurposing one is a version bump.
-2. **Keep the seed.** A save plus the seed can reproduce the run; a save without it can only resume it.
-3. **Do not save pointers or handles.** Entity ids are not stable across sessions; the registry is what makes memory
-   survive a reload.
-4. **Test the round trip in CI**, including loading a fixture written by the previous release. There is a compatibility
-   suite for exactly this.
+1. **Treat the format as an API.** Adding a field is compatible. Reordering or repurposing one is a version bump.
+2. **Keep the seed.** A save plus its seed can reproduce a run. A save without it can only resume one.
+3. **Never save handles.** Entity ids are not stable across sessions. The subject registry is what lets memory survive a
+   reload.
+4. **Load an old fixture in CI.** The compatibility suite loads a file written by the previous release; that test is the
+   only thing standing between you and a silent migration bug.
 
-## Where to look
+## When a load is refused
 
-- `docs/dev/adr/0012-*`, persistence and format
-- `docs/dev/adr/0013-*`, the subject registry
-- `docs/dev/adr/0014-*`, the compatibility testing framework
+A refused load is the feature working. The crate returns an error naming the section and the version rather than
+partially applying a save, because a half-loaded crowd is worse than a failed load: it looks like a simulation bug for
+the next three hours.
+
+Design references: `docs/dev/adr/0012-*` (format), `0013-*` (registry), `0014-*` (compatibility framework).

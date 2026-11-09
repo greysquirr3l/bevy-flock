@@ -1,4 +1,4 @@
-# 0013 — Subjects are matched by stable key, and the file says which keys it used
+# 0013, Subjects are matched by stable key, and the file says which keys it used
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -7,7 +7,7 @@
 
 ## Context
 
-ADR 0012 wrote a version 1 file that stored `SubjectId` — a dense `u16` that means
+ADR 0012 wrote a version 1 file that stored `SubjectId`, a dense `u16` that means
 "position in the game's subject list". The record ends with an open question that
 should have been a blocker:
 
@@ -28,8 +28,8 @@ of those shifts positions. A format that identifies subjects by position cannot
 survive the first content update, and "do not reorder your cast" is not a
 constraint a library can impose on a game.
 
-Version 1 also had a structural problem. Its layout is positional — header, then
-records, then trailer — so there is nowhere to put a table without reinterpreting
+Version 1 also had a structural problem. Its layout is positional, header, then
+records, then trailer, so there is nowhere to put a table without reinterpreting
 existing bytes. Adding the registry is not an additive change; it is a new
 container.
 
@@ -50,7 +50,7 @@ SubjectEntry { key, kind, label }
 SubjectRegistry      // dense: position *is* the SubjectId
 ```
 
-The game assigns keys from something that already outlives a save — an authored
+The game assigns keys from something that already outlives a save, an authored
 character id, a row id in a content table, a persistent entity id. The registry
 is dense because runtime lookups need it to be, and the file carries the keys
 because density is exactly what does not survive an edit.
@@ -90,7 +90,7 @@ Rules that make it a container rather than a bag of bytes:
 The registry section header carries a 32-bit FNV-1a fingerprint over every
 `(key, kind)` pair in identifier order. If the current registry's fingerprint
 matches the file's, positions were identical when the file was written and the
-loader skips translation entirely — no per-subject work on the common path.
+loader skips translation entirely, no per-subject work on the common path.
 
 The fingerprint covers keys and kinds, deliberately not labels: relabelling a
 subject is free, re-keying one is a mapping change. It is a checksum of intent,
@@ -120,7 +120,7 @@ a game with thousands builds a map once and passes a registry it already indexed
 | `Refuse` (default) | `SaveError::MissingSubjectRegistry` |
 | `AssumeDense` | Loads, trusting positions, and reports `unverified_mapping: true` |
 
-A version 1 file cannot be verified — it has no keys — so the decision belongs to
+A version 1 file cannot be verified, it has no keys, so the decision belongs to
 the game, is explicit at the call site, and is visible in the report. Silently
 assuming the old behaviour would preserve exactly the bug this record exists to
 fix.
@@ -162,8 +162,8 @@ which is the price of never needing version 3 for an additive change.
   the save will faithfully hand one character's history to another. The doc comment
   on `SubjectKey` says so where the game will read it.
 - **A dropped subject is a dropped relationship.** There is no repair: a memory of
-  someone who no longer exists has nowhere to go. The alternative — keeping it under
-  a tombstone id — preserves data for content the game cannot display.
+  someone who no longer exists has nowhere to go. The alternative, keeping it under
+  a tombstone id, preserves data for content the game cannot display.
 - **Version 1 files still load, under a named policy.** The promise in ADR 0012
   survives: the old reader stays, and the new writer never emits it again.
 - **The format now has a growth story.** Promoted relationships, ambient cell

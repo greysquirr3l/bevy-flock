@@ -1,4 +1,4 @@
-# ADR 0037 — Dialog graphs are validated before they are played
+# ADR 0037, Dialog graphs are validated before they are played
 
 **Status:** Accepted
 **Date:** 2026-11-05
@@ -9,7 +9,7 @@ Authored conversation is content, and content has bugs: a choice pointing at a n
 that does not exist, a node no path reaches, a cycle with no exit. In a shipped game
 those become a soft-lock in a quest the tester did not walk, discovered by a player.
 
-The alternative — checking at runtime, when a choice is taken — moves the failure to
+The alternative, checking at runtime, when a choice is taken, moves the failure to
 the worst possible moment: mid-conversation, in front of the player.
 
 ## Decision
@@ -20,7 +20,7 @@ bad ones with a typed error carrying the offending node or choice:
 * every choice's `next` resolves;
 * the root exists;
 * every node is reachable from the root, because an unreachable node is authored
-  content that will never be seen — a silent content bug;
+  content that will never be seen, a silent content bug;
 * choice conditions reference keys the session can evaluate, and are total: a missing
   blackboard slot means "not met", never a panic.
 

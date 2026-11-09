@@ -1,4 +1,4 @@
-# ADR 0026 — Cell-major crowd steering
+# ADR 0026, Cell-major crowd steering
 
 **Status:** Accepted (2026-11-04)
 **Supersedes:** the per-agent steering loop in `src/boids.rs` (`steer_flock` as it stood at
@@ -8,7 +8,7 @@ ordering and parity)
 
 ## The problem
 
-`flock_frame/10000` — the crowd path a game gets from `FlockPlugin` — measured **18.2 ms**, which
+`flock_frame/10000`, the crowd path a game gets from `FlockPlugin`, measured **18.2 ms**, which
 is 55 fps against a 16.6 ms budget. The plan has carried that as a documented miss rather than a
 claim, and ADR 0018 pointed at the band path as the 60 Hz route. That is a poor answer for the
 common case: ten thousand NPCs that all steer is the simplest thing a customer will try.
@@ -28,7 +28,7 @@ arithmetic:
 
 1. `SpatialGrid::radius` sorts every neighbour list by distance (`total_cmp` on `f32`, tie-broken
    by id) before returning it. At ~78 neighbours that is a sort per agent per frame.
-2. The model walks the buffer **three times** — separation, alignment, cohesion — because each
+2. The model walks the buffer **three times**, separation, alignment, cohesion, because each
    behaviour is its own function. Same neighbours, three passes.
 3. Each neighbour is copied into a `Vec<Neighbour>` (24 bytes) that is cleared and refilled per
    agent, so the frame streams roughly `78 × 24 B × 10,000 ≈ 19 MB` through a scratch buffer for
@@ -44,12 +44,12 @@ one pass per agent over the cells in range.**
 - positions, velocities, targets and flags in parallel `Vec`s;
 - a counting sort of agent indices into **cell-major order** (an agent's bucket comes from the
   same `SpatialGrid` arithmetic, so the neighbour set is identical to the grid's);
-- the same `SpatialGrid` geometry — cell size, dimensions and coarsening — so the two structures
+- the same `SpatialGrid` geometry, cell size, dimensions and coarsening, so the two structures
   cannot disagree about who is next to whom.
 
 Then one `scan` per agent accumulates **separation, alignment, cohesion and the neighbour count in
 a single pass over the cells in range**, and `desired_for` applies the model to those sums. The
-model is not re-derived: it is `desired_velocity`'s arithmetic term for term — priority-weighted
+model is not re-derived: it is `desired_velocity`'s arithmetic term for term, priority-weighted
 truncation via the existing `accumulate`, the arrival curve, the stop radius, the jitter floor,
 the speed clamp.
 
@@ -71,7 +71,7 @@ The costs, stated plainly:
 
 - **A second representation of the crowd.** The ECS holds entities; the kernel holds arrays. They
   are reconciled once per frame by the gather and the scatter, which is `O(n)` copies of 16 bytes
-  each — an order of magnitude cheaper than the buffer traffic it replaces, but it is not free and
+  each, an order of magnitude cheaper than the buffer traffic it replaces, but it is not free and
   it is the price of any data-oriented pass under an archetype ECS.
 - **The kernel needs the grid's geometry, not its contents.** `configure_from_grid` reads cell
   size, dimensions and the origin from `FlockSpatialGrid`; a caller that builds a grid with a
@@ -105,14 +105,14 @@ produce identical output, and `docs/dev/adr/0002` still governs the seeds.
 
 ## Tests
 
-- `cells_agree_with_the_spatial_grid` — 500 random points, kernel cell ids against
+- `cells_agree_with_the_spatial_grid`, 500 random points, kernel cell ids against
   `SpatialGrid::cell_of`, including the coarsened grid.
-- `the_crowd_agrees_with_the_domain_model` — 400-agent spiral, every agent's desired velocity
+- `the_crowd_agrees_with_the_domain_model`, 400-agent spiral, every agent's desired velocity
   against `desired_velocity` within 1e-3, with targets on a third of them.
-- `the_kernel_does_not_average_an_agent_into_its_own_cohesion` — the behaviour change above.
-- `ambient_agents_are_neighbours_but_not_steered` — the LOD contract survives the rewrite.
-- `a_lone_agent_is_isolated_and_does_not_drift` — the degenerate case.
-- `tests/crowd_no_alloc.rs` — a steady 1,000-agent frame allocates **zero** bytes, measured by a
+- `the_kernel_does_not_average_an_agent_into_its_own_cohesion`, the behaviour change above.
+- `ambient_agents_are_neighbours_but_not_steered`, the LOD contract survives the rewrite.
+- `a_lone_agent_is_isolated_and_does_not_drift`, the degenerate case.
+- `tests/crowd_no_alloc.rs`, a steady 1,000-agent frame allocates **zero** bytes, measured by a
   counting allocator.
 
 ## What was not done
@@ -120,7 +120,7 @@ produce identical output, and `docs/dev/adr/0002` still governs the seeds.
 The four-lane `wide` path from ADR 0023 was prototyped for this kernel and **not shipped**. With
 the sort, the extra passes and the copies gone, the scalar cell-major loop lands comfortably
 inside the frame budget, and a four-lane version has to reproduce the sums in the same order to
-stay parity-clean — a sharp edge for a win that is no longer needed to make the target. The band
+stay parity-clean, a sharp edge for a win that is no longer needed to make the target. The band
 still uses its own SIMD kernel where the numbers justified it. If the crowd needs another 2×, the
 place to start is the `Pack`-style block scan in `src/application/packed.rs`, which is the same
 layout with lanes already written.

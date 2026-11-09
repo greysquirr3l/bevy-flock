@@ -1,4 +1,4 @@
-# 0046 — Obstacle-driven navigation: rebuild in slices, publish once
+# 0046, Obstacle-driven navigation: rebuild in slices, publish once
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -10,7 +10,7 @@
 `NavVersion`, and a stale field is dropped rather than walked through a wall. What was missing is
 the obvious source for a level that *changes*: a crate pushed into a corridor, a door closing, a
 bridge collapsing. Until now the game had to notice the change, re-stamp its own bitmap by hand,
-and remember to bump the version. Forgetting is a silent bug — the crowd keeps walking through
+and remember to bump the version. Forgetting is a silent bug, the crowd keeps walking through
 the crate.
 
 The competitive research flagged this as a gap against Unreal's navmesh rebuild-on-demand and
@@ -37,7 +37,7 @@ tested:
 - A rebuild already in flight is abandoned when the set changes again: the newer world wins, and
   at most one tick of work is thrown away.
 
-`step()` fills at most `cells_per_tick` cells (4,096 by default — a 64×64 block a frame),
+`step()` fills at most `cells_per_tick` cells (4,096 by default, a 64×64 block a frame),
 **a whole row at a time**. A half-filled row is a gap that exists for exactly one frame, and a
 path through a wall that exists for one frame is still a path an agent can take. When a single
 row is wider than the whole budget, one row is granted anyway, or a narrow budget would never

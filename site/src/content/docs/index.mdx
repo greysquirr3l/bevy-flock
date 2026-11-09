@@ -3,7 +3,7 @@ title: bevy-flock
 description: A deterministic NPC and crowd engine for Bevy.
 template: splash
 hero:
-  tagline: Ten thousand agents in a frame. A million when you need them. Deterministic, and it never allocates mid-frame.
+  tagline: A deterministic crowd engine for Bevy. Ten thousand agents in a frame, a million when you need them.
   actions:
     - text: Install
       link: /bevy-flock/start/getting-started/
@@ -11,27 +11,29 @@ hero:
       variant: primary
     - text: A crowd in five lines
       link: /bevy-flock/start/first-crowd/
-      icon: rocket
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
 
-<CardGrid stagger>
-  <Card title="Five lines to a crowd" icon="rocket">
-    `FlockPlugin::new(FlockConfig::preset(CrowdPreset::CityAmbient))` and you have a city. Presets cover a quiet
-    village, a city ambient layer and a battle horde; every field is yours to change.
-  </Card>
-  <Card title="Deterministic by construction" icon="approve-check">
-    Same seed, same platform, same features, same digest over hundreds of ticks. Save it, replay it, test it in CI.
-  </Card>
-  <Card title="Cost you can predict" icon="setting">
-    Distance decides how much thinking an NPC gets: reflex, ambient, or full cognition near the player. The budget is a
-    number you set, not a number you discover.
-  </Card>
-  <Card title="Engine, not a framework" icon="puzzle">
-    It does not render, collide, network or read your files. It simulates a crowd and hands you the ECS handles.
-  </Card>
-</CardGrid>
+The crate does one job: it turns a population into a crowd that moves, decides, and remembers, deterministically, inside
+a frame budget you set. It does not render, collide, network or read your files.
+
+| | `bevy-flock` | `bevy-flock-core` |
+| --- | --- | --- |
+| Depends on Bevy | yes | **no** |
+| For | games, anything with an `App` | servers, replays, CI harnesses |
+| Plugin, components, systems | yes | no |
+| Spatial, steering, trees, tiers | re-exported | yes |
+
+The measured shape, on a shared vCPU with `--release`:
+
+| | measured | gate |
+| --- | --- | --- |
+| 1,000,000-inhabitant band frame | <span class="figure">3.78 ms</span> wide, 4.75 ms scalar | < 6 ms |
+| 100,000 with 5,000 manifested | <span class="figure">3.37 ms</span> | < 8 ms |
+| Per agent | 32 B wide, 28 B scalar | — |
+
+Those numbers come with their fixture, their machine and their losing runs in
+[Performance](/bevy-flock/reference/performance/), which is the only page on this site allowed to quote them.
 
 ## Where to go first
 

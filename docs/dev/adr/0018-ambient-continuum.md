@@ -71,7 +71,7 @@ Conventional crowd LODs keep every agent simulated and render distant ones as im
 That is a rendering answer to a simulation bill, and it fails the moment anyone asks a
 distant agent a question: who lives there, who saw the murder, which faction holds the
 square. The continuum answers those from the cell, at a coarser grain, and refuses the
-individual question by design — because there is no individual.
+individual question by design, because there is no individual.
 
 That trade is only acceptable with two guarantees, and both are load-bearing:
 
@@ -112,7 +112,7 @@ city and perfectly in a wilderness for opposite reasons.
 ### Advection
 
 The continuum ticks on a stride, not every frame. Default: every 8 ticks, which at 60 Hz
-is 7.5 Hz — faster than a crowd visibly changes and 8× cheaper than per-frame.
+is 7.5 Hz, faster than a crowd visibly changes and 8× cheaper than per-frame.
 
 ```text
 for each cell with population > 0:
@@ -150,7 +150,7 @@ Three properties make this defensible:
 
 Folding is the inverse: the NPC's cell is found from its position, its population is
 incremented, and its contribution to the cell's velocity and alarm is averaged in. A folded
-NPC that was mid-conversation is a bug the caller must prevent — which is what anchoring is
+NPC that was mid-conversation is a bug the caller must prevent, which is what anchoring is
 for.
 
 ### Anchoring
@@ -189,8 +189,8 @@ The task is not complete when the code compiles. It is complete when these hold,
    of cell populations plus live entities equals the initial total, to the unit, every tick.
 3. **Determinism:** replay of 1,000 ticks reproduces the manifest identifier sequence and
    the fold counts exactly.
-4. **Parity:** a 5-minute scenario run twice — once with the continuum, once with the same
-   population as entities — agrees on per-cell population within 1% and mean velocity
+4. **Parity:** a 5-minute scenario run twice, once with the continuum, once with the same
+   population as entities, agrees on per-cell population within 1% and mean velocity
    within 5%. Without this test the continuum is a rumour with a data structure.
 5. **No popping:** a camera crossing the manifest boundary at 30 m/s never manifests more
    than the ration on one frame, and the count of visible agents never jumps by more than
@@ -208,8 +208,8 @@ The task is not complete when the code compiles. It is complete when these hold,
   it moves the wall from 64,000 to ~350,000 and leaves the asymptotic shape unchanged.
 - **Sleep distant NPCs.** They stop being population. A market that empties when the camera
   turns is worse than a market that never existed.
-- **Impostors only.** A rendering answer to a simulation bill: the individual question —
-  who saw what, who lives here — remains unanswerable, and the count is wrong.
+- **Impostors only.** A rendering answer to a simulation bill: the individual question , 
+  who saw what, who lives here, remains unanswerable, and the count is wrong.
 - **Hierarchical ECS islands.** Still entities, still O(n) per tick, and the transition
   between islands has the same determinism problem with none of the compression.
 - **Statistical population with no manifestation.** Cheapest of all, and it makes the
@@ -251,14 +251,14 @@ Measured 2026-11-04, the full suite (`crowd`, `brain`, `tiers`, `think`, `memory
 | Population | Baseline | Reflex | Reactive | Deliberative | Social | 95/4/1 mix |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1,000 | 4.26 | 4.38 | 4.38 | 4.27 | 4.24 | 4.42 |
-| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | — | 6.42 |
+| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 |, | 6.42 |
 | 64,000 | 4.19 | **11.44** | 7.93 | 7.68 | 7.55 | 11.99 |
 | 100,000 | 4.22 | 14.01 | 9.74 | 9.52 | 9.03 | 14.67 |
 
 Three things follow, and the first two are corrections to ADR 0017.
 
 **1. The reflex ceiling is higher than 64,000, and the published per-think cost was not a
-constant.** 64,000 reflex agents, all thinking every tick, cost 11.44 ms — 7.25 ms over
+constant.** 64,000 reflex agents, all thinking every tick, cost 11.44 ms, 7.25 ms over
 baseline, inside a 16.6 ms frame with room to spare. 100,000 wants 14.01 ms. But the
 per-think figure implied by each row is 219 ns at 10,000 and 113 ns at 64,000: a 2× spread
 that no single number explains, and that probably reflects cache residency rather than a
@@ -273,8 +273,8 @@ it could afford. A declared cost is a contract (ADR 0009), and a 2× overestimat
 third of the frame's cognition capacity. Recalibration belongs after the packed batch
 exists, because the batch will change the measurement again.
 
-**3. The binding constraint at 100,000 is not cognition at all.** The crowd benchmark —
-100,000 NPCs, no brains, steering and spatial partitioning only — measures **198 ms per
+**3. The binding constraint at 100,000 is not cognition at all.** The crowd benchmark , 
+100,000 NPCs, no brains, steering and spatial partitioning only, measures **198 ms per
 frame**. Fourteen times the cognition cost for the same population, and thirty times the
 no-brain baseline of the tier benchmarks.
 
@@ -287,7 +287,7 @@ victory in the wrong currency.
 **Amended gate.** In addition to gates 1–7 above:
 
 8. **The crowd path, not the scheduler, is the acceptance test.** 100,000 inhabitants with
-   5,000 manifested must sustain a frame under 8 ms — a 25× improvement on the measured
+   5,000 manifested must sustain a frame under 8 ms, a 25× improvement on the measured
    198 ms. If the continuum ships and this gate fails, it has optimised the wrong system
    and the task is not done.
 9. **Folding is complete.** A folded NPC appears in no ECS query: not the steering query,

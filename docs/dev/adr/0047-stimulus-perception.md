@@ -1,4 +1,4 @@
-# 0047 — Stimulus perception: a bounded buffer, not a per-NPC scan
+# 0047, Stimulus perception: a bounded buffer, not a per-NPC scan
 
 - **Status:** Accepted
 - **Date:** 2026-11-05
@@ -10,7 +10,7 @@ Encounter perception answers "did this NPC meet that player?", which is what soc
 It is not a senses model: it cannot express a guard losing sight of a target and searching, a
 villager hearing a scream through a wall, or a stealth game where being seen is a fact with an
 age rather than a flag. Those are the questions behaviour trees actually ask, and answering them
-per NPC per tick from the entity list is the classic crowd cost — a hundred agents each walking a
+per NPC per tick from the entity list is the classic crowd cost, a hundred agents each walking a
 thousand others.
 
 ## Decision
@@ -21,7 +21,7 @@ Stimuli are published once into a bounded, decaying ring buffer; observers read 
 
 `Stimulus { kind, position, radius, intensity, emitted, ttl }`, where `kind` is `Sight`, `Sound`,
 `Smell` or `Custom(u16)`. Strength at an observer is
-`intensity · (1 − distance/radius) · (1 − age/ttl)` — distance falloff multiplied by age falloff,
+`intensity · (1 − distance/radius) · (1 − age/ttl)`, distance falloff multiplied by age falloff,
 so a shout heard three seconds ago is a rumour rather than a location. A record is live while
 `age <= ttl`; `ttl == 0` is never live, which is how a game says "this tick only".
 
@@ -52,7 +52,7 @@ dependency into a crate that has none, which ADR 0040 exists to prevent.
 
 ### Cadence
 
-The ECS system reads the simulation clock and perceives when `tick % interval == 0` (default 6 —
+The ECS system reads the simulation clock and perceives when `tick % interval == 0` (default 6 , 
 ten times a second at 60 Hz). Perception is mid-band work, and an agent that re-reads the buffer
 every tick pays for an answer that changes once a second. The tick counter is the simulation's, so
 a replay perceives on exactly the same ticks.
@@ -70,7 +70,7 @@ The pass is O(live records × observers-due), not O(observers × entities). Meas
 
 At the default six-tick interval the first row is ~3.6 ms a frame for a 10,000-NPC crowd that
 perceives on every tick of its band, which is inside a mid-band budget and well outside a reflex
-one — hence the interval, which is the scheduler's knob in miniature. The two 4,096-record rows
+one, hence the interval, which is the scheduler's knob in miniature. The two 4,096-record rows
 are the same work at two densities; the rest of this document is about closing the gap between
 them.
 
@@ -102,7 +102,7 @@ Two of the three planned steps shipped with this ADR (the third is scheduler wor
 
 `StimulusBuffer` keeps the axis-aligned box around every live record's *sphere*, updated on `push`
 and recomputed on `retain_live`. Min and max are exact operations, so this can never exclude a
-record that is visible — it is a conservative prune, not an approximation. An observer outside that
+record that is visible, it is a conservative prune, not an approximation. An observer outside that
 box expanded by its own reach returns an empty list in O(1): in a level where the action is in one
 corner, that is most of the crowd, for one comparison each.
 
@@ -118,7 +118,7 @@ measured in kilometres cannot allocate a grid measured in metres. Coarsening onl
 candidates.
 
 **The layout.** A counting sort into CSR: `starts[i]..starts[i + 1]` is cell `i`'s slice of
-`entries`. The fill uses a separate cursor array — writing through `starts` would destroy the
+`entries`. The fill uses a separate cursor array, writing through `starts` would destroy the
 offsets the reader needs, which is exactly the bug the parity test caught on the first attempt.
 Entries are filled in ring order, so every cell's slice is in ring order: canonical, reproducible,
 and free of hash iteration.
@@ -133,7 +133,7 @@ Three facts, and each has a test:
    record radius) <= query.max_limit()`. Therefore every perceivable record's centre lies inside
    the window, therefore its cell is scanned. Nothing perceivable is skipped. (The window is sized
    from the *query's* maximum reach, not the record's, which is why centre-only insertion is safe
-   for a 45 m shout as well as a 3 m footstep — `a_record_with_a_long_radius_is_found_from_a_far_cell`.)
+   for a 45 m shout as well as a 3 m footstep, `a_record_with_a_long_radius_is_found_from_a_far_cell`.)
 2. **No duplication.** One record lives in one cell, so the visitor sees it at most once and the
    bounded insertion cannot count it twice.
 3. **Order irrelevance.** The kept slots are chosen by `ranks`, a total order over exactly the
@@ -174,14 +174,14 @@ plan as `band-scoped-perception`.
 | --- | ---: | ---: |
 | 512 observers, 4,096 records, 40 m square | 36.4 ms | 36.4 ms (fallback) |
 | 512 observers, 4,096 records, 400 m square | 9.6 ms | 4.0 ms (2.4x) |
-| Rebuild of that 4,096-record grid | — | 69 µs per pass |
+| Rebuild of that 4,096-record grid |, | 69 µs per pass |
 
 ### Rejected for the index
 
 - **A k-d tree or BVH.** Rebuild cost per tick, and worse constants than a uniform grid for
   point-like records with a handful of radius classes.
 - **A hash map keyed by cell.** Allocation per rebuild, and iteration order that would have to be
-  sorted back into a canonical order to stay deterministic — paying for the sort twice.
+  sorted back into a canonical order to stay deterministic, paying for the sort twice.
 - **Skipping the exact predicates once a record is bucketed.** Cheaper, and it changes answers
   near cell boundaries, which is the one thing a stealth game cannot tolerate.
 

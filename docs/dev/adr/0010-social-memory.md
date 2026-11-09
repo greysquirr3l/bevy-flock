@@ -1,4 +1,4 @@
-# 0010 — Social memory as a bounded, integer, two-tier store
+# 0010, Social memory as a bounded, integer, two-tier store
 
 Status: Accepted (amended by ADR 0016: the subject ceiling is sixty-four, not sixteen)
 
@@ -66,14 +66,14 @@ Measured on 16,384 eligible NPCs with four subjects (`benches/memory.rs`):
 | `sweep`, everything reclaimed | 288.4 µs | 17.6 ns |
 
 16,384 NPCs × 8 subjects costs 2 MB. Recalling a memory in a think costs 8.5 ns,
-against a guard think measured at 45 ns, so memory roughly a fifth of a think —
+against a guard think measured at 45 ns, so memory roughly a fifth of a think , 
 affordable at ten thousand NPCs, which is the only place it is asked for.
 
 - **Sweeping is not a per-frame operation.** 288 µs is 1.7% of a frame, which is
   too much to pay every frame for housekeeping. It belongs on a slow cadence, and
   the plugin contract has to say so rather than leaving it to be discovered.
 - **A tick stamp is 32 bits.** At 60 Hz a `u32` wraps after 828 days of simulated
-  time. A wrapped age reads as very old, which decays memory to nothing — the safe
+  time. A wrapped age reads as very old, which decays memory to nothing, the safe
   direction, but it means a world that runs for years needs the stamp widened.
 - **Recycled identity and memory are in tension.** A row keyed by a recycled slot
   would hand one NPC's grudge to whoever inherits the slot. Memory therefore

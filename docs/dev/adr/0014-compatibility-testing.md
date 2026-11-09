@@ -1,4 +1,4 @@
-# 0014 — Save compatibility is tested against committed files and a pinned old build
+# 0014, Save compatibility is tested against committed files and a pinned old build
 
 - Status: Accepted
 - Layer 4 landed at `v0.1.0-rc.1`; see "The pinned build, as built" below
@@ -20,7 +20,7 @@ promise is checked, and the ordinary test suite cannot check it:
   single-commit test run models "new build".
 - The failure a modder experiences is *new file, old build*: a save written by a
   newer release, opened by the copy of the game they have installed. That direction
-  is not testable with one binary at all — it needs an old one.
+  is not testable with one binary at all, it needs an old one.
 
 So the promise needs a corpus that outlives the build, and a second binary that is
 deliberately not current. This record fixes both, plus the two edge directions that
@@ -50,8 +50,8 @@ that no current code path can have produced during that run. That is the entire
 point: a reader that only agrees with its sibling writer proves nothing about the
 files already on players' disks.
 
-Each fixture is declared in `manifest.toml` with its expected *summary* — record
-count, slot count, and the digest of the decoded store — not its expected bytes. A
+Each fixture is declared in `manifest.toml` with its expected *summary*, record
+count, slot count, and the digest of the decoded store, not its expected bytes. A
 version 2 writer may legitimately emit identical bytes for identical input (it
 does, and layer 2 checks that), but a version 1 reader path must not be held to a
 byte match with a writer that no longer exists.
@@ -117,7 +117,7 @@ for cut   in 0..bytes.len()   { assert typed error or Ok }
 ```
 
 with a fixed seed and a bounded budget so CI stays deterministic. The assertion is
-not "the load fails" — some mutations land in a label and are legal — but "the load
+not "the load fails", some mutations land in a label and are legal, but "the load
 either succeeds or returns a `SaveError`, and never panics, never allocates more
 than the header claims, and never returns a store that disagrees with the file's
 own checksums".
@@ -145,8 +145,8 @@ v2 with one flipped bit    Decides         refused with a typed error: ChecksumM
 ```
 
 Four cases, three verdicts a released build is allowed: it loads what it understands,
-refuses what it does not *by name*, and never panics. The fourth case — a forged
-version — is the one that matters most, because the tempting implementation is to read
+refuses what it does not *by name*, and never panics. The fourth case, a forged
+version, is the one that matters most, because the tempting implementation is to read
 the fields it recognises and hope.
 
 The harness synthesises its future files rather than committing them, which is the one
@@ -168,7 +168,7 @@ version number moved.
 ## Consequences
 
 - **A fixture that fails to load is a P0, and the fix is the reader.** Never the
-  fixture — regenerating a broken fixture deletes the evidence and the promise with
+  fixture, regenerating a broken fixture deletes the evidence and the promise with
   it.
 - **The corpus grows by one small file per behaviour, not per release.** Eight files
   today; a version 3 adds a directory, not a matrix.

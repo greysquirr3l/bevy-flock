@@ -8,8 +8,8 @@
 ## Context
 
 Some walk cycles translate their own root: the animator moves the hips and the engine is expected to
-take the hint and drop the translation, because the movement is already in the simulation. Others —
-mocap, mostly — carry the movement in the clip and expect the engine to apply it and then place the
+take the hint and drop the translation, because the movement is already in the simulation. Others , 
+mocap, mostly, carry the movement in the clip and expect the engine to apply it and then place the
 body's collision and AI where the clip put it.
 
 Both are reasonable, and they are mutually exclusive. Whichever one the code does by accident, the
@@ -24,10 +24,10 @@ The binding layer cannot decide this for a game. It also cannot leave it undecid
 
 Root motion is a per-profile flag, `RootMotion`, with two values and a documented default.
 
-- `RootMotion::Simulation` (default) — the simulation owns movement. A reported clip translation is
+- `RootMotion::Simulation` (default), the simulation owns movement. A reported clip translation is
   **consumed and dropped** on the tick it arrives. A game with root-motion clips that never opts in
   gets a body that walks where the steering put it, not twice as far.
-- `RootMotion::Clip` — the clip owns movement. The translation is quantised, added to the body's
+- `RootMotion::Clip`, the clip owns movement. The translation is quantised, added to the body's
   transform, and added to `Locomotion`'s distance walked, so the next tick's blend does not drag the
   legs back to where the steering thought they were.
 

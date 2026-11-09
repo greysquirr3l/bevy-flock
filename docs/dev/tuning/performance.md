@@ -20,7 +20,7 @@ document argues about:
 
 Every CI job that builds or tests runs `--locked` (`clippy`, `test`, `features`, `msrv`,
 `docs`, `determinism`, `bench-smoke`, `compat`), and a `lockfile` job fails if either file has
-gone stale — so a dependency bump has to be a commit rather than a silent resolution.
+gone stale, so a dependency bump has to be a commit rather than a silent resolution.
 Reproduce a row exactly with:
 
 ```sh
@@ -43,12 +43,12 @@ rather than one row.
 | Kernel | Linux 6.8 (container) |
 | Toolchain | Rust 1.97.1, `--release` with debug symbols (`[profile.bench]`) |
 | Criterion | 10–20 samples, 0.5–1 s warm-up, 3 s measurement unless a bench overrides it |
-| Renderer | none — headless `App::new()`, simulation only |
+| Renderer | none, headless `App::new()`, simulation only |
 
 Two things to know about that host. It is **shared**, so a neighbour's load shows up as a few
 percent of jitter; and its vCPU count has varied between sandboxes (6 here, 8 on the host the
 earlier tables were taken on), which barely matters because every path measured here is
-**single-threaded** — Bevy's schedule is one thread and the kernels are scalar loops or four
+**single-threaded**, Bevy's schedule is one thread and the kernels are scalar loops or four
 lane `wide` vectors, not rayon. What does change with the host is the absolute number, not the
 shape of the curve or the ranking of designs.
 
@@ -56,7 +56,7 @@ shape of the curve or the ranking of designs.
 
 - **Run to run, same binary, same machine:** 1–4%. Criterion's confidence interval covers it;
   treat the middle value as the number and the interval as the noise floor.
-- **A different machine:** not characterised here, and not worth characterising — an
+- **A different machine:** not characterised here, and not worth characterising, an
   absolute time is a property of a host, not of this library. This document therefore argues
   in **ratios** (dense grid versus sorted array, scalar versus four-lane), and states the
   number that shipped so you can re-measure it on yours rather than adopt it.
@@ -66,7 +66,7 @@ shape of the curve or the ranking of designs.
 ### A cross-check, on the record
 
 Re-measured during the reproducibility pass (2026-11-04, `flock_frame/10000`, locked
-dependencies, 6 vCPU host): **18.75 ms**, against the 18.2 ms committed below — 3% inside the
+dependencies, 6 vCPU host): **18.75 ms**, against the 18.2 ms committed below, 3% inside the
 quoted interval, which is the intended relationship between this section and the tables. The
 1,000,000-inhabitant band frame re-measured at 3.80 ms against the 3.78 ms recorded for ADR
 0021, for the same reason.
@@ -75,14 +75,14 @@ quoted interval, which is the intended relationship between this section and the
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 1.01 ms | — |
+| `flock_frame/1` | 1.01 ms |, |
 | `flock_frame/1000` | 1.74 ms | 1.7 µs |
 | `flock_frame/10000` | **4.27 ms** | 0.43 µs |
 | `flock_frame_large/100000` | **29.2 ms** | 0.29 µs |
-| `spatial_query/radius_8m/1000` | 138 ns | — |
-| `spatial_query/radius_8m/10000` | 185 ns | — |
-| `spatial_query/radius_8m/100000` | 552 ns | — |
-| `steering_step/32_neighbours` | 152 ns | — |
+| `spatial_query/radius_8m/1000` | 138 ns |, |
+| `spatial_query/radius_8m/10000` | 185 ns |, |
+| `spatial_query/radius_8m/100000` | 552 ns |, |
+| `steering_step/32_neighbours` | 152 ns |, |
 
 Four things to read from that table:
 
@@ -102,7 +102,7 @@ Four things to read from that table:
   ~20 µs.
 - **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns at 100,000:
   the index walks the same 27 cells, and the cells are fuller. Those numbers are unchanged by
-  ADR 0026 because the grid is unchanged — the crowd kernel bypasses `SpatialGrid::radius`
+  ADR 0026 because the grid is unchanged, the crowd kernel bypasses `SpatialGrid::radius`
   rather than changing it.
 
 The 1.00 ms at N=1 is the grid rebuild's fixed cost at the default 1 km volume
@@ -197,11 +197,11 @@ A whole think, including the walk over node indices:
 | `urchin` | 31.3 ns | 36 vns |
 | `noble` | 32.9 ns | 35 vns |
 | `wanderer` | 44.6 ns | 35 vns |
-| ten thousand guards, one think each | 449 µs | — |
+| ten thousand guards, one think each | 449 µs |, |
 
 The declared cost is the sum of the leaves a tree can reach; the measured cost
 also contains the traversal, roughly two nanoseconds per visited node. Neither is
-wrong — they answer different questions. The declaration is what the scheduler
+wrong, they answer different questions. The declaration is what the scheduler
 charges; the measurement is what the CPU pays. The calibration gate therefore
 compares **leaf against leaf**, where the two are directly comparable, and reports
 tree-level numbers without failing on them, because otherwise every change to tree
@@ -214,7 +214,7 @@ could think every frame and still leave the frame 97% for everything else.
 ## Memory
 
 `benches/memory.rs` measures what remembering costs, over 16,384 enrolled NPCs
-with four subjects — a busy district rather than a city.
+with four subjects, a busy district rather than a city.
 
 | Operation | 16,384 NPCs | Per NPC |
 | --- | --- | --- |
@@ -235,7 +235,7 @@ slowly. Sweep on a cadence measured in seconds.
 
 The benchmark found a real bug before the design was settled: the first version
 guarded against double release with `free.contains(&index)`, which made sweeping a
-full store quadratic — 24.7 ms for 16k rows. `Option::take` already prevents a
+full store quadratic, 24.7 ms for 16k rows. `Option::take` already prevents a
 double push, so the guard was both wrong and expensive. 24.7 ms became 288 µs.
 
 ## Save format
@@ -264,7 +264,7 @@ it is not the case this format optimises for.
 ## Profiling the 1,000,000-inhabitant frame (2026-11-04)
 
 Captured with `cargo flamegraph` against `examples/profile_band.rs`, which builds the ADR 0021
-layout — 5,000 near agents at 60 Hz, 15,000 mid agents at 20 Hz, 980,000 as density — and runs
+layout, 5,000 near agents at 60 Hz, 15,000 mid agents at 20 Hz, 980,000 as density, and runs
 frames without criterion's timing in the way. Artefact:
 [`docs/images/band-1m-flamegraph.svg`](images/band-1m-flamegraph.svg).
 
@@ -277,15 +277,15 @@ cargo flamegraph --profile profiling --example profile_band --output docs/images
 | Symbol | Self | Children | Reading |
 | --- | --- | --- | --- |
 | `application::packed::Pack::steer` | 82.2% | 90.2% | the kernel is the frame |
-| `libm.so.6` | 10.6% | — | `hypotf`, `fmod` from clamp and wrap |
+| `libm.so.6` | 10.6% |, | `hypotf`, `fmod` from clamp and wrap |
 | `band_steer` | 1.2% | 68.5% | copy in/out is noise next to the steery |
 | `band_steer_mid` | 1.0% | 28.2% | consistent with a 3-frame cadence |
 
 Two things were worth fixing, and both were in the *cheap* half of the arithmetic rather
 than the neighbour scan:
 
-1. **`clamp()` took a square root every time it was called** — four times per agent per tick,
-   for cohesion, alignment, separation and the final limit — and in the common case the
+1. **`clamp()` took a square root every time it was called**, four times per agent per tick,
+   for cohesion, alignment, separation and the final limit, and in the common case the
    vector is already under the limit, so the root was pure waste. It now compares squared
    lengths and only divides when something actually exceeds its cap. `hypotf` leaves the
    profile.
@@ -307,8 +307,8 @@ touching the loop structure.
 
 ### What it did not buy
 
-A restructured inner loop — destructuring the pack into separate slices so the compiler can
-see that reading positions and writing desired touch different fields — was written, measured
+A restructured inner loop, destructuring the pack into separate slices so the compiler can
+see that reading positions and writing desired touch different fields, was written, measured
 at **5.70 ms**, and reverted. The closure form in `Pack::steer` keeps the neighbour walk in a
 single function and the optimiser hoists the base pointers itself; the "obvious" borrow-split
 version was 20% slower. That experiment is worth recording precisely because it is the change
@@ -320,11 +320,11 @@ that looks right on paper.
 scan itself: nine buckets, a linked-list walk per bucket, and roughly fifteen to twenty
 neighbours per agent at the band's density. The options, in order of expected value:
 
-1. **Process four agents at a time** with explicit `f32x4` arithmetic — the accumulation is
+1. **Process four agents at a time** with explicit `f32x4` arithmetic, the accumulation is
    independent per agent, so it vectorises without changing the algorithm.
 2. **Store neighbours as a CSR range** instead of a linked list, trading a counting pass for
    sequential memory.
-3. **Lower the band's density target** — the frame is neighbour-bound, and `density` is the
+3. **Lower the band's density target**, the frame is neighbour-bound, and `density` is the
    parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
    knob for exactly this reason.
 
@@ -333,7 +333,7 @@ neighbours per agent at the band's density. The options, in order of expected va
 
 Every optimisation before this one traded lanes: four agents at a time through `wide::f32x4`. That
 road is finished and measured. What none of it used was the other five cores, and a profile of the
-100,000-agent frame put 84% of samples inside `Crowd::steer` — a pure map over agents — running on
+100,000-agent frame put 84% of samples inside `Crowd::steer`, a pure map over agents, running on
 one thread.
 
 ADR 0044 cuts a frame into contiguous slices of agents and hands them to the ECS compute pool. All
@@ -354,7 +354,7 @@ Two things the numbers say that are easy to get wrong. The gain is 2.0× on six 
 scan is memory-bound, and the neighbour arrays are read by every slice. And a crowd below 1,024
 agents stays on the wide road, which is why `flock_frame/1000` did not move at all.
 
-The wide road is still single-threaded, and the two wins are additive in principle — four lanes
+The wide road is still single-threaded, and the two wins are additive in principle, four lanes
 across six threads. They are not combined yet, because a block writes four non-contiguous agent
 slots and splitting those writes needs either a slot-indexed output buffer or cached per-thread
 scratch. ADR 0044 records the plan and the honest expectation: 2–3× on top, not 6×, for the same
@@ -373,7 +373,7 @@ bandwidth reason.
 
 The two 4,096-record rows are the interesting pair: same record count, same code, 3.8× apart,
 because a linear scan pays the same price for a record on the far side of the level as for one on
-top of the observer. That 9.6 ms floor — 4.7 ns per record per observer — was the scan tax.
+top of the observer. That 9.6 ms floor, 4.7 ns per record per observer, was the scan tax.
 
 Half of it is gone. The buffer now keeps a conservative bounding box, so an observer with nothing
 nearby returns in O(1), and a `StimulusIndex` buckets the live records so an observer only examines
@@ -383,12 +383,12 @@ its own neighbourhood:
 | --- | ---: | ---: | --- |
 | 4,096 records, 40 m square | 36.4 ms | 36.4 ms | index has nothing to prune, so it delegates |
 | 4,096 records, 400 m square | 9.6 ms | 4.0 ms | **2.4× faster** |
-| grid rebuild, 4,096 records | — | 69 µs | amortised over every observer due that tick |
+| grid rebuild, 4,096 records |, | 69 µs | amortised over every observer due that tick |
 
 The index is bit-identical to the linear scan by construction (candidate superset, no duplicates,
 total order) and the parity tests drive randomised worlds to prove it; ADR 0047 records the
-argument. Band-scoped observer sets — only observers whose tier consumes perception pay, each with
-its own interval — remain open as `band-scoped-perception`, and that is where the 100,000 case is
+argument. Band-scoped observer sets, only observers whose tier consumes perception pay, each with
+its own interval, remain open as `band-scoped-perception`, and that is where the 100,000 case is
 won.
 
 Three optimisations are already banked, the largest being bounded insertion into the six result
@@ -414,7 +414,7 @@ that it costs nothing because a subscript bounds-checks anyway. Measured against
 | `crowd_kernel/volumetric` | 1.810 ms | 1.859 ms (+1.5%) | 1.787 ms (**−2.1%**) |
 | `crowd_kernel/dense` | 21.51 ms | 25.61 ms (**+18.5%**) | 21.71 ms (+0.5%) |
 
-The regression lives in the neighbour loop, and only shows when cells are full — `volumetric` spreads
+The regression lives in the neighbour loop, and only shows when cells are full, `volumetric` spreads
 agents over 20 m in Y and barely moved. Two fixes, in order:
 
 1. **Put the row back together.** `Soa` now holds one 28-byte `SoaRow` per agent (position, velocity,
@@ -432,7 +432,7 @@ With both, the kernel is 2% *ahead* of where it started on `volumetric` and at p
 | `crowd_avoidance/steer_only/100000` | 25.35 ms | 24.10 ms (−4.7%) |
 | `crowd_avoidance/steer_and_avoid/100000` | 38.36 ms | 36.42 ms (−5.1%) |
 
-The 2D `application::packed` kernel took the same conversion with no such trouble — it walks rows
+The 2D `application::packed` kernel took the same conversion with no such trouble, it walks rows
 with `iter`/`zip` and unpacks its lanes with literal indices, so the bound was already outside the
 loop (`cargo bench --bench packed`, same baseline method):
 
@@ -553,8 +553,8 @@ What the curves show, and what they cost ADR 0033:
 The suite that guards these numbers is ADR 0034: `scripts/scaling_regression.py` compares a fresh
 sweep against `docs/dev/tuning/data/scaling-sweep.json` on speedup ratios, so a slower CI runner is not a
 regression, and fails when a cell loses more than 25% of its speedup (widened to twice the measured
-spread; 12% to warn). The generated review —
-matrices, efficiency, the measured optimum against the formula — is
+spread; 12% to warn). The generated review , 
+matrices, efficiency, the measured optimum against the formula, is
 [`docs/dev/tuning/reports/scaling-report.md`](reports/scaling-report.md).
 
 Reproduce with `scripts/scaling_sweep.sh docs/dev/tuning/data/scaling-sweep.json` (eighteen minutes on six
@@ -566,7 +566,7 @@ reduced matrix on every push; the full one is a local or nightly job.
 
 The regression gate was run end to end on this six-core machine: 45 cells, **18 m 21 s** of wall clock, two
 repeats per cell and four on each sequential denominator. Thirty-five cells are comparable (shape B has
-only three bundles, so concurrency above three is not swept), and all thirty-five held — median **−0.4%**
+only three bundles, so concurrency above three is not swept), and all thirty-five held, median **−0.4%**
 on shape A and **−0.9%** on shape B, worst cell **−3.7%** (B, two cores, three bundles at once) against a
 13.2% warning line and a 25% failure line.
 
@@ -578,8 +578,8 @@ Two cells were re-measured in isolation because their first readings were ragged
 | A, 4 cores, concurrency 4 | 5.22 s, 41.1% spread | **4.09 s, 1.1%** | 4.20 s, 1.5% |
 
 The one-core outlier mattered more than its own row: it is the denominator of every one-core speedup, so
-two ragged repeats turned five rows into apparent gains of 9–12%. That is the flattering direction — a
-genuine regression could hide behind an inflated denominator — which is why the gate now marks blinded
+two ragged repeats turned five rows into apparent gains of 9–12%. That is the flattering direction, a
+genuine regression could hide behind an inflated denominator, which is why the gate now marks blinded
 cells `unverified` and folds the sequential cell's spread into the rows that divide by it (ADR 0034).
 
 ## What the numbers do not cover
@@ -601,12 +601,12 @@ cells `unverified` and folds the sequential cell's spread into the rows that div
 ## Think scheduling
 
 `benches/think.rs`, and the table `application::schedule` asserts in its own tests. A
-16.6 ms **virtual** budget — simulated cost, never a clock — with the cost mix measured
+16.6 ms **virtual** budget, simulated cost, never a clock, with the cost mix measured
 in `benches/brain.rs`:
 
 | Participants | Thinks per tick | Served per tick | Worst wait | Planner wall time |
 | --- | --- | --- | --- | --- |
-| 1 | 1 | 100% | 1 tick | — |
+| 1 | 1 | 100% | 1 tick |, |
 | 1,000 | 1,000 | 100% | 1 tick | 0.12 ms |
 | 10,000 | 8,872 | 88.7% | 3 ticks | 1.34 ms |
 | 100,000 | 12,124 | 12.1% | 45 ticks | 1.83 ms |
@@ -614,7 +614,7 @@ in `benches/brain.rs`:
 Two readings matter more than the headline.
 
 **Ten thousand NPCs do not all think every tick at this cost mix.** The budget serves
-88.7% and the rest wait at most three ticks — a twentieth of a second for a crowd the
+88.7% and the rest wait at most three ticks, a twentieth of a second for a crowd the
 player cannot pick out of a line. A per-archetype fudge factor would have hidden that
 trade instead of pricing it.
 
@@ -637,8 +637,8 @@ is the same world with no brains at all, so the difference is what thinking cost
 Two things to read carefully, because both are easy to get wrong.
 
 **The delta is not the think.** These brains run a one-node tree at a declared 2 µs cost.
-The 73 ns per brain is the *system overhead* — enrolling, reading the cost, planning,
-finding the chosen ones — and the tree tick itself is inside the 2 µs budget rather than
+The 73 ns per brain is the *system overhead*, enrolling, reading the cost, planning,
+finding the chosen ones, and the tree tick itself is inside the 2 µs budget rather than
 inside this measurement. A real archetype tree costs 4–12 µs of virtual budget, which is
 what the budget spends and what the frame pays.
 
@@ -654,7 +654,7 @@ With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs delibe
 
 - **7,000 deliberative thinkers per tick** is the ceiling: 14 ms ÷ 2 µs. At or below it,
   every NPC thinks every tick and the wait is one tick.
-- **6,000 is comfortable** — the same crowd with 14% headroom for the expensive archetype
+- **6,000 is comfortable**, the same crowd with 14% headroom for the expensive archetype
   that turns up in a scene and costs 12 µs rather than 2.
 - **10,000 fits the frame** (5.01 ms measured) but only ~70% think per tick, and the worst
   NPC waits two ticks. Fine for background, visible on a conversation.
@@ -681,7 +681,7 @@ Reflex is the only composition where everybody thinks every tick, and it is the 
 that costs 2 ms.
 
 **So the reflex ceiling is ~64,000 per tick at 14 ms**, measured at ~217 ns per reflex think
-end to end in the ECS — not the ~93,000 that dividing the budget by the declared 150 ns
+end to end in the ECS, not the ~93,000 that dividing the budget by the declared 150 ns
 would suggest. The difference is query traversal, blackboard access and change detection,
 which no declared cost includes.
 
@@ -704,7 +704,7 @@ Frame times in ms; baseline is the same world with no brains.
 | Population | Baseline | Reflex | Reactive | Deliberative | Social | 95/4/1 mix |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1,000 | 4.26 | 4.38 | 4.38 | 4.27 | 4.24 | 4.42 |
-| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | — | 6.42 |
+| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 |, | 6.42 |
 | 64,000 | 4.19 | 11.44 | 7.93 | 7.68 | 7.55 | 11.99 |
 | 100,000 | 4.22 | 14.01 | 9.74 | 9.52 | 9.03 | 14.67 |
 
@@ -818,15 +818,15 @@ Three things the table is honest about.
 **The kernel did not move.** Against the baseline saved before the row-major rewrite
 (`--save-baseline before`), `crowd_kernel/planar` is 2.021 → 2.055 ms, `volumetric` 1.813 → 1.806 ms
 and `dense` 21.48 → 21.37 ms. A second run of the same binary puts the run-to-run spread at ±1.4%,
-so all three are unchanged — which is the claim ADR 0049 makes: the bounds checks left without the
+so all three are unchanged, which is the claim ADR 0049 makes: the bounds checks left without the
 kernel slowing down, and that is all it claims.
 
 **Reciprocal avoidance costs about half a steering pass.** At 10,000 the step goes from 2.226 ms to
 3.255 ms (+46%); at 100,000 from roughly 21 to 34 ms (+55%). That is the price of a second neighbour
 pass over the same cells, and it buys the symmetric pair solve in ADR 0045. It is on by default in
-`BoidsConfig` — two agents walking through each other is a bug a player sees in the first minute,
+`BoidsConfig`, two agents walking through each other is a bug a player sees in the first minute,
 and 1.03 ms on top of a 2.2 ms steering pass inside a 5.2 ms frame at 10,000 agents is not the place
-to save it — and
+to save it, and
 `with_avoidance(None)` is the opt-out for a game that measures differently on its own hardware.
 
 **The 100,000-agent avoidance cases are quoted as a range, not a delta.** Two runs of the same
@@ -843,13 +843,13 @@ the index's grid window covers everything, so the fallback keeps it honest inste
 
 The playground renders with a CPU rasteriser, because CI and the remote shells this project is
 developed in have no window and no GPU. (When this section was written they also had no `libvulkan`;
-they now have a *software* Vulkan driver, `llvmpipe`, which is a CPU in a GPU's clothing — the
+they now have a *software* Vulkan driver, `llvmpipe`, which is a CPU in a GPU's clothing, the
 amendment at the end of this page measures it.) That is a deliberate choice with a cost, and
 the cost is worth recording: `demo/benches/render_pipeline.rs` draws the same 2,000-body district
 scene twice, once through `raster.rs` and once through a real `wgpu` device on its `noop` backend.
 
-The wgpu number is the CPU half of a frame — pipeline, buffers, instance upload, render pass,
-submission — with the commands discarded. It says nothing about GPU time, and this ADR claims
+The wgpu number is the CPU half of a frame, pipeline, buffers, instance upload, render pass,
+submission, with the commands discarded. It says nothing about GPU time, and this ADR claims
 nothing about it.
 
 `cargo bench --manifest-path demo/Cargo.toml --bench render_pipeline`, release, this sandbox:
@@ -865,12 +865,12 @@ nothing about it.
 What the table says: the CPU cost of a wgpu frame here is a fixed 34 µs that scales with the draw
 list, not with the picture; the software path's cost scales with both, and its pixel work is what the
 GPU would have done. What it also says is that the interactive budget is a rendering decision, not a
-simulation one — the crowd is the same crowd, and the 45× between the two software cases is the LOD
+simulation one, the crowd is the same crowd, and the 45× between the two software cases is the LOD
 thresholds, the sub-pixel cull and a framebuffer a fiftieth of the area. Against a wgpu frame's CPU
 half the ratio is about 550× at terminal size and about 25,000× at full detail.
 
 Measured in a real terminal (`script -qec` on a pty, 112 × 40 pixels), the interactive front end ran
-111 frames in four seconds — 28 fps, 35 ms a frame, just over the loop's 30 fps pacing target, so the
+111 frames in four seconds, 28 fps, 35 ms a frame, just over the loop's 30 fps pacing target, so the
 loop never sleeps and the frame time is the whole cost including the terminal write. The narrower
 112 × 72-pixel picture in the table above is 19.0 ms, so a terminal roughly twice this size lands
 between the two.
@@ -891,14 +891,14 @@ The difference is inside the run-to-run noise, and that is the finding: at 112 c
 bodies sit inside the sixteen-to-twenty-four-metre window, each drawn as a mesh *and* a card, and the
 cost is lost in the frame. The band is free where it is invisible. It is not free on a 300-cell
 terminal, where a body is eight to ten pixels and a body inside the band costs its mesh plus two
-triangles — the accounting test in `render3d` pins exactly that, and there is no measurement above
+triangles, the accounting test in `render3d` pins exactly that, and there is no measurement above
 because no display of that size exists here.
 
 ## A GPU frame on a software Vulkan adapter (2026-11-06, ADR 0050 amendment)
 The sandbox now has a Vulkan loader and an X server, and no `/dev/dri` render node: the only adapter is
 `llvmpipe (LLVM 20.1.2, 128 bits)`, reported as `device_type: Cpu`. `demo-gpu/` renders the same
 district view through an instanced `wgpu` pipeline, so the GPU half of the comparison finally has a
-number — a number about that driver, not about a graphics card.
+number, a number about that driver, not about a graphics card.
 `cargo bench --manifest-path demo-gpu/Cargo.toml --bench frame`, release, this sandbox, 600x375,
 615 instances, 7 draws, 5,401,392 triangles, adapter `Vulkan | llvmpipe (LLVM 20.1.2, 128 bits)`:
 | Case | Median | Interval |
@@ -909,24 +909,24 @@ number — a number about that driver, not about a graphics card.
 Three facts, and no fourth. A CPU-backed adapter's latency and throughput are the same number (974 ms
 against 987 ms per frame), because there is no second processor to overlap with: the frame has nothing
 to pipeline into. Shipping the frame back costs about 23 ms, which a windowed front end would never pay.
-And the GPU path is not faster than the software rasteriser here — 974 ms against 850 ms for the same
-composition at the same size — because both are the same kind of work on the same kind of processor; the
+And the GPU path is not faster than the software rasteriser here, 974 ms against 850 ms for the same
+composition at the same size, because both are the same kind of work on the same kind of processor; the
 GPU path draws every triangle of every body (5.4 million) where the software path spends its time on
 impostors and a culled ground.
 The one number worth carrying forward is the CPU half, measured inside the binary rather than through a
-benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame —
+benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame , 
 create the encoder, one render pass, seven draws, one submit. On real hardware that 0.11 ms would be the
 frame's CPU cost and the GPU would be doing the work behind it. This sandbox cannot show that, and no
 figure here pretends to.
 A trap worth recording, because it cost an hour: a benchmark case that submitted frames without ever
 draining the queue reported 992 ms for what it called `encode`, while the same submit inside the binary
 measured 0.1 ms. The loop was measuring saturation, not encoding. The cases are now named after what
-their loops do — `frame`, `eight_frames_per_drain`, `frame_with_readback` — and
+their loops do, `frame`, `eight_frames_per_drain`, `frame_with_readback`, and
 `docs/dev/tuning/playbooks/gpu-demos.md` writes the rule down for the next person.
 ## Personality costs nothing per frame
 
 `crowd_temperament` in `benches/crowd.rs` measures the same 10,000-agent volumetric fixture twice:
-once with the configured weights for everyone, once with a bias on every agent — the expensive
+once with the configured weights for everyone, once with a bias on every agent, the expensive
 shape, since a crowd where only the near ring has a personality pays a fraction of it.
 
 | Case | Median |
@@ -946,23 +946,23 @@ Needs decay is not in this table because it is not per frame: the system runs on
 ## The crowd readback: what the sort cost (2026-11-08)
 
 The window that draws Ashfall through Bevy reads the crowd out of the ECS once per rendered frame to
-move 2,000 entities. `Playground::bodies` was built for snapshots — one call, one `Vec`, sorted by
-identity so a captured scene is diffable — and a live loop was paying a snapshot API's price sixty
+move 2,000 entities. `Playground::bodies` was built for snapshots, one call, one `Vec`, sorted by
+identity so a captured scene is diffable, and a live loop was paying a snapshot API's price sixty
 times a second. `benches/crowd_readback.rs` (in `demo/`) separates the parts, on this machine's ARM
 core, `cargo bench` profile, a crowd warmed by 600 ticks:
 
 | Case | 2,000 | 10,000 |
 |---|---|---|
-| `full` — build query, iterate, collect, stable-sort, copy out | 30.0 µs | 149.6 µs |
-| `fresh_query` — the same without the sort and the copy | 14.5 µs | 78.5 µs |
-| `reused_query` — iterate through a `QueryState` built once | 13.5 µs | 70.2 µs |
+| `full`, build query, iterate, collect, stable-sort, copy out | 30.0 µs | 149.6 µs |
+| `fresh_query`, the same without the sort and the copy | 14.5 µs | 78.5 µs |
+| `reused_query`, iterate through a `QueryState` built once | 13.5 µs | 70.2 µs |
 
 Half the call was bookkeeping, and most of that was the sort: `sort_by_key` is a stable merge sort,
 which allocates a scratch buffer of half the elements and moves 40-byte pairs through it. The keys
 are `Npc` identity bits, which are unique, so there was no stability to preserve and nothing to
 allocate for it. Three changes, in order of what they bought:
 
-* `sort_unstable_by_key` — no merge buffer, in place, same order, because the keys cannot tie.
+* `sort_unstable_by_key`, no merge buffer, in place, same order, because the keys cannot tie.
 * One buffer instead of three: the pairs are refilled rather than reallocated, and the caller hands
   in the output `Vec` via the new `bodies_into`. After the first frame the call allocates nothing.
 * The `QueryState` is kept on the `Playground` instead of rebuilt per call: 1.2 µs at 2,000, 10 µs at
@@ -971,28 +971,28 @@ allocate for it. Three changes, in order of what they bought:
 | Case | 2,000 before | 2,000 after | 10,000 before | 10,000 after |
 |---|---|---|---|---|
 | `full` | 30.0 µs | 18.0 µs | 149.6 µs | 90.3 µs |
-| `into_reused` — the path the window uses | — | 18.0 µs | — | 89.4 µs |
+| `into_reused`, the path the window uses |, | 18.0 µs |, | 89.4 µs |
 
 Forty percent, and the shape of what is left changed: 13.5 µs of the remaining 18 is the query
-iteration itself — four component fetches and a 40-byte write per body, 6.7 ns each — which is the
+iteration itself, four component fetches and a 40-byte write per body, 6.7 ns each, which is the
 floor for reading 2,000 entities through the ECS, not something this API can tune away.
 
 The next step, if a window ever wants 10,000 bodies at 120 Hz, is to drop the sort entirely:
 `Npc` identity is dense, so a preallocated slot table indexed by identity would scatter each body
 into place in one pass and skip the ordering work. It was not done here because it trades a
-2.8 µs saving (2,000) against a correctness contract that currently rests on one clear rule — slot
+2.8 µs saving (2,000) against a correctness contract that currently rests on one clear rule, slot
 order equals identity order, which is what `BodyLink` relies on to move the right entity. `90 µs` at
 10,000 bodies is 0.5% of a 16.7 ms frame; the contract is worth more than the microseconds.
 
-`bodies()` remains, allocating exactly one `Vec`: snapshot callers — the binaries, the example, the
-tests — were never the problem, and changing their signature to save an allocation they make once
+`bodies()` remains, allocating exactly one `Vec`: snapshot callers, the binaries, the example, the
+tests, were never the problem, and changing their signature to save an allocation they make once
 would be churn.
 
 ## Animation LOD: what stopping the invisible costs and saves (2026-11-09, T07)
 
 `apply_locomotion_blend` now decides, per body, whether to write the blend at all. The level comes
 from the tier the scheduler already assigned (`NpcTier`) and the distance to an `AnimationFocus` the
-game sets once a frame — not from a second distance test:
+game sets once a frame, not from a second distance test:
 
 | Level | What the binding does | When |
 |---|---|---|
@@ -1018,14 +1018,14 @@ at reflex tier, 240 timed passes after a 32-pass warm-up, binding system only:
 
 Two things this table says, and one it does not.
 
-* Culling at the plaza edge clears the gate — 49% of binding time at 10,000 bodies, against the 30%
-  the task asks for — because the tier check and the distance check are one branch set per body, not
+* Culling at the plaza edge clears the gate, 49% of binding time at 10,000 bodies, against the 30%
+  the task asks for, because the tier check and the distance check are one branch set per body, not
   a query or an allocation.
 * The paused band is worth more than the stepped one: 70% saved when the camera is outside the
   plaza, since a paused body costs one `pause_all` per return rather than a write per tick. The
   absolute numbers are small because the whole binding is 0.6 ms at 10,000; what a paused body also
   saves is Bevy's `animate_targets`, which is outside this system and outside this table.
-* A stepped body still advances its clip — the cadence saves the writes, not the bones. Making the
+* A stepped body still advances its clip, the cadence saves the writes, not the bones. Making the
   cadence also freeze the skeleton is what `Paused` is for, and a game that wants low-rate bone
   updates should step the whole player, not just this binding.
 
@@ -1069,13 +1069,13 @@ Machine: a six-core x86-64 sandbox VM (no model string exposed), `[profile.bench
 
 | Case | 2,000 bodies | 10,000 bodies |
 | ---- | -----------: | ------------: |
-| `weights/no_culling` — the blend with the LOD band switched off | 179 µs | 902 µs |
-| `weights/plaza_edge` — the blend with the camera on the plaza edge | 186 µs | 935 µs |
-| `culling/inside_band` — every body inside the near band | 187 µs | 940 µs |
-| `culling/beyond_far` — every body paused | 57 µs | 275 µs |
-| `gaze/2_000_bodies` — two bones solved per body | 263 µs | — |
-| `root_motion/no_report` — the reconciler with nothing to reconcile | 6.3 µs | 26 µs |
-| `root_motion/every_body_reports` — every body reports a clip offset | 36 µs | 175 µs |
+| `weights/no_culling`, the blend with the LOD band switched off | 179 µs | 902 µs |
+| `weights/plaza_edge`, the blend with the camera on the plaza edge | 186 µs | 935 µs |
+| `culling/inside_band`, every body inside the near band | 187 µs | 940 µs |
+| `culling/beyond_far`, every body paused | 57 µs | 275 µs |
+| `gaze/2_000_bodies`, two bones solved per body | 263 µs |, |
+| `root_motion/no_report`, the reconciler with nothing to reconcile | 6.3 µs | 26 µs |
+| `root_motion/every_body_reports`, every body reports a clip offset | 36 µs | 175 µs |
 
 That is 90 ns per body for the blend and 131 ns per body for the gaze solve, at 2,000 bodies: 0.44 ms
 for the pair against the plan's 0.30 ms ceiling. The gap is 47% and it was 82% before the profile below;
@@ -1095,8 +1095,8 @@ one 2,000-body fixture, so the difference between two rows is the cost of the th
 Two findings, one of which was a wrong guess worth recording:
 
 1. **The hypothesis was wrong.** The gap was not the sparse-set `get_mut`. Rebuilding the system to
-   iterate bones sequentially and look the body up through `ChildOf` measured *worse* — 294 ns against
-   128 — because two adjacent bone entities cost one cache line, while two random body lookups cost
+   iterate bones sequentially and look the body up through `ChildOf` measured *worse*, 294 ns against
+   128, because two adjacent bone entities cost one cache line, while two random body lookups cost
    more and lose the sequential body read too.
 2. **The cost was the trigonometry.** `Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)` builds a
    three-axis rotation: three sine and three cosine calls, one of them for a zero angle. The spine only
@@ -1106,7 +1106,7 @@ Two findings, one of which was a wrong guess worth recording:
    same order still pass bit for bit.
 
 A third experiment is recorded because it did *not* work. Skipping `set_weight`/`set_speed` when the
-eight per-body values were unchanged — the steady-walking case, which is most of a crowd — measured
+eight per-body values were unchanged, the steady-walking case, which is most of a crowd, measured
 198 µs against 179: reading and copying the extra 32 bytes per body through `AnimationState` cost more
 than the writes it saved, and `AnimationState` is touched by every other system that inspects a body.
 It was reverted rather than kept behind a flag, and the blend is where it was.
@@ -1137,18 +1137,18 @@ Same machine as the animation envelope: six-core x86-64 sandbox VM, `[profile.be
 
 | Case | Population | Time | Per body |
 | ---- | ---------: | ---: | -------: |
-| `spatial_build/build` — full rebuild of every body | 100,000 | 5.4 ms | 54 ns |
+| `spatial_build/build`, full rebuild of every body | 100,000 | 5.4 ms | 54 ns |
 | | 1,000,000 | 23.8 ms | 23.8 ns |
-| `spatial_query/radius_1k_queries` — 1,000 radius-12 m queries | 100,000 | 0.70 ms | 0.70 µs/query |
+| `spatial_query/radius_1k_queries`, 1,000 radius-12 m queries | 100,000 | 0.70 ms | 0.70 µs/query |
 | | 1,000,000 | 6.5 ms | 6.5 µs/query |
-| `spatial_kernel/steer_integrate_advance` — the scalar reference kernel | 100,000 | 67.7 ms | 677 ns |
+| `spatial_kernel/steer_integrate_advance`, the scalar reference kernel | 100,000 | 67.7 ms | 677 ns |
 
 Two things to read carefully, because both invite a wrong conclusion.
 
 **The 30 ms build is not the frame.** The published million-body frame (4.75 ms) is the banded continuum,
 where ambient bodies are *not* individually indexed: roughly 5,000 manifested bodies sit in the grid and
-the rest are handled as a field. This benchmark deliberately measures the worst case — every one of a
-million bodies rebuilt into cells every tick — because that is the case a naive parallel port would be
+the rest are handled as a field. This benchmark deliberately measures the worst case, every one of a
+million bodies rebuilt into cells every tick, because that is the case a naive parallel port would be
 asked to speed up, and because it is the ceiling a game hits the moment it decides every body matters.
 Comparing 30 ms against 4.75 ms and concluding the crate regressed would be comparing a full rebuild with
 an incremental band.
@@ -1162,18 +1162,18 @@ the crate and timing it separately:
 | ----- | --------: | -------: |
 | `cell_of`, one call per body | 17.9 ms | 17.9 ns |
 | counting pass (`cell_of` + histogram increment) | 22.5 ms | 22.5 ns |
-| prefix sum over 592,704 cells | 1.3 ms | — |
+| prefix sum over 592,704 cells | 1.3 ms |, |
 | placement pass, cell indices already known | 3.5 ms | 3.5 ns |
 | `build()` as it was | 46.4 ms | 46.4 ns |
 
 The parts summed to 26 ms and the whole cost 46. The 20 ms difference was `cell_of` being called **twice
-per body** — once to count, once to place — plus a 2.3 MB copy of the prefix sums into a separate cursor
+per body**, once to count, once to place, plus a 2.3 MB copy of the prefix sums into a separate cursor
 array. Two changes, no change in behaviour:
 
 1. The counting pass remembers each body's cell in a reused `Vec<u32>`, so the placement pass reads four
    bytes instead of recomputing three divisions and three clamps.
 2. `cell_start` is used as its own fill cursor and shifted back by one cell afterwards, in a descending
-   pass that reads each value just before overwriting it. That removes the cursor array entirely — one
+   pass that reads each value just before overwriting it. That removes the cursor array entirely, one
    buffer instead of two, and no copy.
 
 46.4 ms → 34.5 ms in the harness, 47.2 → 30.5 ms under criterion. `every_cell_window_holds_exactly_the
@@ -1189,7 +1189,7 @@ assign boundary bodies to different cells than they do today.
 
 **The 677 ns kernel is the scalar reference, not the SIMD road.** `application::packed` is what the serial
 ECS path was measured against in ADR 0020; the million-body kernel is `benches/crowd.rs`. A scalar run at
-1M takes six seconds per iteration, which is why the case stops at 100k — a measurement nobody will wait
+1M takes six seconds per iteration, which is why the case stops at 100k, a measurement nobody will wait
 for is a measurement nobody acts on. It stays in the gate because the three numbers together are the
 budget, and because a regression in the reference path is a regression in the fallback every
 non-SIMD target uses.
@@ -1205,7 +1205,7 @@ prefix sum serial. At a million bodies on this six-core VM, `cargo run --release
 
 | Threads | Rebuild | Speed-up |
 | ------: | ------: | -------: |
-| 1 (serial reference) | 28.0 ms | — |
+| 1 (serial reference) | 28.0 ms |, |
 | 6 | 10.0 ms | 2.8× |
 
 Three things explain why six workers buy 2.8× rather than 6×, and none of them is a defect:
@@ -1219,12 +1219,12 @@ Three things explain why six workers buy 2.8× rather than 6×, and none of them
   sharing at all. It is also the stage SIMD would help: three divisions per body, vectorisable with
   IEEE-correct `_mm256_div_ps` (bit-identical results, unlike a reciprocal multiply). The counting and
   placement passes are random scatter writes over 592,704 cells and cannot vectorise, so a SIMD
-  `cell_of` would move at most ~6 of the 10 ms left and is deliberately not done in this task — the
+  `cell_of` would move at most ~6 of the 10 ms left and is deliberately not done in this task, the
   partitioning above is what the measurements asked for, and SIMD would need a strided-to-lane
   transpose to feed it from `Vec<GridEntry>`'s 32-byte stride.
 
 Parity is tested, not assumed: `every_thread_count_builds_identical_windows` builds the same 6,000-body
-fixture at 1, 2, 3 and 8 threads and compares `cell_start` and `order` byte for byte — a query test would
+fixture at 1, 2, 3 and 8 threads and compares `cell_start` and `order` byte for byte, a query test would
 pass while two cells' windows were swapped, because it only looks at one cell at a time.
 
 ### Batched queries, partitioned (T04)
@@ -1240,12 +1240,12 @@ cap 32:
 | 1,000,000 | 5.48 ms | 1.07 ms | 5.1× |
 
 The speed-up is better than the rebuild's 2.8× for a structural reason: queries share nothing but the
-read-only grid, so there is no serial prefix sum and no `O(threads × n)` scan — each worker walks its own
+read-only grid, so there is no serial prefix sum and no `O(threads × n)` scan, each worker walks its own
 queries. At 100,000 bodies the fixed cost of the scope and the per-query cell walk dominate, which is why
 the ratio is smaller there.
 
 The bounded set is the nearest `cap` by (distance, identity), not an arbitrary subset: `a_batch_is_the_truncated_single_query_answer` compares 400 queries against the unbounded `radius` answer truncated to
-`cap`, element for element. It caught a real bug — the worst-slot bookkeeping had its comparison inverted,
+`cap`, element for element. It caught a real bug, the worst-slot bookkeeping had its comparison inverted,
 which returned a correct *set* in the wrong order for queries that saturated.
 
 **Allocation, measured rather than claimed.** The serial batch allocates nothing in steady state
@@ -1258,8 +1258,8 @@ that the parallel path allocates nothing was corrected when this was measured.
 
 ### The parity harness (T05)
 `tests/spatial_parity.rs` runs a simulation twice and compares the two runs tick by tick. Every tick folds
-the whole state into one FNV-1a digest — every body's identifier and position, the *ordered* neighbour lists
-around 24 probe points, and the scheduler's chosen set — so "identical" means the same bytes to the same
+the whole state into one FNV-1a digest, every body's identifier and position, the *ordered* neighbour lists
+around 24 probe points, and the scheduler's chosen set, so "identical" means the same bytes to the same
 algorithm the save format uses, not "similar within a tolerance".
 
 | Gate | Shape | Runtime |
@@ -1283,8 +1283,8 @@ Two things had to be true before this harness was worth trusting, and both are t
   ten thousand by 1 mm and requires the stream to diverge on that tick.
 * **The digest notices the mistake a partition can make.**
   `the_spatial_digest_notices_an_insertion_ordered_reduction` (in `src/domain/spatial.rs`, where a grid's
-  private arrays are reachable) rebuilds the window array in insertion order instead of cell order — every
-  body still present, every window still filled, so a set or count comparison would pass — and requires the
+  private arrays are reachable) rebuilds the window array in insertion order instead of cell order, every
+  body still present, every window still filled, so a set or count comparison would pass, and requires the
   digest to differ. That is the negative control the plan asked for.
 
 The varying policy is not decoration either: a partition that only produces the right answer at a fixed
@@ -1293,7 +1293,7 @@ with 1, 8, 3 and 2 workers in rotation.
 
 ### Thread scaling: where the phase 3 ceiling actually is (T06)
 Measured with `examples/scaling_sweep.rs`: 1M bodies, 5,000 queries of radius 12 m, median of five runs per
-cell, on **this VM — aarch64, six cores** (`thread::available_parallelism()` = 6). It is not a workstation and
+cell, on **this VM, aarch64, six cores** (`thread::available_parallelism()` = 6). It is not a workstation and
 nothing below is extrapolated to hardware that was not measured. The figure is
 `docs/images/spatial-scaling.png`; the table is the same data.
 
@@ -1309,8 +1309,8 @@ nothing below is extrapolated to hardware that was not measured. The figure is
 Three things in that table decide the next phase.
 
 **The batch scales, the build saturates at four threads, and the frame lands in between.** The batch reaches
-6.36x at six workers, which is slightly *super*linear — page faults on the freshly allocated arena and entry
-arrays are paid concurrently rather than in one thread's critical path — and it is the only phase here that
+6.36x at six workers, which is slightly *super*linear, page faults on the freshly allocated arena and entry
+arrays are paid concurrently rather than in one thread's critical path, and it is the only phase here that
 would justify more cores. The build gains 2.51x by four workers and then 0.43x more by six: its three O(n)
 passes partition cleanly, but the prefix sum over the cell array, the cell clear and the cursor restore are
 serial by construction (they are what makes the arrays identical at every thread count, ADR 0054). Those are
@@ -1323,7 +1323,7 @@ count and clamps anything larger, because the sweep says a configuration cannot 
 
 **The verdict against the phase's own goal.** The goal was that the parallel path carry the 1M population at a
 frame cost that a simulation can live with. Success was defined as 4x on `frame` at the machine's core count;
-the measurement is **4.65x** (74.13 ms to 15.96 ms), so the phase met its number — but the split says where the
+the measurement is **4.65x** (74.13 ms to 15.96 ms), so the phase met its number, but the split says where the
 credit goes: the batch is 6.4x and the build is 2.9x, and the build is the half that a parallel prefix sum
 would fix. That is the falsifiable part: if build's speed-up had reached 5x at six workers, frame cost would be
 about 12 ms rather than 16, and nothing in the batch would have had to change.
@@ -1346,13 +1346,13 @@ runs, the same 1M fixture as the gated baseline, on the same six-core aarch64 VM
 | **total** | **23.14 ms** | **8.85 ms** | **2.6x** |
 
 Serial share: 6.7% at one worker, 17.6% at six. The fixture holds 421,876 cells, not the 15.6 million an
-earlier draft of these notes assumed — the grid caps its cell array at a budget, which for a 1 km volume at 8 m
+earlier draft of these notes assumed, the grid caps its cell array at a budget, which for a 1 km volume at 8 m
 is 75 cells per axis, an effective 13.3 m. That single correction matters more than it looks: the scan was
 being reasoned about as a 15-million-step loop when it is a 422-thousand-step one.
 
 **The premise phase 4 was built on is wrong, and this is the measurement that says so.** Phase 3's analysis
 blamed the prefix sum for the build's 2.94x and predicted that a parallel scan would take the build to 5x. The
-scan is 0.85 ms — 3.7% of the serial rebuild and 9.8% of the parallel one. Even a scan that cost nothing at six
+scan is 0.85 ms, 3.7% of the serial rebuild and 9.8% of the parallel one. Even a scan that cost nothing at six
 workers would move the build from 8.85 ms to about 8.0 ms. What actually costs the money is the clear
 (12.91 ms, 5.2x) and place (6.99 ms, 3.1x), and what actually caps the curve is the pair of serial passes at
 1.55 ms plus a count pass that gets *slower* with more workers (1.68 ms to 2.08 ms, 0.8x).
@@ -1361,8 +1361,8 @@ The ceiling is arithmetic, not opinion: with 1.55 ms serial, Amdahl at six worke
 however good the parallel half becomes. The measured 2.6x is therefore 58% of what the current decomposition
 can ever reach, and a perfect blocked scan buys roughly 0.7 ms of the 6.3 ms still on the table.
 
-So the blocked scan stays in the plan — it is cheap, it is a prerequisite for deleting the cursor restore, and
-it removes a serial pass — but it is no longer the headline. The tasks that follow this measurement are about
+So the blocked scan stays in the plan, it is cheap, it is a prerequisite for deleting the cursor restore, and
+it removes a serial pass, but it is no longer the headline. The tasks that follow this measurement are about
 the clear's 30 ns per cell and the count pass's negative scaling, and `build-scaling-gate`'s target has been
 re-derived from the floor above rather than from the 5x guess.
 
@@ -1375,18 +1375,18 @@ depend on the machine (ADR 0055 §6). Measured on the same 1M fixture and six aa
 
 | Pass | 1 worker | 6 workers | Before (T01) at 6 | Change |
 | --- | ---: | ---: | ---: | --- |
-| clear | 13.08 ms | 2.46 ms | 2.46 ms | — |
+| clear | 13.08 ms | 2.46 ms | 2.46 ms |, |
 | count | 1.70 ms | 1.74 ms | 2.08 ms | 0.84x |
 | prefix | 0.44 ms | **0.28 ms** | 0.87 ms | **3.1x faster** |
-| place | 7.32 ms | 2.22 ms | 2.23 ms | — |
-| restore | 0.68 ms | 0.70 ms | 0.68 ms | — |
+| place | 7.32 ms | 2.22 ms | 2.23 ms |, |
+| restore | 0.68 ms | 0.70 ms | 0.68 ms |, |
 | **total** | **23.34 ms** | **7.48 ms** | 8.85 ms | **1.18x faster** |
 
-The build went from 8.85 ms to 7.48 ms at six workers, which is the 1.2x the ADR predicted — 8.85 minus the
+The build went from 8.85 ms to 7.48 ms at six workers, which is the 1.2x the ADR predicted, 8.85 minus the
 1.45 ms the scan and (eventually) the restore were worth. The `prefix` figure, however, **missed its own
 prediction by 2.8x**: ADR 0055 said ≤ 0.10 ms and the measured value is 0.28 ms.
 
-That miss was diagnosed by doing what the ADR said to do — sweep `blocks` rather than distrust the design — and
+That miss was diagnosed by doing what the ADR said to do, sweep `blocks` rather than distrust the design, and
 the sweep says the design is not the problem:
 
 | Blocks | `prefix` at 6 workers |
@@ -1397,14 +1397,14 @@ the sweep says the design is not the problem:
 | 4096 | 0.304 ms |
 
 Flat from 64 to 4096. If the O(blocks) step or per-block overhead were the limit, the curve would fall with fewer
-blocks; it does not, so the limit is elsewhere: the scan is a read-modify-write over 421,876 `u32` — 1.7 MB — and
+blocks; it does not, so the limit is elsewhere: the scan is a read-modify-write over 421,876 `u32`, 1.7 MB, and
 0.28 ms is about 6 GB/s of effective single-pass bandwidth on this VM. A 0.10 ms target implied ~17 GB/s, which
 is not available for a pass that both reads and writes the same array. **The prediction was wrong, not the
 implementation**, and the ADR now carries the measured floor with the arithmetic that explains it.
 
 What this leaves is where T04 goes next. The serial tail is now 0.98 ms: 0.28 ms of scan plus 0.70 ms of cursor
 restore. The restore exists only because `place` walks windows downwards from their ends, and per-block bases
-mean it can be deleted outright rather than parallelised — which is worth another 0.70 ms, or about 1.1x on the
+mean it can be deleted outright rather than parallelised, which is worth another 0.70 ms, or about 1.1x on the
 build, and takes the serial floor to roughly 0.3 ms.
 
 ### Retiring the cursor restore (T04)
@@ -1415,11 +1415,11 @@ It now advances a copy (`cell_cursor`) and the shift is gone: `PassCosts::restor
 
 | Pass | 1 worker | 6 workers | T03 at 6 | Change |
 | --- | ---: | ---: | ---: | --- |
-| clear | 12.96 ms | 2.46 ms | 2.46 ms | — |
-| count | 1.72 ms | 1.76 ms | 1.74 ms | — |
-| prefix | 0.43 ms | 0.30 ms | 0.28 ms | — |
+| clear | 12.96 ms | 2.46 ms | 2.46 ms |, |
+| count | 1.72 ms | 1.76 ms | 1.74 ms |, |
+| prefix | 0.43 ms | 0.30 ms | 0.28 ms |, |
 | **seat** | **0.12 ms** | **0.11 ms** | 0.68 ms | **6.0x faster** |
-| place | 7.19 ms | 2.22 ms | 2.22 ms | — |
+| place | 7.19 ms | 2.22 ms | 2.22 ms |, |
 | **total** | **22.15 ms** | **6.95 ms** | 7.48 ms | **1.08x faster** |
 
 Against the phase 3 baseline the build has gone 8.85 ms → 6.95 ms (1.27x) while the scan moved 0.87 → 0.30 ms and
@@ -1430,7 +1430,7 @@ complexity term the plan asked for:
 serial = O(blocks) + sizeof(cell_start)        # 0.30 ms bandwidth-bound scan + 0.11 ms memcpy
 ```
 
-Amdahl at that floor (0.41 ms of 22.15 ms) caps six workers at 5.5x, where the previous floor capped it at 4.5x —
+Amdahl at that floor (0.41 ms of 22.15 ms) caps six workers at 5.5x, where the previous floor capped it at 4.5x , 
 so the 5x gate is now reachable arithmetically for the first time, rather than being blocked by a pass nobody had
 questioned.
 
@@ -1438,7 +1438,7 @@ questioned.
 against 0.11 ms serial: six `thread::scope` spawns cost more than the 1.7 MB they share, and the copy already runs
 at ~15 GB/s. It is therefore the rebuild's one remaining `O(cells)` single-threaded step, which contradicts the
 task's must-have. That is recorded as a deviation with the condition for revisiting it rather than quietly
-satisfied on paper — a worker pool that outlives a tick removes the spawn cost, and this crate does not have one
+satisfied on paper, a worker pool that outlives a tick removes the spawn cost, and this crate does not have one
 yet (the same follow-up phase 3 recorded for the scan).
 
 Placement output is unchanged byte for byte: the fill still walks each window upwards in body order, and both the
@@ -1478,13 +1478,13 @@ parallel pass gives the work-only figures below; the one-worker column has no ta
 | place | 7.1 ms | 2.22 ms (3.2x) | 1.69 ms | 4.2x |
 
 `count` does not refuse to scale; it scales 1.4x and was drowned by a dispatch cost 30% the size of the pass. The
-algorithmic problem phase 4 named is real — each worker re-reads the whole cell list, so the pass is
-`O(workers × n)` — but it is a 1.4x problem, not a 1.0x one, and phase 5's T03 should be read with that correction.
+algorithmic problem phase 4 named is real, each worker re-reads the whole cell list, so the pass is
+`O(workers × n)`, but it is a 1.4x problem, not a 1.0x one, and phase 5's T03 should be read with that correction.
 
 **Of the two mechanisms that remove the tax, only one is adoptable.** `bevy_tasks` is 4x faster again, but its
 `scope` boxes a task per spawn: 9 allocations per round, against the zero steady-frame allocations that
 `tests/crowd_no_alloc.rs` and `tests/spatial_batch_no_alloc.rs` assert. A barrier inside one `std::thread::scope`
-costs ~0 allocations and 51 µs per round, and needs no unsafe and no change to the public surface — so that is the
+costs ~0 allocations and 51 µs per round, and needs no unsafe and no change to the public surface, so that is the
 shape the rebuild should take, with the constraint recorded: the serial scan has to run *between* barriers, and a
 worker holding `&mut` to its slice of the window table cannot hand it back mid-closure. The one-scope design
 therefore has to either keep the scan outside the scope (two scopes per rebuild, 1.06 ms instead of 1.59 ms) or
@@ -1494,12 +1494,12 @@ give the scan's local pass to the workers, which is what T03's fused totals woul
 ## Phase 5: the seat rides inside the place dispatch
 
 Phase 5 priced the thread hand-off at 0.53 ms per `thread::scope` (see *What a thread costs to start*), which turned
-a note in ADR 0056 into an actionable one: the copy of the window starts into the write cursors — the "seat" — was
+a note in ADR 0056 into an actionable one: the copy of the window starts into the write cursors, the "seat", was
 left serial because a parallel version had measured 0.21 ms against the serial 0.11 ms. With the dispatch priced, the
 reason is visible: the parallel copy was never losing to the serial copy, it was paying 0.53 ms for a scope it did
 not need. A rebuild already pays for a dispatch to place the bodies; the copy can go inside it.
 
-It now does — `seat_and_place_parallel` splits `cell_cursor` and `order` across the same workers, each copying its
+It now does, `seat_and_place_parallel` splits `cell_cursor` and `order` across the same workers, each copying its
 own slice from `cell_start` (which nothing writes, so it stays a shared slice) and then placing the bodies whose cell
 falls in its range. `PassCosts::seat` is zero on the parallel path and the copy is counted in `place`.
 
@@ -1519,7 +1519,7 @@ the drift that comes from a shared VM warming up:
 | **median** | **7.010 ms** | **6.671 ms** |
 
 Five pairs, five wins, 0.34 ms (4.8%). The separation is twice the within-group spread, which is the only reason the
-change is claimed at all — a single pair from this fixture said the opposite.
+change is claimed at all, a single pair from this fixture said the opposite.
 
 The saving is larger than the 0.11 ms the serial copy cost, which the measurement does not explain and this document
 will not pretend to: the likely cause is locality. The serial copy streamed 1.7 MB that the placement pass then
@@ -1528,25 +1528,25 @@ number attached, not a finding, and it is recorded as such.
 
 ### What it does not do
 
-It does not remove a dispatch. The rebuild still pays three — clear, count, seat-and-place — and the count pass is
+It does not remove a dispatch. The rebuild still pays three, clear, count, seat-and-place, and the count pass is
 still partitioned by cell range while it reads the whole body list, the `O(workers × n)` re-read that phase 4 named.
 Removing a whole dispatch needs the body-cell pass and the count pass to share one scope, which they cannot: the
 first writes slices of the cell list that the second reads in full. That is a different design (atomics per body, or
 per-worker histograms and a merge) and it is phase 5's `fused-count-and-scan` task, not this one.
 
-At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is **4.72 ms at six workers** — a 4.72x
-reduction of the 22.3 ms one-worker build measured in that session, which is what "5x" meant when it was written — and the
-remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan — 1.37 ms, which lands at 5.3 ms. The
+At 6.67 ms and 1M bodies the rebuild is 6.7 ns per body. The 5x target written into phase 3 is **4.72 ms at six workers**, a 4.72x
+reduction of the 22.3 ms one-worker build measured in that session, which is what "5x" meant when it was written, and the
+remaining recoverable time is 2 × 0.53 ms of dispatch plus 0.31 ms of scan, 1.37 ms, which lands at 5.3 ms. The
 target was set before the dispatch was measured; it needs re-deriving the way phase 4's was.
 
 ## Phase 5: the count pass absorbs the scan's totals, and five passes become four (T03)
 
 ADR 0057 fused two things the rebuild was doing twice. `count` now accumulates each block's total while it counts,
-and the block-local scan writes the window starts *and* the placement cursors from the same register — so the read
+and the block-local scan writes the window starts *and* the placement cursors from the same register, so the read
 that used to happen in `prefix` (1.7 MB of totals, serial) and the copy that used to happen in `seat` are both gone.
 `PassCosts` goes from five rows to four and `seat` is deleted rather than left at zero.
 
-Both binaries were built once and alternated, six pairs, same 1M fixture and six-core aarch64 VM — the method §*Measured,
+Both binaries were built once and alternated, six pairs, same 1M fixture and six-core aarch64 VM, the method §*Measured,
 alternately, on one machine* established for this fixture, because its run-to-run spread is larger than the effect:
 
 | | 1 worker | 6 workers |
@@ -1556,7 +1556,7 @@ alternately, on one machine* established for this fixture, because its run-to-ru
 | delta | −0.08 ms (−0.4%) | −0.06 ms (−0.8%) |
 
 **The total did not move, and the honest reading is that it could not have.** `prefix` did what the ADR said it
-would — it lost the totals read:
+would, it lost the totals read:
 
 | pass | 1 worker | 6 workers |
 | --- | ---: | ---: |
@@ -1566,7 +1566,7 @@ would — it lost the totals read:
 | seat | 0.129 → *deleted* | 0.000 → *deleted* |
 | place | 7.168 → 7.190 | 2.134 → 2.279 |
 
-`prefix` at six workers fell 0.058 ms, which is the 1.7 MB totals read leaving the serial tail — bandwidth-bound at
+`prefix` at six workers fell 0.058 ms, which is the 1.7 MB totals read leaving the serial tail, bandwidth-bound at
 ~6 GB/s, exactly as the ADR's arithmetic predicted. The scan's serial share is now 0.238 ms of a 6.8 ms build, and
 the placement copy is no longer a pass at all. What did not happen is a measurable win in total: 0.06 ms is below
 this fixture's noise, and the totals sum that `count` gained (each worker walking the window it just wrote, hot in
@@ -1574,7 +1574,7 @@ L2) costs about what the scan's re-read did.
 
 **Two regressions were introduced and removed during the task, and both are worth recording because they are the
 kind that hide.** The first was clearing `cell_cursor` in the count pass: 1.7 MB of `fill` per rebuild, 0.3 ms, to
-prepare memory the scan immediately overwrites in full. The cursor is now left dirty on purpose — every slot the scan
+prepare memory the scan immediately overwrites in full. The cursor is now left dirty on purpose, every slot the scan
 writes it writes unconditionally, and the one slot it does not touch (index 0, the empty prefix) is set explicitly.
 The second was routing a single worker through the blocked scan: 1.02 ms against 0.42 ms for the plain serial scan,
 because that scan was still writing through `get`/`get_mut` per element while the blocked one walked zipped slices.
@@ -1583,7 +1583,7 @@ Rewritten as zipped slices, the serial scan costs 0.426 ms, and a single worker 
 **One number the change does not explain.** `count` at one worker reads 0.27 ms higher after the change, and it
 should not: the serial count skips the totals entirely (`needs_block_totals_for` is false at one worker, and
 `the_fused_totals_match_a_recount_of_the_cell_list` asserts the array is empty in that case). It is recorded as
-unexplained drift rather than attributed to the fusion — the same fixture has produced a 0.3 ms swing on an unchanged
+unexplained drift rather than attributed to the fusion, the same fixture has produced a 0.3 ms swing on an unchanged
 `clear` before.
 
 What the task does deliver is structural, and it is the part T05 needs: three dispatches still, but the serial tail
@@ -1616,20 +1616,20 @@ implies, and the derived constant is `cells.div_ceil(blocks)`:
 | 2,048 | 206 | 0.234 ms | 6.75 ms | 0.216 ms | 1.41 ms |
 | 4,096 | 103 | 0.244 ms | **6.99 ms** | 0.213 ms | 1.40 ms |
 
-**Both walls are visible, and the constant is between them.** At 8 blocks — 1.3 per worker — `prefix` costs 0.285 ms
-against 0.23 in the middle: the last block is a tail that five workers watch. At 4096 blocks — 103 cells each — the
+**Both walls are visible, and the constant is between them.** At 8 blocks, 1.3 per worker, `prefix` costs 0.285 ms
+against 0.23 in the middle: the last block is a tail that five workers watch. At 4096 blocks, 103 cells each, the
 per-block overhead arrives in `count` rather than the scan (1.98 ms against 1.85 at 1M, 0.50 against 0.37 at 100k)
 and the total pays 0.3 ms. Between roughly 32 and 2048 blocks everything is inside the fixture's noise.
 
 **The doubt was wrong.** 17 blocks per worker is not too few; the degradation starts an order of magnitude below it,
 around 1.3 blocks per worker. What the constant actually rests on is bytes: 4096 cells is a 16 KB window slice, and
-the scan writes the cursor slice beside it, so a block touches 32 KB — L1-sized on both the x86 and Apple-silicon
+the scan writes the cursor slice beside it, so a block touches 32 KB, L1-sized on both the x86 and Apple-silicon
 cache geometries this crate targets, which is what keeps the local scan's forward walk and its totals read in cache.
 The test `the_block_constant_is_pinned_by_its_bytes_and_its_table` asserts both the value and its byte size, and
 derived block counts at seven cell counts, so an edit to the constant fails a test that points back at this table.
 
 The sweep also says what the block constant *cannot* buy: `prefix` is 0.22–0.28 ms of a 6.7 ms rebuild at every
-setting, so no choice here moves the total by more than noise. The 5x gate does not hinge on it — the dispatch tax
+setting, so no choice here moves the total by more than noise. The 5x gate does not hinge on it, the dispatch tax
 does (§*What a thread hand-off costs*), which is what T05 is for.
 
 ## Why the continuity gates were slow (and what the cost actually was)
@@ -1655,7 +1655,7 @@ not, which is the steering kernel plus the systems' own scans.
 
 **The profile is the cost.** 31 ms against 1.62 ms is 19x, and it is 19x on SIMD code that the dev profile does not
 vectorise, does not inline, and re-checks on every arithmetic op. Five such tests running in parallel on six cores
-with one counting allocator between them is where the 39 minutes came from — not from anything the band does.
+with one counting allocator between them is where the 39 minutes came from, not from anything the band does.
 
 So the fix is a `[profile.test]` with `opt-level = 2`, not a smaller fixture and not an `#[ignore]`. The ticks are the
 gate (ADR 0022); the profile was never part of what it asserts, and `debug-assertions` and `overflow-checks` are still
@@ -1671,13 +1671,13 @@ is the difference between a suite nobody runs locally and one that finishes whil
 
 ## One dispatch for the scan and the placement (T05)
 
-The rebuild used four `thread::scope` dispatches — clear, count, scan, place — and ADR 0059 set out to remove one by
+The rebuild used four `thread::scope` dispatches, clear, count, scan, place, and ADR 0059 set out to remove one by
 fusing the scan with the placement, which touch the same two arrays and nothing else in between.
 
 Doing it needed a correction to the ADR's own reasoning. It proposed a barrier between the two phases, on the theory
 that a worker cannot place until the blocks below it have been scanned. A worker cannot *know* that, but it does not
 need to: it fills the windows of its own cells, every one of which starts at a total it has just computed itself on top
-of the base from `prefix_bases`. The barrier version measured **worse than what it replaced** — 7.42 ms against
+of the base from `prefix_bases`. The barrier version measured **worse than what it replaced**, 7.42 ms against
 6.74 ms, `place` up 27% and `prefix` up 49%, because waking six threads costs more than the dispatch it was meant to
 save. Removing the barrier removed the cost.
 
@@ -1707,7 +1707,7 @@ passes well short of 4.72 ms.
 ### Which serial build is the denominator
 
 Three different one-worker numbers appear in this file for the same 1M fixture: 22.15 ms in phase 4, 22.5 ms in T03, 22.9 ms in
-T06. They are the same code measured in different sessions, and the ~2% between them is this machine's run-to-run spread — larger
+T06. They are the same code measured in different sessions, and the ~2% between them is this machine's run-to-run spread, larger
 than several of the effects these sections report. That makes "5x against the serial build" ambiguous by construction, so the
 rule from here on is that a speedup quotes the one-worker number **measured in the same session, on the same fixture, by the same
 binary**, and a comparison across a code change quotes both binaries' own one-worker numbers. The T06 numbers below follow that
@@ -1715,7 +1715,7 @@ rule; the earlier sections keep their contemporaneous serial figures, which is w
 
 ## The division was most of the rebuild (T06, `clear`)
 
-ADR 0060 identified `clear` as compute-bound on `(position - min) / cell_size` — three f32 divisions per body — and
+ADR 0060 identified `clear` as compute-bound on `(position - min) / cell_size`, three f32 divisions per body, and
 estimated 2.46 → 1.2–1.5 ms. The estimate was directionally right and much too small.
 
 | | before | after | |
@@ -1732,7 +1732,7 @@ The change is a multiply by a cached `1.0 / cell_size` instead of a divide, and 
 4.7x, not the ~2x the probe suggested: the real loop inlines the kernel, while the probe called it through a `fn` pointer
 and paid an indirect call per body, which inflated every fast variant it measured.
 
-Against the pre-fix serial build this is **5.02x** — the phase 5 gate.
+Against the pre-fix serial build this is **5.02x**, the phase 5 gate.
 
 **The gate's denominator moved with it.** The serial path is now 12.229 ms rather than 22.943, so the same binary is
 2.67x against its own serial control. Both numbers are true and they answer different questions: wall clock fell 27%,
@@ -1742,7 +1742,7 @@ serial build" has to say *which* serial build, which is the substance of ADR 006
 ## `count` cannot be rescued by private histograms (measured, and worse)
 
 `count` is 1.21x on six workers because every worker scans all 1M `cells` entries and filters for its own window: six
-4 MB scans, 24 MB, at the 14 GB/s this machine sustains — so it is at bandwidth, not badly scheduled. The obvious fix is
+4 MB scans, 24 MB, at the 14 GB/s this machine sustains, so it is at bandwidth, not badly scheduled. The obvious fix is
 to make it body-partitioned with a private histogram per worker and merge afterwards. Measured on the same shape
 (1M bodies, 421,875 cells), it is three times *worse*:
 
@@ -1757,14 +1757,14 @@ L2-resident table each, and pay for it with a redundant 4 MB read that the memor
 private histograms are 10 MB, so every increment becomes a cache miss, and the merge adds 2.5M more reads on top.
 
 So `count`'s low speedup is the price of its locality, not a defect in it. The only structure that reduces the bytes
-without losing the locality is a bucketing pass — scatter bodies into per-worker buckets once, then let each worker scan
-its own — which is 12 MB of traffic instead of 24 and would help `place` (the same rescan, 1.975 ms) more than `count`.
+without losing the locality is a bucketing pass, scatter bodies into per-worker buckets once, then let each worker scan
+its own, which is 12 MB of traffic instead of 24 and would help `place` (the same rescan, 1.975 ms) more than `count`.
 That is a task with its own record, not a gate.
 
 ## The bucketing pass: measured, and rejected (scatter probe)
 
 The scoped successor to `count` was to scatter bodies into per-worker buckets once, then let `count` and `place` each scan
-only their own — 12 MB of traffic per rebuild instead of 24 for each pass. A single-pass scatter into one shared output
+only their own, 12 MB of traffic per rebuild instead of 24 for each pass. A single-pass scatter into one shared output
 was budgeted at 0.6 ms, and a standalone probe was built before any crate change, on the rule that killed the private
 histograms. It missed by 4.7x, so the task is closed rather than implemented.
 
@@ -1778,13 +1778,13 @@ histograms. It missed by 4.7x, so the task is closed rather than implemented.
 | atomic cursors packed into one line | **6.434** | 6.4 ns |
 | read side: rescan-all → own-slice (6 workers) | 0.728 → 0.155 | |
 
-**The bytes were never the constraint.** Writing the same 4 MB as six disjoint sequential streams takes 0.157 ms — 20x
+**The bytes were never the constraint.** Writing the same 4 MB as six disjoint sequential streams takes 0.157 ms, 20x
 faster than the scatter that produces it. The scatter is latency-bound on a loop-carried dependency: each store's address
 comes from a cursor load, so every iteration waits one cache round trip for the previous one. 2.8 ns per body on this
 machine is L2 latency, not bandwidth, and no amount of traffic reduction touches it.
 
 **Cache coherency costs exactly 2.05x.** Six cursors packed into one 64-byte line means every `fetch_add` invalidates the
-line in the other five cores, and 1M of those is 6.4 ms. Padding each cursor to its own line halves it — and still loses
+line in the other five cores, and 1M of those is 6.4 ms. Padding each cursor to its own line halves it, and still loses
 to no atomics at all, because padding removes line-level false sharing and leaves cursor-level contention: all six
 workers increment all six cursors in turn.
 
@@ -1794,7 +1794,7 @@ implementable shape measured is 2.8 ms. With the scatter included, the rebuild w
 or 6.565 ms with padded atomics.
 
 The only structure that removes the dependency is per-worker-per-bucket counts, a prefix, and then contiguous writes per
-bucket — which needs six passes over each worker's slice, about 1.2–1.3 ms by these numbers. That is at break-even, for a
+bucket, which needs six passes over each worker's slice, about 1.2–1.3 ms by these numbers. That is at break-even, for a
 new pass, 4 MB of scratch and a merge-order determinism argument. It is not worth it, and the estimate it would rest on is
 of the kind that has been wrong twice already in this file.
 
@@ -1804,5 +1804,5 @@ in the earlier `clear` probe, a `fn`-pointer dispatch that blocked inlining and 
 the divide-dominated one it was compared against.
 
 **Decision:** the bucketing task is closed as measured-and-rejected; ADR 0060's `count`/`place` fusion line ends here. If
-`place` is revisited, the target is its inner loop — 1M cursor load-modify-stores, the same dependency shape, and where
-its 1.975 ms actually goes — not the traffic in front of it.
+`place` is revisited, the target is its inner loop, 1M cursor load-modify-stores, the same dependency shape, and where
+its 1.975 ms actually goes, not the traffic in front of it.

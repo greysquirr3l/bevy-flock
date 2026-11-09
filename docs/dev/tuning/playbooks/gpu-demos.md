@@ -69,7 +69,7 @@ pub fn stats(&self) -> Stats;                 // instances, draws, triangles
 pub fn read_rgba(&mut self) -> Result<Vec<u8>, Error>;
 ```
 
-`set_shot` is where a shot is interpreted — camera, light, fog, **and what it can see**. Mirror the
+`set_shot` is where a shot is interpreted, camera, light, fog, **and what it can see**. Mirror the
 software renderer's rules exactly, or the comparison is between two different pictures:
 
 | Rule | Software | GPU |
@@ -96,7 +96,7 @@ pub enum Backend { Auto, Metal, Vulkan, Gl, Noop }
   platform does not have cost nothing: `wgpu` compiles the Metal backend away on anything that is
   not Apple, so one `Auto` serves every machine.
 - `Noop` encodes and validates every command and executes none. It needs no driver, so CI can prove
-  the encode path — instance upload, bind groups, pipeline state, render pass — on a machine with no
+  the encode path, instance upload, bind groups, pipeline state, render pass, on a machine with no
   GPU at all. `wgpu` requires the option to be switched on explicitly:
 
 ```rust
@@ -144,7 +144,7 @@ let lit     = tint * (camera.sun_colour.rgb * lambert + hemi) * camera.exposure.
 
 1. `sun` points **towards** the light, matching `Atmosphere`, not away from it.
 2. The atmosphere's radiance is authored for the software renderer's exposure. Apply the same
-   divisor or every surface clips to white — that is what a `0.34` in a uniform is doing.
+   divisor or every surface clips to white, that is what a `0.34` in a uniform is doing.
 3. Fog resolves to `atmosphere.fog` at `fog_far`, and the pass **clears to the same colour**, so the
    far plane and the sky meet instead of showing a seam.
 
@@ -212,7 +212,7 @@ A GPU demo is not finished until these exist:
    decision and the reason it changed both need to survive.
 4. `CHANGELOG.md` entry, and a `plan.toml` record with `delivered_in` set to the commit.
 5. CI: build the crate, run its no-driver test, and compile its benchmark. Do not run the benchmark
-   in CI — a shared runner has no adapter and the numbers would be noise.
+   in CI, a shared runner has no adapter and the numbers would be noise.
 
 ## 10. When to use Bevy's renderer instead
 

@@ -1,4 +1,4 @@
-# ADR 0006 — Behaviour trees *and* state machines, not one of them
+# ADR 0006, Behaviour trees *and* state machines, not one of them
 
 - Status: Accepted
 - Date: 2026-11-04
@@ -43,7 +43,7 @@ rather than replacing them.
 
   Amended when the engine grew `Parallel`, `Cooldown` and `Timeout`: a running leaf
   is now recorded in the cursor too. Without that entry an abort had nothing to walk
-  and every running leaf was silently skipped — the exact stuck-NPC failure this
+  and every running leaf was silently skipped, the exact stuck-NPC failure this
   ADR is about. Each node also stores the end of its subtree, so "abort everything
   under here" is a loop over a contiguous index range rather than a traversal.
 - A repeat node is capped at 64 iterations per tick. An uncapped repeat over an
@@ -54,9 +54,9 @@ rather than replacing them.
 
 ## Alternatives rejected
 
-- **Trees only** — dwell times become "wait" leaves and state becomes a hack in
+- **Trees only**, dwell times become "wait" leaves and state becomes a hack in
   the blackboard.
-- **Utility only** — sequencing an animation into a conversation into a walk-away
+- **Utility only**, sequencing an animation into a conversation into a walk-away
   is not expressible without inventing a tree.
-- **Scripting language** — a whole interpreter, a sandbox, and a debugger, in a
+- **Scripting language**, a whole interpreter, a sandbox, and a debugger, in a
   crate whose selling point is that the simulation is inspectable Rust.
