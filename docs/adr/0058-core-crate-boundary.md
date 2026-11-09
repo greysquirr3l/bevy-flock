@@ -132,3 +132,28 @@ actually cost something, so it is handled by discipline in the manifest rather t
 - **Fold `demo`, `demo-gpu` and `playground` into the workspace.** They are excluded on purpose, each with its own
   lock file, release profile and reason to exist; a root `cargo test` would build three renderers before it ran one
   simulation test. The split does not change that calculus.
+
+## Boundary audit against the post-phase-5 tree
+
+The decision above was written before phases 2-5 landed. Audited against the tree as it stands, with `tests/core_boundary.rs`
+green (4 tests) and every `use bevy_*` in `domain`, `behavior` and `application` enumerated:
+
+| engine crate | imports in the core layers | verdict |
+| --- | ---: | --- |
+| `bevy_math` | 14 | fine — it is a maths crate (`Vec3`, `Mat3`), not engine runtime |
+| `bevy_tasks` | 1 | fine — a thread-pool abstraction the core needs, not a Bevy app |
+| `bevy_ecs` | **3** | **drift: these must be rehomed** |
+
+The three ECS touch points are narrow and all of them are `Resource` derives, not systems:
+
+- `domain/memory.rs:506` — `#[cfg_attr(feature = "memory", derive(bevy_ecs::prelude::Resource))]`
+- `behavior/registry.rs:144` — `#[derive(Default, bevy_ecs::prelude::Resource)]`
+- `application/mod.rs:22` — `use bevy_ecs::prelude::*;` (the systems module, which belongs to the facade regardless)
+
+So the boundary as decided is *almost* true already: the core's logic has no engine dependency, and its data types carry one
+derive each. This is why `extract-core-crate` moves directories rather than rewriting them, and why `rehome-ecs-resources`
+is the task immediately after it rather than an afterthought — the three derives are the only thing standing between the core
+and `cargo build -p bevy-flock-core` with no Bevy app in the graph.
+
+Two modules added by phases 2-5 were not in the original module list and are confirmed inside the boundary rather than
+outside it: `domain/continuum.rs` and `domain/cognition.rs`, both engine-free.
