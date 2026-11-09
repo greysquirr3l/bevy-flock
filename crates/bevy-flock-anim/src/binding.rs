@@ -36,13 +36,16 @@ use bevy_animation::{ActiveAnimation, AnimationClip, AnimationPlayer};
 use bevy_app::{App, Plugin, Update};
 use bevy_asset::{AssetApp, Assets, Handle};
 use bevy_ecs::prelude::{Commands, Component, Entity, Local, Query, Res};
+use bevy_ecs::system::SystemParam;
 use bevy_flock::adapters::primary::cognition::NpcTier;
 use bevy_flock::application::SimClock;
 use bevy_flock::prelude::Locomotion;
 use bevy_transform::prelude::Transform;
 
-use crate::lod::{AnimationFocus, AnimationLod};
+use crate::lod::AnimationFocus;
 use crate::profile::{ClipSlot, LocomotionProfile};
+use crate::slide::slide_per_tick;
+use crate::state::AnimationState;
 
 /// The four nodes of a game's animation graph that a crowd drives.
 ///
@@ -146,7 +149,7 @@ impl ClipBindings {
 ///
 /// Four weights and four playback rates, filled once per entity and consumed by the node loop. It
 /// lives in a `Local`, so a crowd of ten thousand bodies shares one.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct BlendFrame {
     idle: f32,
     walk: f32,
@@ -164,6 +167,34 @@ impl BlendFrame {
         self.turn_in_place = blend.weight(ClipSlot::TurnInPlace);
     }
 
+    /// Move `step` of the way from this pose to `target`.
+    ///
+    /// The settle window is one fixed step per simulation tick rather than a frame delta, so the
+    /// sequence of poses a replay passes through depends on the tick count and nothing else.
+    #[must_use]
+    pub fn eased_toward(self, target: Self, step: f32) -> Self {
+        let step = step.clamp(0.0, 1.0);
+        let mix = |from: f32, to: f32| from + (to - from) * step;
+        Self {
+            idle: mix(self.idle, target.idle),
+            walk: mix(self.walk, target.walk),
+            run: mix(self.run, target.run),
+            turn_in_place: mix(self.turn_in_place, target.turn_in_place),
+        }
+    }
+    /// Scale the stride slots by `factor`, handing the remainder to idle.
+    ///
+    /// This is where a settle window lands: a body three ticks into a six-tick start is drawn with
+    /// half its stride weight and half of it standing. Idle and turn-in-place are untouched, so a
+    /// body that starts moving while pivoting keeps its pivot.
+    pub fn scale_stride(&mut self, factor: f32) {
+        let factor = factor.clamp(0.0, 1.0);
+        let stride = self.walk + self.run;
+        let kept = stride * factor;
+        self.idle += stride - kept;
+        self.walk *= factor;
+        self.run *= factor;
+    }
     /// The weight for one slot.
     #[must_use]
     pub const fn weight(&self, slot: ClipSlot) -> f32 {
@@ -189,6 +220,25 @@ impl BlendFrame {
     }
 }
 
+/// The assets and the camera focus the binding reads, in one parameter.
+///
+/// Bundled rather than passed one by one so that a reader can see at a glance how much of the world
+/// this system touches: two asset libraries (optional, because a unit test has no plugin), the focus,
+/// and the clock that turns a tick into a duration.
+#[derive(SystemParam)]
+pub struct BlendContext<'w> {
+    /// The profiles the bodies bind.
+    pub profiles: Res<'w, Assets<LocomotionProfile>>,
+    /// Animation graphs, when the game has them loaded.
+    pub graphs: Option<Res<'w, Assets<AnimationGraph>>>,
+    /// Animation clips, when the game has them loaded.
+    pub clips: Option<Res<'w, Assets<AnimationClip>>>,
+    /// Where the camera is, which is what the LOD band measures against.
+    pub focus: Res<'w, AnimationFocus>,
+    /// The simulation clock, absent in a world without the flock plugin.
+    pub clock: Option<Res<'w, SimClock>>,
+}
+
 /// Apply the locomotion blend to every body that has a player and a binding.
 ///
 /// Runs in `FlockSet::Integration` after the locomotion intent has been derived, so it always sees
@@ -198,19 +248,8 @@ impl BlendFrame {
 ///
 /// Animations the binding does not name — a gesture, a hit reaction, anything the game started
 /// itself — keep whatever weight their own system gave them.
-#[expect(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "Bevy hands a system its parameters by value, and the binding needs the clock, the \
-              focus, the profile, the graph and the clip library; hiding any of them in a \
-              resource would hide the cost of the cull from the reader"
-)]
 pub fn apply_locomotion_blend(
-    profiles: Res<Assets<LocomotionProfile>>,
-    graphs: Option<Res<Assets<AnimationGraph>>>,
-    clips: Option<Res<Assets<AnimationClip>>>,
-    focus: Res<AnimationFocus>,
-    clock: Option<Res<SimClock>>,
+    ctx: BlendContext,
     mut bodies: Query<(
         Entity,
         &Locomotion,
@@ -219,7 +258,7 @@ pub fn apply_locomotion_blend(
         &mut AnimationPlayer,
         Option<&NpcTier>,
         Option<&AnimationGraphHandle>,
-        Option<&mut AnimationLod>,
+        Option<&mut AnimationState>,
     )>,
     mut commands: Commands,
     mut frame: Local<BlendFrame>,
@@ -228,7 +267,15 @@ pub fn apply_locomotion_blend(
     // The cadence a stepped body blends on is counted in simulation ticks, so a paused body stays
     // paused across a replay exactly as long as it did the first time. Without the plugin (a unit
     // test, a tool) the counter stands in for the tick, one per pass.
-    let tick = clock.map_or_else(
+    // A body that has not moved this far is standing, which is what starts and stops the window.
+    // Half a centimetre a tick is under a centimetre a second at any sane tick rate.
+    const MOVING: f32 = 0.005;
+    // Slide is metres per tick, so the measurement needs the tick, never a frame time.
+    let delta_seconds = ctx
+        .clock
+        .as_ref()
+        .map_or(1.0 / 60.0, |clock| clock.delta_seconds());
+    let tick = ctx.clock.map_or_else(
         || {
             *fallback_tick = fallback_tick.saturating_add(1);
             *fallback_tick
@@ -236,69 +283,75 @@ pub fn apply_locomotion_blend(
         |clock| clock.tick.get(),
     );
 
-    for (entity, motion, bindings, transform, mut player, tier, graph, lod) in &mut bodies {
-        let Some(profile) = profiles.get(bindings.profile()) else {
+    for (entity, motion, bindings, transform, mut player, tier, graph, state) in &mut bodies {
+        let Some(profile) = ctx.profiles.get(bindings.profile()) else {
             continue;
         };
         let band = profile.lod();
         let level = band.level(
-            focus.distance_to(transform.translation),
+            ctx.focus.distance_to(transform.translation),
             tier.map(|tier| tier.0),
         );
         let evaluated = level.evaluates(tick, band.far_step_ticks());
 
-        // The first time a body is seen it gets the component, so a game does not have to add one
-        // and cannot forget to.
-        let resumed = lod.map_or_else(
-            || {
-                let mut fresh = AnimationLod::default();
-                let resumed = fresh.record(level, evaluated);
-                commands.entity(entity).insert(fresh);
-                resumed
-            },
-            |mut lod| lod.record(level, evaluated),
-        );
+        // The body's bookkeeping is read as a copy, advanced, and written back once at the end of
+        // the pass: a body seen for the first time is inserted with the values this tick produced,
+        // not with defaults that the next tick would have to re-derive.
+        let first_sight = state.is_none();
+        let mut state_here = state.as_deref().copied().unwrap_or_default();
+        let resumed = state_here.lod_mut().record(level, evaluated);
 
         if level.pauses_player() {
             // Paused is the only level that stops the bones: Bevy skips a paused player's targets,
             // so the saving is real work not done, not a write that happens to be cheap.
             player.pause_all();
-            continue;
-        }
+        } else if resumed || evaluated {
+            if resumed {
+                player.resume_all();
+                // Coming back is where a naive cull pops: the weights are this tick's, but the clip
+                // is still where it froze. Put walk and run at the phase the distance walked implies.
+                seek_to_walked_phase(
+                    &mut player,
+                    bindings,
+                    graph,
+                    ctx.graphs.as_deref(),
+                    ctx.clips.as_deref(),
+                    motion,
+                    profile,
+                );
+            }
+            frame.fill(profile, motion.speed(), motion.turn_rate());
+            // Start and stop over the profile's window, counted in ticks: the pose a body is drawn
+            // in walks toward the pose the simulation asks for, which is what makes a crowd leave
+            // and arrive without a snap.
+            let moving = motion.speed() > MOVING;
+            *frame = state_here
+                .settle_mut()
+                .advance(*frame, moving, profile.windows());
+            let slide = slide_per_tick(profile, &frame, motion.speed(), delta_seconds);
+            state_here.slide_mut().observe(slide);
 
-        if resumed {
-            player.resume_all();
-            // Coming back is where a naive cull pops: the weights are this tick's, but the clip is
-            // still where it froze. Put walk and run at the phase the distance walked implies.
-            seek_to_walked_phase(
-                &mut player,
-                bindings,
-                graph,
-                graphs.as_deref(),
-                clips.as_deref(),
-                motion,
-                profile,
-            );
-        } else if !evaluated {
-            continue;
-        }
+            // First activation only: a clip that is not playing gets started at zero weight, so the
+            // tick it starts is not a tick it is visible at full strength.
+            for (_, node) in bindings.slots() {
+                if !player.is_playing_animation(node) {
+                    player.play(node).set_weight(0.0);
+                }
+            }
 
-        frame.fill(profile, motion.speed(), motion.turn_rate());
-
-        // First activation only: a clip that is not playing gets started at zero weight, so the
-        // tick it starts is not a tick it is visible at full strength.
-        for (_, node) in bindings.slots() {
-            if !player.is_playing_animation(node) {
-                player.play(node).set_weight(0.0);
+            for (node, animation) in player.playing_animations_mut() {
+                let Some(slot) = bindings.slot_of(*node) else {
+                    continue;
+                };
+                animation.set_weight(frame.weight(slot));
+                animation.set_speed(BlendFrame::rate(profile, slot, motion.speed()));
             }
         }
 
-        for (node, animation) in player.playing_animations_mut() {
-            let Some(slot) = bindings.slot_of(*node) else {
-                continue;
-            };
-            animation.set_weight(frame.weight(slot));
-            animation.set_speed(BlendFrame::rate(profile, slot, motion.speed()));
+        if first_sight {
+            commands.entity(entity).insert(state_here);
+        } else if let Some(mut state) = state {
+            *state = state_here;
         }
     }
 }
@@ -695,8 +748,8 @@ mod tests {
 
     fn lod_of(world: &World, entity: Entity) -> AnimationLod {
         world
-            .get::<AnimationLod>(entity)
-            .copied()
+            .get::<crate::state::AnimationState>(entity)
+            .map(crate::state::AnimationState::lod)
             .unwrap_or_default()
     }
 
@@ -883,6 +936,132 @@ mod tests {
         assert!(
             (seen - phase * 2.0).abs() < 1e-3,
             "seek {seen} is not the walked phase {phase} of a 2 s clip"
+        );
+    }
+
+    /// A world like [`world_with_body`], but the profile carries a start and stop window.
+    fn world_with_windows(start: u32, stop: u32) -> (World, [AnimationNodeIndex; 4], Entity) {
+        let mut world = World::new();
+        let mut assets = Assets::<LocomotionProfile>::default();
+        let windows = crate::settle::BlendWindows::try_new(start, stop)
+            .unwrap_or_else(|_| unreachable!("the fixture windows are valid"));
+        let handle = assets.add(fixture_profile().with_windows(windows));
+        world.insert_resource(assets);
+        world.insert_resource(bevy_flock::application::SimClock::default());
+        world.init_resource::<AnimationFocus>();
+        let nodes = [index(0), index(1), index(2), index(3)];
+        let bindings =
+            ClipBindings::new(handle, nodes[0], nodes[1], nodes[2]).with_turn_in_place(nodes[3]);
+        let entity = world
+            .spawn((
+                Locomotion::default(),
+                Transform::default(),
+                bindings,
+                AnimationPlayer::default(),
+            ))
+            .id();
+        (world, nodes, entity)
+    }
+    /// Drive one body's motion to a steady speed, the way the integration system would.
+    fn steady(world: &mut World, entity: Entity, speed: f32) {
+        if let Some(mut motion) = world.get_mut::<Locomotion>(entity) {
+            for _ in 0..40 {
+                motion.advance(Vec2::new(speed, 0.0), Vec2::new(speed, 0.0), TICK);
+            }
+        }
+    }
+    #[test]
+    fn a_start_window_commits_the_stride_over_its_ticks() {
+        let (mut world, nodes, body) = world_with_windows(6, 8);
+        steady(&mut world, body, 1.4);
+        run(&mut world);
+        let first = weight_of(&world, body, nodes[1]);
+        assert!(
+            (first - 1.0 / 6.0).abs() < 1e-4,
+            "one tick into a six-tick start should be a sixth of the walk, got {first}"
+        );
+        for _ in 0..5 {
+            run(&mut world);
+        }
+        let settled = weight_of(&world, body, nodes[1]);
+        assert!(
+            (settled - 1.0).abs() < 1e-4,
+            "six ticks should commit the walk, got {settled}"
+        );
+    }
+    #[test]
+    fn the_window_counts_ticks_rather_than_seconds() {
+        // The same start window, driven at 1 tick per pass and at 10 ticks per pass. If any part of
+        // the transition lerped against a delta, the two runs would disagree.
+        let (mut slow, slow_nodes, slow_body) = world_with_windows(6, 8);
+        let (mut fast, fast_nodes, fast_body) = world_with_windows(6, 8);
+        steady(&mut slow, slow_body, 1.4);
+        steady(&mut fast, fast_body, 1.4);
+        for _ in 0..3 {
+            run(&mut slow);
+            if let Some(mut clock) = fast.get_resource_mut::<bevy_flock::application::SimClock>() {
+                for _ in 0..9 {
+                    clock.advance();
+                }
+            }
+            run(&mut fast);
+        }
+        let slow_weight = weight_of(&slow, slow_body, slow_nodes[1]);
+        let fast_weight = weight_of(&fast, fast_body, fast_nodes[1]);
+        assert!(
+            (slow_weight - fast_weight).abs() < 1e-6,
+            "the window is tick-counted: {slow_weight} against {fast_weight}"
+        );
+        assert!(
+            (fast_weight - 0.5).abs() < 1e-4,
+            "three ticks of six is a half, got {fast_weight}"
+        );
+    }
+    #[test]
+    fn a_stop_window_hands_the_walk_back_to_idle() {
+        let (mut world, nodes, body) = world_with_windows(0, 8);
+        steady(&mut world, body, 1.4);
+        run(&mut world);
+        assert!((weight_of(&world, body, nodes[1]) - 1.0).abs() < 1e-4);
+        steady(&mut world, body, 0.0);
+        run(&mut world);
+        let just_stopped = weight_of(&world, body, nodes[1]);
+        assert!(
+            (just_stopped - 7.0 / 8.0).abs() < 1e-4,
+            "one tick into an eight-tick stop keeps seven eighths, got {just_stopped}"
+        );
+        for _ in 0..7 {
+            run(&mut world);
+        }
+        assert!(
+            weight_of(&world, body, nodes[1]).abs() < 1e-4,
+            "the walk is gone"
+        );
+        assert!(
+            (weight_of(&world, body, nodes[0]) - 1.0).abs() < 1e-4,
+            "and idle carries the body"
+        );
+    }
+    #[test]
+    fn a_straight_walk_slides_under_a_millimetre_in_three_hundred_ticks() {
+        let (mut world, nodes, body) = world_with_body();
+        steady(&mut world, body, 1.4);
+        for _ in 0..300 {
+            run(&mut world);
+        }
+        let slide = world
+            .get::<crate::state::AnimationState>(body)
+            .map(crate::state::AnimationState::slide)
+            .unwrap_or_default();
+        assert_eq!(slide.ticks(), 300, "every tick is measured");
+        assert!(
+            slide.total_metres() < 1e-3,
+            "300 ticks of walking slid {:.4} mm in total",
+            slide.total_metres() * 1_000.0
+        );
+        assert!(
+            (weight_of(&world, body, nodes[1]) - 1.0).abs() < 1e-4,
+            "and the walk is still the whole pose"
         );
     }
 }

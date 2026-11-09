@@ -100,6 +100,27 @@ Measured at 10,000 reflex-tier bodies with the camera at the plaza edge: 0.305 m
 against 0.601 ms unculled, 49% saved, and 70% with the camera outside the plaza. The table, the
 method and the caveats are in `docs/performance.md`.
 
+## Starting and stopping
+
+`LocomotionProfile::windows` takes a `BlendWindows`: how many ticks a body spends picking its stride
+up and putting it down. The ease is one fixed step per simulation tick, interpolating from the pose
+the window opened in, so a six-tick start is half committed after three ticks and exactly arrived
+after six — and a replay at 20 fps passes through the poses a replay at 200 fps does.
+
+```rust
+let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    .with_windows(BlendWindows::try_new(6, 8)?);
+```
+
+Zero ticks, the default, is the blend itself. Turn-in-place needs no window: it comes out of idle and
+is unreachable while the body is walking, which `turn_in_place_is_unreachable_at_walking_speed`
+asserts rather than trusts.
+
+Slide is measured while you author the window. `AnimationState::slide()` reports the peak and total
+metres per tick a body has travelled that its stride clips did not account for, and the playground
+prints the peak in its headless summary. The number is not decoration: a straight walk reports under
+a millimetre over 300 ticks, and a body half way into its start reports the half of its motion its
+legs are not carrying.
 ## Licence
 
 MIT OR Apache-2.0.

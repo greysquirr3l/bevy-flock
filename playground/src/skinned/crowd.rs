@@ -19,8 +19,8 @@ use bevy_flock::prelude::{
     NpcVelocity, SimClock,
 };
 use bevy_flock_anim::{
-    ClipBindings, GazeBone, GazeLimits, GazeRig, GestureClips, GesturePlayback, LocomotionProfile,
-    ProfileError,
+    BlendWindows, ClipBindings, GazeBone, GazeLimits, GazeRig, GestureClips, GesturePlayback,
+    LocomotionProfile, ProfileError,
 };
 use bevy_math::{Quat, Vec2, Vec3};
 use bevy_mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -110,7 +110,10 @@ impl From<ProfileError> for RigError {
 ///
 /// Returns [`ProfileError`] if a value is not positive and finite, which the constants below are.
 pub fn rig_profile() -> Result<LocomotionProfile, ProfileError> {
-    LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)
+    // A sixth of a second to pick the stride up and an eighth to put it down: long enough that a
+    // body leaving the plaza does not snap from standing to walking between two ticks.
+    let profile = LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)?;
+    Ok(profile.with_windows(BlendWindows::try_new(6, 8)?))
 }
 
 /// Create the shared assets: one mesh, one bind pose, one material, one graph, one profile.

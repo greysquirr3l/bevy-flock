@@ -47,7 +47,7 @@ use bevy_flock::prelude::{
     SimClock, request_gesture,
 };
 use bevy_flock_anim::{
-    AnimPlugin, AnimationFocus, AnimationLod, ClipBindings, ClipSlot, GazePlugin, GesturePlugin,
+    AnimPlugin, AnimationFocus, AnimationState, ClipBindings, ClipSlot, GazePlugin, GesturePlugin,
     LodLevel,
 };
 use bevy_image::ImagePlugin;
@@ -310,6 +310,8 @@ pub struct Telemetry {
     pub stepped: usize,
     /// Bodies whose players are paused on the last frame.
     pub paused: usize,
+    /// The largest single-tick foot slide any body has shown, in millimetres.
+    pub peak_slide_mm: f32,
 }
 
 impl Telemetry {
@@ -346,7 +348,7 @@ impl Telemetry {
     #[must_use]
     pub fn describe(&self) -> String {
         format!(
-            "{} moved, {} blended, {} gesturing, {} looking, {} full / {} stepped / {} paused, biggest step {:.3} m",
+            "{} moved, {} blended, {} gesturing, {} looking, {} full / {} stepped / {} paused, biggest step {:.3} m, peak foot slide {:.3} mm",
             self.moved,
             self.blended,
             self.gesturing,
@@ -354,7 +356,8 @@ impl Telemetry {
             self.full,
             self.stepped,
             self.paused,
-            self.largest_step
+            self.largest_step,
+            self.peak_slide_mm
         )
     }
 }
@@ -757,18 +760,23 @@ fn sample_crowd(
         &GazeAim,
         &AnimationPlayer,
         &ClipBindings,
-        Option<&AnimationLod>,
+        Option<&AnimationState>,
     )>,
     starts: Res<SpawnPositions>,
 ) {
     let (mut full, mut stepped, mut paused) = (0_usize, 0_usize, 0_usize);
+    let mut peak_slide = 0.0_f32;
     let mut moved = 0;
     let mut largest = 0.0_f32;
     let mut gesturing = 0;
     let mut looking = 0;
     let mut blended = 0;
-    for (entity, transform, gestures, aim, player, bindings, lod) in &bodies {
-        match lod.map(AnimationLod::level) {
+    for (entity, transform, gestures, aim, player, bindings, state) in &bodies {
+        if let Some(state) = state {
+            peak_slide = peak_slide.max(state.slide().peak_metres() * 1_000.0);
+        }
+        let lod = state.map(AnimationState::lod);
+        match lod.map(|lod| lod.level()) {
             Some(LodLevel::Stepped) => stepped += 1,
             Some(LodLevel::Paused) => paused += 1,
             Some(LodLevel::Full) | None => full += 1,
@@ -813,6 +821,7 @@ fn sample_crowd(
     telemetry.full = full;
     telemetry.stepped = stepped;
     telemetry.paused = paused;
+    telemetry.peak_slide_mm = peak_slide;
 }
 
 /// Point the animation LOD at whatever the camera is watching.
@@ -1031,6 +1040,7 @@ mod tests {
             full: 1,
             stepped: 0,
             paused: 0,
+            peak_slide_mm: 0.0,
         };
         assert!(telemetry.check(Rig::Mannequin).is_ok());
         assert!(telemetry.describe().contains("biggest step 0.250 m"));

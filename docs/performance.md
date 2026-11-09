@@ -1033,3 +1033,27 @@ The resume rule is a test, not a note: `a_returning_body_resumes_at_the_walked_p
 300 m out and back, then compares every node's weight against a control that was never culled, and
 `resuming_seeks_the_walk_clip_to_the_phase_the_distance_implies` checks the walk clip lands on
 `phase × duration` rather than frame zero.
+
+## Animation transitions (T08)
+
+The blend itself is a pure function of `Locomotion`, so it is free and it snaps. A start or stop
+window (`LocomotionProfile::windows`, `BlendWindows`) is the part that costs state: each body carries
+the pose it is being drawn in and the pose its window opened from, 32 bytes plus a tick counter, and
+interpolates on a linear ramp that lands exactly on the window.
+
+| Case | Measured |
+| ---- | -------- |
+| Straight walk, 300 ticks at 1.4 m/s, sum of per-tick slide | < 0.001 mm (test ceiling) |
+| Start window committed after 6 ticks | 6/6 of the walk weight, 3/6 at the halfway tick |
+| Stop window released after 8 ticks | 0/8 of the walk weight, idle at 1.0 |
+| Playground, 2,000 mannequins, 60 frames, default radius | peak 22.0 mm in one tick |
+
+The playground figure is the trade the window makes, not a defect in it: while a body is half a
+window into its start its legs carry half its motion, so the remaining half slides. It is largest in
+a milling crowd because bodies are changing state constantly. A game that wants no slide at all
+leaves the windows at zero, which is the default, and gets the exact simulation pose on every tick.
+
+Two rules make the measurement trustworthy. Slide is metres per **simulation tick** from `SimClock`,
+never a frame delta, so the same walk measured at 20 fps and at 240 fps reports the same number. And
+the ease is a fixed fraction of the window per tick, so `the_window_counts_ticks_rather_than_seconds`
+drives the same body at 1 tick and at 10 ticks per pass and requires the identical weight.

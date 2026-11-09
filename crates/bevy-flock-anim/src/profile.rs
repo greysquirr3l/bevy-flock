@@ -10,6 +10,7 @@
 //! is what lets a replay animate identically at 20 frames a second and at 200.
 
 use crate::lod::BlendLod;
+use crate::settle::BlendWindows;
 use bevy_asset::Asset;
 use bevy_reflect::TypePath;
 use thiserror::Error;
@@ -83,6 +84,16 @@ pub enum ProfileError {
     /// The LOD cadence was zero ticks, which is a pause expressed as a step.
     #[error("lod step interval must be at least one tick, got {0}")]
     LodStep(u32),
+    /// A start or stop window was longer than four seconds of ticks.
+    #[error(
+        "settle windows must be at most 240 ticks, got start {start_ticks} and stop {stop_ticks}"
+    )]
+    SettleWindow {
+        /// The start window as authored, in ticks.
+        start_ticks: u32,
+        /// The stop window as authored, in ticks.
+        stop_ticks: u32,
+    },
     /// A field was `NaN` or infinite, which would poison every comparison downstream.
     #[error("{field} must be finite, got {value}")]
     NotFinite {
@@ -109,6 +120,7 @@ pub struct LocomotionProfile {
     turn_threshold: f32,
     turn_full: f32,
     lod: BlendLod,
+    windows: BlendWindows,
 }
 
 impl LocomotionProfile {
@@ -138,6 +150,29 @@ impl LocomotionProfile {
         self.lod
     }
 
+    /// How long this body takes to pick up its stride and to put it down, in ticks.
+    ///
+    /// Zero ticks for both — the default — means the pose follows the simulation exactly on the tick
+    /// it changes, which is what a replay of the simulation should show. A game that wants a start
+    /// and stop animation authors a window here.
+    pub const fn windows(&self) -> BlendWindows {
+        self.windows
+    }
+    /// Replace the settle windows, keeping every other number.
+    ///
+    /// ```
+    /// use bevy_flock_anim::{BlendWindows, LocomotionProfile};
+    ///
+    /// let profile = LocomotionProfile::try_new(1.4, 4.2, 1.5, 0.6, 2.0)?
+    ///     .with_windows(BlendWindows::try_new(6, 8)?);
+    /// assert_eq!(profile.windows().start_ticks(), 6);
+    /// # Ok::<(), bevy_flock_anim::ProfileError>(())
+    /// ```
+    #[must_use]
+    pub const fn with_windows(mut self, windows: BlendWindows) -> Self {
+        self.windows = windows;
+        self
+    }
     /// Replace the LOD band, keeping every other number.
     ///
     /// ```
@@ -205,6 +240,7 @@ impl LocomotionProfile {
             turn_threshold,
             turn_full,
             lod: BlendLod::default(),
+            windows: BlendWindows::immediate(),
         })
     }
 
@@ -276,6 +312,23 @@ pub struct BlendWeights {
 }
 
 impl BlendWeights {
+    /// Scale the stride slots by `factor` and give the rest to idle.
+    ///
+    /// This is what a settle window applies: a body 40% through its start window is drawn as a body
+    /// standing still with 60% of its weight, which is the honest pose for "the legs have not caught
+    /// up yet". Nothing is normalised afterwards because the two weights trade exactly.
+    #[must_use]
+    pub fn with_stride_scaled(self, factor: f32) -> Self {
+        let factor = factor.clamp(0.0, 1.0);
+        let stride = self.walk + self.run;
+        let kept = stride * factor;
+        Self {
+            idle: self.idle + (stride - kept),
+            walk: self.walk * factor,
+            run: self.run * factor,
+            turn_in_place: self.turn_in_place,
+        }
+    }
     /// A pose with every weight at zero, which no profile produces and every default needs.
     pub const ZERO: Self = Self {
         idle: 0.0,
@@ -508,5 +561,22 @@ mod tests {
         for (slot, value) in slots.iter().zip(values) {
             assert!((weights.weight(*slot) - value).abs() < f32::EPSILON);
         }
+    }
+
+    #[test]
+    fn turn_in_place_is_unreachable_at_walking_speed() {
+        let profile = LocomotionProfile::try_new(1.4, 5.0, 1.5, 0.5, 2.0)
+            .unwrap_or_else(|_| unreachable!("the fixture profile is valid"));
+        // A body travelling at walking speed steers; it does not pivot, however hard it turns.
+        let walking = profile.blend(profile.walk_speed(), 40.0);
+        assert!(walking.weight(ClipSlot::TurnInPlace).abs() < 1e-6);
+        assert!((walking.weight(ClipSlot::Walk) - 1.0).abs() < 1e-6);
+        // Standing still and turning is the pivot's whole job, and it comes out of idle.
+        let pivot = profile.blend(0.0, 40.0);
+        assert!((pivot.weight(ClipSlot::TurnInPlace) - 1.0).abs() < 1e-6);
+        assert!(pivot.weight(ClipSlot::Idle).abs() < 1e-6);
+        // Below the profile's threshold there is no pivot at all: a body standing still and turning
+        // slowly is a body standing still.
+        assert!(profile.blend(0.0, 0.2).weight(ClipSlot::TurnInPlace).abs() < 1e-6);
     }
 }

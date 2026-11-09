@@ -64,9 +64,15 @@ pub mod gaze;
 pub mod gesture;
 pub mod lod;
 pub mod profile;
+pub mod settle;
+pub mod slide;
+pub mod state;
 
 pub use binding::{AnimPlugin, BlendFrame, ClipBindings, apply_locomotion_blend};
 pub use gaze::{GazeBone, GazeLimits, GazePlugin, GazeRig, apply_gaze, look_angles, split_yaw};
 pub use gesture::{GestureClips, GesturePlayback, GesturePlugin, play_gestures};
 pub use lod::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
 pub use profile::{BlendWeights, ClipSlot, LocomotionProfile, ProfileError};
+pub use settle::{BlendWindows, Settle};
+pub use slide::{FootSlide, slide_per_tick};
+pub use state::AnimationState;
