@@ -9,6 +9,9 @@ repository = "https://github.com/greysquirr3l/bevy-flock"
 homepage = "https://github.com/greysquirr3l/bevy-flock"
 license = "MIT OR Apache-2.0"
 publish = false
+# Same rule as the facade: this crate publishes code, and the tuning material stays in the repository.
+exclude = ["docs/"]
+
 [features]
 default = ["simd", "threads"]
 # Four agents at a time through `wide::f32x4` (ADR 0023): the band kernel's blocks and the crowd kernel's lanes.
@@ -28,8 +31,6 @@ navmesh = []
 # The `Resource` derives on `SimClock`, `FlockRegistry` and `MemoryStore`. Off by default here, which is the point: the
 # core builds with no engine in the graph, and the facade turns it on because a Bevy game is the reason it exists.
 ecs = ["dep:bevy_ecs"]
-# Same rule as the facade: this crate publishes code, and the tuning material stays in the repository.
-exclude = ["docs/"]
 [dependencies]
 bevy_math = "0.20.1"
 bevy_tasks = { version = "0.20.1", default-features = false }
