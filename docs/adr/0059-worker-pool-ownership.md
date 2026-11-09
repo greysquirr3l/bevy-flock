@@ -110,3 +110,48 @@ in the exact loops the phase is trying to speed up.
 - The 5x gate has to be re-derived regardless: with dispatch at zero the build would be ~5.1 ms against a 4.72 ms
   target, so `build-5x-gate` measures a decomposition whose remaining costs are `clear` (2.46 ms, 5.3x) and `place`
   (2.26 ms, 3.2x), not the thread hand-off. Naming that is the gate's job; assuming the pool would close it is not.
+
+## Outcome (T05, as built)
+
+The two-scope design was implemented and is faster, but not for the reason this record expected, and the difference
+matters more than the 0.2 ms.
+
+**The barrier was wrong and the measurement said so.** The first implementation fused the scan and the placement into
+one scope and put a `Barrier` between them, on the reasoning in §C: a worker cannot place until every block below its
+own has been scanned. That reasoning is wrong. A worker fills the windows of *its own* cells `[lo, hi)`, and every
+start in that range depends only on counts below `hi` — which it has just scanned itself, on top of the base
+`prefix_bases` gave it. The base is already the sum of the preceding blocks, so there is nothing to wait for.
+Measured, the barrier version was **slower than what it replaced**: 6.74 → 7.42 ms at six workers, with `place` up
+27% and `prefix` up 49%. Waking six threads off a condvar cost more than the `thread::scope` it removed.
+
+Without the barrier the same fusion costs nothing to synchronise and the win appears:
+
+| | before (two dispatches) | after (one) |
+| --- | ---: | ---: |
+| `prefix` (scan) | 0.235 ms | **0.110 ms** |
+| `place` | 2.147 ms | 2.044 ms |
+| total, six workers | 6.711 ms | **6.488 ms** |
+| total, one worker | 22.827 ms | 22.692 ms |
+
+Thirteen alternating pairs against the previous binary, medians; the single-worker column is the control, since it
+takes the serial path and only changes by noise.
+
+**The dispatch was overpriced by a factor of two.** The phase 5 harness priced one `thread::scope` at 0.53 ms with an
+empty body. In situ it is worth about 0.2 ms: an empty scope pays the full spawn and join with nothing to overlap,
+while a scope with work in it overlaps the cost of the last thread's creation with the first threads' work. The
+0.53 ms figure should be read as an upper bound on dispatch and never as the saving available from removing one;
+`examples/spawn_cost.rs` is what to fix if that number is ever quoted again.
+
+**A second cost hid inside the first attempt.** The scan was written per cell — `split_at_mut_checked(1)` around the
+bookkeeping for each of 421,876 cells — which put `prefix` at 0.349 ms against the serial 0.235. The accumulation is
+one contiguous pass over a slice, `*slot = slot + running`, exactly as before; the per-cell version was paying for
+arithmetic the block-local loop had already hoisted.
+
+**Placement keeps a block-aligned range** because the worker holding that slice of the cursor table has to be the one
+advancing it, and the cursor slices are handed out with the same block partition as the scan. The parity test now
+compares `cell_cursor` as well as `cell_start` and `order` at 2, 3 and 8 threads: each worker writes the cursor slots
+for its own cells, so a boundary slot written by the wrong worker fails there instead of quietly misplacing bodies.
+
+`bevy_tasks` (option D) was not needed; the unsafe pool (option A) is still unclaimed, and the measured value of the
+dispatch it would remove is 0.2 ms rather than 0.53 — a third of what this record assumed, which makes the case for a
+hand-written aliasing invariant weaker than it already was.

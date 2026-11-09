@@ -1667,3 +1667,38 @@ inherited from `dev`, so the tests keep checking. Measured effect, whole file, f
 
 The compile side pays about a minute for the test profile once. Everything after that is fifty times cheaper, which
 is the difference between a suite nobody runs locally and one that finishes while you read the diff.
+
+## One dispatch for the scan and the placement (T05)
+
+The rebuild used four `thread::scope` dispatches — clear, count, scan, place — and ADR 0059 set out to remove one by
+fusing the scan with the placement, which touch the same two arrays and nothing else in between.
+
+Doing it needed a correction to the ADR's own reasoning. It proposed a barrier between the two phases, on the theory
+that a worker cannot place until the blocks below it have been scanned. A worker cannot *know* that, but it does not
+need to: it fills the windows of its own cells, every one of which starts at a total it has just computed itself on top
+of the base from `prefix_bases`. The barrier version measured **worse than what it replaced** — 7.42 ms against
+6.74 ms, `place` up 27% and `prefix` up 49%, because waking six threads costs more than the dispatch it was meant to
+save. Removing the barrier removed the cost.
+
+| six workers | before | after |
+| --- | ---: | ---: |
+| `clear` | 2.470 ms | 2.480 ms |
+| `count` | 1.858 ms | 1.855 ms |
+| `prefix` | 0.235 ms | **0.110 ms** |
+| `place` | 2.147 ms | 2.044 ms |
+| **total** | **6.711 ms** | **6.488 ms** |
+
+Thirteen alternating pairs against the previous binary, medians (best-of: 6.626 → 6.412). One worker is the control and
+takes the serial path: 22.827 → 22.692 ms, which is noise.
+
+Two things this run establishes beyond the 3%:
+
+**The dispatch costs about 0.2 ms in situ, not 0.53.** The phase 5 harness priced an *empty* scope: it pays spawn and
+join with nothing to overlap. A scope with work in it hides most of the last thread's creation behind the first
+threads' work. Every "the dispatch tax is X" figure in phase 4 and phase 5 should be read as an upper bound, and the
+pool this phase was chartered to build would be chasing a fifth of a millisecond per scope, not half.
+
+**`prefix` is now a tenth of a millisecond, and the serial tail is `count`.** With clears at 2.47 and placement at
+2.04, the two remaining passes are 70% of the rebuild and neither is a scan. Whatever the 5x gate is going to be, it is
+not going to be met by removing dispatches: 6.488 ms is 3.5x, and the arithmetic caps a perfect six-way split of these
+passes well short of 4.72 ms.

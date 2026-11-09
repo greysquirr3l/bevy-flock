@@ -363,11 +363,17 @@ pub struct PassCosts {
     /// The totals moved in here from the scan (ADR 0057), so this row is the one to watch if the fusion turns out
     /// to cost more than the read it removed.
     pub count: Duration,
-    /// The block bases and the block-local scans: `block_bases` then `scan_blocks_*`.
+    /// The block bases and the block-local scans: `prefix_bases` then the scan inside `scan_and_place_parallel`.
     ///
-    /// Serial by construction in the bases (`O(blocks)` additions) and partitioned in the scans.
+    /// Serial by construction in the bases (`O(blocks)` additions) and partitioned in the scans. In the fused
+    /// dispatch (ADR 0059) there is no longer a pass boundary between the scan and the placement, so this is the
+    /// longest worker's own scan and `place` is the rest of the same dispatch — the two still sum to it, and the
+    /// spawn is counted here, where the scan's own dispatch used to be.
     pub prefix: Duration,
     /// Placing bodies into their windows and filling `order`: `place_cells_*`. Partitions.
+    ///
+    /// In the fused dispatch this is measured from the end of the longest scan to the end of the dispatch, so it
+    /// carries the join as well as the placement.
     pub place: Duration,
     /// Blocks the prefix sum was split into: 1 means the serial reference ran.
     ///
@@ -410,6 +416,73 @@ impl PassCosts {
         }
         let serial = self.prefix.as_secs_f64();
         num::f64_to_f32(serial / total)
+    }
+}
+
+/// The unsplit tails of the three output arrays, and where each has been split to.
+///
+/// The fused scan-and-place hands every worker three disjoint slices: the window table it scans, the cursor table it
+/// scans and then advances, and the run of `order` those windows cover. Keeping the three tails together means the
+/// bookkeeping — which index each one now begins at — lives in one place instead of three locals per worker, and the
+/// slices come back with the arrays' lifetime rather than a borrow of the struct, which is what lets a thread hold
+/// them while the next worker is cut.
+///
+/// The two tables are off by one from each other and that is the whole subtlety: the count for cell `c` lives at
+/// `cell_start[c + 1]`, so a worker scans `cell_start[lo + 1 ..= hi]` while it seats `cell_cursor[lo .. hi]`. Same
+/// length, different start, no overlap with either neighbour.
+#[cfg(feature = "threads")]
+struct Splits<'a> {
+    /// What is left of `cell_start`.
+    starts: &'a mut [u32],
+    /// What is left of `cell_cursor`.
+    cursors: &'a mut [u32],
+    /// What is left of `order`.
+    runs: &'a mut [u32],
+    /// The array index `starts` now begins at.
+    at: usize,
+    /// The array index `cursors` now begins at.
+    cursors_at: usize,
+    /// The array index `runs` now begins at.
+    runs_at: usize,
+}
+
+#[cfg(feature = "threads")]
+impl<'a> Splits<'a> {
+    /// Cut one worker's slices for cells `[lo, lo + span)` and order `[begin, end)`.
+    ///
+    /// `last` widens the cursor slice by one slot so the final worker can write `cell_cursor[cells]`, which the
+    /// serial scan leaves holding the population and which the parity test compares.
+    ///
+    /// `None` if the arithmetic does not add up, which cannot happen while the block spans are monotonic — the
+    /// caller turns it into an idle worker that still waits at the barrier rather than a short barrier and a hang.
+    fn take(
+        &mut self,
+        lo: usize,
+        span: usize,
+        last: bool,
+        begin: usize,
+        end: usize,
+    ) -> Option<(&'a mut [u32], &'a mut [u32], &'a mut [u32])> {
+        let starts_head = (lo + 1).checked_sub(self.at)?;
+        let starts = std::mem::take(&mut self.starts);
+        let (_, after_starts) = starts.split_at_mut_checked(starts_head)?;
+        let (window, after_window) = after_starts.split_at_mut_checked(span)?;
+        self.starts = after_window;
+        self.at = lo + 1 + span;
+        let cursors_head = lo.checked_sub(self.cursors_at)?;
+        let cursors = std::mem::take(&mut self.cursors);
+        let (_, after_cursors) = cursors.split_at_mut_checked(cursors_head)?;
+        let cursor_span = span + usize::from(last);
+        let (cursor, after_cursor) = after_cursors.split_at_mut_checked(cursor_span)?;
+        self.cursors = after_cursor;
+        self.cursors_at = lo + cursor_span;
+        let run = begin.checked_sub(self.runs_at)?;
+        let runs = std::mem::take(&mut self.runs);
+        let (_, runs_tail) = runs.split_at_mut_checked(run)?;
+        let (out, after_runs) = runs_tail.split_at_mut_checked(end.checked_sub(begin)?)?;
+        self.runs = after_runs;
+        self.runs_at = end;
+        Some((window, cursor, out))
     }
 }
 
@@ -656,6 +729,7 @@ impl SpatialGrid {
     /// measurement. [`SpatialGrid::build`] is this function with the costs dropped.
     pub fn build_measured(&mut self) -> PassCosts {
         let workers = self.worker_count();
+        let blocks = self.block_count();
         let mut costs = PassCosts::default();
 
         let start = Instant::now();
@@ -674,22 +748,32 @@ impl SpatialGrid {
         }
         costs.count = start.elapsed();
 
-        // The scan is the serial tail this phase exists to attack. It is timed on its own rather than folded
-        // into the count it follows, because that attribution is the whole point of the inventory.
-        let start = Instant::now();
-        costs.blocks = self.prefix_cells(workers);
-        costs.prefix = start.elapsed();
-
-        // No seat pass: the block-local scan wrote the cursor alongside the window table (ADR 0057), so
-        // placement starts from a primed cursor and the copy that used to sit here has nothing left to do.
-        let start = Instant::now();
-        if workers <= 1 {
-            self.place_cells_serial();
+        // The scan is the serial tail this phase exists to attack, so it is timed on its own rather than folded
+        // into the count that derives its totals.
+        costs.blocks = blocks;
+        if workers > 1 && blocks > 1 {
+            // One dispatch for the scan and the placement (ADR 0059): nothing else touches either array between
+            // them, so paying two spawns for them was paying twice for one hand-off. `prefix` carries the spawn,
+            // where the scan's own dispatch used to be counted, which keeps the rows comparable with the serial path.
+            let (prefix, place) = self.scan_and_place_parallel(workers, blocks);
+            costs.prefix = prefix;
+            costs.place = place;
+        } else if workers > 1 {
+            // One block: the scan has nothing to split, but the placement still does.
+            let start = Instant::now();
+            self.prefix_cells_serial();
+            costs.prefix = start.elapsed();
+            costs.place = self.place_cells_parallel(workers);
         } else {
-            self.place_cells_parallel(workers);
+            let start = Instant::now();
+            self.prefix_cells_serial();
+            costs.prefix = start.elapsed();
+            // No seat pass: the block-local scan wrote the cursor alongside the window table (ADR 0057), so
+            // placement starts from a primed cursor and the copy that used to sit here has nothing left to do.
+            let start = Instant::now();
+            self.place_cells_serial();
+            costs.place = start.elapsed();
         }
-        costs.place = start.elapsed();
-
         costs.workers = workers;
         costs.bodies = self.entries.len();
         costs.cells = self.cell_start.len();
@@ -770,17 +854,27 @@ impl SpatialGrid {
         }
     }
 
-    /// Turn counts into prefix sums, so `cell_start[cell]` is where that cell's window begins.
-    fn prefix_cells(&mut self, workers: usize) -> usize {
+    /// Turn the block totals into bases, and report the population they add up to.
+    ///
+    /// This is all that is left of the old `prefix`: `O(blocks)` additions, no scan. The scans moved into the
+    /// dispatch that places the bodies, because between the two of them nothing else touches the window table
+    /// (ADR 0059) — so what used to be two spawns is one, and this is the serial step between the count that
+    /// produced the totals and the scan that consumes them.
+    ///
+    /// Saturating rather than wrapping, for the same reason `PassCosts::total` saturates: a sum that overflowed
+    /// would shift every window after it and still add up to the population.
+    fn prefix_bases(&mut self) -> u32 {
         let blocks = self.block_count();
-        if self.needs_block_totals_for(workers) {
-            self.prefix_cells_blocked(workers.max(1), blocks);
-        } else {
-            // One thread: the blocked scan would walk the same array in the same order and write the same
-            // values, only through a block loop, so there is nothing to gain by splitting it (ADR 0057).
-            self.prefix_cells_serial();
+        self.block_bases.clear();
+        self.block_bases.resize(blocks, 0);
+        let mut running = 0_u32;
+        for (index, total) in self.block_totals.iter().enumerate() {
+            if let Some(slot) = self.block_bases.get_mut(index) {
+                *slot = running;
+            }
+            running = running.saturating_add(*total);
         }
-        blocks
+        running
     }
 
     /// Whether the scan that is about to run needs per-block totals.
@@ -826,159 +920,11 @@ impl SpatialGrid {
         }
     }
 
-    /// ADR 0055: a serial running sum over the block totals, then per-block local scans.
+    /// Fill each window from its start, in body order, on one thread.
     ///
-    /// The serial step is O(blocks) additions instead of O(cells), and both parallel steps write disjoint
-    /// ranges, so there is no shared cursor and no atomic in sight. The block arrays live on the grid and are
-    /// only resized when the block count changes, because this runs every tick: a `vec!` here would be a
-    /// steady-frame allocation for the pass that is meant to be getting cheaper.
-    ///
-    /// The totals were accumulated by `count` (ADR 0057), so this no longer reads the window table to compute
-    /// them: it turns them into bases and hands each block its span. Each block-local scan then writes both the
-    /// window table and the cursor table from the same register.
-    fn prefix_cells_blocked(&mut self, workers: usize, blocks: usize) {
-        let cells = self.cell_count();
-        let Self {
-            cell_start,
-            cell_cursor,
-            block_totals,
-            block_bases,
-            ..
-        } = self;
-        block_bases.clear();
-        block_bases.resize(blocks, 0);
-        let mut running = 0_u32;
-        for (index, total) in block_totals.iter().enumerate() {
-            if let Some(slot) = block_bases.get_mut(index) {
-                *slot = running;
-            }
-            running += *total;
-        }
-        let total = running;
-        #[cfg(feature = "threads")]
-        if workers > 1 {
-            Self::scan_blocks_in_parallel(
-                cell_start,
-                cell_cursor,
-                workers,
-                blocks,
-                cells,
-                block_bases,
-            );
-        } else {
-            Self::scan_blocks_serially(cell_start, cell_cursor, blocks, cells);
-        }
-        #[cfg(not(feature = "threads"))]
-        {
-            let _ = workers;
-            Self::scan_blocks_serially(cell_start, cell_cursor, blocks, cells);
-        }
-        // Index 0 is the empty prefix and the last slot is the total; the block scans write `1..=cells`, so
-        // both ends come out right by construction. Asserting the total keeps a bad split loud rather than
-        // silently shifting every window by the missing remainder.
-        debug_assert_eq!(cell_start.get(cells).copied(), Some(total));
-    }
-
-    /// The per-block scans on one thread.
-    ///
-    /// Index 0 stays 0 — it is the empty prefix, not a cell — so the walk starts at index 1 and each block
-    /// consumes exactly its `len` counts. The scan is inclusive for the same reason the reference one is: the
-    /// count for cell `i` is stored at index `i + 1`, so the value written at an index is the count already
-    /// there plus everything before it. `cell_cursor` takes the same value, so the two tables cannot drift.
-    fn scan_blocks_serially(
-        cell_start: &mut [u32],
-        cell_cursor: &mut [u32],
-        blocks: usize,
-        cells: usize,
-    ) {
-        if let Some(first) = cell_cursor.get_mut(0) {
-            *first = 0;
-        }
-        let (Some(head), Some(cursor_head)) = (cell_start.get_mut(1..), cell_cursor.get_mut(1..))
-        else {
-            return;
-        };
-        let mut rest = head;
-        let mut cursor_rest = cursor_head;
-        let mut running = 0_u32;
-        for block in 0..blocks {
-            let (_, len) = block_span(block, cells, blocks);
-            let take = len.min(rest.len()).min(cursor_rest.len());
-            let (mine, tail) = rest.split_at_mut(take);
-            let (mine_cursor, cursor_tail) = cursor_rest.split_at_mut(take);
-            for (slot, cursor) in mine.iter_mut().zip(mine_cursor.iter_mut()) {
-                *slot += running;
-                running = *slot;
-                *cursor = running;
-            }
-            rest = tail;
-            cursor_rest = cursor_tail;
-        }
-    }
-
-    /// The per-block scans, one worker per contiguous run of blocks.
-    ///
-    /// Each worker is handed the span its blocks write — in the window table and in the cursor table, split the
-    /// same way — and the base its first block starts from, so no worker reads or writes another's range: the
-    /// only shared state is `bases`, which is read-only. Which worker gets which blocks changes with the worker
-    /// count; what a block contains does not, which is what keeps the output byte-identical (ADR 0054, 0055).
-    #[cfg(feature = "threads")]
-    fn scan_blocks_in_parallel(
-        cell_start: &mut [u32],
-        cell_cursor: &mut [u32],
-        workers: usize,
-        blocks: usize,
-        cells: usize,
-        bases: &[u32],
-    ) {
-        let workers = workers.clamp(1, blocks.max(1));
-        if let Some(first) = cell_cursor.get_mut(0) {
-            *first = 0;
-        }
-        let (Some(head), Some(cursor_head)) = (cell_start.get_mut(1..), cell_cursor.get_mut(1..))
-        else {
-            return;
-        };
-        let mut rest = head;
-        let mut cursor_rest = cursor_head;
-        let mut lo = 0_usize;
-        std::thread::scope(|scope| {
-            for worker in 0..workers {
-                let hi = blocks * (worker + 1) / workers;
-                let first = block_span(lo, cells, blocks).0;
-                let last = block_span(hi, cells, blocks).0;
-                let take = last
-                    .saturating_sub(first)
-                    .min(rest.len())
-                    .min(cursor_rest.len());
-                let (mine, tail) = rest.split_at_mut(take);
-                let (mine_cursor, cursor_tail) = cursor_rest.split_at_mut(take);
-                let base = bases.get(lo).copied().unwrap_or(0);
-                scope.spawn(move || {
-                    let mut running = base;
-                    let mut inner = mine;
-                    let mut cursor_inner = mine_cursor;
-                    for block in lo..hi {
-                        let (_, len) = block_span(block, cells, blocks);
-                        let take = len.min(inner.len()).min(cursor_inner.len());
-                        let (piece, remainder) = inner.split_at_mut(take);
-                        let (cursor_piece, cursor_remainder) = cursor_inner.split_at_mut(take);
-                        for (slot, cursor) in piece.iter_mut().zip(cursor_piece.iter_mut()) {
-                            *slot += running;
-                            running = *slot;
-                            *cursor = running;
-                        }
-                        inner = remainder;
-                        cursor_inner = cursor_remainder;
-                    }
-                });
-                rest = tail;
-                cursor_rest = cursor_tail;
-                lo = hi;
-            }
-        });
-    }
-
+    /// The reference the parallel path is compared against byte for byte, and the path a rebuild takes when it has
+    /// one worker. It advances `cell_cursor` rather than `cell_start`, so the scan's output survives placement and
+    /// nothing has to shift it back (ADR 0056).
     fn place_cells_serial(&mut self) {
         self.order.clear();
         self.order.resize(self.entries.len(), 0);
@@ -995,6 +941,168 @@ impl SpatialGrid {
                 *cursor += 1;
             }
         }
+    }
+
+    /// Rotate one worker's counts into window starts, and seat its placement cursor in the same walk.
+    ///
+    /// `window` is `cell_start[lo + 1 ..= hi]`, where the counts of cells `lo..hi` live, and `cursor` is
+    /// `cell_cursor[lo .. hi]`, where their window starts belong. Both are the same length, and the walk sits them one
+    /// slot apart: cell `lo + i`'s start is the running total *before* its own count is added, so the cursor slot is
+    /// written first and the window slot accumulates from the same register. That is the whole of ADR 0057's fusion —
+    /// seating the cursor costs a store rather than a second pass over the window table.
+    ///
+    /// `population` is `Some` only for the last worker: `cell_cursor[cells]` holds the population in the serial scan
+    /// and nothing in this walk produces it, because no cell owns it.
+    #[cfg(feature = "threads")]
+    fn scan_cells(window: &mut [u32], cursor: &mut [u32], base: u32, population: Option<u32>) {
+        let span = window.len();
+        let mut running = base;
+        for (slot, seated) in window.iter_mut().zip(cursor.iter_mut()) {
+            *seated = running;
+            *slot = slot.saturating_add(running);
+            running = *slot;
+        }
+        if let Some((slot, population)) = cursor.get_mut(span).zip(population) {
+            *slot = population;
+        }
+    }
+
+    /// Advance one worker's cursor slots into its run of `order`, in body order.
+    #[cfg(feature = "threads")]
+    fn place_run(
+        cell_list: &[u32],
+        cursor: &mut [u32],
+        out: &mut [u32],
+        lo: usize,
+        hi: usize,
+        begin: usize,
+    ) {
+        for (body, cell) in cell_list.iter().enumerate() {
+            let cell = *cell as usize;
+            if cell < lo || cell >= hi {
+                continue;
+            }
+            let Some(slot) = cursor.get_mut(cell - lo) else {
+                continue;
+            };
+            let target = *slot as usize;
+            *slot += 1;
+            if let Some(written) = target
+                .checked_sub(begin)
+                .and_then(|local| out.get_mut(local))
+            {
+                *written = num::usize_to_u32(body);
+            }
+        }
+    }
+
+    /// The block scans and the placement in one dispatch (ADR 0059).
+    ///
+    /// The two passes are adjacent in what they touch: the scan writes `cell_start[c]` and `cell_cursor[c]` for its own
+    /// cells, and placement then advances those same cursor slots and fills `order`. Nothing else reads or writes either
+    /// array in between, so paying two `thread::scope` spawns for them was paying twice for one hand-off — 0.53 ms each
+    /// on the phase 5 harness.
+    ///
+    /// **No barrier, and that is the point.** A worker fills the windows of its own cells `[lo, hi)`, and every start in
+    /// that range depends only on the counts of cells below `hi` — which the worker has just scanned itself, on top of
+    /// the base `prefix_bases` gave it. So the second pass has nothing to wait for. An earlier shape of this function
+    /// did wait, on the theory that a worker cannot know the blocks before it are scanned; it cannot, but it does not
+    /// need to, because its base is already the sum of them. The barrier cost 0.6 ms — more than the dispatch it
+    /// replaced — and the measurement is what caught it.
+    ///
+    /// Every worker owns exactly the cells of its blocks, `[lo, hi)`, and reads `cell_start[lo + 1 ..= hi]` where the
+    /// counts of those cells live. That off-by-one is the whole subtlety: a slice that reached one cell too far would
+    /// read — or overwrite — the neighbour's first count.
+    ///
+    /// Placement keeps a block-aligned range here rather than the cell-aligned one [`SpatialGrid::place_cells_parallel`]
+    /// uses, because the worker holding that slice of the cursor table has to be the worker that advances it.
+    ///
+    /// Returns `(prefix, place)`. The two phases no longer have a boundary between them, so `prefix` is the longest
+    /// worker's own scan and `place` is the rest of the dispatch: what the attribution loses in exactness it keeps in
+    /// comparability, since both rows still sum to the dispatch.
+    #[cfg(feature = "threads")]
+    fn scan_and_place_parallel(&mut self, workers: usize, blocks: usize) -> (Duration, Duration) {
+        /// Workers are bounded by cores in practice; a longer list than this simply stops recording samples.
+        const SAMPLES: usize = 32;
+        let cells_in_grid = self.cell_count();
+        let bodies = self.entries.len();
+        let total = self.prefix_bases();
+        let Self {
+            cell_start,
+            cell_cursor,
+            order,
+            cells,
+            block_bases,
+            ..
+        } = self;
+        let cell_list: &[u32] = cells.as_slice();
+        let bases: &[u32] = block_bases.as_slice();
+        order.clear();
+        order.resize(bodies, 0);
+        let per = blocks.div_ceil(workers.max(1)).max(1);
+        let samples: [core::sync::atomic::AtomicU64; SAMPLES] =
+            core::array::from_fn(|_| core::sync::atomic::AtomicU64::new(0));
+        let started = Instant::now();
+        thread::scope(|scope| {
+            let mut splits = Splits {
+                starts: cell_start.as_mut_slice(),
+                cursors: cell_cursor.as_mut_slice(),
+                runs: order.as_mut_slice(),
+                at: 0,
+                cursors_at: 0,
+                runs_at: 0,
+            };
+            for worker in 0..workers.max(1) {
+                let lo_block = worker * per;
+                let hi_block = (lo_block + per).min(blocks);
+                let lo = block_span(lo_block, cells_in_grid, blocks).0;
+                let hi = block_span(hi_block, cells_in_grid, blocks).0;
+                let base = bases.get(lo_block).copied().unwrap_or(0);
+                let end = usize::try_from(bases.get(hi_block).copied().unwrap_or(total))
+                    .unwrap_or(bodies)
+                    .min(bodies);
+                let begin = usize::try_from(base).unwrap_or(0).min(end);
+                let span_cells = hi.saturating_sub(lo);
+                let last = hi == cells_in_grid;
+                let payload = splits.take(lo, span_cells, last, begin, end);
+                let sample = samples.get(worker);
+                scope.spawn(move || {
+                    let Some((window, cursor, out)) = payload else {
+                        return;
+                    };
+                    let scanned = Instant::now();
+                    Self::scan_cells(
+                        window,
+                        &mut *cursor,
+                        base,
+                        last.then(|| num::usize_to_u32(end)),
+                    );
+                    if let Some(slot) = sample {
+                        slot.store(
+                            u64::try_from(scanned.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                            core::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                    Self::place_run(cell_list, cursor, out, lo, hi, begin);
+                });
+            }
+        });
+        let finished = Instant::now();
+        let longest_scan = samples
+            .iter()
+            .map(|slot| slot.load(core::sync::atomic::Ordering::Relaxed))
+            .max()
+            .unwrap_or(0);
+        debug_assert_eq!(
+            cell_start.get(cells_in_grid).copied(),
+            Some(total),
+            "the fused scan left the window table's total wrong"
+        );
+        let scanned = Duration::from_nanos(longest_scan);
+        (
+            scanned,
+            finished.duration_since(started).saturating_sub(scanned),
+        )
     }
 
     /// Place the bodies into their windows, one worker per cell range.
@@ -1972,6 +2080,13 @@ mod tests {
             assert_eq!(
                 parallel.cell_start, serial.cell_start,
                 "prefix sums differ at {threads} threads"
+            );
+            // The cursor is seated by the same walk that produces the starts (ADR 0057), and each worker writes the
+            // slots for its own cells, so a boundary slot written by the wrong worker would show up here rather than
+            // as a placement that is merely a little wrong.
+            assert_eq!(
+                parallel.cell_cursor, serial.cell_cursor,
+                "the cursor table differs at {threads} threads"
             );
             assert_eq!(
                 parallel.order, serial.order,
