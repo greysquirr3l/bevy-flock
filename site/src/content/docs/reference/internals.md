@@ -12,7 +12,7 @@ docs/
 ├── book/            the long-form guide (mdBook), older and deeper than this site
 ├── demo/            terminal captures and images used by the demo crates
 ├── dev/
-│   ├── adr/         architecture decision records, 0001 → 0060, indexed
+│   ├── adr/         architecture decision records, 0001 → 0062, indexed
 │   ├── lint/        the lint policy and the stable-lint drift ledger
 │   ├── meta/        1.0 readiness, release checklists
 │   └── tuning/      performance journals, memory, gates, benchmarks, research, playbooks
@@ -28,7 +28,7 @@ docs/
 | What did the last tuning pass actually change? | `docs/dev/tuning/performance.md` |
 | How much memory per agent, and why? | `docs/dev/tuning/memory.md` |
 | What are the nine continuum gates? | `docs/dev/tuning/gates/continuum.md` |
-| How do I compare against Godot or Unreal? | `docs/dev/tuning/benchmarks/cross-engine.md` |
+| How do I compare against Godot or Unreal? | `docs/dev/tuning/benchmarks/cross-engine.md`, harnesses in `benchmarks/` |
 | What does 1.0 require? | `docs/dev/meta/1.0-readiness.md`, `release-checklist-1.0.md` |
 
 ## The rule this layout encodes

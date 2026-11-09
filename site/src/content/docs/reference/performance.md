@@ -6,8 +6,10 @@ description: The numbers, the machine they came from, and the shape rather than 
 Every number here is a measurement with a named fixture. None of them are rounded up, and the ones that lost are included
 because a tuning journal that only records wins is marketing.
 
-**Reference machine:** shared cloud vCPU, x86_64, `--release`, `--offline`. Treat these as shape and ratios; measure your
-own machine before quoting them.
+**Reference machine:** a six-core aarch64 sandbox VM with no CPU model string exposed, `--release`, `--offline`. The
+animation-envelope figures in the journals came from an earlier six-core x86-64 VM, and each section of
+`docs/dev/tuning/performance.md` names its own machine. Treat all of it as shape and ratios; measure your own machine
+before quoting it.
 
 ## Frame budgets
 
@@ -20,14 +22,24 @@ own machine before quoting them.
 
 ## The spatial rebuild
 
-Five passes, clear, count, prefix, place, after the phase-5 fusion. At 1,000,000 bodies over 421,876 cells:
+Four passes: clear, count, prefix, place. Since phase 5 the scan and the placement are one dispatch, and the
+allocation cursor is primed by the scan instead of copied by a pass of its own. At 1,000,000 bodies over 421,876
+cells, on the machine above:
 
 | configuration | total | notes |
 | --- | --- | --- |
-| 1 worker | 6.289 ms | serial reference |
-| 6 workers | **4.572 ms** | 1.38× |
+| one worker | 12.229 ms | serial reference, same binary |
+| six workers | **4.572 ms** | 2.67× against that reference, 27% off the build before the fix |
 
-The honest read: the build is memory-bound, not thread-bound, and the two optimisations that looked best on paper -
+Both of those numbers are the same binary, which is the only way a ratio means anything. The temptation is to divide
+the old 6.289 ms by the new 4.572 ms and tell a 1.38× story about threads; 6.289 ms was six workers too, so that
+division compares two parallel runs from different weeks.
+
+Against the *pre-fix* serial build (22.943 ms) the same 4.572 ms is 5.02×, which is where the phase's 5× gate came
+from, and why ADR 0060 says a gate phrased as a multiple has to name its denominator. Wall clock fell 27% while the
+parallel ratio fell, because a third of the serial work stopped existing.
+
+The honest read: the build is memory-bound, not thread-bound, and the two optimisations that looked best on paper,
 bucketing the scatter and sharded histograms, were measured and rejected. `docs/dev/tuning/performance.md` has the
 scatter probe that killed them, including the numbers that made the decision.
 
@@ -43,6 +55,21 @@ scatter probe that killed them, including the numbers that made the decision.
 
 Your crowd, your hardware, your tick budget. `cargo run --release --example profile_crowd` and
 `--example cross_bench` are the harnesses; the comparison script refuses to mix machines, which is the point.
+
+## Against another engine
+
+The same fixture now runs in Godot 4.7.2 on the same machine, so one comparison exists that is not a published
+number from a different CPU:
+
+| agents | GDScript, no spatial index | `bevy-flock` | GDScript, grid rebuilt each tick |
+| ---: | ---: | ---: | ---: |
+| 10,000 | 3.044 ms | 5.661 ms | 13.976 ms |
+| 100,000 | 30.636 ms | 46.977 ms | 118.071 ms |
+
+So: 2.5× faster than the equivalent GDScript structure, and 1.9× (10k) to 1.5× (100k) slower than a GDScript loop
+that does no indexing at all. Both halves of that sentence are the result. `python3 scripts/cross_bench.py
+--agents 10000,100000` reproduces the table on your machine; the two Godot modes, the Unreal harness and the
+method are in `docs/dev/tuning/benchmarks/cross-engine.md`.
 
 Full journals, including the rejected optimisations and their measurements, are in the repository:
 `docs/dev/tuning/performance.md` and `docs/dev/tuning/memory.md`.

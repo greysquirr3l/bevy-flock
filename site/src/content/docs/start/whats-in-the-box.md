@@ -34,6 +34,7 @@ internals, open an issue instead.
 bevy_flock
 ├── adapters        systems, components, plugin wiring   (engine side)
 ├── boids           steering systems                     (engine side)
+├── anim            clip blending, gaze, gestures         (feature `anim`)
 ├── prelude         one import for the common case
 └── re-exports of bevy-flock-core:
     ├── domain      spatial grid, steering kernels, cognition, continuum, saves

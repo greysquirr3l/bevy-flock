@@ -4,7 +4,7 @@ Generated 2026-11-05T14:47:52+00:00 from `docs/dev/tuning/data/scaling-sweep.jso
 
 Every number here is measured: each run is pinned with `taskset`, each task gets a cold target directory, and each cell is the median of 2 runs. Nothing is modelled. The fixture is 8 crates of 1500 functions for shape A, and 3 bundles of 6 crates for shape B.
 
-![Wall clock and speedup against core count](../images/scaling-curves.png)
+![Wall clock and speedup against core count](../../../images/scaling-curves.png)
 
 Two quantities are used throughout. **Speedup** is the same core count's sequential wall clock divided by the wall clock at that concurrency: dimensionless, so it compares across machines. **Efficiency** is that speedup divided by `min(cores, concurrency x threads per task)`: the fraction of the ideal the run actually delivered. Above 100% is possible and is explained where it happens.
 

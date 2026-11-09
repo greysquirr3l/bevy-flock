@@ -61,9 +61,12 @@ There are four crates in the repository and you depend on one of them:
 | `bevy-flock-anim` | clip blending, gaze, gestures, root motion | only if you want the animation without the crowd |
 | `bevy-flock-core` | the simulation, with no engine in its graph | only for a headless server or a custom driver |
 
+Read by what each one drags into your dependency graph, the same four crates look like this:
+
 | crate | engine in the graph | what it is |
 | --- | --- | --- |
-| `bevy-flock` | Bevy | the plugin, components, systems and the re-exported simulation |
+| `bevy-flock` | Bevy, through `bevy-flock-ecs` | the plugin, components, systems and the re-exported simulation |
+| `bevy-flock-ecs` | Bevy | the plugin, components and systems the facade re-exports |
 | `bevy-flock-core` | none | the same simulation without an engine, for servers and replays |
 | `bevy-flock-anim` | `bevy-flock-ecs` plus `bevy_animation` | where the animation layer lives; a game reaches it through `features = ["anim"]` |
 

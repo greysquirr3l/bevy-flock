@@ -18,6 +18,7 @@ what it needs.
 | `full` | off | `ecs` + `simd` + `threads` + `memory` + `serde` + `navmesh` + `anim`, for a game that wants the whole engine | the six defaults above, unchanged |
 
 ```toml
+
 # a headless replay harness: no engine, no allocator churn, no tasks
 bevy-flock-core = { version = "0.1", default-features = false }
 ```

@@ -3,10 +3,10 @@
 `playground/` draws the Ashfall city and its crowd through Bevy's own PBR pipeline in a window. This
 page is the operational half, how to build it, how to run it on a Mac, how to read what it prints,
 and what to do when a window opens onto nothing. The crate's own page,
-[`playground/README.md`](../../../playground/README.md), covers what is simulated there and which parts
+[`playground/README.md`](../../../../playground/README.md), covers what is simulated there and which parts
 have tests.
 
-![The district from the playground](../../docs/demo/ashfall-bevy-playground.png)
+![The district from the playground](../../../../docs/demo/ashfall-bevy-playground.png)
 
 *The district view, 2,000 bodies, drawn by this crate on `llvmpipe` (Mesa's CPU Vulkan driver) at
 1280x800 under Xvfb. It is a correctness capture, not a beauty shot: a real GPU adds anti-aliasing,
