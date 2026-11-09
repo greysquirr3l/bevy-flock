@@ -8,9 +8,19 @@ description = "The engine-free simulation core of bevy-flock: spatial index, ste
 repository = "https://github.com/greysquirr3l/bevy-flock"
 homepage = "https://github.com/greysquirr3l/bevy-flock"
 license = "MIT OR Apache-2.0"
-publish = false
+documentation = "https://docs.rs/bevy-flock-core"
+readme = "README.md"
+# Published: a headless server depends on this crate alone, which is the whole reason it exists. It used to say
+# `publish = false` while it was an internal step of the extraction (ADR 0058); the four-crate layout (ADR 0062)
+# makes it a shipped package, and a dry run is what caught the leftover.
 # Same rule as the facade: this crate publishes code, and the tuning material stays in the repository.
 exclude = ["docs/"]
+keywords = ["bevy", "crowd", "simulation", "npc", "deterministic"]
+categories = ["game-development", "simulation"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["simd", "threads"]

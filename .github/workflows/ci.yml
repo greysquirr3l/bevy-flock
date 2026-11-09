@@ -99,6 +99,11 @@ jobs:
       # turn a denied lint back into a suggestion, so the count of overrides is checked, not trusted.
       - run: python3 scripts/lint_audit.py --self-test
       - run: python3 scripts/lint_audit.py
+      # `cargo publish` cannot dry-run the upper crates before the lower ones exist, so the manifests are
+      # checked directly: metadata crates.io requires, a version on every path dependency, and no
+      # publishable crate depending on one that is `publish = false`.
+      - run: python3 scripts/publish_check.py --self-test
+      - run: python3 scripts/publish_check.py
       # The drift catalogue is a table in a page; its parser has to be checked without a compiler too.
       - run: python3 scripts/lint_drift.py --self-test
       # The local CI runner reads this file to reproduce these jobs off Actions, so a workflow it

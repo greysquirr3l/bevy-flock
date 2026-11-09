@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The four crates are publishable, and something checks it.** `bevy-flock-core` still carried `publish = false`
+  from the extraction, had no `readme`, `keywords`, `categories` or docs.rs table, and `bevy-flock-ecs` and
+  `bevy-flock-anim` declared a `readme` that did not exist. `scripts/publish_check.py` now verifies the metadata
+  crates.io requires, that every `path` dependency also carries a satisfiable `version`, that no publishable crate
+  depends on a `publish = false` one, and prints the publish order; CI runs it and its self-test on every push.
 - **The animation layer is a `bevy-flock` feature now.** `features = ["anim"]` (and therefore
   `features = ["full"]`) turns on blended clip weights, gaze and gesture playback. Before this the layer lived in
   `bevy-flock-anim`, which depended on `bevy-flock`, so a feature could never include it: Cargo rejects the cycle. The

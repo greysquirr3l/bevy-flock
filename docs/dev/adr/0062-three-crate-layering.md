@@ -107,3 +107,8 @@ cycle.
 - `cargo check -p bevy-flock --no-default-features`: zero warnings, no engine in the graph.
 - `scripts/lint_audit.py`: 186 files scanned, no unsanctioned override, self-test passing.
 - `src/` is two files, 226 lines, and both are re-exports.
+- `scripts/publish_check.py` passes and prints the order `core -> ecs -> anim -> facade`. It exists because
+  `cargo publish --dry-run` can only verify the first crate: the other three are refused with "no matching package
+  named `bevy-flock-core` found" until the lower ones are live. Writing that check found four packaging defects the
+  dry run would have found later and more expensively: `publish = false` still on the core, two READMEs that did not
+  exist, and three crates missing `keywords`, `categories` or a docs.rs table.
