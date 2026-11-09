@@ -87,7 +87,7 @@ simd = ["dep:wide", "bevy-flock-core/simd"]
 [dependencies]
 # The simulation itself, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
 # `application` is here, moved rather than copied, so a headless server can depend on the core alone.
-bevy-flock-core = { path = "crates/bevy-flock-core", default-features = false }
+bevy-flock-core = { version = "0.1.0", path = "crates/bevy-flock-core", default-features = false }
 # Bevy 0.20 splits the engine finely enough that the simulation core needs only
 # these five crates. `bevy_transform` is the ECS transform graph (also used by
 # physics), not a rendering crate: no GPU, window or asset type reaches this

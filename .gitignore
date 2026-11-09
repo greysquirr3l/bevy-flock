@@ -148,3 +148,6 @@ demo/out/
 /playground/target/
 
 .github/skills/
+
+anti-slop/
+plan*.toml

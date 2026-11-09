@@ -7,6 +7,7 @@ import starlight from '@astrojs/starlight';
 // republished, so there is one copy of every number.
 export default defineConfig({
   site: 'https://greysquirr3l.github.io/bevy-flock/',
+  base: '/bevy-flock',
   integrations: [
     starlight({
       title: 'bevy-flock',

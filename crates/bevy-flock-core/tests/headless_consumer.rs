@@ -7,14 +7,16 @@
 //! shows.
 //!
 //! If this file stops compiling because something reached for the engine, the boundary moved and ADR 0058 is wrong.
+use bevy_flock_core::ConfigError;
 use bevy_flock_core::domain::ids::NpcId;
-use bevy_flock_core::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
+use bevy_flock_core::domain::spatial::{
+    GridEntry, Neighbour, SpatialGrid, SpatialGridConfig,
+};
 use bevy_math::Vec3;
 
 /// A deterministic scatter with no RNG and no wall clock: two builds of the same seed must agree exactly.
-fn grid() -> SpatialGrid {
-    let mut grid = SpatialGrid::new(SpatialGridConfig::default())
-        .unwrap_or_else(|error| panic!("the default config must build: {error}"));
+fn grid() -> Result<SpatialGrid, ConfigError> {
+    let mut grid = SpatialGrid::new(SpatialGridConfig::default())?;
     for index in 0..512_u16 {
         let step = f32::from(index);
         grid.insert(GridEntry {
@@ -28,14 +30,14 @@ fn grid() -> SpatialGrid {
         });
     }
     grid.build();
-    grid
+    Ok(grid)
 }
 
 /// Build, index and query a crowd with no `App`, no plugin and no `World`.
 #[test]
-fn a_crowd_can_be_indexed_and_queried_without_an_app() {
-    let first = grid();
-    let second = grid();
+fn a_crowd_can_be_indexed_and_queried_without_an_app() -> Result<(), ConfigError> {
+    let first = grid()?;
+    let second = grid()?;
 
     assert_eq!(first.entries().len(), 512, "every body is in the index");
     assert_eq!(
@@ -71,4 +73,5 @@ fn a_crowd_can_be_indexed_and_queried_without_an_app() {
     let cells = u32::try_from(first.cell_count()).unwrap_or(u32::MAX);
     assert!(cell < cells);
     let _ = first.cell_center(cell);
+    Ok(())
 }

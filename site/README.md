@@ -22,12 +22,15 @@ pnpm preview      # serve dist/ locally
 ## Deploying
 
 ```sh
-pnpm run deploy:dry   # build, rsync into the Pages clone, commit, do not push
-pnpm run deploy       # same, then push and poll the live URL until it answers 200
+pnpm run deploy:dry   # build, rsync into the Pages clone, stage, do not commit or push
+pnpm run deploy       # same, then push and poll until the live page matches the build
 ```
 
-Deploy settings live in `package.json` under `deploy-docs`, the pages repo path, the subdirectory,
-the live URL. The script itself never changes between projects.
+Deploy settings live in `package.json` under `deploy-docs`: the Pages repo path, subdirectory, and
+live URL. `deploy:dry` leaves the publication staged in the Pages clone; a later normal deploy
+commits and pushes it. Live verification compares the served page with the local build, so a cached
+page from the previous publication does not count as success. Run its regression checks with
+`bash scripts/deploy-docs.test.sh`.
 
 If the live URL answers with GitHub's "Site not found" after a deploy, the Pages source is still set
 to "Deploy from a branch" on the wrong branch. That is a one-time repository setting:

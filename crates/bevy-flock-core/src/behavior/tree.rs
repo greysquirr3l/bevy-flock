@@ -842,7 +842,7 @@ impl NodeSpec {
     /// describing the same shape:
     ///
     /// ```
-    /// # use bevy_flock_core::prelude::*;
+    /// # use bevy_flock_core::behavior::tree::{action, condition, selector, sequence, NodeSpec};
     /// let spec = NodeSpec::from_ron(
     ///     r#"Selector([Condition(0), Sequence([Action(1), Action(2)])])"#,
     /// )
