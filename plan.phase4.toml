@@ -217,6 +217,23 @@ blamed, because the grid caps its cell array at 421,876 cells (75 per axis, effe
 planned 5x target was arithmetically unreachable; T05's target is re-derived in ADR 0055 and a new task
 (`clear-and-count-cost`) inherits the work the measurement actually points at.
 """
+[[completed]]
+task = "phase-4 T02 blocked-scan-adr"
+delivered_in = "feat/phase4-t02-blocked-scan-adr"
+note = """
+docs/adr/0055-blocked-prefix-sum.md is the contract: blocks over the flattened cell index (a 3D tiling would
+reorder windows, which ADR 0054 forbids), per-block counts in parallel, an O(blocks) serial scan, per-block
+local offsets in parallel, with the worked arithmetic for the 1 km fixture (n = 421,876, b = 1,024 -> 412 cells
+per block, 1,023 serial additions instead of 421,876, 8 KB of block totals). The remainder rule (the first
+n mod b blocks take one extra cell) is written down because two implementers who differ on it produce different
+cell_start while both claiming to follow the ADR. Blocks derive from the cell count and never the worker count,
+which is what keeps the decomposition independent of the thing being scaled; small grids keep the serial scan,
+and `blocks == 1` is asserted to route to it so the reference cannot be deleted silently.
+The prediction is on the record before the implementation: prefix <= 0.10 ms at six workers, restore 0 ms,
+serial floor <= 0.10 ms, ceiling 4.5x -> 5.6x, build 8.85 -> 7.40 ms. The ADR is explicit that landing it and
+reporting "no change to total" is not a failure, and that a prefix above 0.10 ms is.
+Also corrected: docs/adr/README.md had stopped at 0051, so 0052-0055 were missing from the index entirely.
+"""
 # ─── Phase 3, for reference ───────────────────────────────────────────────────
 [[completed]]
 task = "phase-3 T01-T07"
