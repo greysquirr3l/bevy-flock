@@ -9,6 +9,11 @@ repository = "https://github.com/greysquirr3l/bevy-flock"
 license = "MIT OR Apache-2.0"
 publish = false
 
+# Two binaries live here: the windowed playground and the skinned-avatar bench. Naming the default means
+# `cargo run --manifest-path playground/Cargo.toml` does what a reader expects instead of asking which one --
+# which is what it did until someone hit it with a documented command and got an error.
+default-run = "ashfall-playground"
+
 [[bin]]
 name = "ashfall-playground"
 path = "src/main.rs"

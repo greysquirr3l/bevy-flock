@@ -388,7 +388,8 @@ shadows, fog, a fly camera and `Tab` between the shipped views. On macOS that is
 Vulkan or GL, and the GPU path is Bevy's rather than one written here, which is the point — the
 offscreen front end exists to make its numbers comparable across machines, and this one exists to
 show what the crowd looks like standing in it. `playground/README.md` has the flags and the
-controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it, and
+controls; `cargo run --release --manifest-path playground/Cargo.toml` opens it (`--bin ashfall-playground` if
+`default-run` is not in your checkout), and
 `playground` also ships a second binary, `skinned`, which draws the crowd as rigged characters
 rather than boxes. By default it loads the three Ashfall avatars — rigged by Meshy into 24 bones,
 textured, with idle/walk/run clips in `demo/assets/npcs/rigged` — so
