@@ -23,6 +23,67 @@ half-wired, in this order, because the second and third need the first:
 2. **`SpatialGrid::remove`.** There is no removal API at all, which is why a single death forces a full rebuild.
 3. **Per-cell aggregates.** Opt-in statistics a crowd library will want, with a design that keeps determinism.
 
+## How to work
+
+This section is procedure, not context. Follow it in order. The code is dense, the lints are strict, and a change that
+looks right and misses an invariant costs more to unwind than it saves.
+
+**Before the first edit, verify four claims.** This document was written against `main` after the incremental patch landed
+and including PR #61's borrow budget. It is not the authority: the code is. Run these, read the output, and stop if any of
+them disagrees with the text below.
+
+```bash
+cargo test --offline --workspace --all-features          # must be green before you start
+grep -n "PATCH_MAX_MOVERS\|BORROW_MAX_ELEMENTS\|BORROW_MAX_RUNS" crates/bevy-flock-core/src/domain/spatial.rs
+grep -n "fn entries_mut\|fn build_incremental\|fn check_invariants\|fn patch_movers" crates/bevy-flock-core/src/domain/spatial.rs
+grep -n "fn rebuild_spatial_grid" -A 32 crates/bevy-flock-ecs/src/boids.rs
+```
+
+What each should show:
+
+- The gate passes. If it does not, fix or report that before adding anything to it.
+- The three constants exist with the values the sections below quote, so a limit you are about to reason about is real.
+- `entries_mut`, `build_incremental`, `patch_movers` and `check_invariants` are where this file says they are.
+- `rebuild_spatial_grid` still does `clear()`, a loop of `insert`, then `build()`. This one matters most: if it already
+  writes into `entries`, someone has started Task A, so find their branch and finish that rather than starting again.
+
+**The loop, for every task.** One task at a time, in the order A, B, C: B needs the slot table A creates, and A alone is
+useful even if the other two never happen.
+
+1. Branch from a freshly fetched `origin/main`. One branch per task, never a stack of three.
+2. Read the file you are about to change, not just the function. `spatial.rs` is about three thousand lines: at minimum
+   read the struct and its fields, both constructors, the pass you are touching, and every test that names it.
+3. Make the smallest change that compiles. `cargo check --offline -p bevy-flock-core` after each step, and
+   `cargo test --offline -p bevy-flock-core --lib` before moving on.
+4. Write the test in the same commit as the code. A test added later is a test written to pass.
+5. `cargo fmt --all`, then the full gate, then commit, push, and open the PR saying what was wrong rather than what the
+   diff does. Numbers in the body, with their host.
+6. Merge only when the whole gate is green. There is no exception for documentation-only commits: the link gate reads
+   them.
+
+**When to stop and ask instead of deciding.** Each of these changes something the owner has an opinion about:
+
+- a public signature beyond the ones named here (`remove_slot`, `CellStats`, `with_cell_stats`, the slot component);
+- per-cell memory above 32 bytes per cell in the always-on path, or any increase in the window table;
+- anything that changes what a neighbour query returns, including tie-break order;
+- the code and this document disagreeing about a constant, an invariant or a measured number;
+- a measurement that contradicts a figure below, or a gate that fails for a reason you cannot explain in one sentence;
+- being asked to skip a gate, weaken a test, or add an allow.
+
+**Do not**, under any framing:
+
+- add `#[allow(...)]` or a new `#[expect(..., reason)]`. The audit fails and the reviewer rejects it. Find the shape the
+  lint is asking for (`get`, `let-else`, `Entry::or_default`, `crate::testkit::OrDie`).
+- rewrite `spatial.rs` or `boids.rs` wholesale, or reformat them as a side effect of a change.
+- merge `crates/bevy-flock-core/src/domain/lookback.rs`. It lives on `feat/p2-incremental-rebuild` (PR #59), nothing calls
+  it, and ADR 0063 records the aliasing question as open.
+- claim a speedup without two binaries, alternating runs and a stated host.
+- leave a failing test for later, or mark one `#[ignore]` to get a branch green.
+- use an em dash in a document, a comment or a commit message.
+
+**If this document and the code disagree, the code wins.** Take the narrower reading, do the smaller change, and say in
+the pull request which line of this file was wrong so it gets corrected.
+
 ## Ground rules, in the order they will bite you
 
 **Toolchain and repository.**
@@ -39,9 +100,9 @@ python3 scripts/publish_check.py
 (cd site && ./node_modules/.bin/astro build)
 ```
 
-Use `--offline`; the dependency cache is complete and the network is not reliable. The host is a six-core aarch64 VM with
-16 GB of RAM and a small disk: when `df -h /home/ubuntu` shows under about 3 GB free, `rm -rf target/debug/incremental
-target/debug/examples` before blaming the compiler for a link error.
+Use `--offline`; the dependency cache is complete and the network is not reliable. The sandbox is a small aarch64 VM
+(check `nproc` and `free -g` rather than trusting this line) with a tight disk: when `df -h /home/ubuntu` shows under
+about 3 GB free, `rm -rf target/debug/incremental target/debug/examples` before blaming the compiler for a link error.
 
 **The lint policy is not advisory.** `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and
 the rest of the workspace table are denied **including in tests**. Six allows are permitted
@@ -110,10 +171,9 @@ review. Do not write a PR claiming a frame win at 100,000; measure, and report w
 tick, so `cells.len() != entries.len()` can never be false. Wiring it means the grid's `entries` become persistent and
 each NPC owns a slot.
 
-1. Add a slot component. `NpcGridSlot(pub u32)` in a new `crates/bevy-flock-ecs/src/adapters/primary/grid_door.rs` (a
-   door is the thing an NPC walks through to get into the index); register it in the spawn path where `Npc` and
-   `NpcVelocity` are inserted, and keep a free list so a despawned slot is reused. A `Vec<Option<Entity>>` in a resource
-   is enough to start; do not build a second ECS.
+1. Add a slot component. `NpcGridSlot(pub u32)` in a new `crates/bevy-flock-ecs/src/adapters/primary/grid_slots.rs`,
+   registered in the spawn path where `Npc` and `NpcVelocity` are inserted, with a free list so a despawned slot is
+   reused. A `Vec<Option<Entity>>` in a resource is enough to start; do not build a second ECS.
 2. Replace the body of `rebuild_spatial_grid` with: for each `(slot, transform, npc, velocity)` write
    `entries_mut()[slot] = GridEntry { .. }`, then `build_incremental()`. `entries_mut()` already exists.
 3. Keep a fallback: if the slot table is not dense and sized to the entries, or if any NPC has no slot this tick, do what
@@ -215,14 +275,14 @@ give the caller `CellStats { centre: Vec3, mean_velocity: Vec3, len: u32 }` for 
 CellStats)>)` for the per-tick case so a caller allocates once.
 
 **Where they should be used, later and separately.** The steering pass's neighbourhood scan is the biggest cost in the
-frame (the plugin is 3.3x to 9.2x the matched loop, and the scan is the largest part of it). A cell-level prefilter is the
-natural next step: skip cells whose centroid and density cannot contribute. That is a separate change with its own
+frame (the plugin is 3.3x the matched loop on this VM and 9.2x on the M3 Pro, and the scan is the largest part of it).
+A cell-level prefilter is the natural next step: skip cells whose centroid and density cannot contribute. That is a separate change with its own
 parity test, not part of this one.
 
 ## Sequence and sizing
 
-1. **A**, in two commits: the slot component plus the persistent-entries rewrite with the fallback, then the tests. Expect
-   a day, mostly in making the fallback honest.
+1. **A**, in two commits: the slot component plus the persistent-entries rewrite with the fallback, then the tests. The
+   fallback is what takes the time, not the fast path.
 2. **B**, one commit plus a test commit. The removal itself is an afternoon; the swap-compaction and the reporting are
    the part that needs care.
 3. **C**, one commit. The config flag, the accumulation inside placement, the accessors, the parity extension.
