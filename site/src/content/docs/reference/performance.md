@@ -72,8 +72,9 @@ not Mass Entity. Godot's rebuilds a dictionary grid and then does not query it. 
 with every agent steered, no band and no culling, which is why the 100,000 row miss rate is the interesting
 number: the banded path exists to cut it, and this row deliberately does not use it.
 
-The full six-statistic table, the differences that make it a system comparison, and the four measurements that
-would tighten it are in `benchmarks/README.md`. `python3 scripts/cross_bench.py --agents 10000,100000` reproduces
+The full six-statistic table, the differences that make it a system comparison, and the measurements that would
+tighten it are in `benchmarks/README.md`. `--workload all` is the one to start with there: it runs the Unreal
+fixture's loop bare and inside an ECS system, and separates the schedule's share from the workload's. `python3 scripts/cross_bench.py --agents 10000,100000` reproduces
 our side on your hardware.
 
 Full journals, including the rejected optimisations and their measurements, are in the repository:

@@ -30,9 +30,50 @@ Treat these as rough system comparisons, not an engine ranking. The measured wor
 
 The Unreal workload is a small SoA loop, not a comparison with Unreal's crowd stack. Bevy's result includes its plugin schedule, while Unreal measures only its subsystem tick. The benchmark guide discusses these differences.
 
+## What the gap is made of
+
+A product row cannot say which part of it is the schedule and which is the work. `--workload matched` answers that with
+two extra rows: the Unreal harness's loop (`benchmarks/unreal`) written twice, once called directly and once from a
+single system in `Update` on a bare `App::new()`. Same 1,000 m cube, same 10 m cells, same eight-neighbour bound, same
+seek and separation, same 1/60 s step. A test asserts the two produce bit-identical positions, so the ECS row cannot be
+paying for a different trajectory.
+
+```text
+cargo run --release --example cross_bench -- --workload all --agents 10000,100000 --ticks 300
+```
+
+Measured on the same six-core aarch64 VM as the two-engine table, median of three runs:
+
+| agents | matched, called directly | matched, in one ECS system | the whole plugin | ECS plus schedule |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 2.062 ms | 2.068 ms | 5.393 ms | +0.006 ms (0.3%) |
+| 100,000 | 13.352 ms | 13.360 ms | 44.146 ms | +0.008 ms (0.06%) |
+
+Read it as three statements, in order of how much they can bear:
+
+- **The ECS and its schedule are not the cost.** Eight microseconds per tick at 100,000 agents is 0.06% of the plugin
+  row. Whatever the difference against another engine turns out to be, it is not Bevy's dispatch.
+- **The plugin is 2.6x the matched loop at 10,000 and 3.3x at 100,000.** That is the price of what the product row
+  actually does: a twenty-seven-cell neighbourhood instead of eight same-cell slots, needs, temperament-driven weights,
+  the cognition scheduler and social memory. It is also where the optimisation budget belongs.
+- **The matched loop is still slower than the Unreal row on comparable hardware.** Ours is bounds-checked per element
+  and runs clear, prefix and cursor copy as three passes over a million cells; Unreal's `TArray` compiles to unchecked
+  addressing. That is a difference in the loop's implementation, not in the engine around it, and it is measurable
+  rather than assumed: run `--workload all` on the machine where you ran Unreal and the two matched rows sit in the same
+  table.
+
+The full plugin row here is 44.146 ms, and the laptop's was 16.528 ms for the same workload, which is what a 6-core VM
+against an M3 Pro is worth. The matched rows are the ones to compare across hosts, because they contain nothing but the
+fixture.
+
 ## What to try next
 
-1. **Add a matched Bevy row before attributing the gap.** Keep the full `App::update` number as the product-level result. Add a separate, minimal Bevy workload matching Unreal's 3D volume, cell size, positions, bounded neighbor reads, and per-agent update. That will show how much comes from the different algorithms and how much comes from Bevy's schedule.
+1. **Start from the matched rows when attributing the gap.** `--workload all` runs the fixture twice more: Unreal's
+   loop called directly, and the same loop from one system in `Update` on a bare `App::new()`, with a test asserting the
+   two are bit-identical. The table is under [What the gap is made of](#what-the-gap-is-made-of). On the sandbox the ECS
+   and its schedule were 0.06% of the plugin row at 100,000 agents and the plugin was 3.3x the matched loop, so the gap
+   is the workload and the loop's implementation rather than Bevy's dispatch. What is missing is those three rows on the
+   M3 Pro, which is one command.
 2. **Sweep worker counts on this machine.** [`BoidsConfig::with_workers()`](../crates/bevy-flock-ecs/src/boids.rs) already exposes the grid rebuild's worker count. Compare 1, 2, 4, 6, 8, and 11 workers at both population sizes, and report repeated medians, p95, and budget misses. Existing [worker measurements](../docs/dev/tuning/performance.md) used a six-core host; they do not establish the best setting for this M3 Pro.
 3. **Measure the steering query before changing its arithmetic.** A 100,000-agent Time Profiler capture sampled `steer_agent`, `ScanView::scan`, `Crowd::steer_parallel`, and Bevy's task executor. The capture covered a 15-second window during a roughly 19-second process, so it points to areas to investigate but does not assign exact costs to measured ticks. The scan is in [crowd.rs](../crates/bevy-flock-core/src/application/crowd.rs). Count scanned cells and candidate neighbors in a focused run, then test changes against the existing deterministic parity tests.
 4. **Account for headless schedule work separately.** Bevy's measured frame includes systems such as render-plan preparation even though the benchmark has no renderer. The profile did sample render-plan sorting, but it was not among the leading paths. Measure its cost in [render.rs](../crates/bevy-flock-ecs/src/adapters/primary/render.rs) before considering a headless-only option, and keep the full-plugin row for the application-level comparison.
