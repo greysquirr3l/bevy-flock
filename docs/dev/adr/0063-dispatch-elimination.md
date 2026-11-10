@@ -95,6 +95,31 @@ end. The byte-equality harness is the tool for this: build with the incremental 
 `cell_cursor` and `order` against a full rebuild of the same positions after every tick of a scripted 10,000-tick walk. A
 one-tick divergence fails there rather than in a game.
 
+## Implementation status
+
+`BlockPrefix` in `domain/lookback.rs` is the primitive P1 needs, and it is complete and tested on its own: three-state
+packed slots (not ready, aggregate, inclusive prefix), `publish_total`, `base_of`, `resolve`, `total` and a `reset` that
+re-arms the buffer without returning its memory. Eight unit tests hold it, including a concurrent one that publishes and
+resolves from eight workers over 257 blocks and compares every block against the serial prefix, four seeds deep.
+
+The failure worth recording came out of that test. Resolving a block whose predecessor has not counted yet has to wait,
+and waiting with `core::hint::spin_loop` alone **deadlocks as soon as more workers run than there are cores**, because the
+worker that owes the aggregate never gets scheduled: eight threads on six cores hung for ten minutes on the first run.
+The wait is now 64 spins and then `std::thread::yield_now`. That is not a theoretical case here: the phase-5 sweeps
+already drive sixteen workers on a six-core host, so the rebuild has to survive oversubscription, not merely tolerate it.
+
+What is left for P1, in order:
+
+1. Replace the grid's `block_totals: Vec<u32>` with a `BlockPrefix` sized by `block_count()`, and have
+   `count_cells_parallel` call `publish_total` for each block in its own window as soon as that block's count is final.
+   The serial count keeps its plain sum, since a single worker has no predecessors to wait on.
+2. In `scan_and_place_parallel`, replace `self.prefix_bases()` and the `block_bases` slice with `base_of(lo_block)` and
+   `base_of(hi_block)` resolved inside the scope, which is what lets count, scan and place share one dispatch. Retire
+   `prefix_bases` and `needs_block_totals_for` along with the array.
+3. Move the count into the scan's scope, so `build_measured` pays two spawns per rebuild instead of three.
+4. Re-run the byte-equality matrix, which already covers `cell_start`, `cell_cursor` and `order` across workers
+   {1, 2, 3, 8} × blocks {1, 128, 1024, MAX_BLOCKS}, then measure with `examples/build_passes --warm`.
+
 ## Rejected or deferred
 
 - **Per-block mutexes for a shared histogram** (0059 option B): re-rejected. A million-body count touches every cell, and
