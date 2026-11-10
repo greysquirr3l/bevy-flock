@@ -27,6 +27,9 @@
 //! [`MAX_POPULATION`](crate::error::MAX_POPULATION) is ten million, an order of magnitude of headroom; a total that
 //! exceeds the field saturates on publish rather than wrapping, which keeps a corrupt number from silently relocating
 //! every window after it.
+//!
+//! Wired into the rebuild only if the grid ever runs its whole rebuild inside one dispatch. ADR 0063 records why the
+//! single-dispatch fusion needs an `unsafe` hand-off first, and why that trade is not worth one spawn today.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
