@@ -159,6 +159,10 @@ python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
 
 The [archived result records](results/README.md) include this three-engine run and the later matched-workload run. The files are committed under `benchmarks/results/`, not left in ignored `target/` directories.
 
+Re-run the harness with `--repeat 3` to make a row carry its own dispersion: the record then names the run whose
+median sat in the middle of the three, and `spread_pct` says how far the medians ranged. Every table above predates
+that field and states its run count in prose instead; the archived records under `results/` carry it directly.
+
 The Bevy harness reported `unknown cpu` on macOS for this run, because it read `/proc/cpuinfo` unconditionally, and
 the label in the table above was corrected by hand. That is fixed in the harness: `/proc/cpuinfo` on Linux,
 `sysctl -n machdep.cpu.brand_string` on macOS, `PROCESSOR_IDENTIFIER` on Windows, which is what the Godot harness

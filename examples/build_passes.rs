@@ -70,6 +70,31 @@ fn position(index: usize) -> Vec3 {
     )
 }
 
+/// The schema's version, shared with `cross_bench`: bumped only when a field changes meaning or disappears.
+const SCHEMA_VERSION: u32 = 1;
+
+/// How far the repeats disagreed about a figure, as a percentage of its median.
+///
+/// The median alone hides whether seven repeats agreed to a tenth of a millisecond or to a factor of two, and a reader
+/// deciding whether a 3% difference between two configurations means anything needs that number rather than the median.
+fn spread(samples: &[f64]) -> f64 {
+    if samples.len() < 2 {
+        return 0.0;
+    }
+    let ordered = median(samples.to_vec());
+    if ordered <= 0.0 {
+        return 0.0;
+    }
+    let low = samples.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (high - low) / ordered * 100.0
+}
+
+/// One figure from the repeats: the median, and how far the repeats ranged around it.
+fn figure(samples: &[f64]) -> (f64, f64) {
+    (median(samples.to_vec()), spread(samples))
+}
+
 /// The median of the samples, or zero when there are none.
 fn median(mut samples: Vec<f64>) -> f64 {
     samples.sort_by(f64::total_cmp);
@@ -159,22 +184,23 @@ fn measure(
 fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
     let ran = samples.first().map_or(0, |costs| costs.blocks);
     for (name, get) in PASSES {
-        let seconds = median(
-            samples
+        let (seconds, spread_pct) = figure(
+            &samples
                 .iter()
                 .map(|costs| get(costs).as_secs_f64())
-                .collect(),
+                .collect::<Vec<f64>>(),
         );
         println!(
-            "{{\"kind\":\"pass\",\"pass\":\"{name}\",\"bodies\":{bodies},\"threads\":{workers},\
-             \"requested_blocks\":{blocks},\"blocks\":{ran},\"seconds\":{seconds}}}"
+            "{{\"kind\":\"pass\",\"schema_version\":{SCHEMA_VERSION},\"pass\":\"{name}\",\
+             \"bodies\":{bodies},\"threads\":{workers},\"requested_blocks\":{blocks},\"blocks\":{ran},\
+             \"seconds\":{seconds},\"spread_pct\":{spread_pct}}}"
         );
     }
-    let total = median(
-        samples
+    let (total, total_spread) = figure(
+        &samples
             .iter()
             .map(|costs| costs.total().as_secs_f64())
-            .collect(),
+            .collect::<Vec<f64>>(),
     );
     let serial = median(
         samples
@@ -185,8 +211,9 @@ fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
     let cells = samples.first().map_or(0, |costs| costs.cells);
     let used = samples.first().map_or(0, |costs| costs.workers);
     println!(
-        "{{\"kind\":\"total\",\"bodies\":{bodies},\"threads\":{workers},\"requested_blocks\":{blocks},\
-         \"blocks\":{ran},\"seconds\":{total},\"serial_share\":{serial},\"cells\":{cells},\
+        "{{\"kind\":\"total\",\"schema_version\":{SCHEMA_VERSION},\"bodies\":{bodies},\
+         \"threads\":{workers},\"requested_blocks\":{blocks},\"blocks\":{ran},\"seconds\":{total},\
+         \"spread_pct\":{total_spread},\"serial_share\":{serial},\"cells\":{cells},\
          \"used_workers\":{used}}}"
     );
 }
@@ -198,8 +225,8 @@ fn main() {
     let cells = SpatialGrid::new(config).or_die().cell_count();
     for bodies in body_sweep() {
         println!(
-            "{{\"kind\":\"meta\",\"machine\":\"{}\",\"cores\":{},\"bodies\":{bodies},\"cell\":{},\
-             \"cells\":{cells},\"repeats\":{REPEATS}}}",
+            "{{\"kind\":\"meta\",\"schema_version\":{SCHEMA_VERSION},\"machine\":\"{}\",\"cores\":{},\
+             \"bodies\":{bodies},\"cell\":{},\"cells\":{cells},\"repeats\":{REPEATS}}}",
             std::env::consts::ARCH,
             cores,
             CELL

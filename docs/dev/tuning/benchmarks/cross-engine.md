@@ -45,14 +45,25 @@ which is the point.
 One line per configuration, so `scripts/compare_benchmarks.py` can read a directory of files and print a table:
 
 ```json
-{"engine":"bevy-flock","engine_version":"0.1.0","workload":"W1-fixed-tick","agents":10000,
- "ticks":1000,"warmup":100,"budget_ms":16.6,"median_ms":5.467,"p95_ms":5.650,
- "p99_ms":5.805,"max_ms":5.874,"over_budget_pct":0.00,"ns_per_agent":547,
- "machine":"unknown cpu, 6 threads","notes":"App::update over the plugin schedule; no rendering"}
+{"engine":"bevy-flock","engine_version":"0.1.0","schema_version":1,"workload":"W1-fixed-tick","agents":10000,
+ "ticks":1000,"warmup":100,"repeats":3,"budget_ms":16.6,"median_ms":5.467,"p95_ms":5.650,
+ "p99_ms":5.805,"max_ms":5.874,"over_budget_pct":0.00,"spread_pct":0.42,"ns_per_agent":547,
+ "machine":"ARM Neoverse N1, 6 threads","notes":"App::update over the plugin schedule; no rendering"}
 ```
 
 Required: `engine`, `engine_version`, `workload`, `agents`, `ticks`, `budget_ms`, `median_ms`, `p95_ms`, `p99_ms`,
-`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `warmup`, `ns_per_agent`, `commit`, `workers`, `pool_threads`.
+`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `schema_version`, `warmup`, `repeats`, `spread_pct`,
+`ns_per_agent`, `commit`, `workers`, `pool_threads`.
+
+`schema_version` is `1` for every record written since it was introduced, and it is bumped only when a field changes
+meaning or disappears. Adding a field does not bump it: a consumer that reads named fields keeps working, and one that
+reads positions was already broken.
+
+`repeats` and `spread_pct` are how much the runs disagreed. The percentiles describe the single run whose median sat in
+the middle of the repeats, so the row is a run that actually happened rather than an average of several, and
+`spread_pct` is `(max - min) / median` across those repeat medians. A record with `repeats` of 1 carries a
+`spread_pct` of 0, which means nothing was repeated rather than that the runs agreed. `examples/build_passes` writes
+the same two fields per pass, over its own seven repeats.
 
 `machine` is not decoration. A table without it is a table of rumours: the published Godot result below is on a 2018
 Ryzen 5 2600X, and this sandbox is a six-core aarch64 VM, so their 5.02 ms and our 5.47 ms are not evidence about the
@@ -61,6 +72,9 @@ engines until they run on one machine. The full machine string, the core count a
 `notes` is where an author admits what their harness includes that the others do not.
 
 ## Running the bevy-flock side
+
+`--repeat N` runs every row N times and keeps the middle run, so the record's `spread_pct` says whether a
+difference between two configurations is larger than the noise. The default is 1: one run, an honest zero spread.
 
 ```text
 cargo run --release --example cross_bench -- --agents 10000,100000,1000000 --ticks 1000 --json
@@ -168,6 +182,7 @@ fit in the sandbox the gates run in. The first build may need small version fixe
 project, not a redesign of the fixture.
 
 ## Three engines on one laptop (2026-11-09)
+
 [`benchmarks/README.md`](../../../../benchmarks/README.md) holds a run on an Apple M3 Pro with 11 threads: bevy-flock 0.1.0
 through `App::update`, Unreal 5.8.2 through a `UTickableWorldSubsystem`, Godot 4.7.2 in its grid mode, 1,000 measured
 ticks each against the 16.6 ms budget.
@@ -228,6 +243,7 @@ rows are not portable between hosts even when the fixture is identical; the meas
 came from the host where Unreal ran.
 
 ## A same-machine result (six-core aarch64 VM)
+
 The earlier run, kept because it is a different machine and answers a different question: two engines, one
 headless VM, both harnesses driven by one command (`python3 scripts/cross_bench.py --agents 10000,100000`), 1000
 measured ticks and 100 warm-up ticks per row, Godot 4.7.2 and bevy-flock 0.1.0. Its rows and the laptop's rows do
@@ -247,6 +263,7 @@ not divide into each other.
 comparator would refuse the table, and the refusal is the feature.
 
 What it says, for this machine only:
+
 - **Against a bare GDScript loop we are slower**, 1.9x at 10k and 1.5x at 100k in ns per agent. That row does one pass
   over an array and no indexing at all, so this is the price of the work we do that it does not.
 
@@ -284,6 +301,10 @@ Two rules for anyone extending that table:
 - **Never quote `ns_per_agent` alone.** It is a convenience for reading the scaling shape; at 10k the per-agent cost is
   dominated by index rebuilds that amortise later, and at 1M by memory bandwidth. The six statistics are the result, and
   `ns_per_agent` is a gloss on one of them.
+
+`scripts/compare_benchmarks.py` prints the `workload` beside the engine and the record's `spread` beside its percentiles,
+because a sweep writes rows that differ only in their workload label (`W1-fixed-tick-pool6` against `-pool1`) and a table
+that hid the label would hide the thing being measured. Older records print `-` for a spread they never recorded.
 
 ## Why this exists
 
