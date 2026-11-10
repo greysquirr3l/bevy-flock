@@ -66,10 +66,11 @@ For an existing project, add an entry to the `Modules` array in the `.uproject` 
 
 ## Running it
 
-`UnrealEditor-Cmd` plus `-game -nullrhi` is a shipping-shaped process with no editor and no renderer:
+`UnrealEditor-Cmd` plus `-game -nullrhi` is a shipping-shaped process with no editor and no renderer. Add
+`-stdout -FullStdOutLogOutput` to forward the benchmark record to standard output:
 
 ```bash
-UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
+UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log -stdout -FullStdOutLogOutput \
   -crossbenchagents=10000 -crossbenchticks=1000 -crossbenchwarmup=100 \
   -crossbenchmachine="unknown cpu, 6 threads" > unreal.log 2>&1
 ```
@@ -83,10 +84,10 @@ UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
 | `-crossbenchbudget=` | 16.6 | the budget the over-budget share is counted against |
 | `-crossbenchmachine=` | detected | machine label, see below |
 
-The row arrives on stdout, and the process exits itself:
+The benchmark record is a `LogCrossBench` display message on stdout, and the process exits itself:
 
 ```text
-crossbench {"engine":"unreal","engine_version":"5.4.2-...","workload":"W1-fixed-tick","agents":10000,...}
+LogCrossBench: Display: crossbench {"engine":"unreal","engine_version":"5.4.2-...","workload":"W1-fixed-tick","agents":10000,...}
 ```
 
 If `crossbench starting:` never appears, the subsystem is not ticking: check that the run has `-game` (an editor world
@@ -106,7 +107,7 @@ becomes the only thing standing between the table and a rumour.
 
 ```bash
 python3 scripts/cross_bench.py --agents 10000,100000 --engines unreal \
-  --unreal-cmd 'UnrealEditor-Cmd '"$PWD"'/CrossBench.uproject -game -nullrhi -log \
+  --unreal-cmd 'UnrealEditor-Cmd '"$PWD"'/CrossBench.uproject -game -nullrhi -log -stdout -FullStdOutLogOutput \
     -crossbenchagents={agents} -crossbenchticks={ticks} -crossbenchwarmup={warmup} \
     -crossbenchmachine="unknown cpu, 6 threads"'
 ```

@@ -27,7 +27,7 @@
 //! world, and keeps the world's opinion of cost — measured, per ADR 0009 — out of the
 //! policy. Wiring it to `NpcBrain` is the adapter's job, not this module's.
 //!
-//! `NpcBrain`: crate::adapters::primary::components::NpcBrain
+//! `NpcBrain`: `crate::adapters::primary::components::NpcBrain`
 
 use core::cmp::Reverse;
 use std::collections::BinaryHeap;

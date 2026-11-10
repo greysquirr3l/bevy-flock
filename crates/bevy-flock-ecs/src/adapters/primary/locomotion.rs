@@ -23,6 +23,11 @@
 //! tick was. A game ordering its own animation work after `Integration` sees a `Locomotion` that
 //! describes the tick it is drawing.
 
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "fixed-tick distance accumulation and signed-angle arithmetic must preserve deterministic rounding"
+)]
+
 use bevy_ecs::prelude::{Component, Query, Res};
 use bevy_math::Vec2;
 

@@ -183,7 +183,7 @@ hour on a one-ulp difference: fusing the wide lane and not the scalar reference 
 Fusion is a numerical decision, not a tidy-up, so the lint is allowed again with that reason and the
 kernels stay unfused.
 
-Four `#[expect]`s are therefore permitted, and the audit checks all four:
+Five `#[expect]` cases are therefore permitted, and the audit checks all five:
 
 1. **In `src/domain/num.rs`, for a cast lint.** The module exists so a numeric conversion happens
    once, with its rounding written down, instead of at three hundred call sites. Every helper there
@@ -204,8 +204,11 @@ Four `#[expect]`s are therefore permitted, and the audit checks all four:
    replays and measurements. The manifest is the authority; the source attribute restates its
    decision where it outranks command-line lint flags. The audit checks each root against its own
    manifest.
+5. **In `bevy-flock-ecs` locomotion.** Fixed-tick distance accumulation and signed-angle arithmetic
+   keep their unfused rounding so replayed motion traces do not depend on compiler fusion choices.
+   The expectation is scoped to the locomotion module and listed in `scripts/lint_audit.py`.
 
-### Why the fourth one is in the source at all
+### Why the crate-root expectation is in the source at all
 
 The manifest already allows `suboptimal_flops` crate-wide, so the attribute looks redundant. It is
 not, and the reason is how rustc applies lint flags.

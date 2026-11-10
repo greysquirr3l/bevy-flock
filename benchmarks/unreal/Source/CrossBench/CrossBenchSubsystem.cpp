@@ -286,9 +286,7 @@ void UCrossBenchSubsystem::Report()
         Median * 1000000.0 / static_cast<double>(Agents),
         *Machine);
 
-    // Raw stdout with no log prefix, so the line is parseable without a regex that knows what an engine's log format
-    // looks like.
-    FPlatformMisc::LocalPrint(*FString::Printf(TEXT("%s\n"), *Line));
+    UE_LOG(LogCrossBench, Display, TEXT("crossbench %s"), *Line);
 
     UE_LOG(
         LogCrossBench,

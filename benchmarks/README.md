@@ -1,0 +1,41 @@
+# Cross-engine benchmark notes
+
+These are rough measurements from one Apple M3 Pro with 11 available threads. Each run used 100 warm-up ticks and 1,000 measured ticks, with a 16.6 ms frame budget. The [benchmark guide](../docs/dev/tuning/benchmarks/cross-engine.md) describes the harnesses and how to rerun them.
+
+| Agents | Engine | Version | Median | p95 | p99 | Max | Over 16.6 ms |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | Bevy | 0.1.0 | 2.217 ms | 2.779 ms | 2.980 ms | 3.625 ms | 0% |
+| 10,000 | Unreal | 5.8.2 | 0.937 ms | 2.359 ms | 2.660 ms | 3.679 ms | 0% |
+| 10,000 | Godot grid | 4.7.2 | 4.674 ms | 5.322 ms | 5.762 ms | 7.037 ms | 0% |
+| 100,000 | Bevy | 0.1.0 | 16.528 ms | 18.240 ms | 19.674 ms | 139.185 ms | 47.8% |
+| 100,000 | Unreal | 5.8.2 | 3.496 ms | 5.567 ms | 6.653 ms | 9.343 ms | 0% |
+| 100,000 | Godot grid | 4.7.2 | 38.054 ms | 41.445 ms | 44.352 ms | 179.952 ms | 100% |
+
+At 10,000 agents, Unreal's median was about 2.4 times lower than Bevy's. At 100,000, it was about 4.7 times lower. Bevy's median was about 2.1 times lower than Godot's at 10,000 and 2.3 times lower at 100,000. At 100,000, Bevy's median barely fits the budget, but nearly half its measured ticks exceed it.
+
+Treat these as rough system comparisons, not an engine ranking. The measured work differs:
+
+- Bevy times `App::update` with the full `FlockPlugin` schedule. The [harness](../examples/cross_bench.rs) uses the `CityAmbient` preset. At 100,000 agents, the preset steers only a subset; [prior whole-frame measurements](../docs/dev/adr/0031-cell-sizing-for-lanes.md) found about 5,000 manifested agents.
+- Unreal times a custom `UTickableWorldSubsystem`, not Mass Entity. Its [loop](unreal/Source/CrossBench/CrossBenchSubsystem.cpp) rebuilds a 3D counting-sort grid, seeks a shared goal, checks at most eight same-cell neighbors, and integrates every agent.
+- Godot times `_physics_process` in 2D. Its [grid mode](godot/cross_bench.gd) rebuilds a dictionary grid, then seeks and integrates every agent. The step does not use that grid for neighbor avoidance.
+- The engines do not generate identical positions. Bevy's crowd preset and the other harnesses use different spawn distributions, which also changes cell occupancy and neighbor work.
+
+The Unreal workload is a small SoA loop, not a comparison with Unreal's crowd stack. Bevy's result includes its plugin schedule, while Unreal measures only its subsystem tick. The benchmark guide discusses these differences.
+
+## What to try next
+
+1. **Add a matched Bevy row before attributing the gap.** Keep the full `App::update` number as the product-level result. Add a separate, minimal Bevy workload matching Unreal's 3D volume, cell size, positions, bounded neighbor reads, and per-agent update. That will show how much comes from the different algorithms and how much comes from Bevy's schedule.
+2. **Sweep worker counts on this machine.** [`BoidsConfig::with_workers()`](../crates/bevy-flock-ecs/src/boids.rs) already exposes the grid rebuild's worker count. Compare 1, 2, 4, 6, 8, and 11 workers at both population sizes, and report repeated medians, p95, and budget misses. Existing [worker measurements](../docs/dev/tuning/performance.md) used a six-core host; they do not establish the best setting for this M3 Pro.
+3. **Measure the steering query before changing its arithmetic.** A 100,000-agent Time Profiler capture sampled `steer_agent`, `ScanView::scan`, `Crowd::steer_parallel`, and Bevy's task executor. The capture covered a 15-second window during a roughly 19-second process, so it points to areas to investigate but does not assign exact costs to measured ticks. The scan is in [crowd.rs](../crates/bevy-flock-core/src/application/crowd.rs). Count scanned cells and candidate neighbors in a focused run, then test changes against the existing deterministic parity tests.
+4. **Account for headless schedule work separately.** Bevy's measured frame includes systems such as render-plan preparation even though the benchmark has no renderer. The profile did sample render-plan sorting, but it was not among the leading paths. Measure its cost in [render.rs](../crates/bevy-flock-ecs/src/adapters/primary/render.rs) before considering a headless-only option, and keep the full-plugin row for the application-level comparison.
+
+The grid itself is not missing: Bevy already has a 3D counting-sort grid with count, prefix, and placement passes in [spatial.rs](../crates/bevy-flock-core/src/domain/spatial.rs). Unreal's fixture uses the same broad grid strategy.
+
+## Experiments not to repeat as default fixes
+
+- **Cell-size tuning:** a whole-frame sweep found little difference between the default and finer grids at 10,000 and 100,000 agents. The result and limits are in [ADR 0031](../docs/dev/adr/0031-cell-sizing-for-lanes.md).
+- **Per-worker histograms and bucketing:** profiling and measurements rejected these rebuild alternatives. See the [outcome in ADR 0060](../docs/dev/adr/0060-build-5x-gate.md#outcome).
+- **More prefix-scan work:** the count and prefix work has already been fused and measured; the remaining prefix pass was a small part of the rebuild. See [ADR 0057](../docs/dev/adr/0057-fused-count-and-scan.md) and [ADR 0060](../docs/dev/adr/0060-build-5x-gate.md).
+- **A persistent unsafe worker pool:** [ADR 0059](../docs/dev/adr/0059-worker-pool-ownership.md) defers it because the remaining dispatch cost does not justify the aliasing and soundness burden. The Bevy task-pool alternative was rejected because it allocates in the steady-state rebuild.
+
+The raw JSONL files from this run are in ignored `target/` directories and are not part of the repository. The Bevy harness also reports `unknown cpu` on macOS because it reads `/proc/cpuinfo`; the machine label in this table was corrected to the actual Apple M3 Pro host.

@@ -111,7 +111,7 @@ subsystem rather than an actor, so installing it is copying a module into a proj
 blueprint to wire. Its [README](../../../../benchmarks/unreal/README.md) has the setup, the flags and the build commands.
 
 ```text
-UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
+UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log -stdout -FullStdOutLogOutput \
   -crossbenchagents=10000 -crossbenchticks=1000 -crossbenchwarmup=100 \
   -crossbenchmachine="unknown cpu, 6 threads"
 ```
@@ -120,7 +120,7 @@ and through the runner, once that project exists:
 
 ```text
 python3 scripts/cross_bench.py --agents 10000,100000 --engines unreal,bevy-flock,godot-grid \
-  --unreal-cmd 'UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log \
+  --unreal-cmd 'UnrealEditor-Cmd "$PWD/CrossBench.uproject" -game -nullrhi -log -stdout -FullStdOutLogOutput \
     -crossbenchagents={agents} -crossbenchticks={ticks} -crossbenchwarmup={warmup}'
 ```
 

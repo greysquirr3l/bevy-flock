@@ -9,12 +9,13 @@ warnings, CI passes `-D warnings`, a named list of lints is denied outright — 
 Two things can break that policy, so this script checks both:
 
 - **An override in a file.** Any `#[allow]`/`#[expect]` of any lint, clippy's or rustc's, outside
-  `SANCTIONED` fails. Today that is eight entries: four are `unsafe_code`, all a counting allocator
+  `SANCTIONED` fails. Today that is nine entries: four are `unsafe_code`, all a counting allocator
   in a test or an example — `GlobalAlloc` is unsafe by definition, and there is no way to assert
-  "this frame allocates nothing" from outside the crate without one — and four are `too_many_lines`
-  on a file whose shape is the point of it. A crate-level `#[expect]` is judged by rule instead:
-  `expected_is_allowed` states the four cases the policy permits, and one of them is a source
-  attribute that restates a decision the package's own manifest already made.
+  "this frame allocates nothing" from outside the crate without one — four are `too_many_lines` on
+  files whose shape is the point of them, and one preserves unfused arithmetic in locomotion.
+  A crate-level `#[expect]` is judged by rule instead: `expected_is_allowed` states the four cases
+  the policy permits, and one of them is a source attribute that restates a decision the package's
+  own manifest already made.
 - **A weakened manifest.** `REQUIRED` must still be denied and `TOLERATED` must still be exactly the
   allowed set, so a lint cannot be quietly downgraded in a file nobody reads.
 
@@ -36,6 +37,10 @@ ROOT = Path(__file__).resolve().parent.parent
 #: decision that a denied lint is wrong for one file, which needs a reason and a `plan.toml` task
 #: that removes it; see `docs/lint-policy.md`.
 SANCTIONED: dict[tuple[str, str], str] = {
+    (
+        "crates/bevy-flock-ecs/src/adapters/primary/locomotion.rs",
+        "suboptimal_flops",
+    ): "fixed-tick distance accumulation and signed-angle arithmetic must preserve deterministic rounding",
     # The steering kernels must not fuse: `a * b + c` rounds twice where `a.mul_add(b, c)` rounds
     # once, and the scalar, SIMD and threaded roads are compared bit for bit. The facade states this
     # at its crate root; the core states it on the two files that own the arithmetic, which is
