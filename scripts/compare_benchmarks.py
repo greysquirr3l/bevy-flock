@@ -31,6 +31,7 @@ REQUIRED = (
 def rows(paths: list[str]) -> list[dict]:
     found: list[dict] = []
     for path in paths:
+        foreign = 0
         text = pathlib.Path(path).read_text()
         for line in text.splitlines():
             line = line.strip()
@@ -49,9 +50,16 @@ def rows(paths: list[str]) -> list[dict]:
                 continue
             missing = [key for key in REQUIRED if key not in row]
             if missing:
-                print(f"{path}: skipping a row missing {', '.join(missing)}", file=sys.stderr)
+                # `build_passes` writes its own schema in the same archive. It is not an error, and one line per record
+                # would bury the real warning, so the count is reported once per file.
+                if "kind" in row:
+                    foreign += 1
+                else:
+                    print(f"{path}: skipping a row missing {', '.join(missing)}", file=sys.stderr)
                 continue
             found.append(row)
+        if foreign:
+            print(f"{path}: {foreign} record(s) from another schema (build_passes), not a cross-engine row", file=sys.stderr)
     return found
 
 
