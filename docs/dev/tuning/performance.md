@@ -1806,3 +1806,46 @@ the divide-dominated one it was compared against.
 **Decision:** the bucketing task is closed as measured-and-rejected; ADR 0060's `count`/`place` fusion line ends here. If
 `place` is revisited, the target is its inner loop, 1M cursor load-modify-stores, the same dependency shape, and where
 its 1.975 ms actually goes, not the traffic in front of it.
+
+## The build's pass profile across populations and threads
+
+Same harness as the 1M record above (`examples/build_passes`, seven repeats, medians), three populations on one grid of
+421,875 cells. `count` and `clear` and `prefix` are the passes that were promoted as parallel wins; this is what they
+actually cost as the population changes.
+
+| bodies | threads | clear | count | prefix | place | total | serial share |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 1 | 0.027 ms | 0.146 ms | 0.417 ms | 0.194 ms | 0.792 ms | 53.4% |
+| 10,000 | 6 | 0.165 ms | 1.058 ms | 0.103 ms | 0.151 ms | 1.465 ms | 6.6% |
+| 100,000 | 1 | 0.269 ms | 0.383 ms | 0.421 ms | 0.748 ms | 1.820 ms | 23.0% |
+| 100,000 | 6 | 0.243 ms | 0.375 ms | 0.108 ms | 0.311 ms | 1.032 ms | 9.0% |
+| 1,000,000 | 1 | 2.780 ms | 2.064 ms | 0.420 ms | 7.071 ms | 12.337 ms | 3.4% |
+| 1,000,000 | 6 | 0.892 ms | 1.805 ms | 0.109 ms | 2.059 ms | 4.711 ms | 2.2% |
+
+Three things fall out of it, and the first one is a defect rather than a limit.
+
+**Six threads make a 10,000-body build 1.85x slower.** Clear goes 0.027 → 0.165 ms and count 0.146 → 1.058 ms, so the
+parallel path is spending roughly 0.15 to 0.9 ms per pass on getting itself started, against a whole serial build of
+0.792 ms. `PARALLEL_MIN_BODIES` is 4,096, so every crowd above that pays it. The crossover is somewhere between 10,000 and
+100,000 bodies, where the six-thread build first wins (1.032 against 1.820 ms). The fix is not a bigger constant on its own:
+the per-pass cost is `std::thread::scope` spawn and join repeated three times a build, which is what ADR 0059's persistent
+pool removes. Raising the threshold without that would just move the same 0.5 ms to a different population.
+
+**`count` does not scale and is not a defect.** 0.383 ms at 100,000 and 2.064 ms at 1,000,000 against a constant 421,875-cell
+table: 1.9 ns per body, and 1.14x on six threads at 1M. The earlier record explains why (every worker re-reads the cell
+table; private histograms measured three times worse; the locality is the point). This table adds the population axis, which
+is what makes it a scatter cost rather than a table cost: at 10,000 bodies the same table costs 0.146 ms, so the table is
+not what is being paid for.
+
+**The flat passes are flat for the right reason.** `prefix` is 0.417-0.421 ms at every population on one thread, 3.8x on
+six, and `clear` is 2.780 ms at 1M and 0.027 ms at 10,000, both tracking cells rather than bodies. They are already at
+bandwidth: 421,875 `u32` slots is 1.7 MB read and written per pass, and 3.8x on six cores is what 1.7 MB per pass pays.
+
+No hardware counters were available for this run (`perf` has no binary for the sandbox kernel 6.18.38), so the attribution
+above is from timing structure across populations and thread counts rather than from cache-miss counts. The two conclusions
+that would need counters to sharpen are the dispatch floor's composition and `place`'s 7.071 ms inner loop, and neither
+changes the next action.
+
+**Next action, in order:** the persistent pool (ADR 0059, T05) removes the per-pass dispatch, which is the only measured
+regression here; re-measure this table after it, because a 10,000-body crowd is the case it fixes. Then `place`, which is
+57% of the single-threaded 1M build and the largest single pass in the crate.

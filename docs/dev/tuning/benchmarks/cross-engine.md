@@ -52,7 +52,7 @@ One line per configuration, so `scripts/compare_benchmarks.py` can read a direct
 ```
 
 Required: `engine`, `engine_version`, `workload`, `agents`, `ticks`, `budget_ms`, `median_ms`, `p95_ms`, `p99_ms`,
-`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `warmup`, `ns_per_agent`, `commit`, `workers`.
+`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `warmup`, `ns_per_agent`, `commit`, `workers`, `pool_threads`.
 
 `machine` is not decoration. A table without it is a table of rumours: the published Godot result below is on a 2018
 Ryzen 5 2600X, and this sandbox is a six-core aarch64 VM, so their 5.02 ms and our 5.47 ms are not evidence about the
@@ -81,6 +81,18 @@ threads from the compute task pool, so this answers "what does the build contrib
 The measured answer is 2% of the 100,000-agent row, with the build itself at 2.73x on six threads; the tables and the
 reason are in `benchmarks/README.md` under "Where the threads go". The `workers` key is `null` on rows that do not
 choose a count, and the number requested otherwise.
+
+`--pool 1,2,4,6` is the flag that moves the frame, because the steering pass takes its threads from the compute task
+pool:
+
+```text
+cargo run --release --example cross_bench -- --workload w1 --agents 100000 --ticks 200 --pool 1,2,4,6 --json
+```
+
+Each shape re-executes this binary once. `ComputeTaskPool` is a process-wide `OnceLock`, so a second `TaskPoolPlugin` in
+one process is ignored and an in-process sweep would report the first pool size N times; the child process is the only
+way to measure the real shape. Rows are labelled `W1-fixed-tick-pool<n>` and carry `pool_threads`, and `io` and
+`async_compute` are pinned to one thread each so the row is the compute pool rather than three pools of idle threads.
 
 ## Running the Godot side
 
