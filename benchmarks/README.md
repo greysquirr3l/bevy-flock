@@ -32,39 +32,51 @@ The Unreal workload is a small SoA loop, not a comparison with Unreal's crowd st
 
 ## What the gap is made of
 
-A product row cannot say which part of it is the schedule and which is the work. `--workload matched` answers that with
-two extra rows: the Unreal harness's loop (`benchmarks/unreal`) written twice, once called directly and once from a
-single system in `Update` on a bare `App::new()`. Same 1,000 m cube, same 10 m cells, same eight-neighbour bound, same
-seek and separation, same 1/60 s step. A test asserts the two produce bit-identical positions, so the ECS row cannot be
+A product row cannot say which part of it is the schedule and which is the work. `--workload all` answers that with two
+extra rows: the Unreal harness's loop (`benchmarks/unreal`) written twice, once called directly and once from a single
+system in `Update` on a bare `App::new()`. Same 1,000 m cube, same 10 m cells, same eight-neighbour bound, same seek and
+separation, same 1/60 s step, same seed. A test asserts the two produce bit-identical positions, so the ECS row cannot be
 paying for a different trajectory.
 
 ```text
-cargo run --release --example cross_bench -- --workload all --agents 10000,100000 --ticks 300
+cargo run --release --example cross_bench -- --workload all --agents 10000,100000 --ticks 300 --json
 ```
 
-Measured on the same six-core aarch64 VM as the two-engine table, median of three runs:
+On the Apple M3 Pro that produced the three-engine table, 300 measured ticks after 100 warm-ups:
 
-| agents | matched, called directly | matched, in one ECS system | the whole plugin | ECS plus schedule |
-| ---: | ---: | ---: | ---: | ---: |
-| 10,000 | 2.062 ms | 2.068 ms | 5.393 ms | +0.006 ms (0.3%) |
-| 100,000 | 13.352 ms | 13.360 ms | 44.146 ms | +0.008 ms (0.06%) |
+| agents | matched, called directly | in one ECS system | the whole plugin | Unreal, same host | ECS plus schedule |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 0.428 ms | 0.429 ms | 2.184 ms | 0.937 ms | +0.001 ms (0.05%) |
+| 100,000 | 1.737 ms | 1.734 ms | 15.940 ms | 3.496 ms | -0.003 ms (noise) |
 
-Read it as three statements, in order of how much they can bear:
+Three statements, in order of how much they can bear:
 
-- **The ECS and its schedule are not the cost.** Eight microseconds per tick at 100,000 agents is 0.06% of the plugin
-  row. Whatever the difference against another engine turns out to be, it is not Bevy's dispatch.
-- **The plugin is 2.6x the matched loop at 10,000 and 3.3x at 100,000.** That is the price of what the product row
-  actually does: a twenty-seven-cell neighbourhood instead of eight same-cell slots, needs, temperament-driven weights,
-  the cognition scheduler and social memory. It is also where the optimisation budget belongs.
-- **The matched loop is still slower than the Unreal row on comparable hardware.** Ours is bounds-checked per element
-  and runs clear, prefix and cursor copy as three passes over a million cells; Unreal's `TArray` compiles to unchecked
-  addressing. That is a difference in the loop's implementation, not in the engine around it, and it is measurable
-  rather than assumed: run `--workload all` on the machine where you ran Unreal and the two matched rows sit in the same
-  table.
+- **The ECS and its schedule are not the cost.** A tenth of a millisecond at 10,000 and nothing above run-to-run noise at
+  100,000. Whatever the gap against another engine is, it is not Bevy's dispatch, and this is measured rather than argued.
+- **The fixture's loop is 2.2x faster here than Unreal's, and 2.0x faster at 100,000.** Same host, same work, same bound,
+  both read from tables in the same document. This is the row that settles the argument about the engine around the loop.
+- **What the plugin does on top of the loop is 5.1x the loop at 10,000 and 9.2x at 100,000**, which is 80.3% and 89.1% of
+  the product row. A twenty-seven-cell neighbourhood instead of eight same-cell slots, plus needs, temperament-driven
+  weights, the cognition scheduler and social memory. That is the whole of the 4.6x gap against Unreal at 100,000, and it
+  is where the optimisation budget belongs.
 
-The full plugin row here is 44.146 ms, and the laptop's was 16.528 ms for the same workload, which is what a 6-core VM
-against an M3 Pro is worth. The matched rows are the ones to compare across hosts, because they contain nothing but the
-fixture.
+The three-engine table's product row reads 2.217 and 16.528 ms from the earlier run; this run of it reads 2.184 and
+15.940, which is the same number twice. Its 100,000-agent over-budget share is 32% here against 47.8% in the 1,000-tick
+run, and that is what 300-tick samples on a shared laptop look like rather than a change in the crate.
+
+### The sandbox got the third statement wrong, and that is worth keeping
+
+The same three rows on the six-core aarch64 VM, median of three runs, gave 2.062 / 2.068 / 5.393 ms at 10,000 agents and
+13.352 / 13.360 / 44.146 ms at 100,000. From those, the first two conclusions hold: the schedule is free, and the plugin
+is a multiple of the loop.
+
+The third one inverted. On the VM the matched loop is 13.352 ms at 100,000; divide that by the 2.7x host ratio the plugin
+row shows and it lands at 4.9 ms against Unreal's 3.496 ms laptop row, which reads as a 1.4x deficit for the Rust loop.
+An earlier revision of this section said exactly that. It was wrong, and wrong in a way worth naming: the bare loop is single-threaded and touches four megabytes of grid three times a tick, so the VM
+penalises it 7.7x against the laptop, while the plugin's parallel build absorbs the same weak memory 2.8x. The fixture
+rows are not portable between hosts even when the fixture is identical, and dividing a sandbox row by a laptop row to
+reach a conclusion about an implementation is what produced the mistake. The correction is one command on the host that
+matters, which is the row above.
 
 ## What to try next
 

@@ -159,8 +159,8 @@ agent with no band, no LOD and no impostors, which is why the budget misses at 1
 
 ### Attribution: W2, the matched loop
 
-The three-engine table above says our row is behind Unreal's, and a single row cannot say why. `--workload matched` adds
-two rows that can: the Unreal harness's loop written in Rust twice, once called directly and once from one system in
+The three-engine table above says our row is behind Unreal's, and a single row cannot say why. `--workload all` adds two
+rows that can: the Unreal harness's loop written in Rust twice, once called directly and once from one system in
 `Update` on a bare `App::new()`.
 
 - Same 1,000 m cube, same 10 m cells, same `cell_start[cell] .. cell_start[cell + 1]` slots.
@@ -168,28 +168,39 @@ two rows that can: the Unreal harness's loop written in Rust twice, once called 
 - Same seek, separation, 1/60 s fixed step and cube clamp.
 - The two rows are asserted bit-identical by a test, so the ECS row is not running a different trajectory.
 
-On a six-core aarch64 VM, median of three runs of 300 ticks each:
+On the M3 Pro that produced the table above, 300 measured ticks after 100 warm-ups:
 
-| agents | matched, called directly | matched, in one ECS system | the whole plugin | ECS plus schedule |
-| ---: | ---: | ---: | ---: | ---: |
-| 10,000 | 2.062 ms | 2.068 ms | 5.393 ms | +0.006 ms (0.3%) |
-| 100,000 | 13.352 ms | 13.360 ms | 44.146 ms | +0.008 ms (0.06%) |
+| agents | matched, called directly | in one ECS system | the whole plugin | Unreal, same host | ECS plus schedule |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 0.428 ms | 0.429 ms | 2.184 ms | 0.937 ms | +0.001 ms (0.05%) |
+| 100,000 | 1.737 ms | 1.734 ms | 15.940 ms | 3.496 ms | -0.003 ms (noise) |
+
+The product row here reads 2.184 and 15.940 ms; the three-engine table above carries 2.217 and 16.528 from the earlier
+run. Same number twice, two runs apart, which is the scale of run-to-run variance on this laptop and the reason the
+tables quote medians rather than a single tick.
 
 Three conclusions, in descending order of support:
 
-1. **Bevy's dispatch is not the difference.** Eight microseconds a tick at 100,000 agents is 0.06% of the row that
-   contains it.
-2. **What this crate does beyond the fixture is 3.3x at 100,000.** Twenty-seven cells instead of eight slots, needs,
-   temperament, cognition scheduling and social memory. If those are the cost, they are also the place to optimise, and
-   the banded continuum is exactly that argument made in code.
-3. **The matched loop is still slower than Unreal's** (13.352 ms here against 3.496 ms there, on hardware that differs by
-   roughly 2.7x on the same workload). Bounds-checked element access and three separate passes over a million cells
-   against `TArray`'s unchecked addressing. That is a loop-implementation difference, not an engine one, and it is the
-   next thing to fix if the bare numbers matter.
+1. **Bevy's dispatch is not the difference.** A tenth of a millisecond at 10,000 and nothing above noise at 100,000. The
+   schedule is not what the row is spending its time on.
+2. **The fixture's loop beats Unreal's on the same silicon**: 2.2x at 10,000 and 2.0x at 100,000. Same work, same bound,
+   same host, both numbers from this document. If the question was whether Rust plus Bevy's ECS is the wrong vehicle for
+   a crowd loop, this answers it.
+3. **The plugin's own work is 5.1x the loop at 10,000 and 9.2x at 100,000**, which is 80.3% and 89.1% of the product row.
+   Twenty-seven cells instead of eight slots, needs, temperament, cognition scheduling and social memory. That is the
+   whole of the 4.6x gap against Unreal at 100,000, and it is the only thing worth optimising now.
 
 Attribution is only worth as much as the honesty of its fixture, so: the bare row is a fair Rust implementation, not a
 straw man. Its prefix scan and cursor copy walk slices rather than indexing, because a bounds check per cell across a
 million cells is a millisecond of nothing and would have been attributed to Bevy.
+
+**The sandbox disagreed with conclusion 3, and was wrong.** On the six-core aarch64 VM the same three rows were 2.062 /
+2.068 / 5.393 ms at 10,000 and 13.352 / 13.360 / 44.146 ms at 100,000. Conclusions 1 and 2 held; conclusion 3 inverted,
+because dividing the VM's bare row by the laptop's Unreal row through the plugin row's host ratio makes the Rust loop look
+1.4x slower when it is 2x faster. The bare row is single-threaded and sweeps four megabytes of grid three times a tick, so
+the VM costs it 7.7x against the laptop while the plugin's parallel build absorbs the same weak memory at 2.8x. Fixture
+rows are not portable between hosts even when the fixture is identical; the measurement above is the one to quote, and it
+came from the host where Unreal ran.
 
 ## A same-machine result (six-core aarch64 VM)
 The earlier run, kept because it is a different machine and answers a different question: two engines, one

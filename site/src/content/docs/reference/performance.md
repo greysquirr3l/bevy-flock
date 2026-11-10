@@ -74,7 +74,13 @@ number: the banded path exists to cut it, and this row deliberately does not use
 
 The full six-statistic table, the differences that make it a system comparison, and the measurements that would
 tighten it are in `benchmarks/README.md`. `--workload all` is the one to start with there: it runs the Unreal
-fixture's loop bare and inside an ECS system, and separates the schedule's share from the workload's. `python3 scripts/cross_bench.py --agents 10000,100000` reproduces
+fixture's loop bare and inside an ECS system, and separates the schedule's share from the workload's.
+
+That decomposition, on the same laptop: at 100,000 agents the fixture's loop costs 1.737 ms and this crate's full
+schedule costs 15.940 ms, with the ECS wrapper adding nothing measurable. The loop is 2.0x faster than Unreal's on the
+same hardware, so the 4.6x gap between the two product rows is this crate doing more: a twenty-seven-cell neighbourhood,
+needs, temperament, cognition and social memory. That is a deliberate trade, and it is the number to look at before
+asking for the fixture's workload instead. `python3 scripts/cross_bench.py --agents 10000,100000` reproduces
 our side on your hardware.
 
 Full journals, including the rejected optimisations and their measurements, are in the repository:
