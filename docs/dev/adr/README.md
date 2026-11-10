@@ -90,3 +90,4 @@ replay.
 | [0060](0060-build-5x-gate.md) | Is the 5x build gate reachable, and what would it take | Proposed |
 | [0061](0061-animation-layer-inversion.md) | The animation layer inverts into a feature | accepted |
 | [0062](0062-three-crate-layering.md) | Four crates, one direction, and nothing in `src/` but re-exports | accepted |
+| [0063](0063-dispatch-elimination.md) | Two scopes with no barrier between count, scan and place, then an incremental rebuild that skips the passes entirely | Proposed |

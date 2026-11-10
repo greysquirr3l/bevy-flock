@@ -1909,6 +1909,8 @@ Warm totals with the worker count pushed past the six cores:
 | 100,000 | 1.801 ms | 1.252 ms | 0.923 ms | 0.870 ms | 1.279 ms | 1.689 ms | 1.946 ms |
 | 1,000,000 | 12.455 ms | 6.963 ms | 4.952 ms | 4.283 ms | 6.403 ms | 7.561 ms | 9.136 ms |
 
+![Cold against warm at one million bodies, 1 to 16 threads](../../../benchmarks/results/2026-11-09/sandbox-aarch64/warm-sweep/cold-vs-warm.png)
+
 The knee is the core count, not a bandwidth wall: eight threads make the million-body rebuild 50% slower than six, twelve
 77% slower and sixteen 113% slower. Oversubscription loses more to context switching than it gains in parallelism, which is
 what a barrier-per-pass design should be expected to do.
