@@ -37,6 +37,7 @@
 //! The two matched rows are asserted bit-identical by a test, so the ECS row cannot be paying for a different
 //! trajectory than the bare one.
 use bevy_app::prelude::*;
+use bevy_app::{TaskPoolOptions, TaskPoolPlugin, TaskPoolThreadAssignmentPolicy};
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::system::ResMut;
 use bevy_flock::adapters::primary::plugin::{CrowdPreset, FlockConfig, FlockPlugin};
@@ -119,6 +120,10 @@ struct Args {
     workloads: Vec<Workload>,
     /// Requested grid-build worker counts. Empty means "let the plugin choose", which is the canonical row.
     workers: Vec<Option<usize>>,
+    /// Requested compute-pool thread counts. Empty means "no `TaskPoolPlugin`", which is the canonical row.
+    pools: Vec<usize>,
+    /// The pool shape this process was re-executed with, if any.
+    pool: Option<usize>,
 }
 
 fn args() -> Args {
@@ -129,6 +134,8 @@ fn args() -> Args {
         json: false,
         workloads: vec![Workload::FixedTick],
         workers: Vec::new(),
+        pools: Vec::new(),
+        pool: None,
     };
     let mut rest = std::env::args().skip(1);
     while let Some(flag) = rest.next() {
@@ -165,6 +172,20 @@ fn args() -> Args {
                         .collect();
                     if !counts.is_empty() {
                         parsed.workers = counts.into_iter().map(Some).collect();
+                    }
+                }
+            }
+            "--pool" => {
+                if let Some(list) = rest.next() {
+                    let counts: Vec<usize> = list
+                        .split(',')
+                        .filter_map(|v| v.trim().parse().ok())
+                        .filter(|n| *n > 0)
+                        .collect();
+                    match counts.as_slice() {
+                        [] => {}
+                        [single] => parsed.pool = Some(*single),
+                        many => parsed.pools = many.to_vec(),
                     }
                 }
             }
@@ -218,27 +239,45 @@ impl Row {
     }
 }
 
-fn report(
-    label: &str,
-    note: &str,
+/// What distinguishes one row from another: the label a table prints, the note that admits what the row includes, and the
+/// two knobs that produced it. Grouped rather than threaded through `report` as four parameters, which is one more than a
+/// reader can keep in order.
+struct RowId {
+    label: String,
+    note: String,
     workers: Option<usize>,
-    agents: usize,
-    ticks: usize,
-    warmup: usize,
-    row: &Row,
-    json: bool,
-) {
+    pool: Option<usize>,
+}
+
+impl RowId {
+    /// The canonical row for a workload, with no knob forced.
+    fn of(workload: Workload) -> Self {
+        Self {
+            label: workload.label().to_owned(),
+            note: workload.note().to_owned(),
+            workers: None,
+            pool: None,
+        }
+    }
+}
+
+fn report(id: &RowId, agents: usize, ticks: usize, warmup: usize, row: &Row, json: bool) {
     // `null` rather than `0`: a row that does not choose a worker count, and a row where the question does not apply,
     // are both "not chosen", and the plugin's own `0` already means "decide for me".
-    let workers_field = workers.map_or_else(|| "null".to_owned(), |count| count.to_string());
+    let workers_field = id
+        .workers
+        .map_or_else(|| "null".to_owned(), |count| count.to_string());
+    let pool_field = id
+        .pool
+        .map_or_else(|| "null".to_owned(), |count| count.to_string());
     if json {
         println!(
             "{{\"engine\":\"bevy-flock\",\"engine_version\":\"{}\",\"workload\":\"{}\",\"agents\":{},\
              \"ticks\":{},\"warmup\":{},\"budget_ms\":{},\"median_ms\":{:.3},\"p95_ms\":{:.3},\"p99_ms\":{:.3},\
              \"max_ms\":{:.3},\"over_budget_pct\":{:.2},\"ns_per_agent\":{:.0},\"machine\":\"{}\",\
-             \"workers\":{},\"notes\":\"{}\"}}",
+             \"workers\":{},\"pool_threads\":{},\"notes\":\"{}\"}}",
             env!("CARGO_PKG_VERSION"),
-            label,
+            id.label,
             agents,
             ticks,
             warmup,
@@ -251,13 +290,14 @@ fn report(
             row.ns_per_agent(agents),
             machine(),
             workers_field,
-            note,
+            pool_field,
+            id.note,
         );
     } else {
         println!(
             "{agents} agents [{}]: median {:.3} ms, p95 {:.3}, p99 {:.3}, max {:.3}, \
              {:.2}% over {BUDGET_MS} ms, {:.0} ns/agent",
-            label,
+            id.label,
             row.median,
             row.p95,
             row.p99,
@@ -327,6 +367,37 @@ fn clean(name: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+/// The plugin with a compute pool of exactly `threads`, which a default host only gets by accident.
+///
+/// `percent: 0.0` with equal bounds asks for exactly that many threads: the percentage contributes nothing and the
+/// clamp does the work. `io` and `async_compute` are pinned to one thread each so the row measures the compute pool
+/// instead of three pools' worth of idle threads.
+fn task_pool_plugin(threads: usize) -> TaskPoolPlugin {
+    let policy = || TaskPoolThreadAssignmentPolicy {
+        min_threads: threads,
+        max_threads: threads,
+        percent: 0.0,
+        on_thread_spawn: None,
+        on_thread_destroy: None,
+    };
+    let single = TaskPoolThreadAssignmentPolicy {
+        min_threads: 1,
+        max_threads: 1,
+        percent: 0.0,
+        on_thread_spawn: None,
+        on_thread_destroy: None,
+    };
+    TaskPoolPlugin {
+        task_pool_options: TaskPoolOptions {
+            min_total_threads: 1,
+            max_total_threads: usize::MAX,
+            io: single.clone(),
+            async_compute: single,
+            compute: policy(),
+        },
+    }
+}
+
 fn fixed_tick_config(agents: usize, workers: Option<usize>) -> FlockConfig {
     let mut config = FlockConfig {
         population: PopulationSize::clamped(agents),
@@ -341,24 +412,19 @@ fn fixed_tick_config(agents: usize, workers: Option<usize>) -> FlockConfig {
     config
 }
 
-/// A swept row keeps the canonical workload name in its JSON only when no worker count was requested, so a row that
-/// came from a sweep can never be mistaken for the cross-engine row it is being compared against.
-fn fixed_tick_label(workers: Option<usize>) -> String {
-    workers.map_or_else(
-        || Workload::FixedTick.label().to_owned(),
-        |count| format!("{}-{count}w", Workload::FixedTick.label()),
-    )
-}
-
 fn run_fixed_tick(
     agents: usize,
     ticks: usize,
     warmup: usize,
     json: bool,
     workers: Option<usize>,
+    pool: Option<usize>,
 ) -> Row {
     let config = fixed_tick_config(agents, workers);
     let mut app = App::new();
+    if let Some(threads) = pool {
+        app.add_plugins(task_pool_plugin(threads));
+    }
     app.add_plugins(FlockPlugin::new(config));
     // One update drains the spawn queue, so the timed ticks are steady state rather than a spawn burst.
     app.update();
@@ -373,14 +439,27 @@ fn run_fixed_tick(
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
     let row = Row::from_samples(&mut samples);
-    let label = fixed_tick_label(workers);
-    let mut note = Workload::FixedTick.note().to_owned();
+    let mut id = RowId::of(Workload::FixedTick);
     if let Some(workers) = workers {
-        note.push_str("; grid build pinned to ");
-        note.push_str(&workers.to_string());
-        note.push_str(if workers == 1 { " worker" } else { " workers" });
+        id.label = format!("{}-{workers}w", Workload::FixedTick.label());
+        id.note.push_str("; grid build pinned to ");
+        id.note.push_str(&workers.to_string());
+        id.note
+            .push_str(if workers == 1 { " worker" } else { " workers" });
     }
-    report(&label, &note, workers, agents, ticks, warmup, &row, json);
+    if let Some(threads) = pool {
+        id.label = workers.map_or_else(
+            || format!("{}-pool{threads}", Workload::FixedTick.label()),
+            |workers| format!("{}-{workers}w-pool{threads}", Workload::FixedTick.label()),
+        );
+        id.note.push_str("; compute pool pinned to ");
+        id.note.push_str(&threads.to_string());
+        id.note
+            .push_str(if threads == 1 { " thread" } else { " threads" });
+    }
+    id.workers = workers;
+    id.pool = pool;
+    report(&id, agents, ticks, warmup, &row, json);
     row
 }
 
@@ -609,9 +688,7 @@ fn run_matched_bare(agents: usize, ticks: usize, warmup: usize, json: bool) -> R
     }
     let row = Row::from_samples(&mut samples);
     report(
-        Workload::MatchedBare.label(),
-        Workload::MatchedBare.note(),
-        None,
+        &RowId::of(Workload::MatchedBare),
         agents,
         ticks,
         warmup,
@@ -661,9 +738,7 @@ fn run_matched_ecs(agents: usize, ticks: usize, warmup: usize, json: bool) -> Ro
     }
     let row = Row::from_samples(&mut samples);
     report(
-        Workload::MatchedEcs.label(),
-        Workload::MatchedEcs.note(),
-        None,
+        &RowId::of(Workload::MatchedEcs),
         agents,
         ticks,
         warmup,
@@ -708,8 +783,49 @@ fn ratio(numerator: f64, denominator: f64) -> f64 {
     }
 }
 
-fn main() {
+/// Re-runs this binary once per requested pool shape.
+///
+/// `ComputeTaskPool` is a process-wide `OnceLock`, so the first pool created in a process wins and every later
+/// `TaskPoolPlugin` is ignored. A sweep inside one process would report the first shape N times, which is the kind of
+/// plausible-looking wrong answer this harness exists to avoid. One process per shape costs a spawn and makes the
+/// number real.
+fn respawn_for_pools(pools: &[usize]) -> Result<(), String> {
+    let exe =
+        std::env::current_exe().map_err(|error| format!("cannot find this binary: {error}"))?;
+    for pool in pools {
+        let mut command = std::process::Command::new(&exe);
+        let mut skip_next = false;
+        for arg in std::env::args().skip(1) {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg == "--pool" {
+                skip_next = true;
+                continue;
+            }
+            command.arg(arg);
+        }
+        command.arg("--pool").arg(pool.to_string());
+        let status = command
+            .status()
+            .map_err(|error| format!("cannot run the pool child: {error}"))?;
+        if !status.success() {
+            return Err(format!("the {pool}-thread child exited with {status}"));
+        }
+    }
+    Ok(())
+}
+
+fn main() -> std::process::ExitCode {
     let parsed = args();
+    if !parsed.pools.is_empty() {
+        if let Err(message) = respawn_for_pools(&parsed.pools) {
+            eprintln!("pool sweep failed: {message}");
+            return std::process::ExitCode::FAILURE;
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
     // An empty list means one canonical row with the plugin's own choice of workers.
     let workers = if parsed.workers.is_empty() {
         vec![None]
@@ -731,6 +847,7 @@ fn main() {
                             parsed.warmup,
                             parsed.json,
                             *count,
+                            parsed.pool,
                         ));
                     }
                 }
@@ -756,6 +873,7 @@ fn main() {
             attribute(agents, bare, ecs, plugin.as_ref());
         }
     }
+    std::process::ExitCode::SUCCESS
 }
 
 #[cfg(test)]

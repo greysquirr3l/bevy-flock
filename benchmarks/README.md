@@ -90,11 +90,24 @@ banked.
 It does not show in the product row because of arithmetic: at 100,000 agents the build is 1.79 ms at one worker and 0.97 ms
 at six, out of a 44 ms row, so pinning its threads can move at most 1.9% of the frame. That is what the sweep measured.
 
-The rest of the row is steering, and steering never reads this flag. `pool_for` in `crowd.rs` takes the host's compute task
-pool, creating the default one when a headless app has none, and slices the pass across it above `MIN_PARALLEL_AGENTS`. The
-row's thread count is therefore the pool's, not `BoidsConfig::workers`, which is why a grid-worker sweep is flat and why an
-earlier version of the follow-up list was wrong to expect otherwise. Sweeping the steering needs a host that adds
-`TaskPoolPlugin` with a chosen pool shape before `FlockPlugin`, which is a harness change rather than a flag.
+### The pool, not the grid
+
+The rest of the row is steering, and steering never reads the grid flag. `pool_for` in `crowd.rs` takes the host's compute
+task pool, creating the default one when a headless app has none, and slices the pass across it above
+`MIN_PARALLEL_AGENTS`. The row's thread count is therefore the pool's, which is why the grid sweep above is flat.
+
+`--pool 1,2,4,6` builds the app with a `TaskPoolPlugin` whose compute pool is exactly that many threads, and it re-executes
+the binary once per shape, because `ComputeTaskPool` is a process-wide `OnceLock`: the first pool in a process wins, so an
+in-process sweep would report the first shape N times. Measured on the same six-core VM, 200 ticks, medians of three runs:
+
+| agents | 1 thread | 2 threads | 4 threads | 6 threads |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 11.941 ms | 7.341 ms (1.63x) | 5.578 ms (2.14x) | 5.463 ms (2.19x) |
+| 100,000 | 124.823 ms | 68.297 ms (1.83x) | 49.315 ms (2.53x) | 44.052 ms (2.83x) |
+
+So the frame does scale, 2.83x on six threads at 100,000 agents, with efficiency falling 92%, 63%, 47%. The canonical row
+in every other table of this document is the six-thread one, which is the pool's own choice and not an authored setting.
+Designing for more than six threads means designing for the efficiency column, not the speedup one.
 
 ### The sandbox got the third statement wrong, and that is worth keeping
 
