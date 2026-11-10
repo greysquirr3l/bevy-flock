@@ -75,7 +75,10 @@ def main() -> int:
         return 2
 
     found.sort(key=lambda row: (int(row["agents"]), float(row["median_ms"])))
-    header = f"{'agents':>8}  {'engine':<20} {'median':>8} {'p95':>8} {'p99':>8} {'max':>8} {'>16.6ms':>8} {'ns/agent':>9}"
+    header = (
+        f"{'agents':>8}  {'engine':<14} {'workload':<24} {'median':>8} {'p95':>8} {'p99':>8} {'max':>8} "
+        f"{'>16.6ms':>8} {'spread':>7} {'ns/agent':>9}"
+    )
     print(header)
     print("-" * len(header))
     for row in found:
@@ -85,11 +88,15 @@ def main() -> int:
             if isinstance(per_agent, (int, float))
             else f"{float(row['median_ms']) * 1e6 / int(row['agents']):.0f}"
         )
+        # The workload belongs in the table, not just in the file: a pool sweep writes rows that differ only by their
+        # pool shape, and four identical-looking lines would hide the thing being measured.
+        spread = row.get("spread_pct")
+        spread = f"{spread:.2f}%" if isinstance(spread, (int, float)) else "-"
         print(
-            f"{int(row['agents']):>8}  {row['engine']:<20} "
+            f"{int(row['agents']):>8}  {row['engine']:<14} {str(row.get('workload', '-')):<24} "
             f"{float(row['median_ms']):>8.3f} {float(row['p95_ms']):>8.3f} "
             f"{float(row['p99_ms']):>8.3f} {float(row['max_ms']):>8.3f} "
-            f"{float(row['over_budget_pct']):>7.2f}% {per_agent:>9}"
+            f"{float(row['over_budget_pct']):>7.2f}% {spread:>7} {per_agent:>9}"
         )
     print()
     for machine in sorted(machines):

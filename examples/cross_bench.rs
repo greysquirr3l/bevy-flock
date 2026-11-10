@@ -124,6 +124,8 @@ struct Args {
     pools: Vec<usize>,
     /// The pool shape this process was re-executed with, if any.
     pool: Option<usize>,
+    /// How many times to run each row, so the record carries its own run-to-run spread.
+    repeat: usize,
 }
 
 fn args() -> Args {
@@ -136,6 +138,7 @@ fn args() -> Args {
         workers: Vec::new(),
         pools: Vec::new(),
         pool: None,
+        repeat: 1,
     };
     let mut rest = std::env::args().skip(1);
     while let Some(flag) = rest.next() {
@@ -189,6 +192,11 @@ fn args() -> Args {
                     }
                 }
             }
+            "--repeat" => {
+                if let Some(count) = rest.next().and_then(|value| value.trim().parse().ok()) {
+                    parsed.repeat = std::cmp::max(count, 1);
+                }
+            }
             "--json" => parsed.json = true,
             other => eprintln!("ignoring unknown argument {other}"),
         }
@@ -207,12 +215,58 @@ fn percentile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
 }
 
 /// The six statistics every row reports, computed once so every workload is summarised by the same code.
+#[derive(Clone, Copy, Default)]
 struct Row {
     median: f64,
     p95: f64,
     p99: f64,
     max: f64,
     over_pct: f64,
+}
+
+/// The schema's version. Bumped when a field changes meaning or disappears; adding a field does not bump it, because a
+/// consumer that reads named fields keeps working and one that reads positions was already broken.
+const SCHEMA_VERSION: u32 = 1;
+
+/// One row, plus how far the repeated runs disagreed about its median.
+///
+/// The percentiles come from the run whose median sits in the middle of the repeats, so the whole row describes one real
+/// run rather than an average of several. `spread_pct` is `(max - min) / median` across the repeat medians, which is the
+/// number the earlier prose tables had to state in words ("medians of three runs") and the one a reader needs before
+/// arguing about a three percent difference.
+struct Measurement {
+    row: Row,
+    spread_pct: f64,
+}
+
+impl Measurement {
+    /// Runs `once` `repeats` times and keeps the middle run.
+    ///
+    /// A single repeat reports a spread of zero, which is the truth rather than a placeholder: nothing was repeated, so
+    /// nothing is known about run-to-run variation.
+    fn of(repeats: usize, mut once: impl FnMut() -> Row) -> Self {
+        let repeats = repeats.max(1);
+        let rows: Vec<Row> = (0..repeats).map(|_| once()).collect();
+        let mut medians: Vec<f64> = rows.iter().map(|row| row.median).collect();
+        medians.sort_by(f64::total_cmp);
+        let middle = medians.get(medians.len() / 2).copied().unwrap_or_default();
+        let spread_pct = if repeats > 1 && middle > 0.0 {
+            let low = medians.first().copied().unwrap_or(middle);
+            let high = medians.last().copied().unwrap_or(middle);
+            (high - low) / middle * 100.0
+        } else {
+            0.0
+        };
+        let row = rows
+            .into_iter()
+            .min_by(|a, b| {
+                (a.median - middle)
+                    .abs()
+                    .total_cmp(&(b.median - middle).abs())
+            })
+            .unwrap_or_default();
+        Self { row, spread_pct }
+    }
 }
 
 impl Row {
@@ -261,7 +315,16 @@ impl RowId {
     }
 }
 
-fn report(id: &RowId, agents: usize, ticks: usize, warmup: usize, row: &Row, json: bool) {
+fn report(
+    id: &RowId,
+    agents: usize,
+    ticks: usize,
+    warmup: usize,
+    measured: &Measurement,
+    repeats: usize,
+    json: bool,
+) {
+    let row = &measured.row;
     // `null` rather than `0`: a row that does not choose a worker count, and a row where the question does not apply,
     // are both "not chosen", and the plugin's own `0` already means "decide for me".
     let workers_field = id
@@ -272,21 +335,24 @@ fn report(id: &RowId, agents: usize, ticks: usize, warmup: usize, row: &Row, jso
         .map_or_else(|| "null".to_owned(), |count| count.to_string());
     if json {
         println!(
-            "{{\"engine\":\"bevy-flock\",\"engine_version\":\"{}\",\"workload\":\"{}\",\"agents\":{},\
-             \"ticks\":{},\"warmup\":{},\"budget_ms\":{},\"median_ms\":{:.3},\"p95_ms\":{:.3},\"p99_ms\":{:.3},\
-             \"max_ms\":{:.3},\"over_budget_pct\":{:.2},\"ns_per_agent\":{:.0},\"machine\":\"{}\",\
-             \"workers\":{},\"pool_threads\":{},\"notes\":\"{}\"}}",
+            "{{\"engine\":\"bevy-flock\",\"engine_version\":\"{}\",\"schema_version\":{},\"workload\":\"{}\",\
+             \"agents\":{},\"ticks\":{},\"warmup\":{},\"repeats\":{},\"budget_ms\":{},\"median_ms\":{:.3},\
+             \"p95_ms\":{:.3},\"p99_ms\":{:.3},\"max_ms\":{:.3},\"over_budget_pct\":{:.2},\"spread_pct\":{:.2},\
+             \"ns_per_agent\":{:.0},\"machine\":\"{}\",\"workers\":{},\"pool_threads\":{},\"notes\":\"{}\"}}",
             env!("CARGO_PKG_VERSION"),
+            SCHEMA_VERSION,
             id.label,
             agents,
             ticks,
             warmup,
+            repeats,
             BUDGET_MS,
             row.median,
             row.p95,
             row.p99,
             row.max,
             row.over_pct,
+            measured.spread_pct,
             row.ns_per_agent(agents),
             machine(),
             workers_field,
@@ -294,8 +360,13 @@ fn report(id: &RowId, agents: usize, ticks: usize, warmup: usize, row: &Row, jso
             id.note,
         );
     } else {
+        let spread = if repeats > 1 {
+            format!("{:.2}% across {repeats} runs", measured.spread_pct)
+        } else {
+            "single run".to_owned()
+        };
         println!(
-            "{agents} agents [{}]: median {:.3} ms, p95 {:.3}, p99 {:.3}, max {:.3}, \
+            "{agents} agents [{}]: median {:.3} ms ({spread}), p95 {:.3}, p99 {:.3}, max {:.3}, \
              {:.2}% over {BUDGET_MS} ms, {:.0} ns/agent",
             id.label,
             row.median,
@@ -451,11 +522,36 @@ fn fixed_tick_config(agents: usize, workers: Option<usize>) -> FlockConfig {
     config
 }
 
-fn run_fixed_tick(
+/// The label and note a fixed-tick row carries, computed once so a repeated run cannot drift from a single one.
+fn fixed_tick_id(workers: Option<usize>, pool: Option<usize>) -> RowId {
+    let mut id = RowId::of(Workload::FixedTick);
+    if let Some(workers) = workers {
+        id.label = format!("{}-{workers}w", Workload::FixedTick.label());
+        id.note.push_str("; grid build pinned to ");
+        id.note.push_str(&workers.to_string());
+        id.note
+            .push_str(if workers == 1 { " worker" } else { " workers" });
+    }
+    if let Some(threads) = pool {
+        id.label = workers.map_or_else(
+            || format!("{}-pool{threads}", Workload::FixedTick.label()),
+            |workers| format!("{}-{workers}w-pool{threads}", Workload::FixedTick.label()),
+        );
+        id.note.push_str("; compute pool pinned to ");
+        id.note.push_str(&threads.to_string());
+        id.note
+            .push_str(if threads == 1 { " thread" } else { " threads" });
+    }
+    id.workers = workers;
+    id.pool = pool;
+    id
+}
+
+/// One run of the plugin workload: build the app, drain the spawn queue, warm up, then time `ticks` updates.
+fn fixed_tick_once(
     agents: usize,
     ticks: usize,
     warmup: usize,
-    json: bool,
     workers: Option<usize>,
     pool: Option<usize>,
 ) -> Row {
@@ -477,29 +573,7 @@ fn run_fixed_tick(
         app.update();
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
-    let row = Row::from_samples(&mut samples);
-    let mut id = RowId::of(Workload::FixedTick);
-    if let Some(workers) = workers {
-        id.label = format!("{}-{workers}w", Workload::FixedTick.label());
-        id.note.push_str("; grid build pinned to ");
-        id.note.push_str(&workers.to_string());
-        id.note
-            .push_str(if workers == 1 { " worker" } else { " workers" });
-    }
-    if let Some(threads) = pool {
-        id.label = workers.map_or_else(
-            || format!("{}-pool{threads}", Workload::FixedTick.label()),
-            |workers| format!("{}-{workers}w-pool{threads}", Workload::FixedTick.label()),
-        );
-        id.note.push_str("; compute pool pinned to ");
-        id.note.push_str(&threads.to_string());
-        id.note
-            .push_str(if threads == 1 { " thread" } else { " threads" });
-    }
-    id.workers = workers;
-    id.pool = pool;
-    report(&id, agents, ticks, warmup, &row, json);
-    row
+    Row::from_samples(&mut samples)
 }
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -712,7 +786,7 @@ fn matched_population(agents: usize) -> (Vec<Vec3>, Vec<Vec3>) {
     (positions, velocities)
 }
 
-fn run_matched_bare(agents: usize, ticks: usize, warmup: usize, json: bool) -> Row {
+fn matched_bare_once(agents: usize, ticks: usize, warmup: usize) -> Row {
     let (mut positions, mut velocities) = matched_population(agents);
     let mut grid = MatchedGrid::for_agents(agents);
     for _ in 0..warmup {
@@ -725,16 +799,7 @@ fn run_matched_bare(agents: usize, ticks: usize, warmup: usize, json: bool) -> R
         matched_tick(&mut grid, &mut positions, &mut velocities);
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
-    let row = Row::from_samples(&mut samples);
-    report(
-        &RowId::of(Workload::MatchedBare),
-        agents,
-        ticks,
-        warmup,
-        &row,
-        json,
-    );
-    row
+    Row::from_samples(&mut samples)
 }
 
 /// The same population and the same two functions, driven by one system in `Update` on a plain `App::new()`: no plugins,
@@ -755,7 +820,7 @@ fn matched_ecs_tick(mut crowd: ResMut<MatchedCrowd>) {
     matched_tick(grid, positions, velocities);
 }
 
-fn run_matched_ecs(agents: usize, ticks: usize, warmup: usize, json: bool) -> Row {
+fn matched_ecs_once(agents: usize, ticks: usize, warmup: usize) -> Row {
     let (positions, velocities) = matched_population(agents);
     let mut app = App::new();
     app.insert_resource(MatchedCrowd {
@@ -775,16 +840,7 @@ fn run_matched_ecs(agents: usize, ticks: usize, warmup: usize, json: bool) -> Ro
         app.update();
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
-    let row = Row::from_samples(&mut samples);
-    report(
-        &RowId::of(Workload::MatchedEcs),
-        agents,
-        ticks,
-        warmup,
-        &row,
-        json,
-    );
-    row
+    Row::from_samples(&mut samples)
 }
 
 /// What the three rows mean once they exist. Printed only for a human: the JSON rows are the record.
@@ -880,31 +936,56 @@ fn main() -> std::process::ExitCode {
                 Workload::FixedTick => {
                     // The last row of a sweep is the one the attribution compares against.
                     for count in &workers {
-                        plugin = Some(run_fixed_tick(
+                        let measured = Measurement::of(parsed.repeat, || {
+                            fixed_tick_once(
+                                agents,
+                                parsed.ticks,
+                                parsed.warmup,
+                                *count,
+                                parsed.pool,
+                            )
+                        });
+                        report(
+                            &fixed_tick_id(*count, parsed.pool),
                             agents,
                             parsed.ticks,
                             parsed.warmup,
+                            &measured,
+                            parsed.repeat,
                             parsed.json,
-                            *count,
-                            parsed.pool,
-                        ));
+                        );
+                        plugin = Some(measured.row);
                     }
                 }
                 Workload::MatchedBare => {
-                    bare = Some(run_matched_bare(
+                    let measured = Measurement::of(parsed.repeat, || {
+                        matched_bare_once(agents, parsed.ticks, parsed.warmup)
+                    });
+                    report(
+                        &RowId::of(Workload::MatchedBare),
                         agents,
                         parsed.ticks,
                         parsed.warmup,
+                        &measured,
+                        parsed.repeat,
                         parsed.json,
-                    ));
+                    );
+                    bare = Some(measured.row);
                 }
                 Workload::MatchedEcs => {
-                    ecs = Some(run_matched_ecs(
+                    let measured = Measurement::of(parsed.repeat, || {
+                        matched_ecs_once(agents, parsed.ticks, parsed.warmup)
+                    });
+                    report(
+                        &RowId::of(Workload::MatchedEcs),
                         agents,
                         parsed.ticks,
                         parsed.warmup,
+                        &measured,
+                        parsed.repeat,
                         parsed.json,
-                    ));
+                    );
+                    ecs = Some(measured.row);
                 }
             }
         }
@@ -918,8 +999,8 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        MATCH_HALF_EXTENT, MATCH_MAX_NEIGHBOURS, MatchedCrowd, MatchedGrid, arm_cpu_name,
-        arm_part_name, clean, matched_population, matched_tick, num, parse_cpu_info,
+        MATCH_HALF_EXTENT, MATCH_MAX_NEIGHBOURS, MatchedCrowd, MatchedGrid, Measurement, Row,
+        arm_cpu_name, arm_part_name, clean, matched_population, matched_tick, num, parse_cpu_info,
     };
     use bevy_app::prelude::{App, Update};
     use bevy_math::Vec3;
@@ -935,6 +1016,55 @@ mod tests {
         );
         let arm = "processor\t: 0\nBogoMIPS\t: 108.00\nHardware\t: BCM2835\n";
         assert_eq!(parse_cpu_info(arm).as_deref(), Some("BCM2835"));
+    }
+
+    /// The record has to carry its own dispersion, because "medians of three runs" in prose is not a number a reader can
+    /// check. The representative row is the middle run, not an average, so its p95 belongs to a run that happened.
+    #[test]
+    fn the_measurement_reports_the_middle_run_and_its_spread() {
+        let mut values = [10.0_f64, 12.0, 11.0].into_iter();
+        let measured = Measurement::of(3, || {
+            let median = values.next().unwrap_or_default();
+            Row {
+                median,
+                p95: median + 1.0,
+                p99: median + 2.0,
+                max: median + 3.0,
+                over_pct: 0.0,
+            }
+        });
+        assert!(
+            (measured.row.median - 11.0).abs() < 1e-9,
+            "the middle median"
+        );
+        assert!(
+            (measured.row.p95 - 12.0).abs() < 1e-9,
+            "the middle run's own p95"
+        );
+        let expected = (12.0 - 10.0) / 11.0 * 100.0;
+        assert!(
+            (measured.spread_pct - expected).abs() < 1e-9,
+            "spread was {}",
+            measured.spread_pct
+        );
+    }
+
+    /// One run knows nothing about run-to-run variation, so it reports none rather than inventing a zero-width range that
+    /// reads like agreement.
+    #[test]
+    fn a_single_run_reports_no_spread() {
+        let measured = Measurement::of(1, || Row {
+            median: 4.0,
+            ..Row::default()
+        });
+        assert!((measured.row.median - 4.0).abs() < 1e-9);
+        assert!(measured.spread_pct.abs() < 1e-9);
+        // A zero repeat count is treated as one, because the alternative is an empty table.
+        let coerced = Measurement::of(0, || Row {
+            median: 2.0,
+            ..Row::default()
+        });
+        assert!((coerced.row.median - 2.0).abs() < 1e-9);
     }
 
     /// A kernel that publishes only `CPU implementer` and `CPU part` still names its hardware, which is the case on the
