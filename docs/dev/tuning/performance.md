@@ -1849,3 +1849,33 @@ changes the next action.
 **Next action, in order:** the persistent pool (ADR 0059, T05) removes the per-pass dispatch, which is the only measured
 regression here; re-measure this table after it, because a 10,000-body crowd is the case it fixes. Then `place`, which is
 57% of the single-threaded 1M build and the largest single pass in the crate.
+
+## Why the small-body passes report a 600% spread (2026-11-09)
+
+The spread column arrived with a result that looked broken the moment it existed: on the six-core aarch64 sandbox the
+10,000-body rebuild reports `count` at 0.139 ms with a spread of 624.80%, and `clear` at 0.027 ms with 42.67%. Nothing
+about the pass itself varies by that much. The cause is what the harness measures, and it took one experiment to name.
+
+`examples/build_passes` constructs a fresh `SpatialGrid` for every repeat, so every repeat pays for its own tables. A
+nine-repeat probe of the same configuration, printing each repeat instead of only the median, separated the two effects:
+
+| condition | total, 10,000 bodies | `count`, 10,000 bodies |
+| --- | --- | ---: |
+| fresh grid per repeat | 1.6096, 1.5750, then 0.8088 to 0.7631 (median 0.7819, spread 108.26%) | 0.9553, 0.8984, then 0.1431 to 0.1361 (median 0.1431, spread 572.43%) |
+| one grid, rebuilt in place | 0.6941 median, spread 5.85% | 0.1030 median, spread 16.07% |
+
+The first two repeats are the outliers, not the work. `count` is the first pass to touch all 421,876 slots of
+`cell_start`, which is 1.69 MB: above the allocator's `mmap` threshold, and so zero-filled lazily on first touch. The
+0.81 ms gap between its first repeat and its steady one, over roughly 412 pages of 4 KB, is about 2 us per page fault. Two
+consequences follow, and both are larger than the spread they explain:
+
+- A fresh grid costs about 40 us per repeat even after the pages are warm (0.143 ms against 0.103 ms), because every
+  repeat re-maps and re-zeroes its tables. `build_passes` therefore measures allocate plus rebuild, not rebuild. A game
+  rebuilds into buffers it already owns.
+- Once the pages are warm, 10,000 bodies vary by 5.85% and `count` by 16.07%. That residue is the timer, the scheduler and
+  the memory subsystem, which is the floor a shared VM can measure at this size.
+
+What this means for reading the tables: only rows above roughly one millisecond are worth quoting to three significant
+figures. The million-body rows carry spreads of 8% to 28% and are sound; the 10,000-body rows describe the allocator as
+much as the kernel. A future `build_passes` mode that reuses one grid would report the steady-state cost a game actually
+pays, and its absence is the more interesting finding of the two.
