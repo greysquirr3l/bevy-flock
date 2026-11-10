@@ -162,6 +162,8 @@ The [archived result records](results/README.md) include this three-engine run a
 The Bevy harness reported `unknown cpu` on macOS for this run, because it read `/proc/cpuinfo` unconditionally, and
 the label in the table above was corrected by hand. That is fixed in the harness: `/proc/cpuinfo` on Linux,
 `sysctl -n machdep.cpu.brand_string` on macOS, `PROCESSOR_IDENTIFIER` on Windows, which is what the Godot harness
-(`OS.get_processor_name()`) already did. It mattered more than a label: `scripts/compare_benchmarks.py` refuses to
+(`OS.get_processor_name()`) already did. Aarch64 kernels that publish only `CPU implementer` and `CPU part` are named
+from those identifiers, so the sandbox's own rows say `ARM Neoverse N1` instead of `unknown cpu`; an unrecognised part
+keeps its raw ids rather than being guessed at. It mattered more than a label: `scripts/compare_benchmarks.py` refuses to
 put two machines in one table, so a row that cannot name its own CPU turns that refusal off. The three rows here
 were assembled by hand for that reason, and merging a real set through the comparator is still open.

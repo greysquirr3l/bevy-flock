@@ -340,14 +340,53 @@ fn cpu_name() -> Option<String> {
 }
 
 fn parse_cpu_info(text: &str) -> Option<String> {
-    ["model name", "Processor", "Hardware"]
+    ["model name", "Processor", "Hardware", "CPU model"]
         .iter()
-        .find_map(|key| {
-            text.lines()
-                .find(|line| line.starts_with(key))
-                .and_then(|line| line.split(':').nth(1))
-                .and_then(clean)
-        })
+        .find_map(|key| cpuinfo_value(text, key).and_then(|value| clean(&value)))
+        .or_else(|| arm_cpu_name(text))
+}
+
+/// One `key : value` pair out of `/proc/cpuinfo`, which is the whole file format.
+fn cpuinfo_value(text: &str, key: &str) -> Option<String> {
+    text.lines()
+        .find(|line| line.starts_with(key))
+        .and_then(|line| line.split_once(':'))
+        .map(|(_, value)| value.trim().to_owned())
+}
+
+/// A name for the ARM kernels that publish only a core identity.
+///
+/// Some aarch64 kernels, including the one this repository's sandbox runs, omit `model name`, `Processor` and `Hardware`
+/// entirely and leave `CPU implementer` plus `CPU part` as the only identity. Reporting `unknown cpu` there throws away
+/// hardware that a benchmark record needs, so the parts that appear on cloud and desktop ARM are named. An unrecognised
+/// part keeps its raw ids rather than being guessed at: a wrong name is worse than an opaque one.
+fn arm_cpu_name(text: &str) -> Option<String> {
+    let implementer = cpuinfo_value(text, "CPU implementer")?;
+    let part = cpuinfo_value(text, "CPU part")?;
+    let named = if implementer == "0x41" {
+        arm_part_name(&part)
+    } else {
+        None
+    };
+    named.map_or_else(
+        || Some(format!("arm implementer {implementer} part {part}")),
+        |name| Some(name.to_owned()),
+    )
+}
+
+/// ARM's own part numbers, and only the ones a crowd benchmark is likely to run on.
+fn arm_part_name(part: &str) -> Option<&'static str> {
+    match part {
+        "0xd0c" => Some("ARM Neoverse N1"),
+        "0xd40" => Some("ARM Neoverse V1"),
+        "0xd49" => Some("ARM Neoverse N2"),
+        "0xd4f" => Some("ARM Neoverse V2"),
+        "0xd0a" => Some("ARM Cortex-A72"),
+        "0xd0b" => Some("ARM Cortex-A76"),
+        "0xd05" => Some("ARM Cortex-A55"),
+        "0xd41" => Some("ARM Cortex-A78"),
+        _ => None,
+    }
 }
 
 fn command_stdout(program: &str, arguments: &[&str]) -> Option<String> {
@@ -879,8 +918,8 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        MATCH_HALF_EXTENT, MATCH_MAX_NEIGHBOURS, MatchedCrowd, MatchedGrid, clean,
-        matched_population, matched_tick, num, parse_cpu_info,
+        MATCH_HALF_EXTENT, MATCH_MAX_NEIGHBOURS, MatchedCrowd, MatchedGrid, arm_cpu_name,
+        arm_part_name, clean, matched_population, matched_tick, num, parse_cpu_info,
     };
     use bevy_app::prelude::{App, Update};
     use bevy_math::Vec3;
@@ -896,6 +935,34 @@ mod tests {
         );
         let arm = "processor\t: 0\nBogoMIPS\t: 108.00\nHardware\t: BCM2835\n";
         assert_eq!(parse_cpu_info(arm).as_deref(), Some("BCM2835"));
+    }
+
+    /// A kernel that publishes only `CPU implementer` and `CPU part` still names its hardware, which is the case on the
+    /// aarch64 sandbox this repository's own numbers come from.
+    #[test]
+    fn an_arm_kernel_without_a_model_line_still_names_its_cpu() {
+        let neoverse =
+            "processor\t: 0\nBogoMIPS\t: 243.75\nCPU implementer\t: 0x41\nCPU part\t: 0xd0c\n";
+        assert_eq!(parse_cpu_info(neoverse).as_deref(), Some("ARM Neoverse N1"));
+        assert_eq!(arm_cpu_name(neoverse).as_deref(), Some("ARM Neoverse N1"));
+        // An unknown part keeps its identifiers instead of inventing a name.
+        let unknown = "CPU implementer\t: 0x41\nCPU part\t: 0x999\n";
+        assert_eq!(
+            arm_cpu_name(unknown).as_deref(),
+            Some("arm implementer 0x41 part 0x999")
+        );
+        // A non-ARM implementer is not described in ARM's terms.
+        let other = "CPU implementer\t: 0x48\nCPU part\t: 0xd0c\n";
+        assert_eq!(
+            arm_cpu_name(other).as_deref(),
+            Some("arm implementer 0x48 part 0xd0c")
+        );
+        assert_eq!(arm_cpu_name("processor\t: 0\n").as_deref(), None);
+        assert_eq!(arm_part_name("0xd0c"), Some("ARM Neoverse N1"));
+        assert_eq!(arm_part_name("0x999"), None);
+        // A real model line wins over the identifiers it ships beside.
+        let both = "model name\t: Ampere Altra\nCPU implementer\t: 0x41\nCPU part\t: 0xd0c\n";
+        assert_eq!(parse_cpu_info(both).as_deref(), Some("Ampere Altra"));
     }
 
     /// No model line, or a blank one, is reported as no name: `unknown cpu` is a label, `" "` is a bug.
