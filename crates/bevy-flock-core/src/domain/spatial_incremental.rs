@@ -694,3 +694,109 @@ fn a_stale_table_is_named_rather_than_patched() {
     let reference = oracle(grid.entries(), config, 6);
     assert_same_table(&grid, &reference, "stale table");
 }
+
+/// The same bodies, the same coordinates, a different arrival order: a game spawns from whatever events it has, so the
+/// table may not depend on which order that was.
+///
+/// The comparison is by identity rather than by index, because `cells` is keyed by insertion index and the two grids index
+/// the same body differently. What has to agree is which bodies share a cell and what order they appear in, which is what a
+/// query reads.
+#[test]
+/// Two spawn orders over the same bodies: which cell a body lands in, and how many bodies a cell holds, may not depend on
+/// the order they arrived in. What *does* depend on it is the order inside a cell, because placement writes each run in
+/// arrival order rather than sorting it, and that order is a query's tie-break. Both halves are pinned here.
+///
+/// The comparison is by identity rather than by index, because `cells` is keyed by insertion index and the two grids index
+/// the same body differently.
+#[test]
+fn arrival_order_decides_the_order_inside_a_cell_and_nothing_else() {
+    let bodies: Vec<(u32, Vec3)> = (0..48_u32)
+        .map(|index| {
+            let lane: f32 = match index % 3 {
+                0 => 9.0,
+                1 => 101.0,
+                _ => 233.0,
+            };
+            let depth: f32 = if index % 4 == 0 { 17.0 } else { 149.0 };
+            let height: f32 = if index % 5 == 0 { 33.0 } else { 301.0 };
+            (index, Vec3::new(lane, depth, height))
+        })
+        .collect();
+
+    fn build(order: impl Iterator<Item = usize>, bodies: &[(u32, Vec3)]) -> SpatialGrid {
+        let mut grid = SpatialGrid::new(config(64.0)).or_die();
+        for index in order {
+            let Some((id, position)) = bodies.get(index).copied() else {
+                continue;
+            };
+            grid.insert(GridEntry {
+                id: NpcId::unique(id),
+                position,
+                velocity: Vec3::ZERO,
+            });
+        }
+        grid.build();
+        grid
+    }
+
+    /// The bodies of every cell, in the order the run holds them, as identities.
+    fn per_cell(grid: &SpatialGrid) -> Vec<Vec<u32>> {
+        (0..grid.cell_count())
+            .map(|cell| {
+                let start = grid.cell_start.get(cell).copied().unwrap_or(0);
+                let len = grid.cell_len.get(cell).copied().unwrap_or(0);
+                let start = usize::try_from(start).unwrap_or(usize::MAX);
+                let end = start.saturating_add(usize::try_from(len).unwrap_or(0));
+                grid.order
+                    .get(start..end)
+                    .map(|run| {
+                        run.iter()
+                            .filter_map(|slot| {
+                                let index = usize::try_from(*slot).ok()?;
+                                Some(grid.entries.get(index)?.id.to_bits())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    let forward = build(0..bodies.len(), &bodies);
+    let backward = build((0..bodies.len()).rev(), &bodies);
+
+    assert_eq!(
+        forward.cell_start, backward.cell_start,
+        "the window table is indexed by cell, so arrival order cannot reach it"
+    );
+    assert_eq!(
+        forward.cell_len, backward.cell_len,
+        "the same bodies in the same cells have the same run lengths"
+    );
+
+    let mut forward_sets = per_cell(&forward);
+    let mut backward_sets = per_cell(&backward);
+    for run in &mut forward_sets {
+        run.sort_unstable();
+    }
+    for run in &mut backward_sets {
+        run.sort_unstable();
+    }
+    assert_eq!(
+        forward_sets, backward_sets,
+        "which bodies share a cell is a function of ids and positions"
+    );
+
+    // The order inside a cell is not: `place` writes each run in arrival order, so reversing the spawn reverses the runs.
+    // If this ever starts passing, placement grew a sort and the doc on `SpatialGrid::insert` is now wrong.
+    let runs = per_cell(&forward);
+    assert!(
+        runs.iter().any(|run| run.len() > 1),
+        "the fixture needs at least one shared cell for this to mean anything"
+    );
+    assert_ne!(
+        per_cell(&forward),
+        per_cell(&backward),
+        "arrival order is supposed to be visible inside a cell"
+    );
+}

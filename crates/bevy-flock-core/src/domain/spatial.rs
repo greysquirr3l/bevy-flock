@@ -907,6 +907,12 @@ impl SpatialGrid {
     ///
     /// Insertion order is the order [`SpatialGrid::entries`] reports, and it is
     /// reproduced exactly by a replay that spawns in the same order.
+    ///
+    /// Arrival order reaches the table in one place: a cell's run is written in the order the bodies arrived, so two
+    /// spawn orders over the same bodies and positions produce the same cells, the same starts and lengths, and the same
+    /// set of bodies per cell, but a different order *within* a cell. That order is a query's tie-break, which is why a
+    /// replay has to spawn in the same order to reproduce one bit for bit. Sorting each run by [`NpcId`] instead would
+    /// cost a comparison per body in the placement pass to make an order nothing depends on.
     pub fn insert(&mut self, entry: GridEntry) {
         self.entries.push(entry);
     }
