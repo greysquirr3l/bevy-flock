@@ -43,6 +43,22 @@ The honest read: the build is memory-bound, not thread-bound, and the two optimi
 bucketing the scatter and sharded histograms, were measured and rejected. `docs/dev/tuning/performance.md` has the
 scatter probe that killed them, including the numbers that made the decision.
 
+## The incremental rebuild
+
+`SpatialGrid::build_incremental` is the rebuild a running game wants: it moves the bodies that changed cell and leaves
+the rest of the table where it is. At 1,000,000 bodies a patched tick costs about 1.2 ms against 14 ms for a full
+rebuild, so the question is never "how fast is the patch" but "how often does it give up". It gives up when a cell
+receives more arrivals than it has slack for, and the slack is two knobs: `with_slack_percent` (a quarter of a cell's
+occupancy by default) and `with_slack_floor` (two spare slots per cell, whatever its occupancy).
+
+Neither is free. The percentage costs a quarter again in the run table; the floor costs two slots per cell, which on a
+sparse grid is the larger bill (about 8 MB of table at 100,000 bodies, against 2.9 MB before). What they buy is the
+tail: at 512 random crossers a tick, the default pair takes the share of ticks that patch from 61% to 99.5% and p99
+from 2.83 ms to 0.58 ms at 100,000 bodies, and from 60.5% to 99.0% with p99 16.08 ms to 2.49 ms at a million.
+`with_slack_floor(0)` and `with_slack_percent(0)` each restore the rule they replace, so a game can spend what its own
+measurements justify. At a million bodies a floor of three patches every tick at every thread count, which is the
+setting to reach for when a spike is not merely expensive but unacceptable. `examples/patch_tail.rs` is the harness those numbers come from.
+
 ## Memory
 
 | property | scalar | wide |

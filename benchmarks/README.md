@@ -141,6 +141,36 @@ matters, which is the row above.
 
 The grid itself is not missing: Bevy already has a 3D counting-sort grid with count, prefix, and placement passes in [spatial.rs](../crates/bevy-flock-core/src/domain/spatial.rs). Unreal's fixture uses the same broad grid strategy.
 
+## The patched rebuild's tail
+
+`examples/patch_tail.rs` answers a different question from the cross-engine rows: not how long a frame
+takes, but how often the spatial grid's incremental rebuild gives up and starts over. Each row is one
+`(bodies, crossers, slack)` cell of a sweep with uniformly random arrivals, which is the pattern the patch
+is worst at, and reports the split between patched and rebuilt ticks next to the tick's median, p95, p99 and
+worst time.
+
+```text
+cargo run --release --example patch_tail
+cargo run --release --example patch_tail -- --bodies 1000000 --crossers 64,512,2048 --slack 25,50
+cargo run --release --example patch_tail -- --json
+```
+
+The p95 is the rebuild share wearing a latency, so read it as "how often", not "how bad". Doubling the slack
+from a quarter to a half removes the spike at a million bodies (13.9 ms to 2.4 ms) for 17.8% more table, and
+changes nothing at 100,000 for 1% more, because the cells that refuse an arrival there are empty ones. That
+finding is why `--floor` exists: the floor is the spare slots a cell gets regardless of occupancy, and at 512
+crossers raising it from 0 to 2 takes the patched share from 61% to 99.5% and the p99 from 2.83 ms to 0.58 ms at
+100,000 bodies (16.08 ms to 2.49 ms at a million) for 2.7x and 1.7x the table. Rows:
+`benchmarks/results/2026-11-10/sandbox-aarch64/patch-tail-floor/`.
+
+`--workers` takes a list as well, so the floor and the thread count can be swept together. At a million bodies the
+patch scales to the core count and then back off (6.18 ms at one worker, 1.33 ms at six, 2.00 ms at sixteen on a
+six-core host), and the floor is what decides whether that matters for the tail: floor 0's p99 *rises* with workers
+(19.0 ms at two, 27.7 ms at sixteen) because the residue is a rebuild, floor 2 holds p99 at 2.4 ms at every count, and
+floor 3 leaves no rebuild at all, so the worst tick equals the median (2.46 ms at six, 2.51 ms at sixteen). Rows and
+the chart: `benchmarks/results/2026-11-10/sandbox-aarch64/floor-thread-sweep/`. Rows
+from the sandbox run are in `benchmarks/results/2026-11-10/sandbox-aarch64/patch-tail/`.
+
 ## Experiments not to repeat as default fixes
 
 - **Cell-size tuning:** a whole-frame sweep found little difference between the default and finer grids at 10,000 and 100,000 agents. The result and limits are in [ADR 0031](../docs/dev/adr/0031-cell-sizing-for-lanes.md).

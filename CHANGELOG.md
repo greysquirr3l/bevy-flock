@@ -154,6 +154,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   twenty-eight, is now a rule instead of a number.
 
 ## [Unreleased]
+### Added
+- `SpatialGrid::with_slack_floor` (default `DEFAULT_SLACK_FLOOR`, 2): every cell now keeps spare slots regardless of
+  occupancy, so a pair arriving in an empty cell is patched instead of forcing a rebuild. At 512 crossers a tick the
+  patched share rises from 61% to 99.5% and the p99 falls from 2.83 ms to 0.58 ms at 100,000 bodies (16.08 ms to
+  2.49 ms at a million) for 2.7x and 1.7x the table. `with_slack_floor(0)` restores the percentage-only rule.
+
+
+- `SpatialGrid::with_slack_percent` (default `DEFAULT_SLACK_PERCENT`, 25) and `SpatialGrid::capacity`: the slack
+  each cell's run is laid out with is now a knob rather than a constant. Measured with `examples/patch_tail.rs`:
+  at a million bodies the patch's p95 falls from 13.9 ms to 2.4 ms for 17.8% more table, while at 100,000 it
+  changes nothing and costs 1%, because the cells that refuse an arrival there are empty ones. See ADR 0064.
+
+### Added
+
+- Incremental rebuild step 2: the spatial grid now keeps a slotted table (capacity prefix, occupancy and
+  cursor) and patches the bodies that changed cell in place instead of rebuilding. `RebuildOutcome::Patched`
+  reports it. 11.3x faster than a rebuild at 1M bodies with 64 crossers per tick (1.190 ms against 13.427 ms).
+  See ADR 0064.
+
+
+### Added
+
+- `SpatialGrid::build_incremental`: recomputes cell numbers against the table the last rebuild left, and ends the tick
+  there when no body changed cell. 0.197 ms against 1.790 ms at 100,000 bodies, and 1.104 ms against 13.532 ms at a
+  million, on the six-core sandbox. A tick with real movement rebuilds as before, at about four percent more than a plain
+  rebuild, until the patch path lands.
+- `SpatialGrid::check_invariants`, `RebuildOutcome` and `GridInvariant`: the four promises a completed rebuild makes, named
+  so a failure says which one broke, plus the outcome of an incremental tick.
+- `SpatialGrid::entries_mut`, so the code that moves bodies between rebuilds has a supported way to do it.
+- `examples/incremental_build`: the harness for the still, crosser and full shapes, in the same JSONL schema as the other
+  benchmarks.
 
 - **The level-of-detail switch cross-fades instead of popping.** `Shot::impostor_band` widens the
   switch into a window: a body between `impostor_distance - impostor_band` and `impostor_distance` is

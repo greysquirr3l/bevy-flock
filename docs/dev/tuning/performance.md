@@ -1935,3 +1935,213 @@ writes, the pessimistic figure is about 90 MB and 21 GB/s. Against a 119 GiB/s c
 So the rebuild is not bandwidth bound at any thread count this machine offers, and the earlier framing of `place` and
 `clear` as memory bound at one million bodies was wrong. Their cost is latency: a dependent scatter, a serial scan, and one
 dispatch per pass. Bandwidth work cannot buy the phase-5 gate. Hiding the scatter's latency, or removing a dispatch, can.
+
+## The incremental fast path (P2 step 1)
+
+A rebuild used to cost the same whether the crowd was charging or standing still, because the passes never asked whether
+anything had actually moved. `SpatialGrid::build_incremental` recomputes each body's cell and compares it against the
+table the previous rebuild left behind: an unchanged cell number is a slot left alone rather than rewritten, and a tick
+where no body changed cell ends there. The window table, the cursor and the order still describe the new positions,
+because a body that stays in its cell keeps its place in that cell's run.
+
+Measured with `examples/incremental_build` on the six-core sandbox, 200 ticks after 20 warm-up ticks, nine-cell grid over
+a kilometre of volume, six workers:
+
+| Bodies | Shape | Median | p95 | Spread | Against a full rebuild |
+| ---: | :--- | ---: | ---: | ---: | ---: |
+| 100,000 | still | 0.197 ms | 0.233 ms | 0.18 | 9.09x |
+| 100,000 | 64 crossers | 1.815 ms | 2.026 ms | 0.12 | 0.99x |
+| 100,000 | full | 1.790 ms | 1.917 ms | 0.07 | 1.00x |
+| 1,000,000 | still | 1.104 ms | 1.279 ms | 0.16 | 12.26x |
+| 1,000,000 | 64 crossers | 14.024 ms | 14.469 ms | 0.03 | 0.96x |
+| 1,000,000 | full | 13.532 ms | 13.874 ms | 0.03 | 1.00x |
+
+Two things to read out of it.
+
+The still row is better than the 0.642 ms the dispatch analysis projected, and the reason is the comparison itself: the
+old fill wrote every slot of a 1.7 MB table every tick, while this one writes only the slots whose cell number changed,
+which on a still crowd is none. The pass still walks the positions, but it no longer dirties the table's cache lines, and
+dirtying them was most of the cost.
+
+The crosser row earns nothing yet, and slightly loses: 14.024 ms against 13.532 ms, about four percent. A tick with real
+movement now walks the cell list twice, once to compare and once to count, so until the patch path lands (P2 step 2) the
+honest description is "free when still, four percent more expensive when moving". That four percent is the price of knowing
+whether the table is still valid, and it buys an order of magnitude on the other ticks.
+
+The shapes here are `AGENTS.md`-style microbenchmarks rather than a whole frame: they price the rebuild, not steering,
+queries or rendering, which are measured in their own sections.
+
+## Why a flat layout cannot be patched
+
+Step 2 of ADR 0063's P2 is "patch the bodies that moved instead of rebuilding". That sentence assumes a layout can absorb
+an insert, and the layout the grid has today cannot: `order` is one contiguous array in cell order, so a body arriving in
+cell 7 moves every body after it, and every offset after it has to be told.
+
+`benchmarks/probes/patch_layout.rs` prices the two candidates without depending on the crate, single-threaded, with the
+shapes the grid produces. "Flat" is today's layout. "Slotted" is the same array with per-cell slack, so an insert moves one
+run instead of the tail.
+
+| Bodies | k movers | Flat patch | Slotted patch | Full rebuild |
+| ---: | ---: | ---: | ---: | ---: |
+| 100,000 | 1 | 0.095 ms | < 0.001 ms | 0.757 ms |
+| 100,000 | 64 | 4.219 ms | < 0.001 ms | 0.757 ms |
+| 100,000 | 1,024 | 69.720 ms | 0.004 ms | 0.757 ms |
+| 1,000,000 | 1 | 0.582 ms | < 0.001 ms | 15.686 ms |
+| 1,000,000 | 64 | 46.597 ms | < 0.001 ms | 15.686 ms |
+| 1,000,000 | 1,024 | 728.953 ms | 0.004 ms | 15.686 ms |
+
+The flat row is `O(k·n)` and there is no way around it: 0.7 ms per mover at a million bodies. Sixty-four movers already
+cost three rebuilds, so the only tick a flat patch wins is a single body moving, and that case is rare enough that the
+still fast path (which handles zero movers for free) covers the useful half of it.
+
+The slotted row is flat in `k` because a round of movers touches one run per body, and a run is two to four bodies at this
+density. It is also the layout that leaves the query path alone: `cell_window` still returns one contiguous slice, now
+`start..start + len`, so radius and the neighbour loops keep slicing without an indirection. A delta overlay, the third
+candidate, would have put a pointer chase in the hot path for the same asymptotic win and been the wrong trade.
+
+What it costs is memory, and the probe overstates it. Its policy is `count + count / 4 + 4`, and at 2.4 bodies per cell
+that floor alone is 6.7 MB of empty slots. The policy the grid will use is `count + count / 4 + 1`, which at a million
+bodies and 421,876 cells is roughly 1.7 million slots of slack, about 6.8 MB against an `order` array of 4 MB: the table
+goes from about 6 MB to about 13 MB, with a second `len` array replacing nothing.
+
+That is the trade step 2 makes: one and a half times the table's memory to make a moving tick cost a few microseconds
+instead of a rebuild. It is not implemented yet, and it is the next unit of work rather than a footnote on this one,
+because it changes what `cell_start` means and every test that asserts on it.
+
+## Incremental rebuild, step 2: the patch
+
+The slotted table (capacity prefixes, occupancy, cursor) plus the two-phase move path from ADR 0064. Measured
+with `./target/release/examples/incremental_build --bodies N --workers 6 --crossers 64`, medians of five runs,
+against a full rebuild of the same positions at the same worker count.
+
+| bodies | still | 64 crossers | full rebuild | patch vs rebuild |
+| --- | --- | --- | --- | --- |
+| 100,000 | 0.207 ms | 0.230 ms | 1.870 ms | 8.1x |
+| 1,000,000 | 1.161 ms | 1.190 ms | 13.427 ms | 11.3x |
+
+Two things to read carefully. First, the patch is only 0.03 ms above the still path at a million bodies: the
+diff that used to be a cheap early-out is now the early-out plus a move per body that changed cell, and the
+move is what used to cost a full recount. Second, the p95 at a million bodies is 13.8 ms while the median is
+1.2 ms, and that spread is the fallback rather than noise: a tick that puts two arrivals into one empty cell
+exhausts that cell's single spare slot, and the rebuild that follows re-derives the slack. Clustered arrivals
+are the case the patch cannot serve, which is why the capacity rule is a quarter of the count rather than one
+slot per cell.
+
+The design record, including why the patch declines and what a patched table is not, is ADR 0064.
+
+## Patch tail latency and the slack rule
+
+The patched rebuild is bimodal by construction: a tick either moves the bodies that changed cell, or gives up and
+rebuilds. `examples/patch_tail.rs` measures that split under uniformly random arrivals, which is the pattern the patch
+is worst at, and sweeps the two slack rules the design considered. Medians of three runs of 200 ticks, six workers,
+8-unit cells over a 1024-unit field:
+
+| bodies | crossers | slack | patched | median | p95 | p99 | order slots |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100,000 | 64 | 25% | 93.5% | 0.229 ms | 2.364 ms | 2.454 ms | 736,066 |
+| 100,000 | 64 | 50% | 93.5% | 0.224 ms | 2.393 ms | 2.472 ms | 743,159 |
+| 100,000 | 512 | 25% | 61.0% | 0.346 ms | 2.649 ms | 2.843 ms | 736,066 |
+| 100,000 | 512 | 50% | 61.0% | 0.341 ms | 2.655 ms | 3.104 ms | 743,159 |
+| 1,000,000 | 64 | 25% | 93.5% | 1.197 ms | 13.893 ms | 14.162 ms | 1,685,496 |
+| 1,000,000 | 64 | 50% | 95.0% | 1.191 ms | 2.356 ms | 14.120 ms | 1,985,236 |
+| 1,000,000 | 512 | 25% | 60.5% | 1.404 ms | 14.189 ms | 15.423 ms | 1,685,496 |
+| 1,000,000 | 512 | 50% | 67.5% | 1.394 ms | 14.199 ms | 15.734 ms | 1,985,236 |
+
+The p95 is the rebuild share wearing a latency: a patched tick at a million bodies is 1.2 ms and a rebuilt one is
+14 ms, so 6.5% of ticks rebuilding is a p95 of 14 ms. Two conclusions, both counter-intuitive enough to be worth
+recording. Doubling the slack buys nothing at 100,000 bodies, because the cells that refuse an arrival there are
+*empty* ones and half of zero is still zero. And at a million bodies the same rule removes the p95 spike entirely
+(13.9 ms to 2.4 ms) for 17.8% more table, because the average cell then holds 2.4 bodies and a quarter of that is one
+spare slot where a half is three.
+
+The default therefore stays a quarter, and the next change worth making is a floor rather than a larger percentage:
+`SpatialGrid::with_slack_percent` cannot help a cell that was empty, which is the failure both densities share. Raw
+rows are in `benchmarks/results/2026-11-10/sandbox-aarch64/patch-tail/`; the reasoning is ADR 0064's amendment.
+
+## The capacity floor, measured at 512 crossers
+
+The percentage rule cannot help a cell that is empty, and a sparse grid is mostly empty cells, so the 512-crosser
+arrivals in the previous section were being spent on rebuilds that no percentage could absorb. `DEFAULT_SLACK_FLOOR`
+adds two spare slots to every cell regardless of occupancy, and `SpatialGrid::with_slack_floor` exposes it. Sweeping
+it at the load that defeated both percentages, three runs of 200 ticks each, six workers:
+
+| bodies | slack | floor | patched | median | p95 | p99 | worst | order slots |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 100,000 | 25% | 0 | 61.0% | 0.340 ms | 2.661 ms | 2.834 ms | 3.119 ms | 736,066 |
+| 100,000 | 25% | 1 | 96.5% | 0.332 ms | 0.581 ms | 2.697 ms | 3.212 ms | 1,372,112 |
+| 100,000 | 25% | 2 | 99.5% | 0.335 ms | 0.420 ms | 0.581 ms | 2.677 ms | 2,008,168 |
+| 100,000 | 25% | 4 | 100.0% | 0.339 ms | 0.415 ms | 0.684 ms | 0.972 ms | 3,280,280 |
+| 1,000,000 | 25% | 0 | 60.5% | 1.410 ms | 14.548 ms | 16.079 ms | 24.889 ms | 1,685,496 |
+| 1,000,000 | 25% | 1 | 96.5% | 1.336 ms | 1.732 ms | 14.042 ms | 14.118 ms | 2,272,269 |
+| 1,000,000 | 25% | 2 | 99.0% | 1.337 ms | 1.505 ms | 2.485 ms | 14.152 ms | 2,908,168 |
+| 1,000,000 | 25% | 4 | 100.0% | 1.336 ms | 1.476 ms | 2.393 ms | 2.496 ms | 4,180,280 |
+
+The floor is the rule that matters at this load, and it is the rule that costs, because it is paid per cell rather
+than per body: at 100,000 bodies a floor of two is 1.27 million extra slots (5.1 MB of `u32`) on a 2.9 MB table. What
+that buys at 512 crossers:
+
+- **floor 0, the percentage-only rule:** 61% of ticks patch, so p95 is a rebuild (2.7 ms at 100,000, 14.5 ms at a
+  million). This was the shipped behaviour and it was the tail.
+- **floor 1:** absorbs a single arrival into an empty cell, which is most of them. Patched rises to 96.5% and p95 falls
+  to 0.58 ms and 1.73 ms, but p99 stays at the rebuild cost, so the pair that lands together is still a stall.
+- **floor 2, the default:** absorbs the pair, which is the case a random arrival pattern produces constantly. p99 falls
+  to 0.58 ms at 100,000 and 2.49 ms at a million, a 4.9x and 6.5x reduction in the tail, for 2.7x and 1.7x the table.
+  The residual 0.5% of ticks are the ones where three or more bodies converge on one empty cell in a single tick.
+- **floor 4:** removes the residual, and the worst tick with it (0.97 ms and 2.50 ms), for 4.5x and 2.5x the table. That
+  is 13 MB and 16.7 MB at the two populations, which is a deliberate choice rather than a default.
+
+So the default stays at two: it is the smallest floor that covers the failure the percentage cannot see, and the step
+from two to four costs more memory than the stalls it removes. A game with 512 random crossers a tick and a 16 ms
+budget can make that trade in one builder call; the numbers are here to make it arithmetic rather than a guess.
+
+## Sixteen threads across five floors, at a million bodies
+
+`examples/patch_tail.rs` sweeps workers as a list now, so the two knobs that decide a patched tick can be measured
+together. 1,000,000 bodies, 512 crossers a tick, 25% slack, floors 0 to 4, workers 1 through 16, three runs of 100
+measured ticks each. This host has **six cores and one thread per core**, so 8, 12 and 16 workers are oversubscribed
+by 1.3x to 2.7x; that is a real configuration (a game does not always know its core count) and it is labelled rather
+than hidden.
+
+![Floor and thread scaling at a million bodies](../../../benchmarks/results/2026-11-10/sandbox-aarch64/floor-thread-sweep/floor-thread-scaling.png)
+
+| workers | median patch | speed-up | p99, floor 0 | p99, floor 2 | p99, floor 3 | worst, floor 2 | worst, floor 3 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 6.18 ms | 1.00x | 6.27 ms | 6.27 ms | 6.26 ms | 27.57 ms | 6.27 ms |
+| 2 | 3.39 ms | 1.83x | 19.04 ms | 3.51 ms | 3.48 ms | 18.40 ms | 3.49 ms |
+| 3 | 2.35 ms | 2.63x | 17.71 ms | 2.56 ms | 2.44 ms | 17.31 ms | 2.46 ms |
+| 4 | 1.85 ms | 3.34x | 15.83 ms | 2.20 ms | 2.01 ms | 15.79 ms | 2.02 ms |
+| 5 | 1.53 ms | 4.03x | 14.81 ms | 2.26 ms | 1.72 ms | 14.64 ms | 1.73 ms |
+| 6 | 1.33 ms | 4.66x | 15.54 ms | 2.44 ms | 1.94 ms | 13.64 ms | 2.46 ms |
+| 8 | 1.97 ms | 3.15x | 18.16 ms | 2.84 ms | 2.70 ms | 18.42 ms | 2.82 ms |
+| 12 | 1.98 ms | 3.16x | 23.96 ms | 2.58 ms | 2.57 ms | 21.78 ms | 2.66 ms |
+| 16 | 2.00 ms | 3.12x | 27.71 ms | 2.43 ms | 2.41 ms | 24.35 ms | 2.51 ms |
+
+Three things fall out of the table, and only the first was expected:
+
+- **The patch scales to the cores and then backs off.** 6.18 ms at one worker, 1.33 ms at six (4.66x), then 1.97 ms
+  at eight and 2.00 ms at sixteen: past the core count the extra workers buy nothing and cost about 50%, because the
+  patch is a memory-bound scatter and the eighth worker is waiting for the sixth one's cache lines. Every floor shows
+  the same curve to within 1%, which is the point of the patch: the capacity rule decides *whether* a tick patches, not
+  how long patching takes.
+- **The floor decides whether the thread count can buy a tail at all.** At floor 0 the p99 *rises* with workers after
+  two (19.0 ms at two, 27.7 ms at sixteen) because the ticks that do not patch are now a rebuild whose own scaling is
+  poor and gets worse under oversubscription. At floor 2 the p99 is 2.4 ms at every worker count above two. The floor
+  is not an optimisation of the patch; it is what stops the patch from handing the frame to the build.
+- **At a million bodies, floor 3 is the first floor with no rebuild left.** 100% of ticks patch at every worker count,
+  so the worst tick equals the median: 2.46 ms at six workers, 2.51 ms at sixteen, and the worst tick does not grow
+  when the machine is oversubscribed, because there is no build to be oversubscribed. Floor 2 leaves 1% of ticks to the
+  build, and those ticks carry the build's whole tail (13.6 ms at six workers, 24.4 ms at sixteen).
+
+That last row is the difference between "almost never spikes" and "cannot spike", and it costs a third more table than
+the default: 11.6 MB against 8.7 MB at a million bodies, for `with_slack_floor(3)`. Given that the 100,000-body
+measurement needed a floor of four for the same guarantee — where the residual rebuilds were three-way convergences —
+the honest summary is that the floor needed for a guarantee is a property of the crowd's density, not a constant. The
+default stays at two because it is the cheapest rule that removes the common failure; the guarantee is one builder call
+away and now has numbers behind it.
+
+Raw rows: `benchmarks/results/2026-11-10/sandbox-aarch64/floor-thread-sweep/`. Reproduce with:
+
+```sh
+cargo run --release --offline --example patch_tail -- --bodies 1000000 --crossers 512 --slack 25 \
+    --floor 0,1,2,3,4 --workers 1,2,3,4,5,6,8,12,16 --ticks 100 --json
+```
