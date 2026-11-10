@@ -97,7 +97,9 @@ one-tick divergence fails there rather than in a game.
 
 ## Implementation status
 
-`BlockPrefix` in `domain/lookback.rs` is the primitive P1 needs, and it is complete and tested on its own: three-state
+`BlockPrefix` is the primitive P1 needs. It is complete and tested on its own, but it is **not on this branch**:
+it lives on `feat/p2-incremental-rebuild` with the incremental rebuild, because it is only usable once that work
+opens the door to one dispatch. The description below is of the implementation on that branch:  three-state
 packed slots (not ready, aggregate, inclusive prefix), `publish_total`, `base_of`, `resolve`, `total` and a `reset` that
 re-arms the buffer without returning its memory. Eight unit tests hold it, including a concurrent one that publishes and
 resolves from eight workers over 257 blocks and compares every block against the serial prefix, four seeds deep.
