@@ -55,6 +55,11 @@ Neither is free. The percentage costs a quarter again in the run table; the floo
 sparse grid is the larger bill (about 8 MB of table at 100,000 bodies, against 2.9 MB before). What they buy is the
 tail: at 512 random crossers a tick, the default pair takes the share of ticks that patch from 61% to 99.5% and p99
 from 2.83 ms to 0.58 ms at 100,000 bodies, and from 60.5% to 99.0% with p99 16.08 ms to 2.49 ms at a million.
+A cell that is still full does not force a rebuild: the patch borrows a slot from the first run after it that has a
+spare, moving the boundaries between them, bounded by 32,768 shifted elements and 64 consecutive full runs. That is what
+makes a crowd flowing into one district survive: 512 crossers arriving inside a four-cell hotspot patched 0% of ticks
+before and every tick after, taking the median from 2.58 ms to 0.35 ms at 100,000 bodies and from 13.98 ms to 1.31 ms at
+a million, with p99 following. `RebuildOutcome::Rebuilt` reports a `RebuildCause` when even that is not enough.
 `with_slack_floor(0)` and `with_slack_percent(0)` each restore the rule they replace, so a game can spend what its own
 measurements justify. At a million bodies a floor of three patches every tick at every thread count, which is the
 setting to reach for when a spike is not merely expensive but unacceptable. `examples/patch_tail.rs` is the harness those numbers come from.

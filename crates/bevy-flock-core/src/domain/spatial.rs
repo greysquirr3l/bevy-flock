@@ -463,11 +463,81 @@ impl PassCosts {
 /// thousand moves the rebuild is both cheaper and simpler. At the sizes the probe measured, 4,096 moves at a million
 /// bodies is 3.4 ms of shifting against a 15.7 ms rebuild — still a win, but the last decade of it.
 const PATCH_MAX_MOVERS: usize = 4_096;
+/// The most slots one tick's patch may shift to keep a narrow run alive.
+///
+/// A borrow moves the tail of every run between the cell that needs a slot and the first run after it that has one
+/// spare, so its cost is the number of *elements* it shifts rather than the number of slots it frees. This budget is
+/// therefore in elements: a tick that would move more than this many is cheaper to recount, which is the same trade the
+/// mover bound makes and the same fallback it takes.
+const BORROW_MAX_ELEMENTS: usize = 32_768;
+/// The most consecutive full runs one arrival may walk before the patch gives up.
+///
+/// The walk stops at the first run with a spare slot, which at any density is within a handful of cells; the limit
+/// exists so a tick spent inside one saturated hotspot cannot walk the table looking for room it will not find.
+const BORROW_MAX_RUNS: usize = 64;
 
 /// Where cell `cell`'s run is: `(start, len)`, checked against the cell's capacity.
 ///
 /// `None` for a cell whose run would not fit inside its own region, which is the corruption a patch has to refuse
 /// rather than propagate.
+/// Give `cell`'s run one more slot by taking it from the runs that follow it.
+///
+/// A run's capacity is the distance to the next cell's start, so lending a slot is a boundary move: every run between
+/// `cell` and the first one with a spare slot keeps its bodies but starts one slot later, and the donor loses one slot of
+/// room. Done from the donor backwards, so each run moves into room the run after it has just vacated, every write lands
+/// inside the region it belongs to and the runs stay contiguous and sorted by identity.
+///
+/// Returns how many elements it moved, or `None` when the walk crosses a run with no spare room inside `BORROW_MAX_RUNS`,
+/// the last cell (which has no neighbour to borrow from) or the caller's remaining budget. A caller that sees `None`
+/// rebuilds, which is what makes a half-applied walk harmless: the walk only ever runs after a full removal phase, and
+/// the rebuild recomputes every table from the entries.
+fn borrow_slot(
+    cell_start: &mut [u32],
+    cell_len: &[u32],
+    cell_cursor: &mut [u32],
+    order: &mut [u32],
+    cell: usize,
+    budget: &mut usize,
+) -> Option<usize> {
+    let cells = cell_len.len();
+    let mut donor = cell.checked_add(1)?;
+    let mut walked = 0_usize;
+    loop {
+        if donor >= cells || walked >= BORROW_MAX_RUNS {
+            return None;
+        }
+        walked = walked.saturating_add(1);
+        let start = usize::try_from(*cell_start.get(donor)?).ok()?;
+        let len = usize::try_from(*cell_len.get(donor)?).ok()?;
+        let next = usize::try_from(*cell_start.get(donor.checked_add(1)?)?).ok()?;
+        if start.checked_add(len)? < next {
+            break;
+        }
+        donor = donor.checked_add(1)?;
+    }
+    // Price the whole walk before touching a slot, so a refusal leaves the table exactly as it was.
+    let mut moved = 0_usize;
+    for run in cell.saturating_add(1)..=donor {
+        moved = moved.checked_add(usize::try_from(*cell_len.get(run)?).ok()?)?;
+    }
+    if moved > *budget {
+        return None;
+    }
+    *budget = budget.saturating_sub(moved);
+    for run in (cell.saturating_add(1)..=donor).rev() {
+        let start = usize::try_from(*cell_start.get(run)?).ok()?;
+        let len = usize::try_from(*cell_len.get(run)?).ok()?;
+        let end = start.checked_add(len)?;
+        order.get(start..end.checked_add(1)?)?;
+        order.copy_within(start..end, start.checked_add(1)?);
+        let slot = cell_start.get_mut(run)?;
+        *slot = slot.saturating_add(1);
+        // The cursor is the run's end (`check_invariants`), so it follows the boundary rather than staying put.
+        let cursor = cell_cursor.get_mut(run)?;
+        *cursor = cursor.saturating_add(1);
+    }
+    Some(moved)
+}
 fn window_of(cell_start: &[u32], cell_len: &[u32], cell: u32) -> Option<(usize, usize)> {
     let start = usize::try_from(*cell_start.get(cell as usize)?).ok()?;
     let len = usize::try_from(*cell_len.get(cell as usize)?).ok()?;
@@ -603,6 +673,25 @@ impl<'a> Splits<'a> {
     }
 }
 
+/// Why a tick that moved bodies fell back to a rebuild.
+///
+/// [`SpatialGrid::build_incremental`] reports this beside the number of movers, because "the patch declined" is not a
+/// diagnosis: the four causes have different fixes, and a game that sees `NarrowRun` every tick has a crowd whose
+/// arrivals cluster, while `TooManyMovers` says the crowd re-formed rather than moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildCause {
+    /// The table described a different population: a first build, an empty grid, or an entry list that changed length.
+    Population,
+    /// More bodies changed cell than the mover list holds, so the list was not kept in full.
+    ///
+    /// See [`PATCH_MAX_MOVERS`]. The list is abandoned rather than truncated because a partial list would leave the
+    /// table describing moves it never made.
+    TooManyMovers,
+    /// A mover was not in the run its previous cell named, so the table was already inconsistent with the entries.
+    StaleTable,
+    /// A run had no spare slot and the runs after it could not lend one inside [`BORROW_MAX_ELEMENTS`].
+    NarrowRun,
+}
 /// What [`SpatialGrid::build_incremental`] did with a tick's worth of movement.
 ///
 /// The distinction is the point of the whole exercise: most ticks move no body across a cell boundary, and on those the
@@ -621,6 +710,8 @@ pub enum RebuildOutcome {
         /// Equal to the population when the entry list itself changed length, because then every body is new to the
         /// table rather than moved within it.
         changed: usize,
+        /// Which of the four reasons the patch declined, for the caller that has to decide whether to care.
+        cause: RebuildCause,
     },
     /// Bodies moved between cells, and the table absorbed them without a rebuild.
     ///
@@ -1062,20 +1153,24 @@ impl SpatialGrid {
             return RebuildOutcome::Unchanged;
         }
         // A handful of moves is cheaper to move than to recount: no fill, no count, no scan, just the two runs each body
-        // touches. `movers.len() == changed` is the test that the list is complete rather than truncated.
-        // A handful of moves is cheaper to move than to recount: no fill, no count, no scan, just the two runs each body
         // touches. `movers.len() == changed` is the test that the list is complete rather than truncated, and the patch
-        // itself refuses when a run has no room, which is the one case only a fresh count can fix.
-        let patched = reusable
-            && changed <= PATCH_MAX_MOVERS
-            && self.movers.len() == changed
-            && self.patch_movers();
-        if patched {
+        // itself refuses when a run has no room it can borrow, which is the case only a fresh count can fix.
+        let cause = if !reusable {
+            Some(RebuildCause::Population)
+        } else if changed > PATCH_MAX_MOVERS || self.movers.len() != changed {
+            Some(RebuildCause::TooManyMovers)
+        } else {
+            self.patch_movers().err()
+        };
+        if cause.is_none() {
             return RebuildOutcome::Patched { changed };
         }
         let mut costs = PassCosts::default();
         self.build_tables(&mut costs);
-        RebuildOutcome::Rebuilt { changed }
+        RebuildOutcome::Rebuilt {
+            changed,
+            cause: cause.unwrap_or(RebuildCause::NarrowRun),
+        }
     }
 
     /// Move the bodies that changed cell, in place, without rebuilding anything.
@@ -1088,7 +1183,7 @@ impl SpatialGrid {
     /// the work is wasted, the result is not wrong.
     ///
     /// `O(moves)` twice, plus the shift of the run tails, which is why only a handful of moves may take this path.
-    fn patch_movers(&mut self) -> bool {
+    fn patch_movers(&mut self) -> Result<(), RebuildCause> {
         let Self {
             cell_start,
             cell_len,
@@ -1101,13 +1196,13 @@ impl SpatialGrid {
         } = self;
         for (body, old) in movers.iter().copied() {
             let Some((start, len)) = window_of(cell_start, cell_len, old) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             let Some(run) = order.get(start..start.saturating_add(len)) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             let Some(at) = run.iter().position(|value| *value == body) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             // Close the gap inside the run only: the slots after it belong to the next cell.
             order.copy_within(
@@ -1118,31 +1213,54 @@ impl SpatialGrid {
                 cell_len.get_mut(old as usize),
                 cell_cursor.get_mut(old as usize),
             ) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             *len_slot = len_slot.saturating_sub(1);
             *cursor = cursor.saturating_sub(1);
         }
+        let mut budget = BORROW_MAX_ELEMENTS;
         for (body, _) in movers.iter().copied() {
             let Some(new) = cells.get(body as usize).copied() else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
-            let Some((start, len)) = window_of(cell_start, cell_len, new) else {
-                return false;
+            let Some((mut start, mut len)) = window_of(cell_start, cell_len, new) else {
+                return Err(RebuildCause::StaleTable);
             };
-            let Some(next) = cell_start
+            let Some(mut next) = cell_start
                 .get((new as usize).saturating_add(1))
                 .copied()
                 .map(|value| value as usize)
             else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             if start.saturating_add(len) >= next {
-                // The region is full. A rebuild lays the slack out again from the new counts.
-                return false;
+                // The region is full, which is what a clustered arrival does to a narrow run. The runs after it own
+                // spare slots between them, so borrow one: a rebuild would only recompute the same capacities from a
+                // count that has not changed in shape.
+                let cell = usize::try_from(new).map_err(|_| RebuildCause::StaleTable)?;
+                if borrow_slot(cell_start, cell_len, cell_cursor, order, cell, &mut budget)
+                    .is_none()
+                {
+                    return Err(RebuildCause::NarrowRun);
+                }
+                start = window_of(cell_start, cell_len, new)
+                    .ok_or(RebuildCause::StaleTable)?
+                    .0;
+                len = window_of(cell_start, cell_len, new)
+                    .ok_or(RebuildCause::StaleTable)?
+                    .1;
+                next = cell_start
+                    .get(cell.saturating_add(1))
+                    .copied()
+                    .map(|value| value as usize)
+                    .ok_or(RebuildCause::StaleTable)?;
+                debug_assert!(
+                    start.saturating_add(len) < next,
+                    "the borrow did not free a slot"
+                );
             }
             let Some(target) = entries.get(body as usize) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             let at = order
                 .get(start..start.saturating_add(len))
@@ -1160,19 +1278,19 @@ impl SpatialGrid {
                 start.saturating_add(at).saturating_add(1),
             );
             let Some(slot) = order.get_mut(start.saturating_add(at)) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             *slot = body;
             let (Some(len_slot), Some(cursor)) = (
                 cell_len.get_mut(new as usize),
                 cell_cursor.get_mut(new as usize),
             ) else {
-                return false;
+                return Err(RebuildCause::StaleTable);
             };
             *len_slot = len_slot.saturating_add(1);
             *cursor = cursor.saturating_add(1);
         }
-        true
+        Ok(())
     }
     /// Recompute every body's cell, returning how many of them landed somewhere new.
     ///

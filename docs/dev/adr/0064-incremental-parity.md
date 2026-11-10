@@ -326,3 +326,77 @@ Floor 2 therefore remains the default, and floor 3 is the documented setting for
 no tick can rebuild. The general lesson, which the 100,000-body measurement had already hinted at (a floor of four was
 needed there for the same guarantee), is that the floor a crowd needs for that guarantee depends on its density, so it
 is a measured choice rather than a constant this crate can pick for everyone.
+
+## Amendment: P2 step 2 delivered, the borrow budget
+
+The floor amendment ended with the one case no per-cell rule reaches: "a crowd that pours into a stairwell is not random,
+and no per-cell rule handles a run that the tick itself makes too narrow." That is the patch's problem, not the capacity
+rule's, and this is the change that answers it.
+
+### What the patch does when a run is full
+
+A run's capacity is the distance to the next cell's start, so a run that has no slot left is a *boundary* that is in the
+wrong place rather than a cell that is too small. The patch therefore borrows: it walks forward to the first run with a
+spare slot and moves every boundary on the way up by one, copying each donor's run one slot further into room the run
+after it has just vacated. Done from the donor backwards, every write lands inside the region it belongs to, the runs stay
+contiguous, and the bodies inside them stay sorted by identity. The cursor follows the boundary, because the invariant is
+that a cursor ends where its run ends.
+
+Two limits bound the walk, and both are the trade the mover bound already makes:
+
+- `BORROW_MAX_ELEMENTS` (32,768) prices the walk in the *elements it shifts*, because that is what a borrow costs. A donor
+  holding more than that is left to the rebuild, and so is a tick whose walk would add up to more.
+- `BORROW_MAX_RUNS` (64) stops a tick spent inside one saturated hotspot from walking the table looking for room it will
+  not find.
+
+The walk is priced before a single slot moves, so a refusal leaves the table exactly as the removal phase left it, which is
+still safe for the same reason it always was: a rebuild recomputes every table from the entries.
+
+### The outcome now says why
+
+`RebuildOutcome::Rebuilt` carries a `RebuildCause`: `Population` (a first build, or an entry list that changed length),
+`TooManyMovers` (past `PATCH_MAX_MOVERS`, so the mover list was not kept), `StaleTable` (a mover was not in the run its old
+cell names) or `NarrowRun` (no slot within the borrow budget). "The patch declined" is not a diagnosis, and the four
+causes have different fixes: a game seeing `NarrowRun` every tick has arrivals that cluster, while `TooManyMovers` says the
+crowd re-formed rather than moved.
+
+### Measured
+
+`examples/patch_tail` grew a second arrival pattern for this. `--arrival random` scatters a tick's crossers over the whole
+field, which is what the earlier amendments measured; `--arrival cluster --cluster-radius 4` puts them inside a hotspot
+four cells wide around one point per tick, which is a crowd flowing into one district and the case the borrow exists for.
+512 crossers, 200 measured ticks, six workers, 25% slack, floor 2, medians of three runs, `benchmarks/results/2026-11-10/sandbox-aarch64/borrow-budget/`:
+
+| bodies | arrival | patched before | median before | p99 before | patched after | median after | p99 after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100,000 | cluster | 0.0% | 2.581 ms | 3.421 ms | 100.0% | 0.347 ms | 0.615 ms |
+| 100,000 | random | 99.5% | 0.351 ms | 0.552 ms | 100.0% | 0.352 ms | 0.448 ms |
+| 1,000,000 | cluster | 0.0% | 13.981 ms | 16.680 ms | 100.0% | 1.305 ms | 1.684 ms |
+| 1,000,000 | random | 99.0% | 1.344 ms | 2.456 ms | 100.0% | 1.362 ms | 2.041 ms |
+
+Three readings.
+
+1. **The clustered case was not a tail, it was the whole distribution.** Before the borrow, a district-shaped arrival
+   rebuilt every tick: 0% patched, so the median *was* the rebuild's cost. That is 7.4x at 100,000 and 10.7x at a million,
+   and the p99 falls with the median rather than beside it.
+2. **Uniform arrivals are unchanged within noise.** They were already 99% patched, so the borrow has nothing to do; the
+   small p99 differences are run-to-run spread on a shared host, not an effect.
+3. **The extreme cluster still rebuilds, by design.** All 512 crossers into a *single* cell needs 512 slots, which is
+   further than 64 runs may walk, so `--cluster-radius 0` keeps `NarrowRun` on every tick. That is the budget working: a
+   party that size is a re-formation, and a fresh count is the honest answer.
+
+### What the earlier amendments mean now
+
+The floor and the percentage still decide the *table's width* and how often a tick has to borrow at all, but they no longer
+decide whether a clustered arrival survives: at a 0% floor the pair that lands in an empty cell now borrows instead of
+rebuilding, and at 25% slack the sixty-arrival case borrows nine boundaries instead of refusing. The tests state that
+directly rather than leaving it to the timings, by counting the boundaries a tick moves
+(`slack_now_decides_how_far_the_borrow_walks_rather_than_whether_it_happens`).
+
+### Tests
+
+`spatial_incremental.rs` gains the borrow's own cases: a run with one slot absorbing sixty arrivals and matching a rebuild
+cell for cell, a walk past a full run to the next one with room, a donor wider than the budget (which rebuilds with
+`NarrowRun`), and a remembered cell that has lost its body (`StaleTable`). Every one of them compares against the oracle
+*and* asserts the invariants, because a boundary in the wrong place is exactly the kind of error a run-only comparison would
+miss.

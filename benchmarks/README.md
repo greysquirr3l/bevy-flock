@@ -123,6 +123,22 @@ rows are not portable between hosts even when the fixture is identical, and divi
 reach a conclusion about an implementation is what produced the mistake. The correction is one command on the host that
 matters, which is the row above.
 
+### The patch's borrow budget
+
+`examples/patch_tail.rs` now measures two arrival patterns, because the patch's failure mode depends on which one a game
+has. `--arrival random` scatters a tick's crossers over the whole field; `--arrival cluster --cluster-radius 4` puts them
+inside a hotspot four cells wide around one point per tick, which is a crowd flowing into one district.
+
+| bodies | arrival | patched before | median before | patched after | median after |
+| --- | --- | --- | --- | --- | --- |
+| 100,000 | cluster | 0.0% | 2.581 ms | 100.0% | 0.347 ms |
+| 1,000,000 | cluster | 0.0% | 13.981 ms | 100.0% | 1.305 ms |
+| 100,000 | random | 99.5% | 0.351 ms | 100.0% | 0.352 ms |
+| 1,000,000 | random | 99.0% | 1.344 ms | 100.0% | 1.362 ms |
+
+`--cluster-radius 0` sends every crosser into a single cell, which is beyond the borrow budget and still rebuilds on
+purpose: the row exists so the limit is visible rather than inferred.
+
 ## What to try next
 
 1. **Start from the matched rows when attributing the gap.** `--workload all` runs the fixture twice more: Unreal's

@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The incremental rebuild no longer gives up on a clustered arrival.** A cell whose run is full had forced a full
+  rebuild, which made a crowd flowing into one district the worst case for the patch: at 512 crossers arriving inside a
+  four-cell hotspot, 0% of ticks patched and the median tick was the rebuild (2.58 ms at 100,000 bodies, 13.98 ms at a
+  million). The patch now borrows a slot from the first run after the full one that has a spare, moving the boundaries
+  between them and copying each donor's run one slot up, bounded by `BORROW_MAX_ELEMENTS` (elements shifted) and
+  `BORROW_MAX_RUNS` (consecutive full runs). The same ticks now patch every time: 0.347 ms and 1.305 ms, 7.4x and
+  10.7x, with p99 falling from 3.42 ms and 16.68 ms to 0.62 ms and 1.68 ms. `RebuildOutcome::Rebuilt` also carries a
+  `RebuildCause` now (`Population`, `TooManyMovers`, `StaleTable`, `NarrowRun`), so a game can tell which of the four
+  reasons its tick rebuilt, and `examples/patch_tail` grew `--arrival cluster --cluster-radius` to reproduce the case.
 - **The docs and this site were audited against the tree, and eleven links were broken.** Moving `docs/adr` to
   `docs/dev/adr` and the tuning material deeper left relative links pointing at directories that no longer exist:
   ADR images, demo captures, the playground README, three charts in the performance journal. Markdown does not
