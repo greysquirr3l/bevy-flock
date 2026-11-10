@@ -15,8 +15,8 @@ pub use crate::adapters::primary::components::{
 };
 pub use crate::adapters::primary::gaze::{GazeAim, GazeConfig, GazeTarget, resolve_gaze};
 pub use crate::adapters::primary::gesture::{
-    GestureChannel, GestureConfig, GestureCue, GestureKind, GestureRequest, KEY_GESTURE, NpcGestures,
-    advance_gestures, collect_gesture_requests, request_gesture,
+    GestureChannel, GestureConfig, GestureCue, GestureKind, GestureRequest, KEY_GESTURE,
+    NpcGestures, advance_gestures, collect_gesture_requests, request_gesture,
 };
 pub use crate::adapters::primary::locomotion::{Locomotion, MIN_MOVING_SPEED};
 pub use crate::adapters::primary::observability::{

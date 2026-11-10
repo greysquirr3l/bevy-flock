@@ -29,9 +29,6 @@
 //! same pose, which is what makes the animation independent of frame rate rather than merely
 //! similar at two frame rates. Nothing in this path reads `Time`.
 
-use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
-use bevy_flock_core::application::SimClock;
-use bevy_flock_ecs::prelude::Locomotion;
 use bevy_animation::graph::{
     AnimationGraph, AnimationGraphHandle, AnimationNodeIndex, AnimationNodeType,
 };
@@ -41,6 +38,9 @@ use bevy_asset::{AssetApp, Assets, Handle};
 use bevy_ecs::prelude::{Commands, Component, Entity, Local, Query, Res};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::SystemParam;
+use bevy_flock_core::application::SimClock;
+use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
+use bevy_flock_ecs::prelude::Locomotion;
 use bevy_transform::prelude::Transform;
 
 use crate::lod::AnimationFocus;
@@ -455,16 +455,16 @@ pub(crate) fn fixture_profile() -> LocomotionProfile {
 #[cfg(test)]
 mod tests {
     use super::{BlendFrame, ClipBindings, apply_locomotion_blend, fixture_profile};
-    use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
     use crate::lod::{AnimationFocus, AnimationLod, BlendLod, LodLevel};
     use crate::profile::{ClipSlot, LocomotionProfile};
-    use bevy_flock_core::domain::cognition::CognitionTier;
-    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_animation::graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex};
     use bevy_animation::{AnimationClip, AnimationPlayer};
     use bevy_asset::{Assets, Handle};
     use bevy_ecs::prelude::{Entity, World};
     use bevy_ecs::system::RunSystemOnce;
+    use bevy_flock_core::domain::cognition::CognitionTier;
+    use bevy_flock_ecs::adapters::primary::cognition::NpcTier;
+    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_math::{Vec2, Vec3};
     use bevy_transform::prelude::Transform;
     use proptest::prelude::{prop_assert, proptest};
@@ -528,7 +528,8 @@ mod tests {
     /// through `run_system_once` gets fresh `Local` state every call, so the tick has to live in the
     /// world, exactly as it does in a game.
     fn run(world: &mut World) {
-        if let Some(mut clock) = world.get_resource_mut::<bevy_flock_core::application::SimClock>() {
+        if let Some(mut clock) = world.get_resource_mut::<bevy_flock_core::application::SimClock>()
+        {
             clock.advance();
         }
         if world.run_system_once(apply_locomotion_blend).is_err() {
@@ -1011,7 +1012,9 @@ mod tests {
         steady(&mut fast, fast_body, 1.4);
         for _ in 0..3 {
             run(&mut slow);
-            if let Some(mut clock) = fast.get_resource_mut::<bevy_flock_core::application::SimClock>() {
+            if let Some(mut clock) =
+                fast.get_resource_mut::<bevy_flock_core::application::SimClock>()
+            {
                 for _ in 0..9 {
                     clock.advance();
                 }

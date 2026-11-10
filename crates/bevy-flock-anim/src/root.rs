@@ -24,9 +24,9 @@
 //! Extraction itself stays outside this crate: Bevy owns the skeleton, so the game's animation
 //! bridge reads the root joint and calls [`RootOffset::report`]. What this module owns is the
 //! decision — apply once, or drop — and the trace that proves which happened.
+use bevy_ecs::prelude::{Component, Query, Res, ResMut, Resource};
 use bevy_flock_core::domain::num;
 use bevy_flock_ecs::prelude::Locomotion;
-use bevy_ecs::prelude::{Component, Query, Res, ResMut, Resource};
 use bevy_math::{Vec2, Vec3};
 use bevy_transform::prelude::Transform;
 
@@ -203,12 +203,12 @@ mod tests {
     use super::{QUANTUM_METRES, RootMotionTrace, RootOffset, apply_root_motion, quantise};
     use crate::binding::ClipBindings;
     use crate::profile::LocomotionProfile;
-    use bevy_flock_core::domain::num;
-    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_animation::graph::AnimationNodeIndex;
     use bevy_asset::Assets;
     use bevy_ecs::prelude::{Entity, World};
     use bevy_ecs::system::RunSystemOnce;
+    use bevy_flock_core::domain::num;
+    use bevy_flock_ecs::prelude::Locomotion;
     use bevy_math::{Vec2, Vec3};
     use bevy_transform::prelude::Transform;
 

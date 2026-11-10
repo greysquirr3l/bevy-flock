@@ -13,12 +13,12 @@
 //! is the whole reason [`crate::ClipBindings`] leaves unnamed animations alone, and it is what the
 //! `a_gesture_leaves_the_locomotion_weights_exactly_as_the_blend_wrote_them` test pins.
 
-use bevy_flock_ecs::prelude::{GestureKind, NpcGestures};
 use bevy_animation::AnimationPlayer;
 use bevy_animation::graph::AnimationNodeIndex;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::{Component, Query};
 use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_flock_ecs::prelude::{GestureKind, NpcGestures};
 
 use crate::binding::ClipBindings;
 
@@ -163,20 +163,20 @@ impl Plugin for GesturePlugin {
 #[cfg(test)]
 mod tests {
     use super::{GestureClips, GesturePlayback, play_gestures};
-    use bevy_flock_ecs::adapters::primary::cognition::NpcBlackboard;
     use crate::binding::{ClipBindings, apply_locomotion_blend, fixture_profile};
     use crate::profile::LocomotionProfile;
-    use bevy_flock_core::application::SimClock;
-    use bevy_flock_core::domain::ids::NpcId;
-    use bevy_flock_ecs::prelude::{
-        GestureChannel, GestureConfig, GestureKind, Locomotion, Npc, NpcGestures, advance_gestures,
-        collect_gesture_requests, request_gesture,
-    };
     use bevy_animation::AnimationPlayer;
     use bevy_animation::graph::AnimationNodeIndex;
     use bevy_asset::Assets;
     use bevy_ecs::prelude::{Entity, World};
     use bevy_ecs::system::RunSystemOnce;
+    use bevy_flock_core::application::SimClock;
+    use bevy_flock_core::domain::ids::NpcId;
+    use bevy_flock_ecs::adapters::primary::cognition::NpcBlackboard;
+    use bevy_flock_ecs::prelude::{
+        GestureChannel, GestureConfig, GestureKind, Locomotion, Npc, NpcGestures, advance_gestures,
+        collect_gesture_requests, request_gesture,
+    };
     use bevy_transform::prelude::Transform;
 
     /// The node a gesture plays on, and a node the blend owns, chosen apart so a test can tell
