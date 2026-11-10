@@ -157,6 +157,40 @@ Neither half is an engine verdict, for reasons the source document spells out: U
 loop rather than Mass Entity, Godot's grid is rebuilt and then not used for avoidance, and our row steers every
 agent with no band, no LOD and no impostors, which is why the budget misses at 100k are the honest part of it.
 
+### Attribution: W2, the matched loop
+
+The three-engine table above says our row is behind Unreal's, and a single row cannot say why. `--workload matched` adds
+two rows that can: the Unreal harness's loop written in Rust twice, once called directly and once from one system in
+`Update` on a bare `App::new()`.
+
+- Same 1,000 m cube, same 10 m cells, same `cell_start[cell] .. cell_start[cell + 1]` slots.
+- Same bound: at most eight same-cell neighbours per body.
+- Same seek, separation, 1/60 s fixed step and cube clamp.
+- The two rows are asserted bit-identical by a test, so the ECS row is not running a different trajectory.
+
+On a six-core aarch64 VM, median of three runs of 300 ticks each:
+
+| agents | matched, called directly | matched, in one ECS system | the whole plugin | ECS plus schedule |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 2.062 ms | 2.068 ms | 5.393 ms | +0.006 ms (0.3%) |
+| 100,000 | 13.352 ms | 13.360 ms | 44.146 ms | +0.008 ms (0.06%) |
+
+Three conclusions, in descending order of support:
+
+1. **Bevy's dispatch is not the difference.** Eight microseconds a tick at 100,000 agents is 0.06% of the row that
+   contains it.
+2. **What this crate does beyond the fixture is 3.3x at 100,000.** Twenty-seven cells instead of eight slots, needs,
+   temperament, cognition scheduling and social memory. If those are the cost, they are also the place to optimise, and
+   the banded continuum is exactly that argument made in code.
+3. **The matched loop is still slower than Unreal's** (13.352 ms here against 3.496 ms there, on hardware that differs by
+   roughly 2.7x on the same workload). Bounds-checked element access and three separate passes over a million cells
+   against `TArray`'s unchecked addressing. That is a loop-implementation difference, not an engine one, and it is the
+   next thing to fix if the bare numbers matter.
+
+Attribution is only worth as much as the honesty of its fixture, so: the bare row is a fair Rust implementation, not a
+straw man. Its prefix scan and cursor copy walk slices rather than indexing, because a bounds check per cell across a
+million cells is a millisecond of nothing and would have been attributed to Bevy.
+
 ## A same-machine result (six-core aarch64 VM)
 The earlier run, kept because it is a different machine and answers a different question: two engines, one
 headless VM, both harnesses driven by one command (`python3 scripts/cross_bench.py --agents 10000,100000`), 1000
