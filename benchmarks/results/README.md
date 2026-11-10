@@ -48,6 +48,8 @@ Two more files from the same host, written by harnesses that share this schema:
 
 ![Machine memory bandwidth against threads, beside the warm rebuild curve](2026-11-09/sandbox-aarch64/bandwidth.png)
 
+![Cold against warm at one million bodies, 1 to 16 threads](2026-11-09/sandbox-aarch64/warm-sweep/cold-vs-warm.png)
+
 The two panels belong together because they answer the question the thread sweep raises. The rebuild's knee is at the core
 count, where eight threads cost 50% more time than six at a million bodies, but it is not a bandwidth wall: the rebuild
 moves about 41 MB per pass, which at its best is 9.6 GB/s, or roughly 7% of the copy ceiling this same machine reaches. Its
