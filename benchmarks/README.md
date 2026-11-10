@@ -2,6 +2,8 @@
 
 These are rough measurements from one Apple M3 Pro with 11 available threads. Each run used 100 warm-up ticks and 1,000 measured ticks, with a 16.6 ms frame budget. The [benchmark guide](../docs/dev/tuning/benchmarks/cross-engine.md) describes the harnesses and how to rerun them.
 
+This is one host. Every other number in the repository comes from a six-core aarch64 sandbox VM, and the two sets do not divide into each other: a row from here and a row from there are different machines with different clocks, so each is quoted with its host and neither is used to correct the other.
+
 | Agents | Engine | Version | Median | p95 | p99 | Max | Over 16.6 ms |
 | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | 10,000 | Bevy | 0.1.0 | 2.217 ms | 2.779 ms | 2.980 ms | 3.625 ms | 0% |
@@ -15,7 +17,13 @@ At 10,000 agents, Unreal's median was about 2.4 times lower than Bevy's. At 100,
 
 Treat these as rough system comparisons, not an engine ranking. The measured work differs:
 
-- Bevy times `App::update` with the full `FlockPlugin` schedule. The [harness](../examples/cross_bench.rs) uses the `CityAmbient` preset. At 100,000 agents, the preset steers only a subset; [prior whole-frame measurements](../docs/dev/adr/0031-cell-sizing-for-lanes.md) found about 5,000 manifested agents.
+- Bevy times `App::update` with the full `FlockPlugin` schedule, and it steers and integrates **every** agent. The
+  [harness](../examples/cross_bench.rs) uses the `CityAmbient` preset, and that preset is a spawn distribution:
+  `FlockPlugin` installs the memory bridge and `BoidsPlugin`, not the manifest band, so nothing is culled in this
+  row. Per-agent cost stays flat across the two sizes (222 ns at 10,000, 165 ns at 100,000), which is what a loop
+  over the whole population looks like when density does the only adjusting. The 5,000-manifested figure quoted
+  elsewhere belongs to the banded continuum (`BandPlugin` plus a camera anchor) and is a different workload; it
+  cannot be subtracted from this row, and the 47.8% budget misses at 100,000 are the all-steered number.
 - Unreal times a custom `UTickableWorldSubsystem`, not Mass Entity. Its [loop](unreal/Source/CrossBench/CrossBenchSubsystem.cpp) rebuilds a 3D counting-sort grid, seeks a shared goal, checks at most eight same-cell neighbors, and integrates every agent.
 - Godot times `_physics_process` in 2D. Its [grid mode](godot/cross_bench.gd) rebuilds a dictionary grid, then seeks and integrates every agent. The step does not use that grid for neighbor avoidance.
 - The engines do not generate identical positions. Bevy's crowd preset and the other harnesses use different spawn distributions, which also changes cell occupancy and neighbor work.
@@ -38,4 +46,20 @@ The grid itself is not missing: Bevy already has a 3D counting-sort grid with co
 - **More prefix-scan work:** the count and prefix work has already been fused and measured; the remaining prefix pass was a small part of the rebuild. See [ADR 0057](../docs/dev/adr/0057-fused-count-and-scan.md) and [ADR 0060](../docs/dev/adr/0060-build-5x-gate.md).
 - **A persistent unsafe worker pool:** [ADR 0059](../docs/dev/adr/0059-worker-pool-ownership.md) defers it because the remaining dispatch cost does not justify the aliasing and soundness burden. The Bevy task-pool alternative was rejected because it allocates in the steady-state rebuild.
 
-The raw JSONL files from this run are in ignored `target/` directories and are not part of the repository. The Bevy harness also reports `unknown cpu` on macOS because it reads `/proc/cpuinfo`; the machine label in this table was corrected to the actual Apple M3 Pro host.
+## Reproducing a row
+
+```text
+cargo run --release --example cross_bench -- --agents 10000,100000 --ticks 1000 --json
+godot --headless --path benchmarks/godot -- --mode=grid --agents=10000 --ticks=1000 --json
+# Unreal: copy the module per unreal/README.md, then run with the -crossbench* flags
+python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
+```
+
+The raw JSONL files from this run are in ignored `target/` directories and are not part of the repository.
+
+The Bevy harness reported `unknown cpu` on macOS for this run, because it read `/proc/cpuinfo` unconditionally, and
+the label in the table above was corrected by hand. That is fixed in the harness: `/proc/cpuinfo` on Linux,
+`sysctl -n machdep.cpu.brand_string` on macOS, `PROCESSOR_IDENTIFIER` on Windows, which is what the Godot harness
+(`OS.get_processor_name()`) already did. It mattered more than a label: `scripts/compare_benchmarks.py` refuses to
+put two machines in one table, so a row that cannot name its own CPU turns that refusal off. The three rows here
+were assembled by hand for that reason, and merging a real set through the comparator is still open.

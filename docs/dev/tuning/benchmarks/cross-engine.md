@@ -142,10 +142,26 @@ The harness is written against the UE 5.x API but has not been compiled in this 
 fit in the sandbox the gates run in. The first build may need small version fixes; that is a five-minute fix in the
 project, not a redesign of the fixture.
 
-## A same-machine result
+## Three engines on one laptop (2026-11-09)
+[`benchmarks/README.md`](../../../../benchmarks/README.md) holds a run on an Apple M3 Pro with 11 threads: bevy-flock 0.1.0
+through `App::update`, Unreal 5.8.2 through a `UTickableWorldSubsystem`, Godot 4.7.2 in its grid mode, 1,000 measured
+ticks each against the 16.6 ms budget.
 
-2026-11-09, one machine, one command (`python3 scripts/cross_bench.py --agents 10000,100000`), 1000 measured ticks
-and 100 warm-up ticks per row, Godot 4.7.2 and bevy-flock 0.1.0:
+| agents | bevy-flock | Unreal | Godot grid |
+| ---: | ---: | ---: | ---: |
+| 10,000 | 2.217 ms | 0.937 ms | 4.674 ms |
+| 100,000 | 16.528 ms, 47.8% over budget | 3.496 ms | 38.054 ms |
+
+That is 2.1x faster than the Godot grid at 10k and 2.3x at 100k, and 2.4x to 4.7x slower than the Unreal loop.
+Neither half is an engine verdict, for reasons the source document spells out: Unreal's row is a hand-written SoA
+loop rather than Mass Entity, Godot's grid is rebuilt and then not used for avoidance, and our row steers every
+agent with no band, no LOD and no impostors, which is why the budget misses at 100k are the honest part of it.
+
+## A same-machine result (six-core aarch64 VM)
+The earlier run, kept because it is a different machine and answers a different question: two engines, one
+headless VM, both harnesses driven by one command (`python3 scripts/cross_bench.py --agents 10000,100000`), 1000
+measured ticks and 100 warm-up ticks per row, Godot 4.7.2 and bevy-flock 0.1.0. Its rows and the laptop's rows do
+not divide into each other.
 
 | agents | engine | median | p95 | p99 | max | over 16.6 ms | ns/agent |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -160,8 +176,7 @@ and 100 warm-up ticks per row, Godot 4.7.2 and bevy-flock 0.1.0:
 `/proc/cpuinfo` has no model line. Both implement the same fallback deliberately: if the two strings differed, the
 comparator would refuse the table, and the refusal is the feature.
 
-What it says:
-
+What it says, for this machine only:
 - **Against a bare GDScript loop we are slower**, 1.9x at 10k and 1.5x at 100k in ns per agent. That row does one pass
   over an array and no indexing at all, so this is the price of the work we do that it does not.
 

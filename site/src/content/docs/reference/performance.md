@@ -56,20 +56,25 @@ scatter probe that killed them, including the numbers that made the decision.
 Your crowd, your hardware, your tick budget. `cargo run --release --example profile_crowd` and
 `--example cross_bench` are the harnesses; the comparison script refuses to mix machines, which is the point.
 
-## Against another engine
+## Against other engines
 
-The same fixture now runs in Godot 4.7.2 on the same machine, so one comparison exists that is not a published
-number from a different CPU:
+Three harnesses, one fixture, one laptop: an Apple M3 Pro with 11 threads, 1,000 measured ticks each, the same
+16.6 ms budget.
 
-| agents | GDScript, no spatial index | `bevy-flock` | GDScript, grid rebuilt each tick |
+| agents | `bevy-flock` | Unreal 5.8.2 | Godot 4.7.2 grid |
 | ---: | ---: | ---: | ---: |
-| 10,000 | 3.044 ms | 5.661 ms | 13.976 ms |
-| 100,000 | 30.636 ms | 46.977 ms | 118.071 ms |
+| 10,000 | 2.217 ms | 0.937 ms | 4.674 ms |
+| 100,000 | 16.528 ms, 47.8% of ticks over budget | 3.496 ms | 38.054 ms |
 
-So: 2.5× faster than the equivalent GDScript structure, and 1.9× (10k) to 1.5× (100k) slower than a GDScript loop
-that does no indexing at all. Both halves of that sentence are the result. `python3 scripts/cross_bench.py
---agents 10000,100000` reproduces the table on your machine; the two Godot modes, the Unreal harness and the
-method are in `docs/dev/tuning/benchmarks/cross-engine.md`.
+Faster than the Godot grid at both sizes, slower than the Unreal loop, and neither half is an engine verdict.
+Unreal's row is a hand-written subsystem that rebuilds a counting-sort grid and reads at most eight neighbours,
+not Mass Entity. Godot's rebuilds a dictionary grid and then does not query it. Ours is the whole plugin schedule
+with every agent steered, no band and no culling, which is why the 100,000 row miss rate is the interesting
+number: the banded path exists to cut it, and this row deliberately does not use it.
+
+The full six-statistic table, the differences that make it a system comparison, and the four measurements that
+would tighten it are in `benchmarks/README.md`. `python3 scripts/cross_bench.py --agents 10000,100000` reproduces
+our side on your hardware.
 
 Full journals, including the rejected optimisations and their measurements, are in the repository:
 `docs/dev/tuning/performance.md` and `docs/dev/tuning/memory.md`.

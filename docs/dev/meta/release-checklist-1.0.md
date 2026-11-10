@@ -172,27 +172,45 @@ python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
 
 ```
 
-**Status:** two of the three rows exist, from one machine, by one command.
+**Status:** all three rows exist, from one host, produced by the harnesses. On 2026-11-09 an Apple M3 Pro with 11
+threads ran bevy-flock 0.1.0, Unreal 5.8.2 and Godot 4.7.2 with 1,000 measured ticks and 100 warm-up ticks each; the
+table and the differences that make it a system comparison are in `benchmarks/README.md`.
 
-`python3 scripts/cross_bench.py --agents 10000,100000` ran bevy-flock 0.1.0 and Godot 4.7.2 with identical tick counts
-and tick/warm-up settings, wrote one JSONL file per engine, and printed the table through
-`scripts/compare_benchmarks.py`. It is recorded in `cross-engine.md`.
+| agents | Bevy | Unreal | Godot grid |
+| ---: | ---: | ---: | ---: |
+| 10,000 | 2.217 ms | 0.937 ms | 4.674 ms |
+| 100,000 | 16.528 ms, 47.8% over budget | 3.496 ms | 38.054 ms |
+
+Two rows carry a caveat that has to travel with them. Unreal's is a `UTickableWorldSubsystem`, not Mass Entity, so it
+measures a hand-written SoA loop with bounded neighbour reads. Ours steers every agent: `FlockPlugin` installs the
+memory bridge and `BoidsPlugin`, not the manifest band, so 47.8% of the 100,000-agent ticks missing the budget is the
+no-culling number.
+
+That run also exposed why the table was assembled by hand. The Bevy harness read `/proc/cpuinfo` on macOS and reported
+`unknown cpu` while the Godot row on the same laptop said `Apple M3 Pro`, and `scripts/compare_benchmarks.py` refuses to
+put two machines in one table. The harness now reads each platform's own name (`sysctl` on macOS, `PROCESSOR_IDENTIFIER`
+on Windows), so the remaining step is a real three-engine set merged through the comparator rather than typed.
+
+The earlier two-engine run stays as its own record, because it is a different machine. `python3 scripts/cross_bench.py
+--agents 10000,100000` ran bevy-flock 0.1.0 and Godot 4.7.2 on a six-core aarch64 VM with identical tick counts and
+tick/warm-up settings, wrote one JSONL file per engine, and printed the table through `scripts/compare_benchmarks.py`.
+It is recorded in `cross-engine.md`, and this is that table:
 
 | agents | godot-array (lower bound) | bevy-flock | godot-grid (like-for-like) |
 | ---: | ---: | ---: | ---: |
 | 10,000 | 3.044 ms median | 5.661 ms | 13.976 ms |
 | 100,000 | 30.636 ms | 46.977 ms | 118.071 ms |
 
-Read it as 2.5x faster than a GDScript loop that rebuilds a grid, and 1.9x / 1.5x slower than one that does no indexing
+On that VM, read it as 2.5x faster than a GDScript loop that rebuilds a grid, and 1.9x / 1.5x slower than one that does no indexing
 at all. The `array` row exists so the fast-looking comparison is visible next to the fair one rather than left to
 whoever reads the table.
 
-The Unreal row is the remaining gap, and the harness for it now exists: `benchmarks/unreal/` is a
-`UTickableWorldSubsystem` running the same fixture, with its setup, flags and build commands in its README, and
-`scripts/cross_bench.py --engines unreal --unreal-cmd ...` drives it and parses the row (proved by
-`scripts/cross_bench.py --self-test`, which runs the whole path against a fake command). It has not been compiled
-against a real engine, because UE5 does not fit in this sandbox, so the first build is expected to need small version
-fixes. What is left is one `UnrealEditor-Cmd` run on a machine with UE5 installed.
+The Unreal harness is `benchmarks/unreal/`, a `UTickableWorldSubsystem` running the same fixture, with its setup,
+flags and build commands in its own README; `scripts/cross_bench.py --engines unreal --unreal-cmd ...` drives it and
+parses the row, and `--self-test` proves that path against a fake command. It has now been compiled and run against a
+real engine on the M3 Pro, which is where the 0.937 and 3.496 ms rows come from, and the compile fixes that run needed
+are folded back into the module. It has still never been built in this repository's CI, because UE5 does not fit in the
+sandbox the gates run in, so a contributor's first build may need small version fixes again.
 
 ## 8. Release mechanics
 
