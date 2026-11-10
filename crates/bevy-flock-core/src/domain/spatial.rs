@@ -314,13 +314,23 @@ pub struct SpatialGrid {
     /// `1.0 / cell_size`, cached because the fill pass multiplies by it once per body per axis.
     inv_cell_size: f32,
     dims: [u32; 3],
-    /// Prefix sums: `cell_start[c]..cell_start[c + 1]` is cell `c`'s window in
+    /// Prefix sums of *capacities*: cell `c`'s region is `cell_start[c]..cell_start[c + 1]`, and the bodies in it are
+    /// the first `cell_len[c]` slots, leaving the rest as slack for arrivals (ADR 0064). The prefix sums used to be of
+    /// counts, which made the two numbers the same thing and cost the ability to absorb an insert: a run that gained a
+    /// body moved every run after it. `cell_start[c]..cell_start[c + 1]` is cell `c`'s region in
     /// `order`. Length is `cell_count() + 1`.
     ///
     /// Written by the scan and **not touched afterwards**: `place` advances [`SpatialGrid::cell_cursor`]
     /// instead, so the window table a caller reads is the one the scan produced rather than a leftover of the
     /// placement pass (ADR 0056).
     cell_start: Vec<u32>,
+    /// How many bodies sit in each cell: the run at `cell_start[cell]` is `cell_len[cell]` long.
+    ///
+    /// The window table's entries are no longer one cell's run apart, because each cell owns `capacity_for(count)` slots
+    /// and the difference is slack: room for the bodies that arrive next tick without moving any other cell's run
+    /// (ADR 0064). So the run length is a separate number, and this is it. Four bytes per cell, and it is what lets a
+    /// query slice `cell_start[cell]..cell_start[cell] + cell_len[cell]` with no indirection in between.
+    cell_len: Vec<u32>,
     /// The write cursor `place` advances through each window: a copy of `cell_start`, reused every rebuild.
     ///
     /// It exists so that placement does not have to un-advance `cell_start` afterwards. The old shape walked the
@@ -334,6 +344,14 @@ pub struct SpatialGrid {
     entries: Vec<GridEntry>,
     /// How many threads a rebuild may use. See [`SpatialGrid::with_threads`].
     threads: usize,
+    /// The slack each cell's run gets when it is laid out, as a percentage of the cell's population.
+    ///
+    /// See [`SpatialGrid::with_slack_percent`] and [`DEFAULT_SLACK_PERCENT`]. Read by the count pass, which is where
+    /// counts become capacities, so it takes effect on the next rebuild rather than on the next query.
+    slack_percent: u8,
+    /// Spare slots every cell gets regardless of occupancy. See [`SpatialGrid::with_slack_floor`]. Read by the
+    /// count pass beside the percentage, because a cell's spare slots are the larger of the two rules.
+    slack_floor: u32,
     /// How many blocks the prefix sum is split into; 0 means derive it from the cell count.
     ///
     /// See [`SpatialGrid::with_blocks`]. Derived from the cell count and never from `threads`, because a
@@ -347,6 +365,20 @@ pub struct SpatialGrid {
     /// the code that uses them rather than left to warn in a build that has no threads.
     #[cfg(feature = "threads")]
     block_bases: Vec<u32>,
+    /// Whether the tables describe `entries` as they stand.
+    ///
+    /// Set when the count, scan and placement finish, cleared when the entry list is emptied. The incremental rebuild
+    /// reads it instead of inferring "already built" from buffer lengths, because the constructor sizes the window table
+    /// and an unbuilt empty grid would otherwise look built, with a cursor that had never been written and a table full
+    /// of zeros that happens to be right by accident.
+    built: bool,
+    /// Every body that landed in a different cell, as `(body, the cell it came from)`.
+    ///
+    /// Filled by the diff that already runs every tick, and only up to [`PATCH_MAX_MOVERS`]: past that the rebuild is
+    /// cheaper than the patch, so a longer list would be memory nothing reads. Every worker writes its own chunk of this
+    /// buffer, which is why it is sized by workers and not by bodies, and the chunks are compacted into the front once
+    /// the dispatch returns so a caller reads a contiguous list (`len == changed` exactly when it is complete).
+    movers: Vec<(u32, u32)>,
     /// The cell each entry landed in, remembered between the counting and placement passes.
     ///
     /// `cell_of` is the only float work in a rebuild and it was being done twice per body: once to
@@ -425,6 +457,85 @@ impl PassCosts {
     }
 }
 
+/// The most bodies a tick may move and still be patched rather than rebuilt.
+///
+/// The patch's own bookkeeping is linear in the moves, and so is the chance that a run arrives full, so past a few
+/// thousand moves the rebuild is both cheaper and simpler. At the sizes the probe measured, 4,096 moves at a million
+/// bodies is 3.4 ms of shifting against a 15.7 ms rebuild — still a win, but the last decade of it.
+const PATCH_MAX_MOVERS: usize = 4_096;
+
+/// Where cell `cell`'s run is: `(start, len)`, checked against the cell's capacity.
+///
+/// `None` for a cell whose run would not fit inside its own region, which is the corruption a patch has to refuse
+/// rather than propagate.
+fn window_of(cell_start: &[u32], cell_len: &[u32], cell: u32) -> Option<(usize, usize)> {
+    let start = usize::try_from(*cell_start.get(cell as usize)?).ok()?;
+    let len = usize::try_from(*cell_len.get(cell as usize)?).ok()?;
+    let next = usize::try_from(*cell_start.get((cell as usize).checked_add(1)?)?).ok()?;
+    if start.checked_add(len)? > next {
+        return None;
+    }
+    Some((start, len))
+}
+
+/// The slack a cell gets when it is laid out, as a percentage of its population.
+///
+/// A quarter is the measured default (ADR 0064): it absorbs the arrivals a tick puts into a cell, and it costs a quarter
+/// again in `order` on top of the population, which at a million bodies is 1.7 MB of slack rather than 1.7 MB of exact
+/// runs. A crowd whose arrivals cluster harder than that can raise it with
+/// [`SpatialGrid::with_slack_percent`], at the cost of that memory and of the cache the runs used to share.
+pub const DEFAULT_SLACK_PERCENT: u8 = 25;
+
+/// A slack percentage that means something: 0 (exact runs) to 100 (a spare slot per body).
+const fn clamp_slack(percent: u8) -> u8 {
+    if percent > 100 { 100 } else { percent }
+}
+/// Spare slots every cell gets regardless of how many bodies it holds. See [`SpatialGrid::with_slack_floor`].
+///
+/// Two, because the failure a percentage cannot fix is a cell that was empty when the tick began: a quarter of zero is
+/// zero, so a sparse grid gives an empty cell one slot and rebuilds the table the moment two bodies arrive in it.
+pub const DEFAULT_SLACK_FLOOR: u32 = 2;
+/// The largest floor worth laying out. Past this a cell's spare slots cost more than the rebuild they avoid.
+pub const MAX_SLACK_FLOOR: u32 = 1_024;
+/// A floor that means something: 0 (a percentage-only rule) to [`MAX_SLACK_FLOOR`].
+const fn clamp_floor(floor: u32) -> u32 {
+    if floor > MAX_SLACK_FLOOR {
+        MAX_SLACK_FLOOR
+    } else {
+        floor
+    }
+}
+
+/// Room one cell of `count` bodies gets in `order`: its occupants, its spare slots, and one more for the count itself.
+///
+/// The spare slots are the larger of two rules, and they fail differently. The percentage scales with a cell that is
+/// already busy, so a crowd packed into one cell keeps absorbing arrivals as it thickens. The floor is absolute, so a
+/// cell that is *empty* still has room for the two bodies that can land in it together, which no percentage can give
+/// it. Spare slots are `max(percent of count, floor)`, so either rule alone can be asked for by zeroing the other, and
+/// the pair is what `examples/patch_tail.rs` sweeps.
+///
+/// Saturating, like every other width bound in this file: a count that overflowed would be a million bodies over
+/// `u32::MAX`, and the saturating answer is at least not a window that points backwards.
+fn capacity_for(count: u32, slack_percent: u8, slack_floor: u32) -> u32 {
+    let percent = (u32::from(slack_percent)).saturating_mul(count) / 100;
+    let spare = if percent > slack_floor {
+        percent
+    } else {
+        slack_floor
+    };
+    count.saturating_add(spare).saturating_add(1)
+}
+/// Convert one slice of the window table from counts to capacities, recording the occupancy on the way past.
+///
+/// `window` is `cell_start[lo + 1 ..= hi]`, so its slot `i` belongs to cell `lo + i`, and `lens` is `cell_len[lo..hi]`.
+/// The two arrays are shortest-zipped, so a short `lens` (an empty grid) leaves the window alone rather than panicking.
+fn counts_to_capacity(window: &mut [u32], lens: &mut [u32], slack_percent: u8, slack_floor: u32) {
+    for (slot, len) in window.iter_mut().zip(lens.iter_mut()) {
+        *len = *slot;
+        *slot = capacity_for(*slot, slack_percent, slack_floor);
+    }
+}
+
 /// The unsplit tails of the three output arrays, and where each has been split to.
 ///
 /// The fused scan-and-place hands every worker three disjoint slices: the window table it scans, the cursor table it
@@ -492,6 +603,65 @@ impl<'a> Splits<'a> {
     }
 }
 
+/// What [`SpatialGrid::build_incremental`] did with a tick's worth of movement.
+///
+/// The distinction is the point of the whole exercise: most ticks move no body across a cell boundary, and on those the
+/// window table, the cursor and the order are still correct, so the rebuild ends after recomputing cell numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildOutcome {
+    /// No body changed cell, so nothing was recounted, rescanned or replaced.
+    ///
+    /// A body that stays in its cell keeps its place in that cell's run, so the previous `order` still lists every body
+    /// once and each run is still sorted by identity: the invariants hold without any work.
+    Unchanged,
+    /// At least one body moved between cells, so the tables were rebuilt end to end.
+    Rebuilt {
+        /// How many bodies sit in a different cell than they did at the previous rebuild.
+        ///
+        /// Equal to the population when the entry list itself changed length, because then every body is new to the
+        /// table rather than moved within it.
+        changed: usize,
+    },
+    /// Bodies moved between cells, and the table absorbed them without a rebuild.
+    ///
+    /// The runs are as if the table had been rebuilt: same cell, same order within the cell, same starts and lengths. What
+    /// differs is the slack, which a rebuild would have laid out from a fresh count and a patch leaves where it was, so a
+    /// patched grid and a rebuilt grid are equal run by run rather than byte for byte (ADR 0064).
+    Patched {
+        /// How many bodies sit in a different cell than they did at the previous rebuild.
+        changed: usize,
+    },
+}
+
+/// An invariant that a completed rebuild promises, named so a failure says which one broke.
+///
+/// See [`SpatialGrid::check_invariants`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridInvariant {
+    /// `order` is not a permutation of the entry indices: one body is missing from it, or one appears twice.
+    NotAPermutation,
+    /// A cell's run is not ordered by [`NpcId`], so a query's tie-break would depend on when a body arrived.
+    RunUnsorted,
+    /// A cell cursor does not end where that cell's run ends, so the next placement would overwrite its neighbour.
+    CursorMisplaced,
+    /// The runs do not tile `order`: the first does not start at zero, or the last does not end at the population.
+    PopulationMismatch,
+}
+
+impl core::fmt::Display for GridInvariant {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let what = match self {
+            Self::NotAPermutation => "order is not a permutation of the entry indices",
+            Self::RunUnsorted => "a cell run is not sorted by identity",
+            Self::CursorMisplaced => "a cell cursor does not end at its run's end",
+            Self::PopulationMismatch => "the cell runs do not add up to the population",
+        };
+        formatter.write_str(what)
+    }
+}
+
+impl std::error::Error for GridInvariant {}
+
 impl SpatialGrid {
     /// Build an empty grid.
     ///
@@ -529,10 +699,15 @@ impl SpatialGrid {
             inv_cell_size: 1.0 / cell_size,
             dims,
             cell_start: vec![0; cells + 1],
+            cell_len: vec![0; cells],
             cell_cursor: Vec::new(),
+            movers: Vec::new(),
+            built: false,
             order: Vec::new(),
             entries: Vec::new(),
             threads: default_threads(),
+            slack_percent: DEFAULT_SLACK_PERCENT,
+            slack_floor: DEFAULT_SLACK_FLOOR,
             blocks: 0,
             block_totals: Vec::new(),
             #[cfg(feature = "threads")]
@@ -559,10 +734,15 @@ impl SpatialGrid {
             inv_cell_size: 0.5,
             dims: [1, 1, 1],
             cell_start: vec![0, 0],
+            cell_len: vec![0],
             cell_cursor: Vec::new(),
+            movers: Vec::new(),
+            built: false,
             order: Vec::new(),
             entries: Vec::new(),
             threads: 1,
+            slack_percent: DEFAULT_SLACK_PERCENT,
+            slack_floor: DEFAULT_SLACK_FLOOR,
             blocks: 0,
             block_totals: Vec::new(),
             #[cfg(feature = "threads")]
@@ -615,12 +795,21 @@ impl SpatialGrid {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.order.clear();
+        self.built = false;
     }
 
     /// The agents in insertion order.
     #[must_use]
     pub fn entries(&self) -> &[GridEntry] {
         &self.entries
+    }
+    /// The agents, for the code that moves them between rebuilds.
+    ///
+    /// Positions and velocities are the supported mutations: they are what a physics or steering step writes, and the
+    /// next [`SpatialGrid::build_incremental`] picks them up. Changing an `id` is allowed by the type and means calling
+    /// [`SpatialGrid::build`] instead, because the identity is the sort key a cell's run is ordered by.
+    pub fn entries_mut(&mut self) -> &mut [GridEntry] {
+        &mut self.entries
     }
 
     /// Insert an agent.
@@ -671,6 +860,53 @@ impl SpatialGrid {
     pub const fn with_threads(mut self, threads: usize) -> Self {
         self.threads = threads;
         self
+    }
+    /// Set how much slack each cell's run gets when the table is laid out, as a percentage of its population.
+    ///
+    /// The default is [`DEFAULT_SLACK_PERCENT`], a quarter. The slack is what a patch spends: a cell absorbs arrivals up
+    /// to that share of its occupancy before the table has to be laid out again. Raising it trades memory in `order` (the
+    /// slack is unused slots) for a smaller chance of that fallback, which is the knob a crowd with clustered arrivals
+    /// wants; lowering it buys the memory back at the cost of more rebuilding.
+    ///
+    /// Clamped to 0..=100, because a slack above one spare slot per body would double the table for no patch the two
+    /// phase move can use. Takes effect on the next rebuild, not on the next query.
+    #[must_use]
+    pub const fn with_slack_percent(mut self, slack_percent: u8) -> Self {
+        self.slack_percent = clamp_slack(slack_percent);
+        self
+    }
+    /// The slack this grid lays its runs out with. See [`SpatialGrid::with_slack_percent`].
+    #[must_use]
+    pub const fn slack_percent(&self) -> u8 {
+        self.slack_percent
+    }
+    /// Set the spare slots every cell gets regardless of how many bodies it holds, clamped to [`MAX_SLACK_FLOOR`].
+    ///
+    /// The percentage rule cannot help a cell that is empty, because a percentage of zero is zero: a sparse grid gives
+    /// an empty cell one slot, and the first tick in which two bodies arrive in the same one has to lay the table out
+    /// again. The floor covers that case, and it is the expensive half of the rule because it is paid per cell rather
+    /// than per body: at 611,066 cells a floor of two is 1.2 million slots, which is why the default is the smallest
+    /// floor that absorbs a pair rather than a rounder number.
+    ///
+    /// A cell's spare slots are the larger of this and the percentage, so `with_slack_floor(0)` restores the
+    /// percentage-only rule exactly. Takes effect on the next rebuild, not on the next query.
+    #[must_use]
+    pub const fn with_slack_floor(mut self, slack_floor: u32) -> Self {
+        self.slack_floor = clamp_floor(slack_floor);
+        self
+    }
+    /// The floor this grid lays its runs out with. See [`SpatialGrid::with_slack_floor`].
+    #[must_use]
+    pub const fn slack_floor(&self) -> u32 {
+        self.slack_floor
+    }
+    /// Slots in the run table, which is the population plus the slack every cell was given.
+    ///
+    /// This is the array a query walks and the memory the slack costs, so it is the number to read next to a latency
+    /// measurement rather than a count of bodies.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.order.len()
     }
 
     /// Split the prefix sum into `blocks` blocks.
@@ -739,9 +975,7 @@ impl SpatialGrid {
     /// measurement. [`SpatialGrid::build`] is this function with the costs dropped.
     pub fn build_measured(&mut self) -> PassCosts {
         let workers = self.worker_count();
-        let blocks = self.block_count();
         let mut costs = PassCosts::default();
-
         let start = Instant::now();
         if workers <= 1 {
             self.fill_cells_serial();
@@ -749,7 +983,16 @@ impl SpatialGrid {
             self.fill_cells_parallel(workers);
         }
         costs.clear = start.elapsed();
-
+        self.build_tables(&mut costs);
+        costs
+    }
+    /// Count, scan and place: everything a rebuild does once it knows each body's cell.
+    ///
+    /// Split out of [`SpatialGrid::build_measured`] so the incremental path can run the same passes over a cell table it
+    /// has already recomputed, instead of keeping a second copy of this dispatch to drift out of step with the first.
+    fn build_tables(&mut self, costs: &mut PassCosts) {
+        let workers = self.worker_count();
+        let blocks = self.block_count();
         let start = Instant::now();
         if workers <= 1 {
             self.count_cells_serial();
@@ -757,7 +1000,6 @@ impl SpatialGrid {
             self.count_cells_parallel(workers);
         }
         costs.count = start.elapsed();
-
         // The scan is the serial tail this phase exists to attack, so it is timed on its own rather than folded
         // into the count that derives its totals.
         costs.blocks = blocks;
@@ -787,9 +1029,385 @@ impl SpatialGrid {
         costs.workers = workers;
         costs.bodies = self.entries.len();
         costs.cells = self.cell_start.len();
-        costs
+        self.built = true;
+    }
+    /// Rebuild only if a body actually changed cell.
+    ///
+    /// The cheap tick. Cell numbers are recomputed for every body, which is the work `fill` already did, and the result
+    /// is compared against the table the previous rebuild left behind. A body that stayed in its cell keeps its slot in
+    /// that cell's run, so the old table still describes the new positions; a body that moved between cells makes the
+    /// old runs wrong, which is the only case that pays for [`SpatialGrid::build_tables`].
+    ///
+    /// The comparison costs nothing extra: `fill` was writing every slot unconditionally, so this writes a slot only
+    /// when it changes and counts the writes it made.
+    ///
+    /// `O(n)` when nothing moved, `O(n)` plus the three table passes when something did. It does not yet *patch* a handful
+    /// of moves without rebuilding: that needs per-cell arrival and departure counts, and is the next step of ADR 0063
+    /// P2, verified per ADR 0064.
+    pub fn build_incremental(&mut self) -> RebuildOutcome {
+        // A grid with no table yet, one whose entry list changed length, or one whose buffers were sized for another
+        // population has nothing worth keeping. The length test is against the *capacity* total, not the population:
+        // the array is longer than the bodies by the slack, and comparing it to `entries.len()` would rebuild every tick
+        // for a table that is perfectly reusable.
+        let cells_in_grid = self.cell_count();
+        let capacity = self.cell_start.get(cells_in_grid).copied().unwrap_or(0) as usize;
+        let reusable = self.built
+            && self.cell_len.len() == cells_in_grid
+            && self.cell_start.len() == cells_in_grid.saturating_add(1)
+            && self.cell_cursor.len() == self.cell_start.len()
+            && self.order.len() == capacity
+            && self.cells.len() == self.entries.len();
+        let changed = self.refill_cells();
+        if reusable && changed == 0 {
+            return RebuildOutcome::Unchanged;
+        }
+        // A handful of moves is cheaper to move than to recount: no fill, no count, no scan, just the two runs each body
+        // touches. `movers.len() == changed` is the test that the list is complete rather than truncated.
+        // A handful of moves is cheaper to move than to recount: no fill, no count, no scan, just the two runs each body
+        // touches. `movers.len() == changed` is the test that the list is complete rather than truncated, and the patch
+        // itself refuses when a run has no room, which is the one case only a fresh count can fix.
+        let patched = reusable
+            && changed <= PATCH_MAX_MOVERS
+            && self.movers.len() == changed
+            && self.patch_movers();
+        if patched {
+            return RebuildOutcome::Patched { changed };
+        }
+        let mut costs = PassCosts::default();
+        self.build_tables(&mut costs);
+        RebuildOutcome::Rebuilt { changed }
     }
 
+    /// Move the bodies that changed cell, in place, without rebuilding anything.
+    ///
+    /// Two phases, every removal before any insertion. A body leaving a cell frees the slot an arrival into that same
+    /// cell may need, so interleaving the two would let a full cell refuse an arrival a later departure made room for.
+    ///
+    /// Returns `false` when a run had no room left in its region, which the caller answers with a rebuild. Abandoning a
+    /// half-applied patch is safe precisely because [`SpatialGrid::build_tables`] recomputes every table from the entries:
+    /// the work is wasted, the result is not wrong.
+    ///
+    /// `O(moves)` twice, plus the shift of the run tails, which is why only a handful of moves may take this path.
+    fn patch_movers(&mut self) -> bool {
+        let Self {
+            cell_start,
+            cell_len,
+            cell_cursor,
+            order,
+            entries,
+            cells,
+            movers,
+            ..
+        } = self;
+        for (body, old) in movers.iter().copied() {
+            let Some((start, len)) = window_of(cell_start, cell_len, old) else {
+                return false;
+            };
+            let Some(run) = order.get(start..start.saturating_add(len)) else {
+                return false;
+            };
+            let Some(at) = run.iter().position(|value| *value == body) else {
+                return false;
+            };
+            // Close the gap inside the run only: the slots after it belong to the next cell.
+            order.copy_within(
+                start.saturating_add(at).saturating_add(1)..start.saturating_add(len),
+                start.saturating_add(at),
+            );
+            let (Some(len_slot), Some(cursor)) = (
+                cell_len.get_mut(old as usize),
+                cell_cursor.get_mut(old as usize),
+            ) else {
+                return false;
+            };
+            *len_slot = len_slot.saturating_sub(1);
+            *cursor = cursor.saturating_sub(1);
+        }
+        for (body, _) in movers.iter().copied() {
+            let Some(new) = cells.get(body as usize).copied() else {
+                return false;
+            };
+            let Some((start, len)) = window_of(cell_start, cell_len, new) else {
+                return false;
+            };
+            let Some(next) = cell_start
+                .get((new as usize).saturating_add(1))
+                .copied()
+                .map(|value| value as usize)
+            else {
+                return false;
+            };
+            if start.saturating_add(len) >= next {
+                // The region is full. A rebuild lays the slack out again from the new counts.
+                return false;
+            }
+            let Some(target) = entries.get(body as usize) else {
+                return false;
+            };
+            let at = order
+                .get(start..start.saturating_add(len))
+                .map_or(0, |run| {
+                    run.partition_point(|value| {
+                        entries
+                            .get(*value as usize)
+                            .is_some_and(|other| other.id < target.id)
+                    })
+                });
+            // Push the run's tail up by one inside the region, then drop the body into the hole. The run stays sorted by
+            // identity, which is the tie-break a query relies on.
+            order.copy_within(
+                start.saturating_add(at)..start.saturating_add(len),
+                start.saturating_add(at).saturating_add(1),
+            );
+            let Some(slot) = order.get_mut(start.saturating_add(at)) else {
+                return false;
+            };
+            *slot = body;
+            let (Some(len_slot), Some(cursor)) = (
+                cell_len.get_mut(new as usize),
+                cell_cursor.get_mut(new as usize),
+            ) else {
+                return false;
+            };
+            *len_slot = len_slot.saturating_add(1);
+            *cursor = cursor.saturating_add(1);
+        }
+        true
+    }
+    /// Recompute every body's cell, returning how many of them landed somewhere new.
+    ///
+    /// The buffer is the one the previous rebuild used, so an unchanged cell number is a slot left alone rather than a
+    /// slot rewritten with the value it already held. At a million bodies that is most of the traffic the pass would
+    /// otherwise generate, on a tick that may be about to do nothing else at all.
+    fn refill_cells(&mut self) -> usize {
+        #[cfg(feature = "threads")]
+        if self.worker_count() > 1 && self.entries.len() >= PARALLEL_MIN_BODIES {
+            return self.refill_cells_parallel();
+        }
+        let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
+        let Self {
+            cells,
+            entries,
+            movers,
+            ..
+        } = self;
+        movers.clear();
+        if cells.len() != entries.len() {
+            cells.clear();
+            cells.resize(entries.len(), 0);
+            for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
+                *slot = cell_of_parts(min, inv, dims, entry.position);
+            }
+            return entries.len();
+        }
+        let mut changed = 0_usize;
+        for (index, (slot, entry)) in cells.iter_mut().zip(entries.iter()).enumerate() {
+            let cell = cell_of_parts(min, inv, dims, entry.position);
+            if *slot != cell {
+                // The old cell has to be read here, because the next statement is what forgets it.
+                if movers.len() < PATCH_MAX_MOVERS {
+                    movers.push((num::usize_to_u32(index), *slot));
+                }
+                *slot = cell;
+                changed = changed.saturating_add(1);
+            }
+        }
+        changed
+    }
+    /// The same diff, one body range per worker, each reporting how many moves it saw and which ones.
+    ///
+    /// One slot per worker rather than a shared counter, so the total is the same whatever order the workers finish in,
+    /// and the pass allocates nothing: each worker writes the moves it finds into its own chunk of `movers`, and the chunks
+    /// are compacted into the front afterwards. The old cell is read before the slot is overwritten, because that write is
+    /// what forgets it.
+    ///
+    /// A worker whose chunk fills stops recording and says so. A tick with more moves than that is rebuilt rather than
+    /// patched, and a half-recorded list must not be mistaken for a complete one.
+    #[cfg(feature = "threads")]
+    fn refill_cells_parallel(&mut self) -> usize {
+        /// Workers are bounded by cores in practice; a longer list than this stops recording a count.
+        const SAMPLES: usize = 32;
+        let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
+        let workers = self.worker_count().min(SAMPLES);
+        self.movers.clear();
+        self.movers
+            .resize(workers.saturating_mul(PATCH_MAX_MOVERS), (0, 0));
+        let Self {
+            cells,
+            entries,
+            movers,
+            ..
+        } = self;
+        let bodies = entries.len();
+        if cells.len() != bodies {
+            cells.clear();
+            cells.resize(bodies, 0);
+            movers.clear();
+            for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
+                *slot = cell_of_parts(min, inv, dims, entry.position);
+            }
+            return bodies;
+        }
+        let chunk = bodies.div_ceil(workers.max(1));
+        if chunk == 0 {
+            movers.clear();
+            return 0;
+        }
+        let counts: [core::sync::atomic::AtomicUsize; SAMPLES] =
+            core::array::from_fn(|_| core::sync::atomic::AtomicUsize::new(0));
+        let wrote: [core::sync::atomic::AtomicUsize; SAMPLES] =
+            core::array::from_fn(|_| core::sync::atomic::AtomicUsize::new(0));
+        let mut base = 0_usize;
+        thread::scope(|scope| {
+            let mut siblings: &[core::sync::atomic::AtomicUsize] = counts.as_slice();
+            let mut writers: &[core::sync::atomic::AtomicUsize] = wrote.as_slice();
+            for ((slots, slice), room) in cells
+                .chunks_mut(chunk)
+                .zip(entries.chunks(chunk))
+                .zip(movers.chunks_mut(PATCH_MAX_MOVERS))
+            {
+                let (sample, rest) = match siblings.split_first() {
+                    Some((first, rest)) => (Some(first), rest),
+                    None => (None, siblings),
+                };
+                siblings = rest;
+                let (writer, rest) = match writers.split_first() {
+                    Some((first, rest)) => (Some(first), rest),
+                    None => (None, writers),
+                };
+                writers = rest;
+                let first_body = base;
+                base = base.saturating_add(slice.len());
+                scope.spawn(move || {
+                    let mut changed = 0_usize;
+                    let mut collected = 0_usize;
+                    let mut full = false;
+                    for (offset, (slot, entry)) in slots.iter_mut().zip(slice).enumerate() {
+                        let cell = cell_of_parts(min, inv, dims, entry.position);
+                        if *slot != cell {
+                            if let Some(pair) = room.get_mut(collected) {
+                                *pair =
+                                    (num::usize_to_u32(first_body.saturating_add(offset)), *slot);
+                                collected = collected.saturating_add(1);
+                            } else {
+                                full = true;
+                            }
+                            *slot = cell;
+                            changed = changed.saturating_add(1);
+                        }
+                    }
+                    if let Some(slot) = sample {
+                        slot.store(changed, core::sync::atomic::Ordering::Relaxed);
+                    }
+                    if let Some(slot) = writer {
+                        slot.store(
+                            if full { usize::MAX } else { collected },
+                            core::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                });
+            }
+        });
+        let changed = counts
+            .iter()
+            .map(|slot| slot.load(core::sync::atomic::Ordering::Relaxed))
+            .fold(0_usize, usize::saturating_add);
+        if wrote
+            .iter()
+            .any(|slot| slot.load(core::sync::atomic::Ordering::Relaxed) == usize::MAX)
+        {
+            self.movers.clear();
+            return changed;
+        }
+        let mut write_at = 0_usize;
+        for (index, slot) in wrote.iter().enumerate() {
+            let count = slot.load(core::sync::atomic::Ordering::Relaxed);
+            if count == 0 {
+                continue;
+            }
+            let from = index.saturating_mul(PATCH_MAX_MOVERS);
+            if from != write_at {
+                self.movers
+                    .copy_within(from..from.saturating_add(count), write_at);
+            }
+            write_at = write_at.saturating_add(count);
+        }
+        self.movers.truncate(write_at);
+        changed
+    }
+    /// Check the four things a completed rebuild promises, in `O(n)` plus one bitset.
+    ///
+    /// Allocates, so it is a debugging and test tool rather than something to call in a frame. It exists because the
+    /// incremental path's failures are quiet: a body left out of `order` is a neighbour that stops being found, and a
+    /// run left unsorted changes a query's tie-break without changing how many neighbours it returns.
+    ///
+    /// # Errors
+    ///
+    /// The first invariant that fails, named by [`GridInvariant`].
+    pub fn check_invariants(&self) -> Result<(), GridInvariant> {
+        let bodies = self.entries.len();
+        let cells = self.cell_count();
+        if self.cell_start.len() != cells.saturating_add(1) || self.cell_len.len() != cells {
+            return Err(GridInvariant::PopulationMismatch);
+        }
+        // The array is as long as the capacities add up to. With slack, that is longer than the population, and the
+        // difference is the room a patch has to spend.
+        let capacity_total = self.cell_start.get(cells).copied().unwrap_or(0);
+        if self.order.len() != capacity_total as usize
+            || self.cell_start.first().copied() != Some(0)
+        {
+            return Err(GridInvariant::PopulationMismatch);
+        }
+        let mut seen = vec![false; bodies];
+        let mut occupied = 0_u32;
+        for cell in 0..cells {
+            let start = self.cell_start.get(cell).copied().unwrap_or(0);
+            let next = self
+                .cell_start
+                .get(cell.saturating_add(1))
+                .copied()
+                .unwrap_or(0);
+            let len = self.cell_len.get(cell).copied().unwrap_or(0);
+            if next < start || len > next.saturating_sub(start) {
+                // A run longer than its own region would write into the next cell's bodies.
+                return Err(GridInvariant::PopulationMismatch);
+            }
+            if self.cell_cursor.get(cell).copied() != Some(start.saturating_add(len)) {
+                return Err(GridInvariant::CursorMisplaced);
+            }
+            occupied = occupied.saturating_add(len);
+            let Some(run) = self
+                .order
+                .get(start as usize..start.saturating_add(len) as usize)
+            else {
+                return Err(GridInvariant::PopulationMismatch);
+            };
+            for pair in run.windows(2) {
+                let (Some(first), Some(second)) = (
+                    self.entries.get(pair[0] as usize),
+                    self.entries.get(pair[1] as usize),
+                ) else {
+                    return Err(GridInvariant::NotAPermutation);
+                };
+                if first.id > second.id {
+                    return Err(GridInvariant::RunUnsorted);
+                }
+            }
+            for index in run {
+                match usize::try_from(*index)
+                    .ok()
+                    .and_then(|slot| seen.get_mut(slot))
+                {
+                    Some(flag) if !*flag => *flag = true,
+                    _ => return Err(GridInvariant::NotAPermutation),
+                }
+            }
+        }
+        if occupied != num::usize_to_u32(bodies) {
+            return Err(GridInvariant::PopulationMismatch);
+        }
+        Ok(())
+    }
     /// Compute each body's cell. `cell_of` is the only float work in a rebuild, and it is done once per
     /// body into a reused buffer so the placement pass reads four bytes instead of recomputing.
     fn fill_cells_serial(&mut self) {
@@ -814,6 +1432,7 @@ impl SpatialGrid {
     /// the empty prefix, not a cell), and each of them sets it.
     fn reset_tables(&mut self) {
         self.cell_start.fill(0);
+        self.cell_len.fill(0);
         if self.cell_cursor.len() != self.cell_start.len() {
             self.cell_cursor.clear();
             self.cell_cursor.resize(self.cell_start.len(), 0);
@@ -856,6 +1475,21 @@ impl SpatialGrid {
             if let Some(slot) = self.cell_start.get_mut(*cell as usize + 1) {
                 *slot += 1;
             }
+        }
+        // Counts become capacities here, because this is the last moment the counts exist on their own: the prefix
+        // scan below sums whatever it is given, and giving it capacities is what leaves room between the runs.
+        let cells_in_grid = self.cell_count();
+        let slack = self.slack_percent;
+        let floor = self.slack_floor;
+        let Self {
+            cell_start,
+            cell_len,
+            ..
+        } = self;
+        if let (Some(window), Some(lens)) =
+            (cell_start.get_mut(1..), cell_len.get_mut(..cells_in_grid))
+        {
+            counts_to_capacity(window, lens, slack, floor);
         }
         if self.needs_block_totals_for(self.worker_count()) {
             self.total_blocks_from_window();
@@ -937,8 +1571,11 @@ impl SpatialGrid {
     /// one worker. It advances `cell_cursor` rather than `cell_start`, so the scan's output survives placement and
     /// nothing has to shift it back (ADR 0056).
     fn place_cells_serial(&mut self) {
+        // The array is as long as the capacities add up to, not as long as the population: the difference is the slack a
+        // patch spends, and placement still writes only the first `cell_len[cell]` slots of each region.
+        let total = self.cell_start.get(self.cell_count()).copied().unwrap_or(0);
         self.order.clear();
-        self.order.resize(self.entries.len(), 0);
+        self.order.resize(total as usize, 0);
         for (index, cell) in self.cells.iter().enumerate() {
             let cell = *cell as usize;
             let target = match self.cell_cursor.get(cell).copied() {
@@ -1059,8 +1696,8 @@ impl SpatialGrid {
         /// Workers are bounded by cores in practice; a longer list than this simply stops recording samples.
         const SAMPLES: usize = 32;
         let cells_in_grid = self.cell_count();
-        let bodies = self.entries.len();
         let total = self.prefix_bases();
+        let capacity = total as usize;
         let Self {
             cell_start,
             cell_cursor,
@@ -1072,7 +1709,7 @@ impl SpatialGrid {
         let cell_list: &[u32] = cells.as_slice();
         let bases: &[u32] = block_bases.as_slice();
         order.clear();
-        order.resize(bodies, 0);
+        order.resize(total as usize, 0);
         let per = blocks.div_ceil(workers.max(1)).max(1);
         let samples: [core::sync::atomic::AtomicU64; SAMPLES] =
             core::array::from_fn(|_| core::sync::atomic::AtomicU64::new(0));
@@ -1092,9 +1729,12 @@ impl SpatialGrid {
                 let lo = block_span(lo_block, cells_in_grid, blocks).0;
                 let hi = block_span(hi_block, cells_in_grid, blocks).0;
                 let base = bases.get(lo_block).copied().unwrap_or(0);
+                // The window a worker owns runs from its base to the next block's base, which is a *capacity* offset:
+                // the table is longer than the population by the slack a patch spends, and clamping to the population
+                // here would hand the last workers a short slice and silently drop their bodies.
                 let end = usize::try_from(bases.get(hi_block).copied().unwrap_or(total))
-                    .unwrap_or(bodies)
-                    .min(bodies);
+                    .unwrap_or(capacity)
+                    .min(capacity);
                 let begin = usize::try_from(base).unwrap_or(0).min(end);
                 let span_cells = hi.saturating_sub(lo);
                 let last = hi == cells_in_grid;
@@ -1162,7 +1802,6 @@ impl SpatialGrid {
     #[cfg(feature = "threads")]
     fn place_cells_parallel(&mut self, workers: usize) -> Duration {
         let cells_in_grid = self.cell_count();
-        let bodies = self.entries.len();
         let Self {
             cell_start,
             cell_cursor,
@@ -1173,7 +1812,8 @@ impl SpatialGrid {
         let starts: &[u32] = cell_start.as_slice();
         let cell_list: &[u32] = cells.as_slice();
         order.clear();
-        order.resize(bodies, 0);
+        let capacity = cell_start.get(cells_in_grid).copied().unwrap_or(0) as usize;
+        order.resize(capacity, 0);
         let per = cells_in_grid.div_ceil(workers);
         let started = Instant::now();
         thread::scope(|scope| {
@@ -1270,6 +1910,8 @@ impl SpatialGrid {
     /// loop: the pass is memory-bound and the inner loop already reads every cell index to filter for its range.
     #[cfg(feature = "threads")]
     fn count_cells_parallel(&mut self, workers: usize) {
+        let slack_percent = self.slack_percent;
+        let slack_floor = self.slack_floor;
         let cells_in_grid = self.cell_count();
         let blocks = self.block_count();
         self.reset_tables();
@@ -1278,6 +1920,7 @@ impl SpatialGrid {
 
         let Self {
             cell_start,
+            cell_len,
             cells,
             block_totals,
             ..
@@ -1286,8 +1929,10 @@ impl SpatialGrid {
         let per = blocks.div_ceil(workers.max(1)).max(1);
         thread::scope(|scope| {
             let mut rest: &mut [u32] = cell_start.as_mut_slice();
+            let mut lens_rest: &mut [u32] = cell_len.as_mut_slice();
             let mut totals_rest: &mut [u32] = block_totals.as_mut_slice();
             let mut at = 0_usize;
+            let mut lens_at = 0_usize;
             let mut totals_at = 0_usize;
             let mut lo_block = 0_usize;
             for _ in 0..workers {
@@ -1313,6 +1958,21 @@ impl SpatialGrid {
                 };
                 rest = tail_rest;
                 at = hi + 1;
+                // The occupancy of the cells this worker owns, so it can convert its own window to capacities and
+                // total them without a second pass over the array.
+                let lens_now = std::mem::take(&mut lens_rest);
+                let Some((_, lens_skip)) =
+                    lens_now.split_at_mut_checked(lo.saturating_sub(lens_at))
+                else {
+                    lo_block = hi_block;
+                    continue;
+                };
+                let Some((lens, lens_after)) = lens_skip.split_at_mut_checked(take) else {
+                    lo_block = hi_block;
+                    continue;
+                };
+                lens_rest = lens_after;
+                lens_at = hi;
                 let totals_now = std::mem::take(&mut totals_rest);
                 let Some((_, totals_skip)) =
                     totals_now.split_at_mut_checked(lo_block.saturating_sub(totals_at))
@@ -1340,6 +2000,10 @@ impl SpatialGrid {
                             *slot += 1;
                         }
                     }
+                    // Counts become capacities before anything is totalled, so the totals are of the slots the
+                    // prefix scan will actually hand out. This is why the conversion lives in the count pass and not
+                    // after it: doing it later would stale every total and cost a second pass over the array.
+                    counts_to_capacity(window, lens, slack_percent, slack_floor);
                     // The totals this worker owns, out of the window it just filled: the counts are in L2, and
                     // no other thread can write these slots, so the result cannot depend on the schedule.
                     let mut running_window: &mut [u32] = window;
@@ -1359,8 +2023,10 @@ impl SpatialGrid {
     /// The entry indices in one cell.
     fn cell_window(&self, cell: u32) -> &[u32] {
         let start = self.cell_start.get(cell as usize).copied().unwrap_or(0) as usize;
-        let end = self.cell_start.get(cell as usize + 1).copied().unwrap_or(0) as usize;
-        self.order.get(start..end).unwrap_or(&[])
+        let len = self.cell_len.get(cell as usize).copied().unwrap_or(0) as usize;
+        self.order
+            .get(start..start.saturating_add(len))
+            .unwrap_or(&[])
     }
 
     /// Append every agent within `radius` of `centre`, ordered by distance then
@@ -2222,35 +2888,120 @@ mod tests {
         }));
         grid.build();
 
-        let mut expected = vec![0_u32; grid.cell_count() + 1];
+        // The counts, as the cell list alone can produce them.
+        let mut counts = vec![0_u32; grid.cell_count()];
         for position in &positions {
             let cell = grid.cell_of(*position);
-            if let Some(slot) = expected.get_mut(cell as usize + 1) {
+            if let Some(slot) = counts.get_mut(cell as usize) {
                 *slot += 1;
             }
         }
-        for index in 0..grid.cell_count() {
-            let below = expected.get(index).copied().unwrap_or(0);
-            let here = expected.get(index + 1).copied().unwrap_or(0);
-            if let Some(slot) = expected.get_mut(index + 1) {
-                *slot = here + below;
+        assert_eq!(
+            grid.cell_len, counts,
+            "the occupancy is not what the cell list says it is"
+        );
+        // And the window table is the scan's output over *capacities*: each cell owns its occupants plus the slack a
+        // patch spends, so the offsets are a prefix of capacities rather than of counts (ADR 0064).
+        let mut expected = vec![0_u32; grid.cell_count() + 1];
+        for (cell, count) in counts.iter().enumerate() {
+            let below = expected.get(cell).copied().unwrap_or(0);
+            if let Some(slot) = expected.get_mut(cell + 1) {
+                *slot = below.saturating_add(capacity_for(
+                    *count,
+                    grid.slack_percent(),
+                    grid.slack_floor(),
+                ));
             }
         }
         assert_eq!(
             grid.cell_start, expected,
             "the window table is not the scan's output, so placement is still writing through it"
         );
-        // And the cursor is the scratch that absorbed the advance: each entry ends at its window's end, which is
-        // the value the old shape left in `cell_start` and then had to shift back out.
+        // And the cursor is the scratch that absorbed the advance: each run ends where its window starts, plus its
+        // occupancy, which is the value the old shape left in `cell_start` and then had to shift back out.
         for cell in 0..grid.cell_count() {
+            let start = grid.cell_start.get(cell).copied().unwrap_or(0);
+            let len = grid.cell_len.get(cell).copied().unwrap_or(0);
             assert_eq!(
                 grid.cell_cursor.get(cell).copied(),
-                grid.cell_start.get(cell + 1).copied(),
-                "cursor for cell {cell} did not finish at the window end"
+                Some(start.saturating_add(len)),
+                "cursor for cell {cell} did not finish at the run's end"
             );
         }
     }
 
+    #[test]
+    fn the_slack_rule_keeps_every_run_at_least_as_wide_as_its_bodies() {
+        // The rule the patch spends, checked as arithmetic: a run always has room for the bodies in it, its spare slots
+        // are the larger of the percentage and the floor, and an empty cell still owns one slot of its own plus the
+        // floor, because that floor is the only thing standing between it and a rebuild on the next pair of arrivals.
+        for percent in [0_u8, 10, 25, 50, 100] {
+            for floor in [0_u32, 1, 2, 4] {
+                for count in [0_u32, 1, 2, 3, 4, 5, 17, 1_000, 640_000] {
+                    let capacity = capacity_for(count, percent, floor);
+                    assert!(
+                        capacity > count,
+                        "{percent}%/{floor}: {count} bodies would fill {capacity} slots with no room to move"
+                    );
+                    let spare = capacity - count - 1;
+                    let percent_slots = u32::from(percent).saturating_mul(count) / 100;
+                    assert_eq!(
+                        spare,
+                        percent_slots.max(floor),
+                        "{percent}%/{floor}: {count} bodies got {spare} spare slots"
+                    );
+                }
+            }
+        }
+        // The percentage-only rule is still reachable, which is what makes this an addition rather than a change.
+        assert_eq!(capacity_for(100, 25, 0), 126);
+        assert_eq!(capacity_for(100, 50, 0), 151);
+        // An empty cell: a percentage of zero is zero, so only the floor can make room for the pair that lands together.
+        assert_eq!(capacity_for(0, 50, 0), 1);
+        assert_eq!(capacity_for(0, 50, 1), 2);
+        assert_eq!(capacity_for(0, 50, DEFAULT_SLACK_FLOOR), 3);
+        // The floor dominates only while the percentage is smaller, which is the sparse end of the grid.
+        assert_eq!(
+            capacity_for(4, 25, 2),
+            7,
+            "1 percent slot yields to a floor of 2"
+        );
+        assert_eq!(capacity_for(400, 25, 2), 501, "100 percent slots win");
+        // Both setters clamp rather than letting a number mean nothing.
+        assert_eq!(clamp_slack(255), 100);
+        assert_eq!(clamp_slack(50), 50);
+        assert_eq!(clamp_floor(0), 0);
+        assert_eq!(clamp_floor(u32::MAX), MAX_SLACK_FLOOR);
+    }
+    #[test]
+    fn the_slack_is_read_at_build_time_and_defaults_to_a_quarter_plus_a_pair() {
+        let config =
+            SpatialGridConfig::try_new(Vec3::splat(-50.0), Vec3::splat(50.0), 4.0).or_die();
+        let grid = SpatialGrid::new(config).or_die();
+        assert_eq!(grid.slack_percent(), DEFAULT_SLACK_PERCENT);
+        assert_eq!(grid.slack_floor(), DEFAULT_SLACK_FLOOR);
+        let tuned = SpatialGrid::new(config)
+            .or_die()
+            .with_slack_percent(50)
+            .with_slack_floor(0);
+        assert_eq!(tuned.slack_percent(), 50);
+        assert_eq!(tuned.slack_floor(), 0);
+        assert_eq!(
+            SpatialGrid::new(config)
+                .or_die()
+                .with_slack_percent(200)
+                .with_slack_floor(u32::MAX)
+                .slack_percent(),
+            100
+        );
+        assert_eq!(
+            SpatialGrid::new(config)
+                .or_die()
+                .with_slack_floor(u32::MAX)
+                .slack_floor(),
+            MAX_SLACK_FLOOR
+        );
+    }
     #[test]
     fn blocks_partition_the_cells_without_gaps_or_overlap() {
         // The remainder rule from ADR 0055 §2, checked as arithmetic rather than trusted: blocks must tile
@@ -2337,6 +3088,11 @@ mod tests {
                     blocks,
                     "threads = {threads}, blocks = {blocks}: wrong number of totals"
                 );
+                // The totals are sums of *capacities*, not of counts: the scan hands out slots from the capacity prefix,
+                // so a total of counts would be a base pointing into the wrong cell (ADR 0064).
+                for slot in counted.iter_mut().skip(1) {
+                    *slot = capacity_for(*slot, grid.slack_percent(), grid.slack_floor());
+                }
                 for block in 0..blocks {
                     let (first, len) = block_span(block, cells, blocks);
                     let want: u32 = counted
@@ -2351,8 +3107,14 @@ mod tests {
                 let total: u32 = grid.block_totals.iter().copied().sum();
                 assert_eq!(
                     total,
+                    grid.cell_start.get(cells).copied().unwrap_or(0),
+                    "threads = {threads}, blocks = {blocks}: totals do not add up to the table"
+                );
+                let occupied: u32 = grid.cell_len.iter().copied().sum();
+                assert_eq!(
+                    occupied,
                     num::usize_to_u32(grid.entries.len()),
-                    "threads = {threads}, blocks = {blocks}: totals do not add up to the population"
+                    "threads = {threads}, blocks = {blocks}: the occupancy is not the population"
                 );
             }
         }
@@ -2670,3 +3432,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "spatial_incremental.rs"]
+mod incremental_tests;
