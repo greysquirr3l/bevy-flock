@@ -52,7 +52,7 @@ One line per configuration, so `scripts/compare_benchmarks.py` can read a direct
 ```
 
 Required: `engine`, `engine_version`, `workload`, `agents`, `ticks`, `budget_ms`, `median_ms`, `p95_ms`, `p99_ms`,
-`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `warmup`, `ns_per_agent`, `commit`.
+`max_ms`, `over_budget_pct`, `machine`, `notes`. Optional: `warmup`, `ns_per_agent`, `commit`, `workers`.
 
 `machine` is not decoration. A table without it is a table of rumours: the published Godot result below is on a 2018
 Ryzen 5 2600X, and this sandbox is a six-core aarch64 VM, so their 5.02 ms and our 5.47 ms are not evidence about the
@@ -68,6 +68,19 @@ cargo run --release --example cross_bench -- --agents 10000,100000,1000000 --tic
 
 One JSON line per agent count. Use `--ticks` and `--warmup` to match the other harnesses exactly; the defaults are the
 fixture's 1000 and 100.
+
+`--workers 1,2,4` adds one row per count and renames the workload to `W1-fixed-tick-<n>w`, so a swept row can never be
+mistaken for the canonical one:
+
+```text
+cargo run --release --example cross_bench -- --workload all --agents 100000 --workers 1,2,4,6 --json
+```
+
+It pins `BoidsConfig::with_workers`, which reaches the grid rebuild and nothing else; the steering pass takes its
+threads from the compute task pool, so this answers "what does the build contribute" and not "does the frame scale".
+The measured answer is 2% of the 100,000-agent row, with the build itself at 2.73x on six threads; the tables and the
+reason are in `benchmarks/README.md` under "Where the threads go". The `workers` key is `null` on rows that do not
+choose a count, and the number requested otherwise.
 
 ## Running the Godot side
 
