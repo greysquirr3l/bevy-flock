@@ -22,6 +22,12 @@
 //! cargo run --release --example build_passes -- --bodies 100000,1000000 --blocks 32,128,512
 //! ```
 //!
+//! `--warm` reuses one `SpatialGrid` across the repeats instead of allocating a fresh one per repeat. That distinction is
+//! not cosmetic: a fresh grid pays for its own tables, so `count` absorbs the first-touch page faults on the 1.69 MB
+//! `cell_start` and the median describes the allocator as much as the kernel. A game rebuilds into buffers it already
+//! owns, so `--warm` is the steady-state figure and the default is the cold one, kept because it is what every figure in
+//! `docs/dev/tuning/performance.md` before this flag was measured against.
+//!
 //! `--bodies` exists for phase 5's block sweep: the block constant has to work at the population the game actually
 //! runs, not only at the million-body fixture, and the pass mix changes with it — `clear`, `count` and `place` walk
 //! the bodies while the scan walks the cells, so a grid with few bodies in many cells is nearly all scan.
@@ -133,6 +139,14 @@ fn body_sweep() -> Vec<usize> {
     }
 }
 
+/// Whether `--warm` was passed: reuse one grid across the repeats instead of allocating one per repeat.
+///
+/// Presence is the whole contract, the way `--force` works in `scripts/compare_benchmarks.py`: a flag that changes what a
+/// number means should be hard to pass by accident and easy to see in the command that produced it.
+fn warm() -> bool {
+    std::env::args().any(|arg| arg == "--warm")
+}
+
 /// `--workers 2,4,6`: the thread counts to measure. Defaults to every count from one to the core count.
 ///
 /// The scaling curve is what the phase-5 gate has to be argued from: a pass that is 3.5x on six threads and a pass that
@@ -161,9 +175,12 @@ fn measure(
     bodies: usize,
     workers: usize,
     blocks: usize,
+    warm: bool,
 ) -> Vec<PassCosts> {
     let mut samples = Vec::with_capacity(REPEATS);
-    for _ in 0..REPEATS {
+    if warm {
+        // One grid, filled once, rebuilt repeatedly: the tables are already mapped and faulted in, which is the state a
+        // game runs in after its first frame.
         let mut grid = SpatialGrid::new(config)
             .or_die()
             .with_threads(workers)
@@ -175,13 +192,32 @@ fn measure(
                 Vec3::ZERO,
             )
         }));
-        samples.push(grid.build_measured());
+        // The first rebuild still faults in whatever the fill did not touch, so it is discarded rather than measured.
+        let _ = grid.build_measured();
+        for _ in 0..REPEATS {
+            samples.push(grid.build_measured());
+        }
+    } else {
+        for _ in 0..REPEATS {
+            let mut grid = SpatialGrid::new(config)
+                .or_die()
+                .with_threads(workers)
+                .with_blocks(blocks);
+            grid.extend_from((0..bodies).map(|index| {
+                (
+                    NpcId::unique(num::usize_to_u32(index)),
+                    position(index),
+                    Vec3::ZERO,
+                )
+            }));
+            samples.push(grid.build_measured());
+        }
     }
     samples
 }
 
 /// Print one `pass` record per pass and one `total` for the run.
-fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
+fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize, warm: bool) {
     let ran = samples.first().map_or(0, |costs| costs.blocks);
     for (name, get) in PASSES {
         let (seconds, spread_pct) = figure(
@@ -193,7 +229,7 @@ fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
         println!(
             "{{\"kind\":\"pass\",\"schema_version\":{SCHEMA_VERSION},\"pass\":\"{name}\",\
              \"bodies\":{bodies},\"threads\":{workers},\"requested_blocks\":{blocks},\"blocks\":{ran},\
-             \"seconds\":{seconds},\"spread_pct\":{spread_pct}}}"
+             \"seconds\":{seconds},\"spread_pct\":{spread_pct},\"warm\":{warm}}}"
         );
     }
     let (total, total_spread) = figure(
@@ -214,7 +250,7 @@ fn report(samples: &[PassCosts], bodies: usize, workers: usize, blocks: usize) {
         "{{\"kind\":\"total\",\"schema_version\":{SCHEMA_VERSION},\"bodies\":{bodies},\
          \"threads\":{workers},\"requested_blocks\":{blocks},\"blocks\":{ran},\"seconds\":{total},\
          \"spread_pct\":{total_spread},\"serial_share\":{serial},\"cells\":{cells},\
-         \"used_workers\":{used}}}"
+         \"used_workers\":{used},\"warm\":{warm}}}"
     );
 }
 
@@ -223,23 +259,31 @@ fn main() {
     let config =
         SpatialGridConfig::try_new(Vec3::splat(-EXTENT), Vec3::splat(EXTENT), CELL).or_die();
     let cells = SpatialGrid::new(config).or_die().cell_count();
+    let warm = warm();
     for bodies in body_sweep() {
         println!(
             "{{\"kind\":\"meta\",\"schema_version\":{SCHEMA_VERSION},\"machine\":\"{}\",\"cores\":{},\
-             \"bodies\":{bodies},\"cell\":{},\"cells\":{cells},\"repeats\":{REPEATS}}}",
+             \"bodies\":{bodies},\"cell\":{},\"cells\":{cells},\"repeats\":{REPEATS},\"warm\":{warm}}}",
             std::env::consts::ARCH,
             cores,
             CELL
         );
         for workers in worker_sweep(cores) {
-            report(&measure(config, bodies, workers, 0), bodies, workers, 0);
+            report(
+                &measure(config, bodies, workers, 0, warm),
+                bodies,
+                workers,
+                0,
+                warm,
+            );
         }
         for blocks in block_sweep() {
             report(
-                &measure(config, bodies, cores, blocks),
+                &measure(config, bodies, cores, blocks, warm),
                 bodies,
                 cores,
                 blocks,
+                warm,
             );
         }
     }

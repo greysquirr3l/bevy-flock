@@ -33,6 +33,26 @@ pool sweep: frame time against pool threads on a log scale, with the repeat rang
 speedup against the ideal line. The second is the million-body rebuild pass by pass, where `place` is 58% of the
 single-threaded build and 43% of the six-worker one.
 
+### Warm rebuild and the machine's bandwidth ceiling
+
+Two more files from the same host, written by harnesses that share this schema:
+
+- [`sandbox-aarch64/warm-sweep/`](2026-11-09/sandbox-aarch64/warm-sweep/bevy-flock-warm.jsonl) is the rebuild at 100,000
+  and 1,000,000 bodies over 1, 2, 4, 6, 8, 12 and 16 workers, cold (a fresh grid per repeat, the historical shape) and
+  warm (`--warm`, one grid rebuilt in place). Warm at six workers is 4.283 ms against cold 4.499 ms at a million bodies,
+  and 0.870 against 0.981 ms at a hundred thousand.
+- [`sandbox-aarch64/bandwidth.jsonl`](2026-11-09/sandbox-aarch64/bandwidth.jsonl) is the machine's own memory ceiling at
+  each thread count, measured with the three patterns the rebuild uses: writes reach about 146 GiB/s by five threads, reads
+  and copies about 89 and 119 GiB/s by six, and all three flatten there. This file is a machine reference and not a
+  cross-engine row, and `scripts/compare_benchmarks.py` says so rather than pretending otherwise.
+
+![Machine memory bandwidth against threads, beside the warm rebuild curve](2026-11-09/sandbox-aarch64/bandwidth.png)
+
+The two panels belong together because they answer the question the thread sweep raises. The rebuild's knee is at the core
+count, where eight threads cost 50% more time than six at a million bodies, but it is not a bandwidth wall: the rebuild
+moves about 41 MB per pass, which at its best is 9.6 GB/s, or roughly 7% of the copy ceiling this same machine reaches. Its
+cost is dependent latency and one dispatch per pass, and that is where further speedup has to come from.
+
 A caveat the spread column exists to state: the same harness at 10,000 bodies reports passes of 27 to 410 microseconds
 with spreads from 2% to 625%. Those figures are too small for this machine to measure reliably, so only the million-body
 rows above are worth quoting. The earlier prose tables that reported 10,000-body passes to three decimal places were

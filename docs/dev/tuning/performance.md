@@ -1879,3 +1879,57 @@ What this means for reading the tables: only rows above roughly one millisecond 
 figures. The million-body rows carry spreads of 8% to 28% and are sound; the 10,000-body rows describe the allocator as
 much as the kernel. A future `build_passes` mode that reuses one grid would report the steady-state cost a game actually
 pays, and its absence is the more interesting finding of the two.
+
+## Warm mode, and where the ceiling actually is (2026-11-09)
+
+`examples/build_passes --warm` reuses one `SpatialGrid` across the repeats and discards a first rebuild, so the figures
+describe a rebuild into buffers the process already owns. That is the state a game is in after its first frame. The default
+stays cold because every figure in this journal before the flag was measured cold.
+
+| 1,000,000 bodies, 6 workers | cold | warm | change |
+| --- | ---: | ---: | ---: |
+| `clear` | 0.720 ms | 0.642 ms | -10.8% |
+| `count` | 1.718 ms | 1.638 ms | -4.6% |
+| `prefix` | 0.108 ms | 0.106 ms | -1.3% |
+| `place` | 1.947 ms | 1.911 ms | -1.9% |
+| total | 4.499 ms | 4.283 ms | -4.8% |
+
+At 100,000 bodies the comparison is worth 11.3% of the total (0.981 to 0.870 ms) and `clear` alone drops 27.6%, because
+there the 1.69 MB of cell tables costs more than the entries it indexes. At one million bodies the entries dominate and the
+allocation bill shrinks to 4.8%. At one worker the two conditions differ by 5.1% in the wrong direction, which is not a
+regression: `place` moved 6.652 to 7.262 ms while its spread fell from 17.86% to 1.58%, so the cold median was riding a
+disturbed distribution and the comparison at that width sits inside the noise of where the allocator placed the buffers.
+
+### The thread sweep, and what it is not
+
+Warm totals with the worker count pushed past the six cores:
+
+| bodies | 1 | 2 | 4 | 6 | 8 | 12 | 16 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100,000 | 1.801 ms | 1.252 ms | 0.923 ms | 0.870 ms | 1.279 ms | 1.689 ms | 1.946 ms |
+| 1,000,000 | 12.455 ms | 6.963 ms | 4.952 ms | 4.283 ms | 6.403 ms | 7.561 ms | 9.136 ms |
+
+The knee is the core count, not a bandwidth wall: eight threads make the million-body rebuild 50% slower than six, twelve
+77% slower and sixteen 113% slower. Oversubscription loses more to context switching than it gains in parallelism, which is
+what a barrier-per-pass design should be expected to do.
+
+To say what the knee is not, `examples/bandwidth` measures the machine's own ceiling with the three access patterns the
+rebuild uses, on 256 MiB buffers, best of three:
+
+| threads | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 12 | 16 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| write | 36.1 | 72.1 | 106.9 | 140.0 | 146.2 | 127.2 | 118.0 | 104.6 | 128.7 |
+| read | 18.5 | 34.5 | 50.7 | 67.7 | 81.4 | 89.3 | 66.2 | 67.0 | 78.7 |
+| copy | 30.7 | 56.9 | 80.0 | 101.5 | 110.8 | 119.2 | 100.0 | 119.4 | 112.9 |
+
+All figures are GiB/s. Writes reach about 146 GiB/s by five threads, reads and copies about 89 and 119 by six, and every
+curve is flat or wobbling inside 15% past that: the memory system is saturated at the core count, not above it.
+
+The rebuild does not come close. Accounting one million-body rebuild at 36 bytes per body (a 16-byte entry read twice and a
+4-byte order slot written) plus 12 bytes per cell (the two 4-byte tables written and re-read) gives 41 MB per rebuild,
+which at 4.283 ms is 9.6 GB/s, or 8.9 GiB/s. Even charging a full 64-byte line for every one of the million scattered
+writes, the pessimistic figure is about 90 MB and 21 GB/s. Against a 119 GiB/s copy ceiling that is 7% to 18%.
+
+So the rebuild is not bandwidth bound at any thread count this machine offers, and the earlier framing of `place` and
+`clear` as memory bound at one million bodies was wrong. Their cost is latency: a dependent scatter, a serial scan, and one
+dispatch per pass. Bandwidth work cannot buy the phase-5 gate. Hiding the scatter's latency, or removing a dispatch, can.
