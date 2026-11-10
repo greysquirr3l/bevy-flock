@@ -157,7 +157,7 @@ godot --headless --path benchmarks/godot -- --mode=grid --agents=10000 --ticks=1
 python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
 ```
 
-The raw JSONL files from this run are in ignored `target/` directories and are not part of the repository.
+The [archived result records](results/README.md) include this three-engine run and the later matched-workload run. The files are committed under `benchmarks/results/`, not left in ignored `target/` directories.
 
 The Bevy harness reported `unknown cpu` on macOS for this run, because it read `/proc/cpuinfo` unconditionally, and
 the label in the table above was corrected by hand. That is fixed in the harness: `/proc/cpuinfo` on Linux,
