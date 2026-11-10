@@ -120,6 +120,34 @@ What is left for P1, in order:
 4. Re-run the byte-equality matrix, which already covers `cell_start`, `cell_cursor` and `order` across workers
    {1, 2, 3, 8} × blocks {1, 128, 1024, MAX_BLOCKS}, then measure with `examples/build_passes --warm`.
 
+## Correction: P1 cannot be finished in safe Rust as written
+
+The look-back primitive works, and it is tested. Wiring it exposed a flaw in the decision above, and the flaw is
+structural rather than a matter of effort.
+
+`Splits::take` hands each worker its output slice for `order`, and it needs `begin` and `end`: the worker's first and
+last output index. Today those come from `prefix_bases()`, computed serially **before** the scope, which is exactly why
+the pre-split is legal. Under look-back, `begin` and `end` are not known until the count has finished, and the count now
+happens inside the same dispatch as the place. A worker would have to split `order` at a runtime offset inside its own
+closure, which safe Rust cannot express: the split has to happen on the thread that owns the buffer, before the closures
+are formed.
+
+Every escape from that is worse than the 0.2 ms it buys:
+
+- **Split runs inside the closure with a raw pointer.** That is 0059's option A arriving through the back door: an
+  `unsafe` hand-off module, for one dispatch.
+- **Store `order` as `AtomicU32`.** Then runs can be handed over shared. It also puts an atomic load on every neighbour
+  read in `cell_window`, which is the query path every frame, to save a hand-off that happens once.
+- **Give each block a fixed-capacity run.** Capacity would have to be the population, multiplied by the block count.
+
+So the three-scope floor stands, and P1's assumption that only `fill` against everything-else resists fusion was wrong:
+`place` against `scan` resists it too, for a different reason. The primitive stays in the tree, tested, because a parked
+pool would put the whole rebuild inside one dispatch where the hand-off is already `unsafe` and the split could be done
+by the owner. It is not a reason to introduce that `unsafe` today for 0.2 ms.
+
+P2 is therefore the next move, and it is also the larger prize by an order of magnitude: 0.642 ms against 4.283 ms on the
+ticks where no body changes cell, with no threading change at all. Its verification design is ADR 0064.
+
 ## Rejected or deferred
 
 - **Per-block mutexes for a shared histogram** (0059 option B): re-rejected. A million-body count touches every cell, and
