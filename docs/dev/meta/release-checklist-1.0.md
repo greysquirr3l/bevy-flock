@@ -212,6 +212,11 @@ real engine on the M3 Pro, which is where the 0.937 and 3.496 ms rows come from,
 are folded back into the module. It has still never been built in this repository's CI, because UE5 does not fit in the
 sandbox the gates run in, so a contributor's first build may need small version fixes again.
 
+Attribution is measured, not argued: `--workload all` runs Unreal's loop bare and inside one ECS system, and on the
+M3 Pro those two rows differ by 0.001 ms at 10,000 agents and by nothing above noise at 100,000, while the plugin is
+9.2x the bare loop. The schedule is not the gap; the workload is. The numbers and the fixture's provenance are in
+`benchmarks/README.md`, including why the same rows measured on the sandbox drew the opposite conclusion.
+
 ## 8. Release mechanics
 
 Four crates publish, in dependency order, at one version. The order is not a preference: `cargo` rewrites every
