@@ -77,22 +77,62 @@ fn percentile(sorted: &[f64], numerator: usize, denominator: usize) -> f64 {
 }
 
 fn machine() -> String {
-    let cpu = std::fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .and_then(|text| {
-            // x86 says "model name", aarch64 says "Processor" or nothing at all.
-            ["model name", "Processor", "Hardware"]
-                .iter()
-                .find_map(|key| {
-                    text.lines()
-                        .find(|line| line.starts_with(key))
-                        .and_then(|line| line.split(':').nth(1))
-                        .map(|name| name.trim().to_owned())
-                })
-        })
-        .unwrap_or_else(|| "unknown cpu".to_owned());
+    let cpu = cpu_name().unwrap_or_else(|| "unknown cpu".to_owned());
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     format!("{cpu}, {cores} threads")
+}
+
+/// The CPU model, spelled the way the platform spells it.
+///
+/// This is reported in every row and `scripts/compare_benchmarks.py` refuses to compare rows that name different
+/// machines, so a harness that cannot name its own CPU silently disables that check. Reading `/proc/cpuinfo`
+/// unconditionally did exactly that on macOS, where the file does not exist: every row said `unknown cpu` and the
+/// Godot row on the same laptop said `Apple M3 Pro`, which is not a comparison the script should have to guess at.
+fn cpu_name() -> Option<String> {
+    if cfg!(target_os = "linux") {
+        // x86 says "model name", aarch64 says "Processor" or nothing at all.
+        std::fs::read_to_string("/proc/cpuinfo")
+            .ok()
+            .as_deref()
+            .and_then(parse_cpu_info)
+    } else if cfg!(target_os = "macos") {
+        command_stdout("sysctl", &["-n", "machdep.cpu.brand_string"])
+    } else if cfg!(target_os = "windows") {
+        std::env::var("PROCESSOR_IDENTIFIER")
+            .ok()
+            .as_deref()
+            .and_then(clean)
+    } else {
+        None
+    }
+}
+
+fn parse_cpu_info(text: &str) -> Option<String> {
+    ["model name", "Processor", "Hardware"]
+        .iter()
+        .find_map(|key| {
+            text.lines()
+                .find(|line| line.starts_with(key))
+                .and_then(|line| line.split(':').nth(1))
+                .and_then(clean)
+        })
+}
+
+fn command_stdout(program: &str, arguments: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(program)
+        .args(arguments)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    std::str::from_utf8(&output.stdout).ok().and_then(clean)
+}
+
+/// Trim, and treat an empty answer as no answer rather than as a machine called " ".
+fn clean(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 fn run(agents: usize, ticks: usize, warmup: usize, json: bool) {
@@ -163,5 +203,32 @@ fn main() {
     let parsed = args();
     for agents in parsed.agents {
         run(agents, parsed.ticks, parsed.warmup, parsed.json);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clean, parse_cpu_info};
+
+    /// Both spellings `/proc/cpuinfo` uses, because the label has to survive an ARM workstation as well as a laptop.
+    #[test]
+    fn the_cpu_name_is_read_from_either_key() {
+        let x86 =
+            "processor\t: 0\nmodel name\t: AMD Ryzen 9 7950X 16-Core Processor\nflags\t\t: fpu\n";
+        assert_eq!(
+            parse_cpu_info(x86).as_deref(),
+            Some("AMD Ryzen 9 7950X 16-Core Processor")
+        );
+        let arm = "processor\t: 0\nBogoMIPS\t: 108.00\nHardware\t: BCM2835\n";
+        assert_eq!(parse_cpu_info(arm).as_deref(), Some("BCM2835"));
+    }
+
+    /// No model line, or a blank one, is reported as no name: `unknown cpu` is a label, `" "` is a bug.
+    #[test]
+    fn a_cpuinfo_without_a_model_is_not_a_machine_name() {
+        assert_eq!(parse_cpu_info("processor\t: 0\n"), None);
+        assert_eq!(parse_cpu_info("model name\t:\n"), None);
+        assert_eq!(clean("  \t "), None);
+        assert_eq!(clean("Apple M3 Pro\n").as_deref(), Some("Apple M3 Pro"));
     }
 }

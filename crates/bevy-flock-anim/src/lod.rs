@@ -17,8 +17,8 @@
 //!
 //! [`NpcTier`]: bevy_flock_ecs::adapters::primary::cognition::NpcTier
 use crate::profile::ProfileError;
-use bevy_flock_core::domain::cognition::CognitionTier;
 use bevy_ecs::prelude::{Component, Resource};
+use bevy_flock_core::domain::cognition::CognitionTier;
 use bevy_math::Vec3;
 
 /// The default distance, in metres, inside which every body animates fully.

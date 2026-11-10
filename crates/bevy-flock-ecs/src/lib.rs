@@ -21,9 +21,9 @@
 //! so a file inside this crate that says `crate::domain::spatial` compiles exactly as it did when
 //! both halves lived in one package.
 
-pub use bevy_flock_core::{application, behavior, domain, error};
 #[doc(hidden)]
 pub use bevy_flock_core::testkit;
+pub use bevy_flock_core::{application, behavior, domain, error};
 
 pub mod adapters;
 pub mod boids;

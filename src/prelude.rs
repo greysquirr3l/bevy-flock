@@ -7,9 +7,6 @@
 // Engine types that appear in this crate's public API. Re-exported so a game
 // stays on one `Vec3` and one `Transform` rather than accidentally depending on
 // a second copy of either.
-#[cfg(feature = "ecs")]
-#[cfg(feature = "ecs")]
-pub use bevy_flock_ecs::prelude::*;
 #[cfg(feature = "anim")]
 pub use bevy_flock_anim::{
     AnimPlugin, AnimationFocus, AnimationLod, AnimationState, BlendFrame, BlendLod, BlendWeights,
@@ -17,6 +14,9 @@ pub use bevy_flock_anim::{
     GesturePlayback, GesturePlugin, LocomotionProfile, LodLevel, ProfileError, RootMotion,
     RootMotionTrace, RootOffset,
 };
+#[cfg(feature = "ecs")]
+#[cfg(feature = "ecs")]
+pub use bevy_flock_ecs::prelude::*;
 
 pub use crate::behavior::{
     ArchetypeLogic, BehaviorTree, Blackboard, Directive, DirectiveKind, FlockRegistry,

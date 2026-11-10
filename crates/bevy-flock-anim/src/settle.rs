@@ -12,8 +12,8 @@
 //!
 //! A window of zero ticks — the default for both start and stop — snaps, so an app that never
 //! authors one gets exactly the blend the simulation describes.
-use bevy_flock_core::domain::num;
 use bevy_ecs::prelude::Component;
+use bevy_flock_core::domain::num;
 
 use crate::binding::BlendFrame;
 use crate::profile::ProfileError;

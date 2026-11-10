@@ -19,8 +19,8 @@
 //! runs `cargo add bevy-flock` has exactly one dependency, so the prelude has to supply `App` and `Vec3`
 //! itself. The engine half of this file fails to compile if that stops being true.
 
-use bevy_flock::application::schedule::ThinkScheduler;
 use bevy_flock::application::SimClock;
+use bevy_flock::application::schedule::ThinkScheduler;
 use bevy_flock::behavior::Blackboard;
 use bevy_flock::domain::num;
 use bevy_flock::domain::spatial::{SpatialGrid, SpatialGridConfig};
