@@ -24,6 +24,15 @@ The harness names this machine from `CPU implementer` and `CPU part`, because th
   spreads of 8% to 28%: `clear` 2.745 to 0.719 ms, `count` 2.022 to 1.740 ms, `prefix` 0.411 to 0.105 ms, `place` 7.056 to
   1.972 ms.
 
+![Compute-pool scaling: frame time against threads on a log scale, and speedup against the ideal line](2026-11-09/sandbox-aarch64/scaling.png)
+
+![Spatial rebuild at one million bodies, pass by pass, on one and six workers](2026-11-09/sandbox-aarch64/build-passes.png)
+
+Both charts are drawn from the two files above, by reading them rather than by retyping the numbers. The first is the
+pool sweep: frame time against pool threads on a log scale, with the repeat range as whiskers, and the same data as a
+speedup against the ideal line. The second is the million-body rebuild pass by pass, where `place` is 58% of the
+single-threaded build and 43% of the six-worker one.
+
 A caveat the spread column exists to state: the same harness at 10,000 bodies reports passes of 27 to 410 microseconds
 with spreads from 2% to 625%. Those figures are too small for this machine to measure reliably, so only the million-body
 rows above are worth quoting. The earlier prose tables that reported 10,000-body passes to three decimal places were
