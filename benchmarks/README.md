@@ -64,6 +64,38 @@ The three-engine table's product row reads 2.217 and 16.528 ms from the earlier 
 15.940, which is the same number twice. Its 100,000-agent over-budget share is 32% here against 47.8% in the 1,000-tick
 run, and that is what 300-tick samples on a shared laptop look like rather than a change in the crate.
 
+### Where the threads go
+
+`--workers 1,2,4,6` pins the grid build's worker count. On the six-core VM it moves the product row by nothing:
+
+| agents | 1 worker | 2 workers | 4 workers | 6 workers |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 5.284 ms | 5.435 ms | 5.330 ms | 5.436 ms |
+| 100,000 | 44.102 ms | 44.331 ms | 43.983 ms | 44.374 ms |
+
+That is not the build failing to scale. Measured on its own, 1,000,000 bodies over 421,876 cells, seven repeats, from
+`examples/build_passes`:
+
+| threads | total | speedup | efficiency | clear | count | prefix | place |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 12.351 ms | 1.00x | 100% | 2.760 ms | 2.042 ms | 0.417 ms | 7.291 ms |
+| 2 | 6.970 ms | 1.77x | 88% | 1.552 ms | 2.060 ms | 0.294 ms | 3.082 ms |
+| 4 | 5.149 ms | 2.40x | 60% | 0.927 ms | 1.840 ms | 0.158 ms | 2.237 ms |
+| 6 | 4.564 ms | 2.73x | 46% | 0.740 ms | 1.731 ms | 0.111 ms | 1.964 ms |
+
+Place and count are where the curve flattens: both are memory-bound scatter and histogram passes, and the serial share of
+the build rises to 24.5% at six threads, which caps it near 4x. 2.73x is what six threads are worth here, and it is already
+banked.
+
+It does not show in the product row because of arithmetic: at 100,000 agents the build is 1.79 ms at one worker and 0.97 ms
+at six, out of a 44 ms row, so pinning its threads can move at most 1.9% of the frame. That is what the sweep measured.
+
+The rest of the row is steering, and steering never reads this flag. `pool_for` in `crowd.rs` takes the host's compute task
+pool, creating the default one when a headless app has none, and slices the pass across it above `MIN_PARALLEL_AGENTS`. The
+row's thread count is therefore the pool's, not `BoidsConfig::workers`, which is why a grid-worker sweep is flat and why an
+earlier version of the follow-up list was wrong to expect otherwise. Sweeping the steering needs a host that adds
+`TaskPoolPlugin` with a chosen pool shape before `FlockPlugin`, which is a harness change rather than a flag.
+
 ### The sandbox got the third statement wrong, and that is worth keeping
 
 The same three rows on the six-core aarch64 VM, median of three runs, gave 2.062 / 2.068 / 5.393 ms at 10,000 agents and
@@ -86,7 +118,11 @@ matters, which is the row above.
    and its schedule were 0.06% of the plugin row at 100,000 agents and the plugin was 3.3x the matched loop, so the gap
    is the workload and the loop's implementation rather than Bevy's dispatch. What is missing is those three rows on the
    M3 Pro, which is one command.
-2. **Sweep worker counts on this machine.** [`BoidsConfig::with_workers()`](../crates/bevy-flock-ecs/src/boids.rs) already exposes the grid rebuild's worker count. Compare 1, 2, 4, 6, 8, and 11 workers at both population sizes, and report repeated medians, p95, and budget misses. Existing [worker measurements](../docs/dev/tuning/performance.md) used a six-core host; they do not establish the best setting for this M3 Pro.
+2. **Sweep the pool, not the grid build, if the frame is the target.** `--workers` pins
+   [`BoidsConfig::with_workers()`](../crates/bevy-flock-ecs/src/boids.rs), which reaches only the grid rebuild, and the
+   rebuild is 2% of the 100,000-agent row: see [Where the threads go](#where-the-threads-go). The steering pass takes its
+   threads from the compute task pool, so measuring it needs `TaskPoolPlugin` with a chosen pool shape in front of
+   `FlockPlugin`. That sweep, on the M3 Pro at 1, 2, 4 and 10 threads, is the one worth running next.
 3. **Measure the steering query before changing its arithmetic.** A 100,000-agent Time Profiler capture sampled `steer_agent`, `ScanView::scan`, `Crowd::steer_parallel`, and Bevy's task executor. The capture covered a 15-second window during a roughly 19-second process, so it points to areas to investigate but does not assign exact costs to measured ticks. The scan is in [crowd.rs](../crates/bevy-flock-core/src/application/crowd.rs). Count scanned cells and candidate neighbors in a focused run, then test changes against the existing deterministic parity tests.
 4. **Account for headless schedule work separately.** Bevy's measured frame includes systems such as render-plan preparation even though the benchmark has no renderer. The profile did sample render-plan sorting, but it was not among the leading paths. Measure its cost in [render.rs](../crates/bevy-flock-ecs/src/adapters/primary/render.rs) before considering a headless-only option, and keep the full-plugin row for the application-level comparison.
 

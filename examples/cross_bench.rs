@@ -8,6 +8,7 @@
 //! cargo run --release --example cross_bench -- --agents 10000,100000 --ticks 1000
 //! cargo run --release --example cross_bench -- --agents 1000000 --ticks 200 --json
 //! cargo run --release --example cross_bench -- --workload matched --agents 10000,100000
+//! cargo run --release --example cross_bench -- --workload all --agents 100000 --workers 1,2,4,6 --json
 //! ```
 //!
 //! The frame measured is `App::update` over the plugin's own schedule, which is the closest thing this crate has to the
@@ -116,6 +117,8 @@ struct Args {
     warmup: usize,
     json: bool,
     workloads: Vec<Workload>,
+    /// Requested grid-build worker counts. Empty means "let the plugin choose", which is the canonical row.
+    workers: Vec<Option<usize>>,
 }
 
 fn args() -> Args {
@@ -125,6 +128,7 @@ fn args() -> Args {
         warmup: 100,
         json: false,
         workloads: vec![Workload::FixedTick],
+        workers: Vec::new(),
     };
     let mut rest = std::env::args().skip(1);
     while let Some(flag) = rest.next() {
@@ -151,6 +155,17 @@ fn args() -> Args {
             "--workload" => {
                 if let Some(list) = rest.next() {
                     parsed.workloads = Workload::parse(&list);
+                }
+            }
+            "--workers" => {
+                if let Some(list) = rest.next() {
+                    let counts: Vec<usize> = list
+                        .split(',')
+                        .filter_map(|v| v.trim().parse().ok())
+                        .collect();
+                    if !counts.is_empty() {
+                        parsed.workers = counts.into_iter().map(Some).collect();
+                    }
                 }
             }
             "--json" => parsed.json = true,
@@ -203,15 +218,27 @@ impl Row {
     }
 }
 
-fn report(workload: Workload, agents: usize, ticks: usize, warmup: usize, row: &Row, json: bool) {
+fn report(
+    label: &str,
+    note: &str,
+    workers: Option<usize>,
+    agents: usize,
+    ticks: usize,
+    warmup: usize,
+    row: &Row,
+    json: bool,
+) {
+    // `null` rather than `0`: a row that does not choose a worker count, and a row where the question does not apply,
+    // are both "not chosen", and the plugin's own `0` already means "decide for me".
+    let workers_field = workers.map_or_else(|| "null".to_owned(), |count| count.to_string());
     if json {
         println!(
             "{{\"engine\":\"bevy-flock\",\"engine_version\":\"{}\",\"workload\":\"{}\",\"agents\":{},\
              \"ticks\":{},\"warmup\":{},\"budget_ms\":{},\"median_ms\":{:.3},\"p95_ms\":{:.3},\"p99_ms\":{:.3},\
              \"max_ms\":{:.3},\"over_budget_pct\":{:.2},\"ns_per_agent\":{:.0},\"machine\":\"{}\",\
-             \"notes\":\"{}\"}}",
+             \"workers\":{},\"notes\":\"{}\"}}",
             env!("CARGO_PKG_VERSION"),
-            workload.label(),
+            label,
             agents,
             ticks,
             warmup,
@@ -223,13 +250,14 @@ fn report(workload: Workload, agents: usize, ticks: usize, warmup: usize, row: &
             row.over_pct,
             row.ns_per_agent(agents),
             machine(),
-            workload.note(),
+            workers_field,
+            note,
         );
     } else {
         println!(
             "{agents} agents [{}]: median {:.3} ms, p95 {:.3}, p99 {:.3}, max {:.3}, \
              {:.2}% over {BUDGET_MS} ms, {:.0} ns/agent",
-            workload.label(),
+            label,
             row.median,
             row.p95,
             row.p99,
@@ -299,14 +327,37 @@ fn clean(name: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-fn run_fixed_tick(agents: usize, ticks: usize, warmup: usize, json: bool) -> Row {
-    let config = FlockConfig {
+fn fixed_tick_config(agents: usize, workers: Option<usize>) -> FlockConfig {
+    let mut config = FlockConfig {
         population: PopulationSize::clamped(agents),
         spawn_budget: 1_000_000,
         mode: PopulationMode::Unique,
         seed: SimSeed::new(0xC0FF_EE00),
         ..FlockConfig::preset(CrowdPreset::CityAmbient)
     };
+    if let Some(workers) = workers {
+        config.boids = config.boids.with_workers(workers);
+    }
+    config
+}
+
+/// A swept row keeps the canonical workload name in its JSON only when no worker count was requested, so a row that
+/// came from a sweep can never be mistaken for the cross-engine row it is being compared against.
+fn fixed_tick_label(workers: Option<usize>) -> String {
+    workers.map_or_else(
+        || Workload::FixedTick.label().to_owned(),
+        |count| format!("{}-{count}w", Workload::FixedTick.label()),
+    )
+}
+
+fn run_fixed_tick(
+    agents: usize,
+    ticks: usize,
+    warmup: usize,
+    json: bool,
+    workers: Option<usize>,
+) -> Row {
+    let config = fixed_tick_config(agents, workers);
     let mut app = App::new();
     app.add_plugins(FlockPlugin::new(config));
     // One update drains the spawn queue, so the timed ticks are steady state rather than a spawn burst.
@@ -322,7 +373,14 @@ fn run_fixed_tick(agents: usize, ticks: usize, warmup: usize, json: bool) -> Row
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
     let row = Row::from_samples(&mut samples);
-    report(Workload::FixedTick, agents, ticks, warmup, &row, json);
+    let label = fixed_tick_label(workers);
+    let mut note = Workload::FixedTick.note().to_owned();
+    if let Some(workers) = workers {
+        note.push_str("; grid build pinned to ");
+        note.push_str(&workers.to_string());
+        note.push_str(if workers == 1 { " worker" } else { " workers" });
+    }
+    report(&label, &note, workers, agents, ticks, warmup, &row, json);
     row
 }
 
@@ -550,7 +608,16 @@ fn run_matched_bare(agents: usize, ticks: usize, warmup: usize, json: bool) -> R
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
     let row = Row::from_samples(&mut samples);
-    report(Workload::MatchedBare, agents, ticks, warmup, &row, json);
+    report(
+        Workload::MatchedBare.label(),
+        Workload::MatchedBare.note(),
+        None,
+        agents,
+        ticks,
+        warmup,
+        &row,
+        json,
+    );
     row
 }
 
@@ -593,7 +660,16 @@ fn run_matched_ecs(agents: usize, ticks: usize, warmup: usize, json: bool) -> Ro
         samples.push(started.elapsed().as_secs_f64() * 1e3);
     }
     let row = Row::from_samples(&mut samples);
-    report(Workload::MatchedEcs, agents, ticks, warmup, &row, json);
+    report(
+        Workload::MatchedEcs.label(),
+        Workload::MatchedEcs.note(),
+        None,
+        agents,
+        ticks,
+        warmup,
+        &row,
+        json,
+    );
     row
 }
 
@@ -634,6 +710,12 @@ fn ratio(numerator: f64, denominator: f64) -> f64 {
 
 fn main() {
     let parsed = args();
+    // An empty list means one canonical row with the plugin's own choice of workers.
+    let workers = if parsed.workers.is_empty() {
+        vec![None]
+    } else {
+        parsed.workers.clone()
+    };
     for agents in parsed.agents {
         let mut bare: Option<Row> = None;
         let mut ecs: Option<Row> = None;
@@ -641,12 +723,16 @@ fn main() {
         for workload in &parsed.workloads {
             match workload {
                 Workload::FixedTick => {
-                    plugin = Some(run_fixed_tick(
-                        agents,
-                        parsed.ticks,
-                        parsed.warmup,
-                        parsed.json,
-                    ));
+                    // The last row of a sweep is the one the attribution compares against.
+                    for count in &workers {
+                        plugin = Some(run_fixed_tick(
+                            agents,
+                            parsed.ticks,
+                            parsed.warmup,
+                            parsed.json,
+                            *count,
+                        ));
+                    }
                 }
                 Workload::MatchedBare => {
                     bare = Some(run_matched_bare(
