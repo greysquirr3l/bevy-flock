@@ -782,4 +782,31 @@ mod tests {
             }
         ));
     }
+
+    /// The authored form is the documented one: a blackboard key is a slot number, not a Rust
+    /// type name. This is the spelling the module docs show, so a change to the key's serialised
+    /// shape that broke it would break every dialogue file an author had written.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_hand_written_graph_with_a_bare_key_loads() {
+        let graph = DialogGraph::from_ron(
+            r#"(
+                root: 0,
+                nodes: [
+                    (id: 0, speaker: Npc, text: "Salt? Fresh in this morning.",
+                     choices: [(text: "I'll take two.", next: 1, requires: Some((key: 7, at_least: 2.0)))]),
+                    (id: 1, speaker: Npc, text: "Two coppers a measure.", choices: []),
+                ],
+            )"#,
+        )
+        .or_die();
+        let condition = graph
+            .nodes
+            .first()
+            .and_then(|node| node.choices.first())
+            .and_then(|choice| choice.requires)
+            .expect("the choice should carry its condition");
+        assert_eq!(condition.key, key(7));
+        assert_eq!(condition.at_least, 2.0);
+    }
 }
