@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The Bevy adapter patches its spatial index instead of rebuilding it every tick.** The incremental path existed, was
+  measured, and was used by the benchmarks only: the adapter rebuilt the whole index from scratch on every tick, so a
+  crowd paid for a full recount of a table that was usually still right. Each NPC now owns a slot in the grid's entry
+  array, which is what lets the patch compare a body's cell now with the cell it was in, and the adapter reports what it
+  did. `FlockStats` counts patched ticks and rebuilt ticks, and the new `FlockGridReport` resource holds the last outcome,
+  which names the cause when a rebuild was needed. A crowd that stands still rebuilds once, on the tick it is built, and
+  patches nothing after that. A spawn, a despawn, or a tick where more bodies cross a cell boundary than the patch can
+  absorb falls back to the rebuild, and the cause says which of those it was.
+- **The plugin's spatial grid is the one its configuration asks for.** `BoidsConfig::grid` was documented as the grid
+  the perception pass builds and was used to validate spawn positions, but the index itself was always built from the
+  default configuration. A game that set a cell size or a cell budget got the default grid and a validation that
+  disagreed with it. The grid is now built from the configuration, which is what the field has always said it was.
+- **A cleared spatial grid no longer answers about the population it used to hold.** `SpatialGrid::clear` emptied the
+  entries and kept the cell memory, and that memory is what the patch compares against, so a grid that had been cleared
+  and refilled reported that nothing had moved and kept the old population's cells. A rebuild after a clear now recounts
+  every body, which is what a grid that has forgotten everything should say.
+- **The invariant audit no longer calls a grid unsorted for keeping its entries in slot order.** A cell's run is written
+  in the order the bodies arrived, so a grid whose entries are not in identity order have runs that are not in identity
+  order either. `check_invariants` applied the sort check to those grids anyway and named the grid's own contract a
+  fault. It applies the check to a grid built from identity-ordered entries now, and skips it for one that was not.
 - **The scaling gate stopped blinding itself on a noisy runner.** A shared runner hands a cell the occasional run twice
   as long as the others, and the spread the gate reads as noise was the difference between the best and the worst of
   every sample — a range, which the worst sample the machine produced sets. One stolen run in the sequential cell

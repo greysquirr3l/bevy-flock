@@ -18,6 +18,7 @@ use crate::adapters::primary::cognition::{
 use crate::adapters::primary::components::{
     LodTier, Npc, NpcBundle, NpcDesiredVelocity, NpcIdentity, NpcNeeds, NpcTemperament, NpcVelocity,
 };
+use crate::adapters::primary::grid_slots::{GridSlots, NpcGridSlot};
 use crate::application::SimClock;
 use crate::boids::{BoidsConfig, BoidsPlugin};
 use crate::domain::ids::{NpcId, SimSeed};
@@ -326,6 +327,17 @@ pub struct FlockStats {
     pub pending: u32,
     /// Total NPCs spawned since startup.
     pub spawned_total: u64,
+    /// Ticks the spatial index was patched rather than rebuilt.
+    ///
+    /// A patch is the cheap path: no body crossed a cell boundary, so the index's tables were
+    /// already right. A crowd that reports patches is a crowd that is being simulated rather than
+    /// re-sorted.
+    pub patched_ticks: u64,
+    /// Ticks the spatial index was rebuilt from scratch.
+    ///
+    /// A rebuild is what a population change costs, and what a crowd whose bodies all cross a cell
+    /// boundary every tick costs. A number that keeps climbing says the population is changing.
+    pub rebuilt_ticks: u64,
 }
 
 impl FlockStats {
@@ -558,6 +570,7 @@ pub fn drain_spawn_queue(
     config: Res<FlockConfig>,
     mut queue: ResMut<SpawnQueue>,
     mut stats: ResMut<FlockStats>,
+    mut slots: ResMut<GridSlots>,
     mut commands: Commands,
 ) {
     let budget = config.spawn_budget;
@@ -583,22 +596,29 @@ pub fn drain_spawn_queue(
         // temperaments and archetypes above are the same whatever the placement is.
         let position = config.placement.position(id.index(), &mut rng);
 
-        commands.spawn(NpcBundle {
-            npc: Npc(id),
-            transform: Transform::from_translation(position),
-            identity: NpcIdentity {
-                archetype,
-                appearance_seed: u64::from(id.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15),
-            },
-            temperament: NpcTemperament(temperament),
-            // Everyone starts content; the decay system and whatever satisfies needs take it from
-            // here, so an NPC's state is a function of its life rather than of its spawn.
-            needs: NpcNeeds(Needs::satisfied()),
-            velocity: NpcVelocity(Vec3::ZERO),
-            desired: NpcDesiredVelocity(Vec3::ZERO),
-            locomotion: crate::adapters::primary::locomotion::Locomotion::default(),
-            lod: LodTier::Near,
-        });
+        // The slot is the index this NPC owns in the spatial grid's entry array. The grid's
+        // incremental path needs the same body at the same index every tick, and the index is
+        // what keeps that true across spawns.
+        let entity = commands
+            .spawn(NpcBundle {
+                npc: Npc(id),
+                transform: Transform::from_translation(position),
+                identity: NpcIdentity {
+                    archetype,
+                    appearance_seed: u64::from(id.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+                },
+                temperament: NpcTemperament(temperament),
+                // Everyone starts content; the decay system and whatever satisfies needs take it from
+                // here, so an NPC's state is a function of its life rather than of its spawn.
+                needs: NpcNeeds(Needs::satisfied()),
+                velocity: NpcVelocity(Vec3::ZERO),
+                desired: NpcDesiredVelocity(Vec3::ZERO),
+                locomotion: crate::adapters::primary::locomotion::Locomotion::default(),
+                lod: LodTier::Near,
+            })
+            .id();
+        let slot = slots.allocate(entity);
+        commands.entity(entity).insert(NpcGridSlot(slot));
         spawned += 1;
     }
 

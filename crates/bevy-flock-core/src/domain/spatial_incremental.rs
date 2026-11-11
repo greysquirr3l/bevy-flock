@@ -216,6 +216,32 @@ fn an_entry_list_that_changes_length_rebuilds_everything() {
 }
 
 #[test]
+fn a_cleared_grid_counts_every_body_against_the_new_population() {
+    let config = config(8.0);
+    let entries = crowd(1_500, 0xC1EA_1234);
+    let mut grid = grid_with(&entries, config, 6);
+
+    // The same bodies again after a clear: the bodies are in the same cells, so a grid that
+    // remembered the old cell numbers would report no movement at all.
+    grid.clear();
+    for entry in &entries {
+        grid.insert(*entry);
+    }
+    let outcome = grid.build_incremental();
+    assert_eq!(
+        outcome,
+        RebuildOutcome::Rebuilt {
+            changed: grid.len(),
+            cause: RebuildCause::Population,
+        },
+        "a cleared grid has no cell memory, so every body is new to it"
+    );
+    let reference = oracle(grid.entries(), config, 6);
+    assert_same_table(&grid, &reference, "cleared and refilled");
+    grid.check_invariants().or_die();
+}
+
+#[test]
 fn the_fast_path_holds_at_every_worker_count() {
     let config = config(6.0);
     let entries = crowd(12_000, 0xA11CE);
@@ -244,6 +270,25 @@ fn the_fast_path_holds_at_every_worker_count() {
         assert_same_table(&grid, &reference, "one crosser");
         grid.check_invariants().or_die();
     }
+}
+
+#[test]
+fn a_grid_whose_entries_are_not_identity_ordered_is_not_reported_as_unsorted() {
+    let config = config(8.0);
+    let mut entries = crowd(500, 0x5017_0BAD);
+    // The first body takes the highest identity, so the entry list is not in identity order, and
+    // neither are the runs a rebuild writes from it.
+    let Some(first) = entries.first_mut() else {
+        return;
+    };
+    first.id = NpcId::unique(u32::MAX);
+
+    let grid = grid_with(&entries, config, 2);
+    assert_eq!(
+        grid.check_invariants(),
+        Ok(()),
+        "a run in arrival order is the grid's contract, not a fault in it"
+    );
 }
 
 #[test]

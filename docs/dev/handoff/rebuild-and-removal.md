@@ -23,6 +23,29 @@ half-wired, in this order, because the second and third need the first:
 2. **`SpatialGrid::remove`.** There is no removal API at all, which is why a single death forces a full rebuild.
 3. **Per-cell aggregates.** Opt-in statistics a crowd library will want, with a design that keeps determinism.
 
+## Status
+
+**Task A is done**, on `feat/plugin-incremental-rebuild`: the slot table, the patched rebuild, the fallback, the outcome
+counters, and the four tests the task asks for. Two changes outside the task's four steps came with it, because the
+tests needed them and because the code was wrong without them:
+
+- `SpatialGrid::clear` clears the cell memory as well as the entries. It was the one thing standing between a cleared
+  grid and a truthful rebuild: the memory remembers which cell each entry index was in, so a grid that had been cleared
+  and refilled diffed the new bodies against the old ones and reported that nothing had moved.
+- `BoidsPlugin` builds its grid from `BoidsConfig::grid` rather than from the default configuration. The field was
+  documented as the grid the perception pass builds and was used to validate spawn positions, but the index itself
+  ignored it.
+
+Tasks B and C are untouched, and both need the slot table Task A put in place.
+
+**What the measurement says.** The index path itself is 6.6x cheaper at 100,000 bodies and 9.9x at 1,000,000 (the
+`crossers` row against the `full` row of `examples/incremental_build`, medians of three runs on an Apple M3 Pro). The
+plugin's frame could not be read: `examples/horde_100k` at 100,000 NPCs gives medians of 15.43 ms after and 15.35 ms
+before over five alternating pairs, and the host's run-to-run range is 14.4 ms to 28.3 ms while its load average was
+above 18, so a difference of about a millisecond is under the noise. The rebuild the patch removes is about 1 ms of a
+15 ms frame. Raw rows and the journal entry are in `benchmarks/results/2026-11-11/m3-pro/plugin-incremental/` and
+`docs/dev/tuning/performance.md`.
+
 ## How to work
 
 This section is procedure, not context. Follow it in order. The code is dense, the lints are strict, and a change that
@@ -103,6 +126,17 @@ python3 scripts/publish_check.py
 Use `--offline`; the dependency cache is complete and the network is not reliable. The sandbox is a small aarch64 VM
 (check `nproc` and `free -g` rather than trusting this line) with a tight disk: when `df -h /home/ubuntu` shows under
 about 3 GB free, `rm -rf target/debug/incremental target/debug/examples` before blaming the compiler for a link error.
+
+**The pinned toolchain is not the whole lint story.** `cargo clippy` above runs 1.97.1, which is what
+`rust-toolchain.toml` pins, and CI has a second job that checks the lints 1.99 added and 1.97 does not have. A change
+that passes the pinned clippy can still fail that job: `RebuildOutcome::Patched { .. }` is fine on 1.97 and an error on
+1.99, which is `clippy::rest_pattern_accessible_field`. Run the same probe before pushing:
+
+```bash
+cargo +stable clippy --all-targets --all-features -- \
+  -D clippy::unnecessary_rest_pattern -D clippy::rest_pattern_accessible_field -D raw_borrows_via_references
+python3 scripts/lint_drift.py --toolchain stable
+```
 
 **The lint policy is not advisory.** `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and
 the rest of the workspace table are denied **including in tests**. Six allows are permitted
@@ -312,11 +346,18 @@ Never write "5x" about the rebuild. ADR 0060 measured the ceiling at about 1.8x 
 ## Things that are easy to miss
 
 - **`RebuildCause` has no reference page.** It is new public API, it is mentioned in the site's performance page, and the
-  reference section does not describe it. Add it when Task A lands.
+  reference section does not describe it. Add it when Task A lands. **Done in Task A:** the site has a
+  `reference/rebuild-outcomes` page describing the three outcomes, the four causes, and how to read them from a game.
 - **`FlockStats` should count outcomes.** A game cannot currently tell whether its crowd patches or rebuilds. Two counters
-  in the existing stats struct close that.
+  in the existing stats struct close that. **Done in Task A.**
 - **`build_incremental` is documented as honouring `check_invariants` in debug builds.** Confirm that is true before
-  relying on it; if it is not, add it under `debug_assertions` and say so.
+  relying on it; if it is not, add it under `debug_assertions` and say so. **Resolved in Task A, and not the way the note
+  suggests.** ADR 0064 records the decision: the audit is a public method rather than a `debug_assert!` inside the path,
+  because an assertion that allocates a bitset would break the no-allocation tests and run on every tick of every test
+  that touches a grid. The harness calls the audit after each scripted tick instead, which is stronger than one
+  assertion at the end of a rebuild. What the audit did get wrong is the sort check: a cell's run is written in arrival
+  order, so a grid whose entries are in slot order has runs that are not in identity order either. `check_invariants` now
+  applies the sort check only to a grid built from identity-ordered entries, and says so.
 - **The look-back primitive is parked.** `docs/dev/adr/0063-dispatch-elimination.md` describes removing the per-pass
   barriers with a decoupled look-back, and PR #59 holds the primitive as a tested module that nothing calls. It is not
   needed for any of the three tasks above. Do not merge it into the grid without the aliasing decision that ADR 0063

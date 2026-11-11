@@ -32,6 +32,7 @@ export default defineConfig({
         { label: 'Reference', items: [
           { label: 'Feature flags', slug: 'reference/features' },
           { label: 'Performance', slug: 'reference/performance' },
+          { label: 'Rebuild outcomes', slug: 'reference/rebuild-outcomes' },
           { label: 'Guarantees', slug: 'reference/guarantees' },
           { label: 'Feature coverage', slug: 'reference/coverage' },
           { label: 'Where the internals live', slug: 'reference/internals' },
