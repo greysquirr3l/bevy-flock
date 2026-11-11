@@ -12,7 +12,10 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
-bevy-flock = { path = "..", default-features = false, features = ["simd", "threads"] }
+# `ecs` is the dependency edge to `bevy-flock-ecs`, which carries the plugin, the components and the
+# systems this demo drives. The facade turns it off by default so a headless simulation can depend on
+# the core alone, so a demo that runs a crowd in an `App` has to ask for it.
+bevy-flock = { path = "..", default-features = false, features = ["simd", "threads", "ecs"] }
 bevy_app = "0.20.1"
 bevy_ecs = "0.20.1"
 bevy_math = "0.20.1"
@@ -23,7 +26,7 @@ bevy_transform = "0.20.1"
 bevy_time = "0.20.1"
 
 [dev-dependencies]
-bevy_flock = { package = "bevy-flock", path = "..", default-features = false, features = ["simd", "threads"] }
+bevy_flock = { package = "bevy-flock", path = "..", default-features = false, features = ["simd", "threads", "ecs"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 # The comparison in `benches/render_pipeline.rs` needs a second renderer's CPU cost, and wgpu's
 # `noop` backend is the only one that runs without a GPU, a driver or a display: it validates and
