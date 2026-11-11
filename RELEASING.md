@@ -33,6 +33,7 @@ cargo check  --locked --target wasm32-unknown-unknown
 # 2. The scripts that guard decisions.
 python3 scripts/group_cap.py --self-test
 python3 scripts/scaling_regression.py --self-test
+python3 scripts/cpu_topology.py --self-test
 python3 scripts/scaling_report.py --check
 python3 scripts/cell_size_gate.py
 

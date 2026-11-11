@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The scaling gate stopped comparing hardware threads with cores.** A "four-core" row was four logical CPUs, and on
+  a machine with SMT that is two cores' worth of parallelism: the CI runner measured 2.29x where the six-core baseline
+  measured 3.73x, and the gate read that 38% loss as a regression in the crawl. It was the runner's topology, not the
+  code. The sweep now counts the machine's physical cores from its own topology (`scripts/cpu_topology.py`), pins one
+  CPU per core, and records the cores, the threads and the pinned CPUs in every row; a width wider than the machine
+  has cores is skipped with a note rather than measured. The gate compares a candidate's widths with the baseline's
+  only where both count real cores, and names the widths it left out: the committed baseline predates topology
+  recording, so its wider rows count threads and CI compares widths 1 and 2. A red build that was a hardware artefact,
+  fixed without touching a threshold.
 - **The band boundary gate now measures the band, not the test harness.** The allocation counter in
   `tests/band_continuity.rs` was process-wide, so it read whatever the other four gates happened to be allocating as
   if it belonged to the frame under test, and the gate then asserted that a steady-state frame allocated *at least

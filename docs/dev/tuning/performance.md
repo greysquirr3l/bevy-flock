@@ -560,7 +560,10 @@ matrices, efficiency, the measured optimum against the formula, is
 Reproduce with `scripts/scaling_sweep.sh docs/dev/tuning/data/scaling-sweep.json` (eighteen minutes on six
 cores, measured; every run pinned with `taskset`, two repeats per cell) then `python3
 scripts/scaling_curves.py docs/dev/tuning/data/scaling-sweep.json docs/images/scaling-curves.png`. CI runs the
-reduced matrix on every push; the full one is a local or nightly job.
+reduced matrix on every push; the full one is a local or nightly job. A sweep taken with the current
+script pins one CPU per physical core and records the machine's topology, so its rows count real
+cores; the committed baseline predates that and holds real-core widths 1 and 2, which is the range the
+gate compares (ADR 0034).
 
 ### Verification run, 2026-11-05
 

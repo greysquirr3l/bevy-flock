@@ -24,9 +24,11 @@ from scaling_regression import (  # noqa: E402
     FAIL_NOISE_MULTIPLIER,
     NOISE_FLOOR_PCT,
     WARN_NOISE_MULTIPLIER,
+    comparable_widths,
     compare,
     coverage_notes,
     load,
+    real_core_widths,
     speedup,
 )
 
@@ -142,11 +144,22 @@ def main() -> int:
     add(f"Generated {datetime.datetime.now().astimezone().isoformat(timespec='seconds')} from "
         f"`{args.sweep}`, recorded {recorded} on {nproc} cores ({processor}, `{machine}`).")
     add("")
-    add("Every number here is measured: each run is pinned with `taskset`, each task gets a cold target "
+    add("Every number here is measured: each run is pinned, each task gets a cold target "
         f"directory, and each cell is the median of {repeats} runs. Nothing is modelled. The fixture is "
         f"{fixture.get('crates_one_per_task', '?')} crates of {fixture.get('funcs_per_crate', '?')} functions "
         f"for shape A, and {fixture.get('bundles', '?')} bundles of {fixture.get('crates_per_bundle', '?')} "
         "crates for shape B.")
+    add("")
+    if meta.get("physical_cores"):
+        add(f"The pin is one logical CPU per physical core: the machine had "
+            f"{meta['physical_cores']} cores over {meta.get('logical_cpus', '?')} threads, so a row's core "
+            "count is a count of cores.")
+    else:
+        add("The pin in this baseline is `taskset` over logical CPU ids, and the machine's SMT layout was "
+            "never captured, so a row's core count is a count of hardware threads rather than of cores. "
+            "The gate compares the widths that are known to be real cores and names the rest, because a "
+            "row of threads is not a row of cores: two threads of one core deliver about 1.3x, not the 2x "
+            "a two-core row means.")
     add("")
     add("![Wall clock and speedup against core count](../../../images/scaling-curves.png)")
     add("")
@@ -357,14 +370,18 @@ def main() -> int:
 
     if args.candidate:
         cand_meta, cand_cells = load(args.candidate)
-        rows, failures = compare(cells, cand_cells)
+        rows, failures = compare(
+            cells,
+            cand_cells,
+            widths=comparable_widths(meta, cells, cand_meta, cand_cells),
+        )
         warnings = [row for row in rows if row["status"] == "WARN"]
         add("## Regression check against a newer run")
         add("")
         add(f"Candidate: `{args.candidate}`, recorded {cand_meta.get('recorded', 'undated')} on "
             f"{cand_meta.get('nproc', '?')} cores. Comparison is on speedup, so a slower machine is not a "
             "regression.")
-        for note in coverage_notes(cells, cand_cells):
+        for note in coverage_notes(cells, cand_cells, meta, cand_meta):
             add(f"- {note}")
         add("")
         add(table(
@@ -389,9 +406,11 @@ def main() -> int:
     add("python3 scripts/scaling_report.py --check                       # fails if this report or ADR 0034 drifted")
     add("```")
     add("")
-    add("CI runs a reduced matrix (`SHAPES=\"A\" CORES=\"1 $(nproc)\" CONC=\"1 2 4\"`, two repeats) on every "
-        "push and compares it with the same baseline; the full matrix above stays a local or nightly job "
-        "because it costs twenty minutes.")
+    real_widths = sorted(real_core_widths(meta, cells))
+    add("CI runs a reduced matrix "
+        f"(`SHAPES=\"A\" CORES=\"{' '.join(str(width) for width in real_widths)}\" CONC=\"1 2 4\"`, two repeats) "
+        "on every push and compares it with the same baseline; the full matrix above stays a local or "
+        "nightly job because it costs twenty minutes.")
     add("")
 
     path = pathlib.Path(args.out)
