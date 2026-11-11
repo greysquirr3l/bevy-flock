@@ -132,7 +132,7 @@ fn still_ticks(grid: &mut SpatialGrid) -> Vec<f64> {
     })
 }
 
-/// Ticks with `crossers` bodies moved more than a cell, so the tables are rebuilt.
+/// Ticks with `crossers` bodies moved more than a cell, so the tables have to absorb them.
 fn crosser_ticks(grid: &mut SpatialGrid, crossers: usize) -> Vec<f64> {
     let mut cursor = 0_usize;
     let bodies = grid.len().max(1);
@@ -150,14 +150,8 @@ fn crosser_ticks(grid: &mut SpatialGrid, crossers: usize) -> Vec<f64> {
         cursor = cursor.wrapping_add(crossers);
         let outcome = grid.build_incremental();
         debug_assert!(
-            matches!(
-                outcome,
-                RebuildOutcome::Rebuilt {
-                    changed: _,
-                    cause: _
-                }
-            ),
-            "a forced crosser must invalidate the table"
+            matches!(outcome, RebuildOutcome::Patched { .. }),
+            "a body that crosses a cell boundary is absorbed by the patch, got {outcome:?}"
         );
     })
 }
