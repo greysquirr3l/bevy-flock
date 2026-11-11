@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail CI when group scaling gets worse than the recorded baseline in `docs/data/scaling-sweep.json`.
+"""Fail CI when group scaling gets worse than the recorded baseline in `docs/dev/tuning/data/scaling-sweep.json`.
 
 Wall clock alone cannot gate CI: a runner with four slower cores takes longer than the six-core
 machine the baseline came from, and nothing has regressed. What transfers is the *shape* of the
@@ -14,11 +14,21 @@ Two runs must have measured the same work to be comparable, so the fixture is ch
 different functions-per-crate or a different bundle size makes the comparison meaningless and is
 refused rather than reported as a regression.
 
-    python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/candidate.json
+Two runs must also have measured the same *hardware* to be comparable, so core counts are read as
+counts of real cores. A sweep pins one logical CPU per physical core and records the machine's
+topology, so its widths mean the same thing on a four-core workstation and a four-core CI runner. The
+recorded baseline was made before that: it pinned logical CPU ids on a host whose SMT layout was never
+captured, so its wider rows count hardware threads, and a row of threads is not a row of cores. Those
+widths are named and left out of the comparison rather than compared and failed.
+
+    python3 scripts/scaling_regression.py docs/dev/tuning/data/scaling-sweep.json /tmp/candidate.json
     python3 scripts/scaling_regression.py BASE.json CAND.json --fail-pct 30 --warn-pct 15 --json out.json
 
 Defaults are 25% to fail and 12% to warn. Both widen to twice the measured spread, so a noisy runner
-gets slack without anyone editing the numbers.
+gets slack without anyone editing the numbers. The spread is the sweep's, and it is the uncertainty of
+the number the gate compares — the median's — rather than the range the machine covered: a robust
+standard error says how far that median can plausibly be off, and one run a noisy neighbour stole from
+moves neither the median nor the noise.
 
 A cell whose own spread is so wide that the failure threshold rises past the SLA it is supposed to
 enforce is reported as `unverified`, never `ok`: it has not been checked, and saying otherwise would be
@@ -52,6 +62,17 @@ FAIL_NOISE_MULTIPLIER = 2.0
 # A suite where most cells could not be checked is not a passing suite. Half is a blunt line, but it is
 # a line: below it, the run says "cannot verify" instead of reporting a green tick on a coin toss.
 MIN_VERIFIED_FRACTION = 0.5
+# The recorded baseline was made before the sweep recorded the machine's topology. It pinned logical CPU
+# ids (`taskset -c 0-N-1`) on a host whose SMT layout was never captured, so a row's core count there is
+# a count of hardware threads, and a thread of a core is not a core: two threads of one core deliver
+# about 1.3x, not the 2x a two-core row needs to be comparable with this machine's two-core row. Rows 1
+# and 2 of that baseline are real cores: the width-2 row reaches 1.878x on two concurrent builds, which
+# one core's two threads cannot do. Wider rows are ambiguous. Width 4 measures 3.734x, which four cores
+# give at 93% efficiency and three cores plus one sibling cannot beat, but a host that pairs its threads
+# differently could still have delivered it from three. So the gate compares the widths it can compare,
+# names the rest, and a sweep recorded from schema 3 on has no such gap: every width in it is a count
+# of real cores.
+LEGACY_REAL_CORE_WIDTHS = frozenset({1, 2})
 
 
 def load(path: str) -> tuple[dict, dict[tuple[str, int, int], dict]]:
@@ -85,16 +106,46 @@ def speedup(cells: dict, shape: str, cores: int, concurrency: int) -> float | No
     return sequential["wall"] / cell["wall"]
 
 
+def real_core_widths(meta: dict, cells: dict) -> set[int]:
+    """The core counts whose rows measured real cores rather than hardware threads.
+
+    Schema 3 records the machine's physical cores and pins one CPU per core, so every width in the
+    file counts real cores. Earlier sweeps pinned logical CPU ids without recording the host's SMT
+    layout, so only the widths in `LEGACY_REAL_CORE_WIDTHS` are known to be real cores there.
+    """
+    widths = {key[1] for key in cells}
+    if int(meta.get("schema", 1)) >= 3:
+        return widths
+    return widths & LEGACY_REAL_CORE_WIDTHS
+
+
+def comparable_widths(
+    base_meta: dict,
+    base_cells: dict,
+    cand_meta: dict,
+    cand_cells: dict,
+) -> set[int]:
+    """Widths that mean the same thing on both sides: a count of real cores on each."""
+    return real_core_widths(base_meta, base_cells) & real_core_widths(cand_meta, cand_cells)
+
+
 def compare(
     base_cells: dict,
     cand_cells: dict,
     fail_pct: float = DEFAULT_FAIL_PCT,
     warn_pct: float = DEFAULT_WARN_PCT,
+    widths: set[int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Per-cell verdicts and the list of cells that failed. Pure function so the self-test can drive it."""
+    """Per-cell verdicts and the list of cells that failed. Pure function so the self-test can drive it.
+
+    `widths` restricts the comparison to core counts that mean the same thing on both sides; None
+    compares every shared cell, which is what the self-test wants.
+    """
     rows: list[dict] = []
     failures: list[dict] = []
     keys = sorted(set(base_cells) & set(cand_cells), key=lambda k: (k[0], k[1], k[2]))
+    if widths is not None:
+        keys = [key for key in keys if key[1] in widths]
     for key in keys:
         shape, cores, concurrency = key
         base = speedup(base_cells, shape, cores, concurrency)
@@ -153,7 +204,13 @@ def verdict_exit(rows: list[dict], failures: list[dict]) -> int:
     return 0
 
 
-def coverage_notes(base_cells: dict, cand_cells: dict) -> list[str]:
+def coverage_notes(
+    base_cells: dict,
+    cand_cells: dict,
+    base_meta: dict | None = None,
+    cand_meta: dict | None = None,
+) -> list[str]:
+    """What the comparison did not cover, said out loud rather than left as a green tick."""
     base_cores = sorted({k[1] for k in base_cells})
     cand_cores = sorted({k[1] for k in cand_cells})
     notes = []
@@ -165,6 +222,21 @@ def coverage_notes(base_cells: dict, cand_cells: dict) -> list[str]:
         )
     if not set(base_cores) & set(cand_cores):
         notes.append("no core count in common: the run cannot be compared with this baseline")
+    if base_meta is not None and cand_meta is not None:
+        base_real = real_core_widths(base_meta, base_cells)
+        cand_real = real_core_widths(cand_meta, cand_cells)
+        ambiguous = [c for c in base_cores if c not in base_real]
+        if ambiguous:
+            notes.append(
+                "core counts the baseline recorded as hardware threads, not real cores, so they were "
+                f"not compared: {', '.join(map(str, ambiguous))}"
+            )
+        unmatched = [c for c in cand_cores if c in cand_real and c not in base_real]
+        if unmatched:
+            notes.append(
+                "core counts the candidate measured on real cores that the baseline has no real-core "
+                f"row for, so they were not compared: {', '.join(map(str, unmatched))}"
+            )
     return notes
 
 
@@ -244,6 +316,26 @@ def self_test() -> int:
     if any(r["status"] != "ok" for r in rows):
         failures.append("a 10% spread was treated as unverifiable")
 
+    # 12. A core count is comparable only when both sides measured real cores at it. The baseline
+    #     predates topology recording, so its width-4 row is a hardware-thread count and is not
+    #     comparable with a candidate's width-4 row, which is four real cores.
+    legacy = {**suite({1: 30.0, 2: 15.0}, cores=2), **suite({1: 30.0, 2: 15.0, 4: 8.0}, cores=4)}
+    fresh = dict(legacy)
+    if comparable_widths({"schema": 2}, legacy, {"schema": 3}, fresh) != {2}:
+        failures.append("a baseline's hardware-thread width was treated as a count of real cores")
+    if comparable_widths({"schema": 3}, fresh, {"schema": 3}, fresh) != {2, 4}:
+        failures.append("a sweep that recorded its topology was not treated as real cores throughout")
+    rows, dropped = compare(legacy, fresh, widths={2})
+    if dropped or any(row["cores"] != 2 for row in rows):
+        failures.append("a width that means different things on the two sides was compared anyway")
+    if len(compare(legacy, fresh)[0]) != 3:
+        failures.append("the unrestricted comparison lost a cell")
+
+    # 13. Widths left out of the comparison are named, not dropped in silence.
+    notes = coverage_notes(legacy, fresh, {"schema": 2}, {"schema": 3})
+    if not any("hardware threads" in note for note in notes):
+        failures.append("a baseline's hardware-thread widths were not named in the coverage notes")
+
     # 6. Missing core counts are skipped, not failed.
     sparse = {(("A", 2, 1)): cell(30.0), ("A", 2, 2): cell(15.0)}
     rows, dropped = compare(base, sparse)
@@ -272,7 +364,7 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("baseline", nargs="?", help="recorded sweep, usually docs/data/scaling-sweep.json")
+    parser.add_argument("baseline", nargs="?", help="recorded sweep, usually docs/dev/tuning/data/scaling-sweep.json")
     parser.add_argument("candidate", nargs="?", help="sweep from this run")
     parser.add_argument("--fail-pct", type=float, default=DEFAULT_FAIL_PCT, help="speedup drop that fails the build")
     parser.add_argument("--warn-pct", type=float, default=DEFAULT_WARN_PCT, help="speedup drop worth a warning")
@@ -296,8 +388,14 @@ def main() -> int:
         )
         return 2
 
-    rows, failures = compare(base_cells, cand_cells, args.fail_pct, args.warn_pct)
-    notes = coverage_notes(base_cells, cand_cells)
+    rows, failures = compare(
+        base_cells,
+        cand_cells,
+        args.fail_pct,
+        args.warn_pct,
+        widths=comparable_widths(base_meta, base_cells, cand_meta, cand_cells),
+    )
+    notes = coverage_notes(base_cells, cand_cells, base_meta, cand_meta)
 
     print(f"baseline : {args.baseline} ({base_meta.get('recorded', 'undated')}, {base_meta.get('nproc', '?')} cores)")
     print(f"candidate: {args.candidate} ({cand_meta.get('recorded', 'undated')}, {cand_meta.get('nproc', '?')} cores)")
@@ -346,6 +444,9 @@ def main() -> int:
                     "baseline_meta": base_meta,
                     "candidate_meta": cand_meta,
                     "notes": notes,
+                    "comparable_widths": sorted(
+                        comparable_widths(base_meta, base_cells, cand_meta, cand_cells)
+                    ),
                     "rows": rows,
                     "failures": failures,
                     "unverified": unverified,

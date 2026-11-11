@@ -112,11 +112,17 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "bevy-flock"
 version = "0.1.0"
 dependencies = [
- "bevy_app",
+ "bevy-flock-core",
+ "bevy-flock-ecs",
+]
+
+[[package]]
+name = "bevy-flock-core"
+version = "0.1.0"
+dependencies = [
  "bevy_ecs",
  "bevy_math",
  "bevy_tasks",
- "bevy_transform",
  "libm",
  "smallvec",
  "thiserror",
@@ -137,6 +143,21 @@ dependencies = [
  "criterion",
  "futures-lite",
  "wgpu",
+]
+
+[[package]]
+name = "bevy-flock-ecs"
+version = "0.1.0"
+dependencies = [
+ "bevy-flock-core",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_tasks",
+ "bevy_transform",
+ "libm",
+ "smallvec",
+ "thiserror",
 ]
 
 [[package]]

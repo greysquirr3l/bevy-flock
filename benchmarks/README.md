@@ -30,6 +30,55 @@ Treat these as rough system comparisons, not an engine ranking. The measured wor
 
 The Unreal workload is a small SoA loop, not a comparison with Unreal's crowd stack. Bevy's result includes its plugin schedule, while Unreal measures only its subsystem tick. The benchmark guide discusses these differences.
 
+## Which harness answers which question
+
+Seven files in `examples/` and one script produce the numbers in this document and in the performance journal, and they
+answer different questions. Reach for the one whose question matches yours; the "roughly" column is one row on the six-core VM, so it is a
+sense of scale rather than a promise.
+
+| harness | question it answers | command | roughly |
+| --- | --- | --- | ---: |
+| [`cross_bench`](../examples/cross_bench.rs) | Does the engine cost anything, and what does the plugin do on top of a bare loop? | `--workload all --agents 10000,100000 --ticks 300 --json` | 1 s per 60 ticks |
+| [`build_passes`](../examples/build_passes.rs) | What do the four rebuild passes cost, and how do they scale with threads, blocks and bodies? | `--bodies 100000,1000000 --workers 1,6` | 0.1 s per row |
+| [`patch_tail`](../examples/patch_tail.rs) | How often does the incremental rebuild give up, and what does a tick cost when it does? | `--crossers 512 --slack 25 --floor 2 --arrival cluster` | 0.2 s per row |
+| [`incremental_build`](../examples/incremental_build.rs) | What do a still tick, a handful of movers, and a full re-formation cost side by side? | `--bodies 1000000 --crossers 64` | 0.6 s |
+| [`bandwidth`](../examples/bandwidth.rs) | What does this machine's memory actually do, so a memory-bound pass can be told from a badly written one? | `--size 512 --threads 1,2,4,6` | 2 s |
+| [`spawn_cost`](../examples/spawn_cost.rs) | What does acquiring and releasing a crowd cost, separate from moving it? | `--bodies 10000` | 6 s |
+| [`band_ticks`](../examples/band_ticks.rs) | What does the banded continuum cost per tick with a moving anchor? | `--ticks 200` | 0.2 s per 60 ticks |
+| [`scaling_sweep.sh`](../scripts/scaling_sweep.sh) with [`scaling_regression.py`](../scripts/scaling_regression.py) | Did this change make a measured row worse than the checked-in baseline? | see [What CI will fail on](#what-ci-will-fail-on) | minutes |
+
+`profile_crowd`, `profile_build`, `profile_band`, `horde_100k` and `ambient_metropolis` are shaped demos rather than
+measurements: they exist for a scene that needs a number, not for a table.
+
+## Comparability rules
+
+Four rules, and a table that breaks one of them is not a measurement:
+
+1. **Every row names its host.** The rows here come from an Apple M3 Pro laptop and a six-core aarch64 VM, and
+   [`scripts/compare_benchmarks.py`](../scripts/compare_benchmarks.py) refuses to build a table from two machines at once.
+   A row that cannot name its own CPU turns that refusal off, which is why the CPU label was fixed rather than annotated.
+2. **A ratio across hosts is not a result.** [The section below](#the-sandbox-got-the-third-statement-wrong-and-that-is-worth-keeping)
+   is what happens when one is taken anyway: the same fixture reads 7.7x slower on the VM single-threaded and 2.8x slower
+   parallel, so dividing one row by the other produced a deficit that did not exist.
+3. **A row is the median of a stated number of runs.** `--repeat 3` gives the record a `spread_pct` and the name of the run
+   whose median sat in the middle. A row without a repeat count is one run on a shared host.
+4. **Rows measured in different sessions are only comparable within their noise.** A container that was idle for one sweep
+   and busy for the next produces two of everything; the archived records keep their timestamps for this reason.
+
+## How to read a p99 here
+
+A p99 on this kind of host has three causes, and they are told apart by comparing the p99 to its own row's median before
+comparing it to anything else:
+
+- **A rebuild inside the measured loop.** The p99 lands near the rebuild's cost and the patched share says how often: at
+  512 crossers with floor 0, the p99 *rises* with the worker count because the residue is a full rebuild. Change the
+  slack, not the thread count.
+- **Host scheduling.** The p99 sits within about twice the median, and `spread_pct` moves with it. The small-body passes
+  are in this bucket: their kernels are 3 to 4 µs, so a 100 µs tick is the scheduler rather than the code.
+- **First touch and the allocator.** The worst tick is many times the p99 and appears once per process, which is why
+  `cross_bench`'s 100,000-agent row has a 139 ms maximum beside a 19.7 ms p99. Warm-up ticks exist to keep this out of the
+  medians, not to make it disappear.
+
 ## What the gap is made of
 
 A product row cannot say which part of it is the schedule and which is the work. `--workload all` answers that with two
@@ -123,6 +172,22 @@ rows are not portable between hosts even when the fixture is identical, and divi
 reach a conclusion about an implementation is what produced the mistake. The correction is one command on the host that
 matters, which is the row above.
 
+### The patch's borrow budget
+
+`examples/patch_tail.rs` now measures two arrival patterns, because the patch's failure mode depends on which one a game
+has. `--arrival random` scatters a tick's crossers over the whole field; `--arrival cluster --cluster-radius 4` puts them
+inside a hotspot four cells wide around one point per tick, which is a crowd flowing into one district.
+
+| bodies | arrival | patched before | median before | patched after | median after |
+| --- | --- | --- | --- | --- | --- |
+| 100,000 | cluster | 0.0% | 2.581 ms | 100.0% | 0.347 ms |
+| 1,000,000 | cluster | 0.0% | 13.981 ms | 100.0% | 1.305 ms |
+| 100,000 | random | 99.5% | 0.351 ms | 100.0% | 0.352 ms |
+| 1,000,000 | random | 99.0% | 1.344 ms | 100.0% | 1.362 ms |
+
+`--cluster-radius 0` sends every crosser into a single cell, which is beyond the borrow budget and still rebuilds on
+purpose: the row exists so the limit is visible rather than inferred.
+
 ## What to try next
 
 1. **Start from the matched rows when attributing the gap.** `--workload all` runs the fixture twice more: Unreal's
@@ -178,13 +243,76 @@ from the sandbox run are in `benchmarks/results/2026-11-10/sandbox-aarch64/patch
 - **More prefix-scan work:** the count and prefix work has already been fused and measured; the remaining prefix pass was a small part of the rebuild. See [ADR 0057](../docs/dev/adr/0057-fused-count-and-scan.md) and [ADR 0060](../docs/dev/adr/0060-build-5x-gate.md).
 - **A persistent unsafe worker pool:** [ADR 0059](../docs/dev/adr/0059-worker-pool-ownership.md) defers it because the remaining dispatch cost does not justify the aliasing and soundness burden. The Bevy task-pool alternative was rejected because it allocates in the steady-state rebuild.
 
+## What CI will fail on
+
+`scaling-regression` runs a fresh sweep against the checked-in baseline and fails above a threshold:
+
+```text
+scripts/scaling_sweep.sh /tmp/candidate.json
+python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/candidate.json \
+  --fail-pct 25 --warn-pct 12 --json /tmp/scaling-verdict.json
+```
+
+A row more than 25% worse than its baseline fails the job, 12% to 25% warns, and the verdict is uploaded as an artifact.
+The thresholds, the noise handling and the fixture guards are covered by `--self-test`, which runs without a compiler.
+
+Two things this gate does not do. `bench-smoke` only *compiles* the benches (`--no-run`), so a bench that became slower
+does not fail CI. And nothing in CI runs the harnesses above at a million bodies: the archived rows are records, not
+assertions. If a change can move a rebuild, run `build_passes` and `patch_tail` against the same host before and after, and
+put both files in `results/`.
+
+## What the engine fixtures need from you
+
+The fixture is checked in, but each engine needs one thing before it will run:
+
+- **Godot** is self-contained: `godot --headless --path benchmarks/godot -- --mode=grid --agents=10000 --ticks=1000 --json`
+  works from a clean checkout with Godot 4.7 or later, no editor import step. `--mode=basic` runs the version that does
+  not use the grid for avoidance, which is the distinction between the two Godot rows.
+- **Unreal** is not: copy [benchmarks/unreal/Source/CrossBench](unreal/Source/CrossBench) into a project's `Source/`, add
+  the module to that project, build, then run the editor command line the [Unreal README](unreal/README.md) lists.
+  `scripts/cross_bench.py` refuses to guess a template path, so the first run names what is missing rather than producing
+  a row that is quietly the wrong project.
+- **Bevy** needs nothing: `cargo run --release --example cross_bench -- --agents 10000 --ticks 1000 --json`.
+
+The Unreal side has never been executed on this host. It is reviewed code with a fixture behind it, not a measurement, and
+the table above says so where it matters.
+
+## Numbers we do not have
+
+Written down so the gaps are not mistaken for measurements:
+
+- **No x86 row at all.** Every number here is aarch64 or Apple silicon.
+- **No pair of the same fixture on two hosts of the same architecture**, which is what a portable scaling claim needs.
+- **No real GPU numbers for the demo.** The software rasteriser validated on lavapipe is a CPU rasteriser; it says nothing
+  about a Metal or D3D12 frame.
+- **No Unreal execution**, only the review and the fixture.
+- **No measured plugin frame for the incremental rebuild.** `build_incremental` is wired into the harnesses and not yet
+  into `rebuild_spatial_grid`, which clears and rebuilds every tick. The patched rows describe the mechanism, not the
+  frame a game gets.
+
 ## Reproducing a row
 
 ```text
+# three engines, same fixture
 cargo run --release --example cross_bench -- --agents 10000,100000 --ticks 1000 --json
 godot --headless --path benchmarks/godot -- --mode=grid --agents=10000 --ticks=1000 --json
 # Unreal: copy the module per unreal/README.md, then run with the -crossbench* flags
 python3 scripts/compare_benchmarks.py bevy.json godot.json unreal.json
+
+# the four rebuild passes, one row per worker count
+# seven repeats are the harness's own constant, and --warm reuses one grid across them
+cargo run --release --example build_passes -- --bodies 100000,1000000 --workers 1,2,4,6
+
+# the incremental rebuild, both arrival patterns
+cargo run --release --example patch_tail -- --bodies 100000,1000000 --crossers 512 --slack 25 --floor 2 \
+  --workers 6 --arrival random,cluster --ticks 200 --json
+cargo run --release --example patch_tail -- --arrival cluster --cluster-radius 0
+
+# still, a handful of movers, and a re-formation
+cargo run --release --example incremental_build -- --bodies 1000000 --crossers 64 --workers 6
+
+# this machine's memory, so a memory-bound pass is recognisable
+cargo run --release --example bandwidth -- --size 512 --threads 1,2,4,6
 ```
 
 The [archived result records](results/README.md) include this three-engine run and the later matched-workload run. The files are committed under `benchmarks/results/`, not left in ignored `target/` directories.

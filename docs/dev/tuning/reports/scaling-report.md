@@ -1,8 +1,10 @@
 # Scaling report: cores, threads per task, and what the crawl fills
 
-Generated 2026-11-05T14:47:52+00:00 from `docs/dev/tuning/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
+Generated 2026-11-11T02:06:51-05:00 from `docs/dev/tuning/data/scaling-sweep.json`, recorded 2026-11-05T09:52:25+00:00 on 6 cores (aarch64, `Linux-6.18.38+-aarch64-with-glibc2.39`).
 
-Every number here is measured: each run is pinned with `taskset`, each task gets a cold target directory, and each cell is the median of 2 runs. Nothing is modelled. The fixture is 8 crates of 1500 functions for shape A, and 3 bundles of 6 crates for shape B.
+Every number here is measured: each run is pinned, each task gets a cold target directory, and each cell is the median of 2 runs. Nothing is modelled. The fixture is 8 crates of 1500 functions for shape A, and 3 bundles of 6 crates for shape B.
+
+The pin in this baseline is `taskset` over logical CPU ids, and the machine's SMT layout was never captured, so a row's core count is a count of hardware threads rather than of cores. The gate compares the widths that are known to be real cores and names the rest, because a row of threads is not a row of cores: two threads of one core deliver about 1.3x, not the 2x a two-core row means.
 
 ![Wall clock and speedup against core count](../../../images/scaling-curves.png)
 
@@ -130,4 +132,4 @@ python3 scripts/scaling_report.py docs/dev/tuning/data/scaling-sweep.json --out 
 python3 scripts/scaling_report.py --check                       # fails if this report or ADR 0034 drifted
 ```
 
-CI runs a reduced matrix (`SHAPES="A" CORES="1 $(nproc)" CONC="1 2 4"`, two repeats) on every push and compares it with the same baseline; the full matrix above stays a local or nightly job because it costs twenty minutes.
+CI runs a reduced matrix (`SHAPES="A" CORES="1 2" CONC="1 2 4"`, two repeats) on every push and compares it with the same baseline; the full matrix above stays a local or nightly job because it costs twenty minutes.

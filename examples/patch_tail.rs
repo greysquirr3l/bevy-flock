@@ -1,14 +1,24 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "benchmark fixtures must preserve unfused deterministic rounding"
+)]
+
 //! Tail latency of the patched rebuild under heavy random crosser loads, at two slack rules.
 //!
 //! [`SpatialGrid::build_incremental`] either patches the bodies that changed cell or falls back to a full rebuild, and the
 //! fallback is what a frame's tail is made of. Two things decide how often it happens: how many bodies cross a cell
 //! boundary in one tick, and how much slack each cell's run was given when the table was laid out. This harness measures
-//! both, with arrivals that are uniformly random rather than correlated with departures, which is the pattern the patch
+//! both, with arrivals that are either uniformly random or clustered into one cell per tick, which is the pattern the
+//! patch
 //! is worst at and therefore the one worth putting a number on.
 //!
 //! ```text
 //! cargo run --release --example patch_tail
 //! cargo run --release --example patch_tail -- --bodies 1000000 --crossers 64,512,2048 --slack 25,50 --floor 0,1,2,4
+//!
+//! `--arrival random|cluster` picks where a tick's crossers land. `random` scatters them over the whole field, which is
+//! the pattern the patch was measured against first; `cluster` puts them inside a hotspot `--cluster-radius` cells wide
+//! around one point per tick, which is a crowd flowing into one district. The crossers are the same bodies either way.
 //! cargo run --release --example patch_tail -- --json
 //! ```
 //!
@@ -46,10 +56,48 @@ fn main() -> std::process::ExitCode {
     }
 }
 
+/// Where a tick's arrivals land: uniformly through the field, or all inside one cell.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Arrival {
+    /// Uniformly random, which is the worst case for a particle system and the best case for a grid.
+    Random,
+    /// All of them around one point, which is the correlated arrival the borrow budget was added for.
+    Cluster,
+}
+
+impl Arrival {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Random => "random",
+            Self::Cluster => "cluster",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "random" => Some(Self::Random),
+            "cluster" => Some(Self::Cluster),
+            _ => None,
+        }
+    }
+}
+
+/// A displacement inside the hotspot: `radius` cells on each axis around the tick's hot point.
+fn jitter(rng: &mut Rng, radius: f32) -> Vec3 {
+    let unit = |rng: &mut Rng| num::u32_to_f32(rng.below(1_000_001)) / 1_000_000.0;
+    let reach = CELL * radius;
+    Vec3::new(
+        (unit(rng) * 2.0 - 1.0) * reach,
+        (unit(rng) * 2.0 - 1.0) * reach,
+        (unit(rng) * 2.0 - 1.0) * reach,
+    )
+}
+
 /// One row of the sweep: a workload, a slack rule, and what that combination cost.
 struct Row {
     bodies: u32,
     crossers: u32,
+    arrival: Arrival,
     slack: u8,
     floor: u32,
     workers: usize,
@@ -79,7 +127,8 @@ fn run() -> io::Result<()> {
         )?;
         writeln!(
             out,
-            "{:>9} {:>8} {:>5} {:>5} {:>7} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7} {:>7} {:>9}",
+            "{:>7} {:>9} {:>8} {:>5} {:>5} {:>7} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7} {:>7} {:>9}",
+            "arrival",
             "bodies",
             "crossers",
             "slack",
@@ -96,32 +145,44 @@ fn run() -> io::Result<()> {
         )?;
     }
     for &bodies in &args.bodies {
-        for &crossers in &args.crossers {
-            for &slack in &args.slack {
-                for &floor in &args.floor {
-                    for &workers in &args.workers {
-                        let row = measure(bodies, crossers, slack, floor, workers, args.ticks)?;
-                        if args.json {
-                            writeln!(out, "{}", row.to_json())?;
-                        } else {
-                            writeln!(
-                                out,
-                                "{:>9} {:>8} {:>4}% {:>5} {:>7} {:>7.1}% {:>7.1}% {:>7.1}% {:>6.3} {:>6.3} \
-                                 {:>6.3} {:>7.3} {:>9}",
-                                row.bodies,
-                                row.crossers,
-                                row.slack,
-                                row.floor,
-                                row.workers,
-                                percent_of(row.patched, row.ticks),
-                                percent_of(row.rebuilt, row.ticks),
-                                percent_of(row.unchanged, row.ticks),
-                                row.median_ms,
-                                row.p95_ms,
-                                row.p99_ms,
-                                row.worst_ms,
-                                row.order_slots
+        for &arrival in &args.arrival {
+            for &crossers in &args.crossers {
+                for &slack in &args.slack {
+                    for &floor in &args.floor {
+                        for &workers in &args.workers {
+                            let row = measure(
+                                bodies,
+                                crossers,
+                                slack,
+                                floor,
+                                workers,
+                                args.ticks,
+                                arrival,
+                                args.radius,
                             )?;
+                            if args.json {
+                                writeln!(out, "{}", row.to_json())?;
+                            } else {
+                                writeln!(
+                                    out,
+                                    "{:>7} {:>9} {:>8} {:>4}% {:>5} {:>7} {:>7.1}% {:>7.1}% {:>7.1}% {:>6.3} \
+                                 {:>6.3} {:>6.3} {:>7.3} {:>9}",
+                                    row.arrival.label(),
+                                    row.bodies,
+                                    row.crossers,
+                                    row.slack,
+                                    row.floor,
+                                    row.workers,
+                                    percent_of(row.patched, row.ticks),
+                                    percent_of(row.rebuilt, row.ticks),
+                                    percent_of(row.unchanged, row.ticks),
+                                    row.median_ms,
+                                    row.p95_ms,
+                                    row.p99_ms,
+                                    row.worst_ms,
+                                    row.order_slots
+                                )?;
+                            }
                         }
                     }
                 }
@@ -142,9 +203,10 @@ fn run() -> io::Result<()> {
 impl Row {
     fn to_json(&self) -> String {
         format!(
-            "{{\"schema_version\":1,\"kind\":\"patch_tail\",\"bodies\":{},\"crossers\":{},\"slack_percent\":{},\"slack_floor\":{},\
+            "{{\"schema_version\":1,\"kind\":\"patch_tail\",\"arrival\":\"{}\",\"bodies\":{},\"crossers\":{},\"slack_percent\":{},\"slack_floor\":{},\
              \"workers\":{},\"ticks\":{},\"patched\":{},\"rebuilt\":{},\"unchanged\":{},\"rebuild_ms\":{:.3},\
              \"median_ms\":{:.3},\"p95_ms\":{:.3},\"p99_ms\":{:.3},\"worst_ms\":{:.3},\"order_slots\":{}}}",
+            self.arrival.label(),
             self.bodies,
             self.crossers,
             self.slack,
@@ -172,6 +234,8 @@ fn measure(
     floor: u32,
     workers: usize,
     ticks: usize,
+    arrival: Arrival,
+    radius: f32,
 ) -> io::Result<Row> {
     let config = SpatialGridConfig::try_new(Vec3::splat(-EXTENT), Vec3::splat(EXTENT), CELL)
         .map_err(other)?;
@@ -198,9 +262,15 @@ fn measure(
     let mut rebuilt = 0_usize;
     let mut unchanged = 0_usize;
     for tick in 0..(WARMUP + ticks) {
+        // One hot point per tick: in cluster mode every arrival lands inside the cell it falls in, which is a crowd
+        // pouring through one door rather than a crowd teleporting uniformly.
+        let hot = random_position(&mut rng);
         for _ in 0..crossers {
             let index = rng.below(bodies);
-            let position = random_position(&mut rng);
+            let position = match arrival {
+                Arrival::Random => random_position(&mut rng),
+                Arrival::Cluster => hot + jitter(&mut rng, radius),
+            };
             if let Some(entry) = grid.entries_mut().get_mut(index as usize) {
                 entry.position = position;
             }
@@ -222,6 +292,7 @@ fn measure(
     Ok(Row {
         bodies,
         crossers,
+        arrival,
         slack,
         floor,
         workers,
@@ -253,8 +324,13 @@ enum RebuildOutcomeKind {
 const fn classify(outcome: bevy_flock::domain::spatial::RebuildOutcome) -> RebuildOutcomeKind {
     match outcome {
         bevy_flock::domain::spatial::RebuildOutcome::Unchanged => RebuildOutcomeKind::Unchanged,
-        bevy_flock::domain::spatial::RebuildOutcome::Patched { .. } => RebuildOutcomeKind::Patched,
-        bevy_flock::domain::spatial::RebuildOutcome::Rebuilt { .. } => RebuildOutcomeKind::Rebuilt,
+        bevy_flock::domain::spatial::RebuildOutcome::Patched { changed: _ } => {
+            RebuildOutcomeKind::Patched
+        }
+        bevy_flock::domain::spatial::RebuildOutcome::Rebuilt {
+            changed: _,
+            cause: _,
+        } => RebuildOutcomeKind::Rebuilt,
     }
 }
 
@@ -314,6 +390,9 @@ impl Rng {
 struct Args {
     bodies: Vec<u32>,
     crossers: Vec<u32>,
+    arrival: Vec<Arrival>,
+    /// How wide the hotspot is in cells, for the clustered arrival pattern.
+    radius: f32,
     slack: Vec<u8>,
     floor: Vec<u32>,
     workers: Vec<usize>,
@@ -326,6 +405,8 @@ impl Args {
         let mut parsed = Self {
             bodies: vec![100_000, 1_000_000],
             crossers: vec![64, 512, 2_048],
+            arrival: vec![Arrival::Random, Arrival::Cluster],
+            radius: 4.0,
             slack: vec![25, 50],
             floor: vec![0, 2],
             workers: vec![6],
@@ -357,11 +438,42 @@ impl Args {
                 "floor" => parsed.floor = numbers(&arg)?,
                 "workers" => parsed.workers = counts(&arg)?,
                 "ticks" => parsed.ticks = single(&arg)?,
+                "arrival" => parsed.arrival = arrivals(&arg)?,
+                "cluster-radius" => parsed.radius = single_float(&arg)?,
                 other => return Err(invalid(format!("unknown flag `--{other}`"))),
             }
         }
         Ok(parsed)
     }
+}
+
+/// A comma-separated list of arrival patterns.
+fn arrivals(text: &str) -> io::Result<Vec<Arrival>> {
+    let mut values = Vec::new();
+    for piece in text.split(',') {
+        let piece = piece.trim();
+        let arrival = Arrival::parse(piece)
+            .ok_or_else(|| invalid(format!("`{piece}` is neither `random` nor `cluster`")))?;
+        values.push(arrival);
+    }
+    if values.is_empty() {
+        return Err(invalid(
+            "an empty list was given where an arrival pattern was expected".to_owned(),
+        ));
+    }
+    Ok(values)
+}
+
+/// One non-negative float, for the flags that describe the fixture rather than sweep a value.
+fn single_float(text: &str) -> io::Result<f32> {
+    let value: f32 = text
+        .trim()
+        .parse()
+        .map_err(|_| invalid(format!("`{text}` is not a number")))?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(invalid(format!("`{text}` is not a distance")));
+    }
+    Ok(value)
 }
 
 fn numbers(text: &str) -> io::Result<Vec<u32>> {

@@ -566,7 +566,7 @@ mod tests {
         assert!(walk.to_string().contains("walking speed must be positive"));
 
         let run = refusal_of(5.0, 5.0, 1.5, 0.5, 2.0);
-        assert!(matches!(run, ProfileError::RunSpeed { .. }));
+        assert!(matches!(run, ProfileError::RunSpeed { run: _, walk: _ }));
         assert!(
             run.to_string()
                 .contains("must be greater than walking speed")
@@ -581,7 +581,13 @@ mod tests {
         );
 
         let band = refusal_of(1.4, 5.0, 1.5, 2.0, 2.0);
-        assert!(matches!(band, ProfileError::TurnBand { .. }));
+        assert!(matches!(
+            band,
+            ProfileError::TurnBand {
+                threshold: _,
+                full: _
+            }
+        ));
         assert!(band.to_string().contains("turn rate band"));
 
         let infinite = refusal_of(f32::INFINITY, 5.0, 1.5, 0.5, 2.0);
@@ -589,7 +595,7 @@ mod tests {
             infinite,
             ProfileError::NotFinite {
                 field: "walk_speed",
-                ..
+                value: _
             }
         ));
 
@@ -600,7 +606,7 @@ mod tests {
             refusal_of(f32::NAN, 5.0, 1.5, 0.5, 2.0),
             ProfileError::NotFinite {
                 field: "walk_speed",
-                ..
+                value: _
             }
         ));
     }

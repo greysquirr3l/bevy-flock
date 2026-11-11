@@ -988,8 +988,8 @@ impl Renderer {
         // The rim term belongs on silhouettes, not on a ground plane seen at a grazing angle,
         // where every pixel is a silhouette and the whole plane would gain 0.16 of white.
         let rim = match style {
-            Style::Ground { .. } => 0.0,
-            Style::Lit | Style::Facade { .. } => {
+            Style::Ground { cell: _ } => 0.0,
+            Style::Lit | Style::Facade { storey: _ } => {
                 (1.0 - view.dot(normal).clamp(0.0, 1.0)).powi(3) * 0.16
             }
         };

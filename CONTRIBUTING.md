@@ -190,7 +190,9 @@ short and it is measured:
   `Scaling regression` job compares against (ADR 0034). If a change genuinely trades parallel
   efficiency for something else, run `scripts/scaling_sweep.sh docs/dev/tuning/data/scaling-sweep.json`, commit
   the raw rows with the reasoning, and say what got slower. Never re-baseline to clear a red build
-  without explaining which trade-off was made.
+  without explaining which trade-off was made. A sweep taken with the current script pins one CPU per
+  physical core and records the machine's topology, so every row counts real cores; the committed
+  baseline predates that and holds real-core widths 1 and 2, which is the range the gate compares.
 - **Cap by threads, not by task count** (ADR 0033). `cap = nproc / threads_per_task`: a workspace
   build that spawns `cargo -j6` wants to run alone, a single-crate codegen task wants every core
   filled. Measure the task with `python3 scripts/group_cap.py --measure "<command>"`, then size the

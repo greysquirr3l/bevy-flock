@@ -518,7 +518,10 @@ fn bench_perception(c: &mut Criterion) {
 /// and the neighbour queries that walk it.
 fn bench_cell_size(c: &mut Criterion) {
     let mut group = c.benchmark_group("flock_frame_cell");
-    group.sample_size(10);
+    // ADR 0065: the gate compares two cases against a 10% line, so the harness has to resolve better than that. At ten
+    // samples the 95% interval on the 100,000-agent case is about 5% wide, which made the gate's verdict a property of
+    // the runner; fifty halves it for about two seconds per case.
+    group.sample_size(50);
     for population in [10_000_usize, 100_000] {
         for (label, cell, budget) in [
             ("13.5m_2^20", 13.5_f32, 1_u32 << 20),

@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The scaling gate stopped blinding itself on a noisy runner.** A shared runner hands a cell the occasional run twice
+  as long as the others, and the spread the gate reads as noise was the difference between the best and the worst of
+  every sample — a range, which the worst sample the machine produced sets. One stolen run in the sequential cell
+  therefore set the noise floor for every row that divides by it, and the gate reported "cannot verify" on runs whose
+  measured speedups were all within 4-9% of the baseline. The spread is now the uncertainty of the number the gate
+  compares: a robust standard error on the median, which one stolen run cannot move. The raw range and the samples
+  themselves are recorded beside it, and CI measures four repeats per cell and eight for the sequential one, which is
+  what lets the median hold against that run. No threshold moved.
+- **The scaling gate stopped comparing hardware threads with cores.** A "four-core" row was four logical CPUs, and on
+  a machine with SMT that is two cores' worth of parallelism: the CI runner measured 2.29x where the six-core baseline
+  measured 3.73x, and the gate read that 38% loss as a regression in the crawl. It was the runner's topology, not the
+  code. The sweep now counts the machine's physical cores from its own topology (`scripts/cpu_topology.py`), pins one
+  CPU per core, and records the cores, the threads and the pinned CPUs in every row; a width wider than the machine
+  has cores is skipped with a note rather than measured. The gate compares a candidate's widths with the baseline's
+  only where both count real cores, and names the widths it left out: the committed baseline predates topology
+  recording, so its wider rows count threads and CI compares widths 1 and 2. A red build that was a hardware artefact,
+  fixed without touching a threshold.
+- **The band boundary gate now measures the band, not the test harness.** The allocation counter in
+  `tests/band_continuity.rs` was process-wide, so it read whatever the other four gates happened to be allocating as
+  if it belonged to the frame under test, and the gate then asserted that a steady-state frame allocated *at least
+  once* — a claim about the platform, not about this crate. It passed on one platform and failed on another with a
+  frame that genuinely allocated nothing. The counter counts the thread the frame runs on now, the harness records
+  that thread so a schedule which moved the systems elsewhere fails the gate rather than passing it vacuously, a
+  deliberate allocation proves the counter before it is read, and the gate asserts what ADR 0022 claims: 600 steady
+  frames allocate nothing at all. Measured on Linux and macOS.
+- **The incremental rebuild no longer gives up on a clustered arrival.** A cell whose run is full had forced a full
+  rebuild, which made a crowd flowing into one district the worst case for the patch: at 512 crossers arriving inside a
+  four-cell hotspot, 0% of ticks patched and the median tick was the rebuild (2.58 ms at 100,000 bodies, 13.98 ms at a
+  million). The patch now borrows a slot from the first run after the full one that has a spare, moving the boundaries
+  between them and copying each donor's run one slot up, bounded by `BORROW_MAX_ELEMENTS` (elements shifted) and
+  `BORROW_MAX_RUNS` (consecutive full runs). The same ticks now patch every time: 0.347 ms and 1.305 ms, 7.4x and
+  10.7x, with p99 falling from 3.42 ms and 16.68 ms to 0.62 ms and 1.68 ms. `RebuildOutcome::Rebuilt` also carries a
+  `RebuildCause` now (`Population`, `TooManyMovers`, `StaleTable`, `NarrowRun`), so a game can tell which of the four
+  reasons its tick rebuilt, and `examples/patch_tail` grew `--arrival cluster --cluster-radius` to reproduce the case.
 - **The docs and this site were audited against the tree, and eleven links were broken.** Moving `docs/adr` to
   `docs/dev/adr` and the tuning material deeper left relative links pointing at directories that no longer exist:
   ADR images, demo captures, the playground README, three charts in the performance journal. Markdown does not

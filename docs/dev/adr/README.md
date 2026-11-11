@@ -91,4 +91,5 @@ replay.
 | [0061](0061-animation-layer-inversion.md) | The animation layer inverts into a feature | accepted |
 | [0062](0062-three-crate-layering.md) | Four crates, one direction, and nothing in `src/` but re-exports | accepted |
 | [0063](0063-dispatch-elimination.md) | Two scopes with no barrier between count, scan and place, then an incremental rebuild that skips the passes entirely | Proposed |
+| [0065](0065-cell-size-gate-resolution.md) | The cell-size gate judges the frame it was written for, and only at a resolution it can resolve | accepted |
 | [0064](0064-incremental-parity.md) | How an incremental rebuild earns the right to skip passes: an oracle, eight scripts and the invariants in between | Proposed |

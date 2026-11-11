@@ -19,21 +19,22 @@ direction: a warning that is not listed, or a listed warning that is gone. CI ru
 
 <!-- lint-drift:start -->
 clippy on **1.99.1** (`cargo +stable clippy --all-targets --all-features`)
-reports **11 warnings** across 5 lints: `assert_is_empty` × 6, `chunks_exact_to_as_chunks` × 1, `manual_slice_fill` × 1, `needless_borrows_for_generic_args` × 1, `tuple_array_conversions` × 2.
+reports **12 warnings** across 5 lints: `chunks_exact_to_as_chunks` × 1, `manual_slice_fill` × 1, `needless_borrows_for_generic_args` × 1, `suboptimal_flops` × 7, `tuple_array_conversions` × 2.
 
 | Lint | Site | What it wants |
 | --- | --- | --- |
-| `assert_is_empty` | `src/adapters/primary/dialogue.rs:480` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/adapters/primary/interaction.rs:870` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/adapters/primary/observability.rs:642` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/application/tiered.rs:318` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/behavior/provider.rs:425` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `assert_is_empty` | `src/domain/cognition.rs:474` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
-| `chunks_exact_to_as_chunks` | `src/domain/navmesh.rs:349` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
-| `manual_slice_fill` | `src/application/packed.rs:683` | `slice.fill(value)`, which is one call and vectorises |
-| `needless_borrows_for_generic_args` | `src/domain/memory.rs:874` | pass the closure by value; the call already takes it by value |
-| `tuple_array_conversions` | `src/application/packed.rs:512` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
-| `tuple_array_conversions` | `src/application/packed.rs:515` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `chunks_exact_to_as_chunks` | `crates/bevy-flock-core/src/domain/navmesh.rs:349` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
+| `manual_slice_fill` | `crates/bevy-flock-core/src/application/packed.rs:688` | `slice.fill(value)`, which is one call and vectorises |
+| `needless_borrows_for_generic_args` | `crates/bevy-flock-core/src/domain/memory.rs:874` | pass the closure by value; the call already takes it by value |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:248` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:249` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:250` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/domain/spawn.rs:215` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/domain/spawn.rs:219` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:613` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:614` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:517` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:520` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
 <!-- lint-drift:end -->
 
 ## What is deliberately not here
@@ -50,7 +51,7 @@ the lint's name and the site.
 
 ## Closing it
 
-`stable-lint-drift` in `plan.toml` holds the work. The order matters:
+The order matters:
 
 1. Fix the site, not the lint. None of them is a case where stable is wrong, and adding an
    `allow` would have to go through `SANCTIONED` with a reason, which is a heavier decision than the

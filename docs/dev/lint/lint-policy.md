@@ -4,6 +4,10 @@ The crate is linted at one setting, in one place: `[lints]` in `Cargo.toml`. CI 
 `cargo clippy --all-targets --all-features -- -D warnings`, and again with `--no-default-features`,
 so a warning anywhere, in `src`, `tests`, `benches` or `examples`, is a build failure.
 
+Each crate carries that table in its own manifest rather than inheriting one, so the setting a crate
+is linted at does not depend on which other crates happen to be in the build. The crates that carry
+it are listed under [Policing the exceptions](#policing-the-exceptions).
+
 This page says what is enabled, why each exception exists, and how the exceptions are policed.
 
 ## What is denied
@@ -73,6 +77,13 @@ reason: "an `f32` simulation converts at audited boundaries" is an argument for 
 not for three hundred casts. They are denied now, the conversion module exists, and the exceptions
 that remain are `#[expect]`s the audit checks by rule, see [The exceptions](#the-exceptions).
 
+The lint level lives in the manifest, not on the command line. `.cargo/config.toml` carries an `l`
+alias for `cargo clippy --all-targets --all-features -- -D warnings`, and it deliberately does *not*
+repeat the `-W`/`-D` flags: the table in `Cargo.toml` is the one place a lint is turned on or off,
+and a second copy on the command line would be a second place to argue with it, drifting from the
+table the audit reads. The alias exists to make the CI command short, not to make the policy
+configurable from the shell.
+
 ## How a test fails
 
 Tests may not unwrap either. A fixture that cannot build has nothing to assert, so the failure is
@@ -101,7 +112,7 @@ way to observe allocations from inside the crate under test, so the test has to 
 | --- | --- |
 | `tests/crowd_no_alloc.rs` | asserts the crowd kernel allocates nothing per frame |
 | `tests/tree_no_alloc.rs` | asserts behaviour-tree evaluation allocates nothing |
-| `tests/band_continuity.rs` | asserts the band boundary gates allocate nothing over 10,000 ticks |
+| `tests/band_continuity.rs` | asserts a steady-state band frame allocates nothing |
 | `examples/memory_probe.rs` | reports steady-state allocation for a developer running it |
 
 They use `#![expect(unsafe_code, reason = "…")]` rather than `#![allow]`, so the day the allocator
@@ -198,7 +209,7 @@ Five `#[expect]` cases are therefore permitted, and the audit checks all five:
    would measure less, not more. The audit only accepts the expectation in a bench, and only when
    the reason names Criterion.
 4. **At a crate root, for a lint that crate's own manifest already allows crate-wide.** The library,
-   animation, demo and playground library roots, the two affected example roots, and the spatial
+   animation, demo and playground library roots, the three affected example roots, and the spatial
    parity integration-test root carry `suboptimal_flops` expectations. Animation blends, playground
    transforms, benchmark fixtures and parity fixtures preserve unfused rounding for deterministic
    replays and measurements. The manifest is the authority; the source attribute restates its
@@ -259,7 +270,8 @@ item, and a `cfg_attr` wrapper marks the attribute conditional, a decision that 
 configuration is not a crate-wide one, so the audit does not accept it as one.
 
 It also reads every manifest that carries the table, the library's `Cargo.toml`,
-`crates/bevy-flock-anim/Cargo.toml`, `demo/Cargo.toml`, `demo-gpu/Cargo.toml` and
+`crates/bevy-flock-anim/Cargo.toml`, `crates/bevy-flock-core/Cargo.toml`,
+`crates/bevy-flock-ecs/Cargo.toml`, `demo/Cargo.toml`, `demo-gpu/Cargo.toml` and
 `playground/Cargo.toml`, and fails if the policy there is not the policy this page describes, in
 both directions:
 
@@ -273,7 +285,7 @@ both directions:
   *stricter* than the library, the GPU demo denies the groups rather than warning about them, since
   it has no `-D warnings` step of its own, the comparison is against a strength order rather than
   for equality, and no manifest may allow a lint that `TOLERATED` does not list. The tolerated set
-  itself is checked once against all five manifests together, so an entry nothing allows any more
+  itself is checked once against every manifest together, so an entry nothing allows any more
   still fails.
 
 `--self-test` checks the detector against fixtures rather than the tree: a clean file, a file-level

@@ -17,9 +17,26 @@ speedup(cores, concurrency) = wall(cores, 1) / wall(cores, concurrency)
 ```
 
 is dimensionless, so the same thresholds mean the same thing on a six-core workstation and a
-four-core runner. A drop means the machine used its cores less well than before, on any hardware.
+four-core runner. A drop means the machine used its cores less well than before, on any hardware that
+measures the same width in real cores (decision 2).
 
-**2. Noise sets the threshold, and the threshold moves.** Every cell is the median of `REPEATS` runs
+**2. A core count is a count of cores, not of hardware threads.** The sweep pins one logical CPU per
+physical core, read from the machine's own topology (`scripts/cpu_topology.py`), and records the cores,
+the threads and the pinned CPUs in its meta record. Two threads of one core deliver about 1.3x, not
+2x, so a row measured on them is not a row of cores and cannot be compared with a row measured on two
+real cores. This is not a nicety. The CI runner is a four-vCPU machine with two physical cores, and
+its four-wide row measured 2.29x where the six-core baseline measured 3.73x: the gate read that 38%
+loss as a regression, and it was the hardware, not the code. A row of threads is a row about threads,
+and the gate names it as one.
+
+The recorded baseline predates the topology record. It pinned logical CPU ids (`taskset -c 0-N-1`) on a
+host whose SMT layout was never captured, so its wider rows count hardware threads. Rows 1 and 2 of it
+are known to be real cores: the width-2 row reaches 1.878x on two concurrent builds, and one core's two
+threads cannot do that. Width 3 and above are ambiguous, so they are named and left out of the comparison
+rather than compared and failed. Re-recording the baseline on a host whose topology is captured restores
+the wider rows; until then the gate compares widths 1 and 2, and says so in its output.
+
+**3. Noise sets the threshold, and the threshold moves.** Every cell is the median of `REPEATS` runs
 (schema 2 records the spread between them). A threshold tighter than the spread is not signal, so each
 one widens by the measured spread, a warning needs 1.5x the spread, a failure 2x, because a failure
 should be harder evidence than a nag:
@@ -29,6 +46,26 @@ widest  = max(8% floor, baseline spread, candidate spread)
 warn_at = max(12%, 1.5 x widest)
 fail_at = max(25%, 2.0 x widest)
 ```
+
+The spread is the uncertainty of the number the gate compares — the median's — not the range the
+machine covered. A robust standard deviation (the median absolute deviation, scaled to agree with
+the ordinary one on normal data) times the median's own standard error says how far that median can
+plausibly be off, and one run a noisy neighbour stole from moves neither the median nor the noise. The
+raw range is recorded beside it as `raw_spread_pct`, and the samples themselves as `samples_ms`,
+because the range is what the machine did and the standard error is what the measurement can support;
+a disputed run can be re-examined without re-running it. Four repeats per cell and eight for the
+sequential one are what make the median hold against a slow run: a cell measured with two samples
+cannot tell a stolen run from a slow machine. The recorded baseline's spreads were read as ranges,
+which are the larger of the two estimators, so the floor stays conservative until the baseline is
+recorded again.
+
+On 2026-11-11 this mattered twice. The runner's sequential cell came back with one run twice as long
+as the other three, which under the old range-based spread blinded all four comparable rows while
+every measured speedup sat within 9% of the baseline. And the runner's cells then swung by 20% between
+repeats, which the range-based spread read as noise the gate could not see past: three of four rows
+came back `unverified` and the suite exited 2 on a run whose measured speedups were all within 4% of
+the baseline. A range is set by the worst sample the machine happened to produce; the standard error
+of the median is what the measurement can actually support, and it is the yardstick the gate wants.
 
 On the recorded baseline the widest spread is 8.8%, so CI applies 13.2% and 25.0%. A cell between
 those lines is a warning that does not block the build: it is the band where a human should look at the
@@ -48,24 +85,26 @@ deliberately injected 45% wall-clock slowdown on one cell only warned, because 4
 29.7% speedup loss, and a gate that watches a third of the machine disappear without failing is
 decoration. It now fails at 25%.
 
-**3. A different fixture is refused, not compared.** The sweep records functions-per-crate and bundle
+**4. A different fixture is refused, not compared.** The sweep records functions-per-crate and bundle
 geometry in its `meta` record. If the candidate measured different work, the checker exits 2 with both
 fixtures printed. Comparing 1500-function crates against 300-function crates would produce a
 confident, meaningless verdict.
 
-**4. Coverage is reported.** Core counts the baseline has and the candidate lacks are named and
-skipped. No overlap at all exits 2, "nothing comparable" is never a pass, because a green job that
-compared nothing is worse than a red one.
+**5. Coverage is reported.** Core counts the baseline has and the candidate lacks are named and
+skipped, and so are the widths that are not real cores on both sides (decision 2). No overlap at all
+exits 2, "nothing comparable" is never a pass, because a green job that compared nothing is worse than
+a red one.
 
-**5. CI runs a reduced matrix; the full sweep stays local.** The job sweeps shape A on one core and on
-the runner's own `nproc`, at concurrency 1, 2 and 4, two repeats per cell and four for the sequential
-cell (`REF_REPEATS`), because that one is every row's denominator: 3 m 40 s measured on a six-core
-machine, and it covers the two ends of the curve, the sequential baseline the ratios divide
-by, and the fill-the-machine case the policy is about. The full matrix (both shapes, five core counts,
-six concurrencies) costs eighteen minutes measured and stays a local or nightly job, because a gate
-nobody waits for gets skipped.
+**6. CI runs a reduced matrix; the full sweep stays local.** The job sweeps shape A on one core and on
+two, the widths the recorded baseline holds as real cores (decision 2), at concurrency 1, 2 and 4, four
+repeats per cell and eight for the sequential cell (`REF_REPEATS`), because that one is every row's
+denominator and because a shared runner hands a cell the occasional run twice as long as the others
+(decision 3): 3 m 40 s measured on a six-core machine at two repeats, and it covers the two ends of the
+curve, the sequential baseline the ratios divide by, and the fill-the-machine case the policy is
+about. The full matrix (both shapes, five core counts, six concurrencies) costs eighteen minutes
+measured and stays a local or nightly job, because a gate nobody waits for gets skipped.
 
-**6. The baseline is a reviewed file.** `docs/dev/tuning/data/scaling-sweep.json` is committed, so changing it is
+**7. The baseline is a reviewed file.** `docs/dev/tuning/data/scaling-sweep.json` is committed, so changing it is
 a commit with the raw rows attached, visible in review. Re-baselining after a deliberate trade-off is
 normal; re-baselining to make a red build green is visible in the diff. The candidate sweep and the
 verdict JSON are uploaded as CI artifacts, so a disputed run can be re-examined without re-running it.
@@ -114,6 +153,11 @@ their own gates. Say it plainly in the report rather than implying the suite cov
 
 - A green `Scaling regression` job means "the crawl still fills the machine as well as it did", and
   nothing more. The report states that in the same words.
+- What CI can compare is bounded by the recorded baseline: today that is widths 1 and 2, because the
+  wider rows of the baseline count hardware threads rather than cores (decision 2). The job says which
+  widths it compared and which it left out, so a narrow gate is visible rather than assumed. A
+  baseline re-recorded on a host whose topology is captured widens it again, and that is a deliberate
+  commit with the numbers in the diff.
 - Flakiness has a defined response: if the job wobbles, raise `REPEATS` (and `REF_REPEATS` for the
   denominator) before touching the percentages. Widening the thresholds is the wrong lever, past 12.5%
   of noise the failure line leaves the 25% the SLA promises, and the cell is reported unverifiable
@@ -138,3 +182,12 @@ their own gates. Say it plainly in the report rather than implying the suite cov
   which at concurrency 1 is 1.0 for every machine, so the amplifier is noise, not information.
 - **`n=2` with a t-test.** Two samples cannot support a distributional claim; the spread is used as a
   noise floor instead, and that limitation is stated rather than dressed up.
+- **Compare widths regardless of how many cores the pin covered.** A four-wide row on a two-core
+  machine with SMT measures hardware threads, not cores, so comparing it with a four-core row compares
+  two different things. That is the failure this suite already had once: a 38% "regression" that was
+  the runner's topology. The width is now what the machine's topology says it is, and a width that
+  cannot be compared is named rather than failed.
+- **Re-record the baseline to clear the red build.** The wider rows of the recorded baseline are
+  ambiguous, so a new baseline on a host whose topology is captured would restore them. Doing that
+  while the gate is red would trade a reviewed artifact for a green tick, which is the trade this
+  document refuses: the baseline is re-recorded as a deliberate act, with the numbers in the diff.

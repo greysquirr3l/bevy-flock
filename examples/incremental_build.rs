@@ -150,7 +150,13 @@ fn crosser_ticks(grid: &mut SpatialGrid, crossers: usize) -> Vec<f64> {
         cursor = cursor.wrapping_add(crossers);
         let outcome = grid.build_incremental();
         debug_assert!(
-            matches!(outcome, RebuildOutcome::Rebuilt { .. }),
+            matches!(
+                outcome,
+                RebuildOutcome::Rebuilt {
+                    changed: _,
+                    cause: _
+                }
+            ),
             "a forced crosser must invalidate the table"
         );
     })

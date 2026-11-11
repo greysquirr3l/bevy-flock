@@ -560,7 +560,10 @@ matrices, efficiency, the measured optimum against the formula, is
 Reproduce with `scripts/scaling_sweep.sh docs/dev/tuning/data/scaling-sweep.json` (eighteen minutes on six
 cores, measured; every run pinned with `taskset`, two repeats per cell) then `python3
 scripts/scaling_curves.py docs/dev/tuning/data/scaling-sweep.json docs/images/scaling-curves.png`. CI runs the
-reduced matrix on every push; the full one is a local or nightly job.
+reduced matrix on every push; the full one is a local or nightly job. A sweep taken with the current
+script pins one CPU per physical core and records the machine's topology, so its rows count real
+cores; the committed baseline predates that and holds real-core widths 1 and 2, which is the range the
+gate compares (ADR 0034).
 
 ### Verification run, 2026-11-05
 
@@ -2145,3 +2148,35 @@ Raw rows: `benchmarks/results/2026-11-10/sandbox-aarch64/floor-thread-sweep/`. R
 cargo run --release --offline --example patch_tail -- --bodies 1000000 --crossers 512 --slack 25 \
     --floor 0,1,2,3,4 --workers 1,2,3,4,5,6,8,12,16 --ticks 100 --json
 ```
+
+## The patch's borrow budget: clustered arrivals, before and after
+
+The floor measurement in ADR 0064 ended on a case it could not reach: arrivals that cluster. A crowd flowing into one
+district puts several bodies into the same cell in the same tick, and no per-cell rule helps when the run the tick itself
+makes is narrower than the tick's arrivals. That is the patch's problem, and P2 step 2 is the patch answering it: a run
+that is full borrows a slot from the first run after it that has a spare, moving the boundaries between them.
+
+Measured with `examples/patch_tail --crossers 512 --slack 25 --floor 2 --workers 6 --ticks 200`, medians of three runs,
+before from `origin/main` built with the same harness (so the harness is not the variable), after from this branch.
+`benchmarks/results/2026-11-10/sandbox-aarch64/borrow-budget/` holds both files, tagged `variant`.
+
+| bodies | arrival | patched | median | p95 | p99 | worst |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100,000 | cluster, before | 0.0% | 2.581 ms | 3.211 ms | 3.421 ms | 3.561 ms |
+| 100,000 | cluster, after | 100.0% | 0.347 ms | 0.412 ms | 0.615 ms | 0.677 ms |
+| 100,000 | random, before | 99.5% | 0.351 ms | 0.469 ms | 0.552 ms | 2.110 ms |
+| 100,000 | random, after | 100.0% | 0.352 ms | 0.404 ms | 0.448 ms | 0.502 ms |
+| 1,000,000 | cluster, before | 0.0% | 13.981 ms | 15.884 ms | 16.680 ms | 17.470 ms |
+| 1,000,000 | cluster, after | 100.0% | 1.305 ms | 1.517 ms | 1.684 ms | 1.879 ms |
+| 1,000,000 | random, before | 99.0% | 1.344 ms | 1.782 ms | 2.456 ms | 14.118 ms |
+| 1,000,000 | random, after | 100.0% | 1.362 ms | 1.690 ms | 2.041 ms | 2.201 ms |
+
+The clustered rows are the point: 0% to 100% patched, 7.4x and 10.7x on the median, and the p99 follows the median down
+because the rebuild has stopped happening rather than become rarer. The uniform rows barely move, which is the control:
+they were already patched, so the borrow has nothing to do and the differences are host noise.
+
+Two limits are deliberate, and both are `NarrowRun` rather than a slower patch. `BORROW_MAX_ELEMENTS` (32,768) prices a
+walk in the elements it shifts, because that is what a borrow costs; `BORROW_MAX_RUNS` (64) stops a saturating hotspot
+from walking the table. All 512 crossers into a *single* cell needs 512 slots, more than 64 runs may lend, so
+`--cluster-radius 0` keeps every tick rebuilding. A party that size has re-formed the crowd, and a fresh count is the
+right answer.

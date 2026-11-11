@@ -3,7 +3,7 @@
 
     python3 scripts/compare_benchmarks.py results/*.json
 
-Reads any file containing one JSON object per line with the keys docs/benchmarks/cross-engine.md defines, and prints
+Reads any file containing one JSON object per line with the keys docs/dev/tuning/benchmarks/cross-engine.md defines, and prints
 median, p95, p99, max and the over-budget share per (engine, agents), lowest median first. Refuses to compare rows that
 were measured on different machines unless --force is passed, because that comparison is the one this whole harness
 exists to prevent.
