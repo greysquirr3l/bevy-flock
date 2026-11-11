@@ -27,7 +27,9 @@ speed. It holds here because every worker owns a disjoint slot range and the ker
 
 The allocation claims are made with a counting allocator, not with a profiler. `tests/crowd_no_alloc.rs` installs one,
 warms the frame up, and asserts the counter does not move over the steady-state frames. If you change a system that
-allocates lazily, that test is what notices.
+allocates lazily, that test is what notices. `tests/band_continuity.rs::gate_7_...` does the same for a whole band
+frame: it counts the thread the frame runs on, proves the counter by counting a deliberate allocation before it reads
+anything, and then asserts that 600 steady frames allocate nothing at all.
 
 ## The limits of these guarantees
 

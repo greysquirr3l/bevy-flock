@@ -108,7 +108,7 @@ The table above is the post-harness state: gates 4, 5, 6, 7 and 9 were closed by
 
 `tests/band_continuity.rs` drives a camera on a sine path across the band edge for 10,000
 ticks with five instruments. Gates 4 (parity/conservation), 5 (pop-in), 6 (anchoring) and 7
-(allocation rate) pass; gate 9 (fold completeness) passes in isolation.
+(no allocation) pass; gate 9 (fold completeness) passes in isolation.
 
 Two real defects fell out, neither of which any unit test could have found:
 

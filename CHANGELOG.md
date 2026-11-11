@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The band boundary gate now measures the band, not the test harness.** The allocation counter in
+  `tests/band_continuity.rs` was process-wide, so it read whatever the other four gates happened to be allocating as
+  if it belonged to the frame under test, and the gate then asserted that a steady-state frame allocated *at least
+  once* — a claim about the platform, not about this crate. It passed on one platform and failed on another with a
+  frame that genuinely allocated nothing. The counter counts the thread the frame runs on now, the harness records
+  that thread so a schedule which moved the systems elsewhere fails the gate rather than passing it vacuously, a
+  deliberate allocation proves the counter before it is read, and the gate asserts what ADR 0022 claims: 600 steady
+  frames allocate nothing at all. Measured on Linux and macOS.
 - **The incremental rebuild no longer gives up on a clustered arrival.** A cell whose run is full had forced a full
   rebuild, which made a crowd flowing into one district the worst case for the patch: at 512 crossers arriving inside a
   four-cell hotspot, 0% of ticks patched and the median tick was the rebuild (2.58 ms at 100,000 bodies, 13.98 ms at a

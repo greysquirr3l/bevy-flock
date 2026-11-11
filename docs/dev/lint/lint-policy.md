@@ -112,7 +112,7 @@ way to observe allocations from inside the crate under test, so the test has to 
 | --- | --- |
 | `tests/crowd_no_alloc.rs` | asserts the crowd kernel allocates nothing per frame |
 | `tests/tree_no_alloc.rs` | asserts behaviour-tree evaluation allocates nothing |
-| `tests/band_continuity.rs` | asserts the band boundary gates allocate nothing over 10,000 ticks |
+| `tests/band_continuity.rs` | asserts a steady-state band frame allocates nothing |
 | `examples/memory_probe.rs` | reports steady-state allocation for a developer running it |
 
 They use `#![expect(unsafe_code, reason = "…")]` rather than `#![allow]`, so the day the allocator

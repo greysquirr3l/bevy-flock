@@ -16,13 +16,19 @@
 //! The camera follows a sine path rather than a straight line. A straight line leaves the
 //! field within seconds, after which nothing folds because nothing is in a cell — a test
 //! that measures the absence of the thing it is testing.
+//!
+//! The allocation instrument counts per thread, as `tests/tree_no_alloc.rs` does: the test
+//! harness runs this file's five gates on their own threads, and a process-wide counter
+//! would read their allocations as part of the frame under test. That is not a detail —
+//! it is what made this gate platform-dependent, because the reading depended on how the
+//! other gates happened to be scheduled.
 #![expect(
     unsafe_code,
     reason = "a counting allocator is the only way to assert gate 7"
 )]
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
@@ -34,17 +40,23 @@ use bevy_flock::adapters::primary::band::{
 use bevy_flock::adapters::primary::cognition::PlayerFocus;
 use bevy_flock::domain::num;
 
+thread_local! {
+    /// Whether this thread counts its allocations. `const` initialisers matter here: a lazily
+    /// initialised thread local would allocate on first use, from inside the allocator.
+    static ENABLED: Cell<bool> = const { Cell::new(false) };
+    /// Allocations this thread made while counting.
+    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
 /// Counts allocations so gate 7 can be asserted rather than hoped for.
 struct Counting;
 
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
-static COUNTING: AtomicUsize = AtomicUsize::new(0);
-
+// SAFETY: every method forwards to the system allocator with the same arguments and adds a
+// non-allocating counter increment. The thread locals are `const` initialised and never
+// allocate, and `try_with` keeps the increment off a thread whose locals are being torn down.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) == 1 {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        count();
         unsafe { System.alloc(layout) }
     }
 
@@ -53,19 +65,57 @@ unsafe impl GlobalAlloc for Counting {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) == 1 {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        count();
         unsafe { System.realloc(ptr, layout, new_size) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        count();
+        unsafe { System.alloc_zeroed(layout) }
+    }
+}
+
+/// Counts one allocation against the calling thread, if that thread is counting.
+fn count() {
+    if let Ok(enabled) = ENABLED.try_with(Cell::get)
+        && enabled
+    {
+        let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
     }
 }
 
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
+/// Runs `f` with this thread's allocation counter armed, and returns what it allocated.
+fn counted<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let _ = ALLOCATIONS.try_with(|count| count.set(0));
+    let _ = ENABLED.try_with(|flag| flag.set(true));
+    let value = f();
+    let _ = ENABLED.try_with(|flag| flag.set(false));
+    let allocations = ALLOCATIONS.try_with(Cell::get).unwrap_or(usize::MAX);
+    (value, allocations)
+}
+
 const TICKS: u32 = 10_000;
 const SEEDED: u32 = 40_000;
 const WARM_UP: u32 = 600;
+
+/// The number of steady frames gate 7 measures.
+const STEADY_FRAMES: u32 = 600;
+
+/// The thread the last frame ran on.
+///
+/// The allocation counter counts one thread, so the gate has to know that the systems ran on
+/// the thread it is counting. If a schedule ever moved them elsewhere, the reading would be
+/// zero because nothing was measured, not because nothing allocated.
+#[derive(Resource, Clone, Copy, Debug)]
+struct FrameThread(std::thread::ThreadId);
+
+/// Records the thread the frame ran on. Reads nothing; writes [`FrameThread`].
+fn record_frame_thread(mut thread: ResMut<FrameThread>) {
+    thread.0 = std::thread::current().id();
+}
 
 struct Harness {
     app: App,
@@ -83,6 +133,10 @@ impl Harness {
     fn with_config(config: BandConfig) -> Self {
         let mut app = App::new();
         app.add_plugins(BandPlugin::new(config));
+        // The probe goes in with the plugin: it has to see every frame, including the
+        // measured ones.
+        app.insert_resource(FrameThread(std::thread::current().id()))
+            .add_systems(Update, record_frame_thread);
         let camera = app
             .world_mut()
             .spawn((PlayerFocus, Transform::from_xyz(256.0, 256.0, 0.0)))
@@ -123,6 +177,11 @@ impl Harness {
 
     fn live(&self) -> usize {
         self.count()
+    }
+
+    /// The thread the last frame ran on.
+    fn frame_thread(&self) -> std::thread::ThreadId {
+        self.app.world().resource::<FrameThread>().0
     }
 
     fn population(&self) -> u64 {
@@ -228,30 +287,50 @@ fn gate_7_a_steady_state_frame_does_not_allocate() {
         harness.tick(tick);
     }
 
-    // Bevy's schedule and command queue allocate on their own account every frame, so the
-    // honest invariant is not zero: it is that the rate does not grow. A leak - a row, a
-    // cell, a bucket, an event queue - shows up as the second window costing more than the
-    // first, and that is what this asserts.
-    let mut measure = || {
-        ALLOCATIONS.store(0, Ordering::Relaxed);
-        COUNTING.store(1, Ordering::Relaxed);
-        for _ in 0..600 {
+    // The counter counts one thread, so the frame has to run on this thread. If it does not,
+    // the reading below would be zero because nothing was measured.
+    assert_eq!(
+        harness.frame_thread(),
+        std::thread::current().id(),
+        "the frame ran on another thread, so the per-thread counter would not have seen it"
+    );
+
+    // The claim ADR 0022 makes is the strong one: a steady-state frame does not touch the
+    // allocator at all. An earlier version of this gate asserted instead that the frame
+    // allocated *at least once*, on the theory that a counter which never engaged was a
+    // broken counter. That was a claim about the platform rather than about this crate — the
+    // schedule and the command queue allocate on their own account on some platforms and not
+    // on others — and it failed on macOS with a frame that genuinely allocated nothing. The
+    // counter is proved by the control below instead.
+    let (live, allocations) = counted(|| {
+        for _ in 0..STEADY_FRAMES {
             harness.tick_still();
         }
-        COUNTING.store(0, Ordering::Relaxed);
-        ALLOCATIONS.load(Ordering::Relaxed)
-    };
-    let first = measure();
-    let second = measure();
-    assert!(
-        first > 0,
-        "the counter never engaged, so this gate is measuring nothing"
+        harness.live()
+    });
+    assert_eq!(
+        harness.frame_thread(),
+        std::thread::current().id(),
+        "the measured frames ran on another thread, so the per-thread counter would not have \
+         seen them"
     );
-    let growth = second.saturating_sub(first);
-    assert!(
-        growth <= first / 10 + 100,
-        "allocation rate grew from {first} to {second} per 600 steady ticks"
+    assert_eq!(
+        allocations, 0,
+        "a steady-state band frame allocated {allocations} times over {STEADY_FRAMES} frames, \
+         with {live} agents live"
     );
+}
+
+#[test]
+fn the_counting_allocator_sees_a_deliberate_allocation() {
+    // The control: a counter that sees nothing reports zero for everything, and a gate that
+    // asserts zero would then pass without having measured anything.
+    let (buffer, allocations) = counted(|| Vec::<u8>::with_capacity(64 * 1024));
+    assert!(
+        allocations > 0,
+        "the counting allocator saw no allocation for a deliberate one"
+    );
+    assert_eq!(buffer.capacity(), 64 * 1024);
 }
 
 #[test]
