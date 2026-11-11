@@ -605,10 +605,13 @@ const fn record_outcome(
     outcome: RebuildOutcome,
 ) {
     match outcome {
-        RebuildOutcome::Patched { .. } => {
+        RebuildOutcome::Patched { changed: _ } => {
             stats.patched_ticks = stats.patched_ticks.saturating_add(1);
         }
-        RebuildOutcome::Rebuilt { .. } => {
+        RebuildOutcome::Rebuilt {
+            changed: _,
+            cause: _,
+        } => {
             stats.rebuilt_ticks = stats.rebuilt_ticks.saturating_add(1);
         }
         RebuildOutcome::Unchanged => {}

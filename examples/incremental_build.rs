@@ -150,7 +150,7 @@ fn crosser_ticks(grid: &mut SpatialGrid, crossers: usize) -> Vec<f64> {
         cursor = cursor.wrapping_add(crossers);
         let outcome = grid.build_incremental();
         debug_assert!(
-            matches!(outcome, RebuildOutcome::Patched { .. }),
+            matches!(outcome, RebuildOutcome::Patched { changed: _ }),
             "a body that crosses a cell boundary is absorbed by the patch, got {outcome:?}"
         );
     })

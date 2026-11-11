@@ -127,6 +127,17 @@ Use `--offline`; the dependency cache is complete and the network is not reliabl
 (check `nproc` and `free -g` rather than trusting this line) with a tight disk: when `df -h /home/ubuntu` shows under
 about 3 GB free, `rm -rf target/debug/incremental target/debug/examples` before blaming the compiler for a link error.
 
+**The pinned toolchain is not the whole lint story.** `cargo clippy` above runs 1.97.1, which is what
+`rust-toolchain.toml` pins, and CI has a second job that checks the lints 1.99 added and 1.97 does not have. A change
+that passes the pinned clippy can still fail that job: `RebuildOutcome::Patched { .. }` is fine on 1.97 and an error on
+1.99, which is `clippy::rest_pattern_accessible_field`. Run the same probe before pushing:
+
+```bash
+cargo +stable clippy --all-targets --all-features -- \
+  -D clippy::unnecessary_rest_pattern -D clippy::rest_pattern_accessible_field -D raw_borrows_via_references
+python3 scripts/lint_drift.py --toolchain stable
+```
+
 **The lint policy is not advisory.** `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and
 the rest of the workspace table are denied **including in tests**. Six allows are permitted
 (`module_name_repetitions`, `must_use_candidate`, `missing_errors_doc`, `missing_panics_doc`, `struct_excessive_bools`,
