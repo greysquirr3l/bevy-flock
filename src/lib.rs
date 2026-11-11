@@ -36,6 +36,8 @@
 //! # Five lines
 //!
 //! ```
+//! # #[cfg(feature = "ecs")]
+//! # {
 //! use bevy_app::App;
 //! use bevy_flock::prelude::*;
 //!
@@ -44,6 +46,7 @@
 //! app.update();
 //!
 //! assert_eq!(app.world().resource::<FlockStats>().population(), CrowdPreset::MarketplaceBustle.population());
+//! # }
 //! ```
 //!
 //! # Architecture

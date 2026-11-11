@@ -107,6 +107,7 @@ bevy_tasks = { version = "0.20.1", default-features = false }
 [[bench]]
 name = "crowd"
 harness = false
+required-features = ["ecs"]
 
 [[bench]]
 name = "brain"
@@ -235,14 +236,17 @@ required-features = ["serde"]
 [[bench]]
 name = "think"
 harness = false
+required-features = ["ecs"]
 
 [[bench]]
 name = "tiers"
 harness = false
+required-features = ["ecs"]
 
 [[bench]]
 name = "continuum"
 harness = false
+required-features = ["ecs"]
 
 [[bench]]
 name = "spatial"
@@ -262,7 +266,7 @@ required-features = ["memory"]
 # library, which is how it sat broken on main.
 [[test]]
 name = "memory_bridge"
-required-features = ["memory"]
+required-features = ["ecs", "memory"]
 
 # `fuzz_decoders` is `#![cfg(feature = "memory")]`d to nothing without the feature. Declaring it
 # here rather than relying on that keeps the manifest honest: a target that compiles to an empty
@@ -274,6 +278,7 @@ required-features = ["memory"]
 [[bench]]
 name = "band"
 harness = false
+required-features = ["ecs"]
 
 [[bench]]
 name = "cognition"
@@ -290,10 +295,81 @@ harness = false
 [[bench]]
 name = "replication"
 harness = false
+required-features = ["ecs"]
 
 [[example]]
 name = "everything"
 # The example exists to show the full adoption path, so it needs the features that path mentions:
 # social memory for the snapshot, and serde for its bytes.
-required-features = ["memory", "serde"]
+required-features = ["ecs", "memory", "serde"]
+
+# The engine-facing half of the facade. `bevy_flock::adapters` and `bevy_flock::boids` are re-exports
+# of `bevy-flock-ecs`, and the prelude's engine items come from the same crate, so a target that
+# names any of them needs the `ecs` feature. Without the declarations below, `--no-default-features`
+# fails on the *target* rather than on the library: the target is compiled in a configuration where
+# the paths it imports do not exist. Declaring them means the target is skipped instead, which is
+# what "the engine half is optional" has to mean for a target rather than only for a library.
+[[example]]
+name = "ambient_metropolis"
+required-features = ["ecs"]
+
+[[example]]
+name = "band_ticks"
+required-features = ["ecs"]
+
+[[example]]
+name = "cross_bench"
+required-features = ["ecs"]
+
+[[example]]
+name = "grid_sweep"
+required-features = ["ecs"]
+
+[[example]]
+name = "hello_flock"
+required-features = ["ecs"]
+
+[[example]]
+name = "horde_100k"
+required-features = ["ecs"]
+
+[[example]]
+name = "profile_band"
+required-features = ["ecs"]
+
+[[example]]
+name = "profile_crowd"
+required-features = ["ecs"]
+
+[[test]]
+name = "band_churn"
+required-features = ["ecs"]
+
+[[test]]
+name = "band_continuity"
+required-features = ["ecs"]
+
+[[test]]
+name = "cognition"
+required-features = ["ecs"]
+
+[[test]]
+name = "determinism"
+required-features = ["ecs"]
+
+[[test]]
+name = "properties"
+required-features = ["ecs"]
+
+[[test]]
+name = "spawn_placement"
+required-features = ["ecs"]
+
+[[test]]
+name = "spawning"
+required-features = ["ecs"]
+
+[[test]]
+name = "tree_no_alloc"
+required-features = ["ecs"]
 

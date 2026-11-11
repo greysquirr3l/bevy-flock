@@ -2981,6 +2981,9 @@ mod tests {
         }
     }
 
+    // The parallel path only exists with the `threads` feature; without it every build is the serial
+    // one, so there is no second window table to compare against and nothing for this to assert.
+    #[cfg(feature = "threads")]
     #[test]
     fn every_thread_count_builds_identical_windows() {
         // ADR 0054 invariant 7: the thread count is configuration and cannot change behaviour. This
@@ -3214,6 +3217,9 @@ mod tests {
         }
     }
 
+    // The per-block totals are a product of the partition, so they are only produced with the
+    // `threads` feature; the serial scan reads the counts in place and never asks for them.
+    #[cfg(feature = "threads")]
     #[test]
     fn the_fused_totals_match_a_recount_of_the_cell_list() {
         // ADR 0057: `count` now owns the per-block totals, and the scan reads them instead of recomputing them.
