@@ -246,7 +246,11 @@ jobs:
           - "navmesh"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # The pinned toolchain, not stable: `rust-toolchain.toml` overrides the default anyway, so
+      # `stable` here would install the wasm32 target for a toolchain the build never uses and
+      # leave the pinned one without it. This is the toolchain `docs/dev/tuning/platforms.md`
+      # records the wasm audit against.
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
