@@ -47,15 +47,25 @@ warn_at = max(12%, 1.5 x widest)
 fail_at = max(25%, 2.0 x widest)
 ```
 
-The spread is read from the samples that are not the slowest, and the cell needs enough samples for
-that to mean something: with three or more runs the slowest is dropped before the spread is taken,
-because it is the run a noisy neighbour stole from, and it moves neither the median nor the noise the
-gate is measuring. The raw range is recorded beside it as `raw_spread_pct`, so the wobble stays visible
-rather than hidden. Four repeats per cell and eight for the sequential one are what make the median
-hold against that one slow run: a cell measured with two samples cannot tell a stolen run from a slow
-machine. On 2026-11-11 the runner's sequential cell came back with one run twice as long as the other
-three, which blinded all four comparable rows while every measured speedup sat within 9% of the
-baseline.
+The spread is the uncertainty of the number the gate compares — the median's — not the range the
+machine covered. A robust standard deviation (the median absolute deviation, scaled to agree with
+the ordinary one on normal data) times the median's own standard error says how far that median can
+plausibly be off, and one run a noisy neighbour stole from moves neither the median nor the noise. The
+raw range is recorded beside it as `raw_spread_pct`, and the samples themselves as `samples_ms`,
+because the range is what the machine did and the standard error is what the measurement can support;
+a disputed run can be re-examined without re-running it. Four repeats per cell and eight for the
+sequential one are what make the median hold against a slow run: a cell measured with two samples
+cannot tell a stolen run from a slow machine. The recorded baseline's spreads were read as ranges,
+which are the larger of the two estimators, so the floor stays conservative until the baseline is
+recorded again.
+
+On 2026-11-11 this mattered twice. The runner's sequential cell came back with one run twice as long
+as the other three, which under the old range-based spread blinded all four comparable rows while
+every measured speedup sat within 9% of the baseline. And the runner's cells then swung by 20% between
+repeats, which the range-based spread read as noise the gate could not see past: three of four rows
+came back `unverified` and the suite exited 2 on a run whose measured speedups were all within 4% of
+the baseline. A range is set by the worst sample the machine happened to produce; the standard error
+of the median is what the measurement can actually support, and it is the yardstick the gate wants.
 
 On the recorded baseline the widest spread is 8.8%, so CI applies 13.2% and 25.0%. A cell between
 those lines is a warning that does not block the build: it is the band where a human should look at the

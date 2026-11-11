@@ -25,10 +25,10 @@ widths are named and left out of the comparison rather than compared and failed.
     python3 scripts/scaling_regression.py BASE.json CAND.json --fail-pct 30 --warn-pct 15 --json out.json
 
 Defaults are 25% to fail and 12% to warn. Both widen to twice the measured spread, so a noisy runner
-gets slack without anyone editing the numbers. The spread is the sweep's, and the sweep takes it over
-the samples that are not the slowest: a run a noisy neighbour stole from moves neither the median nor
-the noise, and reading it as noise would blind the gate for a reason that has nothing to do with the
-code.
+gets slack without anyone editing the numbers. The spread is the sweep's, and it is the uncertainty of
+the number the gate compares — the median's — rather than the range the machine covered: a robust
+standard error says how far that median can plausibly be off, and one run a noisy neighbour stole from
+moves neither the median nor the noise.
 
 A cell whose own spread is so wide that the failure threshold rises past the SLA it is supposed to
 enforce is reported as `unverified`, never `ok`: it has not been checked, and saying otherwise would be

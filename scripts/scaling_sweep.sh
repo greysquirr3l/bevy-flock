@@ -16,10 +16,11 @@
 # says which CPUs it was pinned to.
 #
 # Output is JSON lines: one `meta` record, then one record per cell with the median over repeats and
-# the spread between them. The spread is the noise the regression suite widens its thresholds with,
-# and it is taken over the samples that are not the slowest: a run a noisy neighbour stole from moves
-# neither the median nor the noise, and letting it set the noise floor blinds the gate for a reason
-# that has nothing to do with the code. The raw range is recorded beside it as `raw_spread_pct`.
+# the spread. The spread is the noise the regression suite widens its thresholds with, and it is the
+# uncertainty of the number the gate compares — the median's — rather than the range the machine
+# covered: a robust standard error says how far that median can plausibly be off, and one run a noisy
+# neighbour stole from moves neither. The raw range is recorded beside it as `raw_spread_pct`, and the
+# samples themselves as `samples_ms`, so a disputed run can be re-examined without re-running it.
 #
 # Usage:
 #   scripts/scaling_sweep.sh OUT.json
@@ -186,11 +187,16 @@ records = []
 for (shape, cores_n, concurrency, tasks, threads), samples in sorted(cells.items()):
     walls = sorted(wall for wall, _ in samples)
     median = statistics.median(walls)
-    # The slowest run is the one a noisy neighbour stole from. With three samples or more it is
-    # dropped before the spread is taken, because it moves neither the median nor the noise the gate
-    # reads; the raw range is recorded beside it so the wobble stays visible rather than hidden.
-    kept = walls[:-1] if len(walls) >= 3 else walls
-    spread = (max(kept) - min(kept)) / median * 100.0 if len(kept) > 1 and median else 0.0
+    # The noise the gate widens its thresholds with is the uncertainty of the number it compares:
+    # the median's. A robust standard deviation (the median absolute deviation, scaled to agree
+    # with the ordinary one on normal data) times the median's own standard error says how far that
+    # number can plausibly be off, and a run a noisy neighbour stole from moves neither. The raw
+    # range is recorded beside it, because the range is what the machine did and the standard error
+    # is what the measurement can support.
+    deviations = sorted(abs(wall - median) for wall in walls)
+    sigma = statistics.median(deviations) * 1.4826
+    stderr = 1.2533 * sigma / (len(walls) ** 0.5) if len(walls) > 1 else 0.0
+    spread = stderr / median * 100.0 if median else 0.0
     raw = (max(walls) - min(walls)) / median * 100.0 if len(walls) > 1 and median else 0.0
     records.append({
         "kind": "measurement",
@@ -203,8 +209,8 @@ for (shape, cores_n, concurrency, tasks, threads), samples in sorted(cells.items
         "wall": round(median / 1000.0, 3),
         "repeats": len(walls),
         "spread_pct": round(spread, 1),
-        "spread_samples": len(kept),
         "raw_spread_pct": round(raw, 1),
+        "samples_ms": walls,
         "cpus": samples[0][1],
     })
 
