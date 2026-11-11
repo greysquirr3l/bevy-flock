@@ -324,8 +324,13 @@ enum RebuildOutcomeKind {
 const fn classify(outcome: bevy_flock::domain::spatial::RebuildOutcome) -> RebuildOutcomeKind {
     match outcome {
         bevy_flock::domain::spatial::RebuildOutcome::Unchanged => RebuildOutcomeKind::Unchanged,
-        bevy_flock::domain::spatial::RebuildOutcome::Patched { .. } => RebuildOutcomeKind::Patched,
-        bevy_flock::domain::spatial::RebuildOutcome::Rebuilt { .. } => RebuildOutcomeKind::Rebuilt,
+        bevy_flock::domain::spatial::RebuildOutcome::Patched { changed: _ } => {
+            RebuildOutcomeKind::Patched
+        }
+        bevy_flock::domain::spatial::RebuildOutcome::Rebuilt {
+            changed: _,
+            cause: _,
+        } => RebuildOutcomeKind::Rebuilt,
     }
 }
 

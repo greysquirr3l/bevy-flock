@@ -2326,7 +2326,11 @@ impl SpatialGrid {
         }
         let per = centres.len().div_ceil(workers);
         let grid = self;
-        let QueryArena { slots, counts, .. } = arena;
+        let QueryArena {
+            slots,
+            counts,
+            cap: _,
+        } = arena;
         thread::scope(|scope| {
             let chunks = centres
                 .chunks(per)

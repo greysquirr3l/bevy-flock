@@ -805,8 +805,8 @@ mod tests {
             .first()
             .and_then(|node| node.choices.first())
             .and_then(|choice| choice.requires)
-            .expect("the choice should carry its condition");
+            .or_die();
         assert_eq!(condition.key, key(7));
-        assert_eq!(condition.at_least, 2.0);
+        assert!((condition.at_least - 2.0).abs() < f32::EPSILON);
     }
 }
