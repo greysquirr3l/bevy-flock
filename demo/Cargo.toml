@@ -6,6 +6,10 @@ rust-version = "1.97.1"
 publish = false
 description = "Ashfall Verge: a technical playground for bevy-flock, with generated assets and artefact output rather than a renderer."
 license = "MIT OR Apache-2.0"
+# Three binaries live in this package: the flight, the headless playback and the five-view capture.
+# `cargo run` has to be told which one it means, and the command in `demo/README.md` — and the one the
+# demo's CI job runs — is the plain one, so the flight is what a plain `cargo run` runs.
+default-run = "bevy-flock-demo"
 
 # A package rather than a workspace member, for the same reason `compat/` is: a demo should not be
 # able to break the library's build, and the library should not pay for the demo's dependencies.
