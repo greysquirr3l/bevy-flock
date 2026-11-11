@@ -166,7 +166,7 @@ fn one_crosser_per_tick_reports_one_and_matches_a_full_rebuild() {
 #[test]
 fn every_body_crossing_reports_the_population_and_matches_a_full_rebuild() {
     let config = config(8.0);
-    let entries = crowd(3_000, 0xB0D1E5);
+    let entries = crowd(3_000, 0x00B0_D1E5);
     let mut grid = grid_with(&entries, config, 6);
     // Every body leaves its cell for one cell, which is the move no slack rule can absorb: an even redistribution is
     // patchable now that a cell keeps room for a pair
@@ -249,7 +249,7 @@ fn the_fast_path_holds_at_every_worker_count() {
 #[test]
 fn the_audit_catches_a_table_it_should_not_have_accepted() {
     let config = config(8.0);
-    let entries = crowd(500, 0xC0FFEE);
+    let entries = crowd(500, 0x00C0_FFEE);
 
     let mut doubled = grid_with(&entries, config, 2);
     assert_eq!(doubled.check_invariants(), Ok(()));
@@ -508,7 +508,7 @@ fn slack_now_decides_how_far_the_borrow_walks_rather_than_whether_it_happens() {
             walked > 0,
             !absorbed,
             "{slack}% slack: expected {} boundaries to move, {walked} did",
-            if absorbed { 0 } else { 1 }
+            i32::from(!absorbed)
         );
         grid.check_invariants().or_die();
         let reference = oracle(grid.entries(), config, 4);
@@ -553,7 +553,7 @@ fn the_floor_still_decides_whether_a_pair_in_an_empty_cell_has_to_borrow() {
             walked > 0,
             !absorbed,
             "a floor of {floor}: expected {} boundaries to move, {walked} did",
-            if absorbed { 0 } else { 1 }
+            i32::from(!absorbed)
         );
         grid.check_invariants().or_die();
         let reference = oracle(grid.entries(), config, 6);
@@ -698,31 +698,15 @@ fn a_stale_table_is_named_rather_than_patched() {
 /// The same bodies, the same coordinates, a different arrival order: a game spawns from whatever events it has, so the
 /// table may not depend on which order that was.
 ///
-/// The comparison is by identity rather than by index, because `cells` is keyed by insertion index and the two grids index
-/// the same body differently. What has to agree is which bodies share a cell and what order they appear in, which is what a
-/// query reads.
-#[test]
 /// Two spawn orders over the same bodies: which cell a body lands in, and how many bodies a cell holds, may not depend on
 /// the order they arrived in. What *does* depend on it is the order inside a cell, because placement writes each run in
 /// arrival order rather than sorting it, and that order is a query's tie-break. Both halves are pinned here.
 ///
 /// The comparison is by identity rather than by index, because `cells` is keyed by insertion index and the two grids index
-/// the same body differently.
+/// the same body differently. What has to agree is which bodies share a cell and what order they appear in, which is what a
+/// query reads.
 #[test]
 fn arrival_order_decides_the_order_inside_a_cell_and_nothing_else() {
-    let bodies: Vec<(u32, Vec3)> = (0..48_u32)
-        .map(|index| {
-            let lane: f32 = match index % 3 {
-                0 => 9.0,
-                1 => 101.0,
-                _ => 233.0,
-            };
-            let depth: f32 = if index % 4 == 0 { 17.0 } else { 149.0 };
-            let height: f32 = if index % 5 == 0 { 33.0 } else { 301.0 };
-            (index, Vec3::new(lane, depth, height))
-        })
-        .collect();
-
     fn build(order: impl Iterator<Item = usize>, bodies: &[(u32, Vec3)]) -> SpatialGrid {
         let mut grid = SpatialGrid::new(config(64.0)).or_die();
         for index in order {
@@ -761,6 +745,19 @@ fn arrival_order_decides_the_order_inside_a_cell_and_nothing_else() {
             })
             .collect()
     }
+
+    let bodies: Vec<(u32, Vec3)> = (0..48_u32)
+        .map(|index| {
+            let lane: f32 = match index % 3 {
+                0 => 9.0,
+                1 => 101.0,
+                _ => 233.0,
+            };
+            let depth: f32 = if index % 4 == 0 { 17.0 } else { 149.0 };
+            let height: f32 = if index % 5 == 0 { 33.0 } else { 301.0 };
+            (index, Vec3::new(lane, depth, height))
+        })
+        .collect();
 
     let forward = build(0..bodies.len(), &bodies);
     let backward = build((0..bodies.len()).rev(), &bodies);

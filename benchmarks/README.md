@@ -315,7 +315,6 @@ cargo run --release --example incremental_build -- --bodies 1000000 --crossers 6
 cargo run --release --example bandwidth -- --size 512 --threads 1,2,4,6
 ```
 
-
 The [archived result records](results/README.md) include this three-engine run and the later matched-workload run. The files are committed under `benchmarks/results/`, not left in ignored `target/` directories.
 
 Re-run the harness with `--repeat 3` to make a row carry its own dispersion: the record then names the run whose

@@ -1002,7 +1002,7 @@ impl SpatialGrid {
     /// This is the array a query walks and the memory the slack costs, so it is the number to read next to a latency
     /// measurement rather than a count of bodies.
     #[must_use]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.order.len()
     }
 
@@ -1184,19 +1184,25 @@ impl SpatialGrid {
     /// Two phases, every removal before any insertion. A body leaving a cell frees the slot an arrival into that same
     /// cell may need, so interleaving the two would let a full cell refuse an arrival a later departure made room for.
     ///
-    /// Returns `false` when a run had no room left in its region, which the caller answers with a rebuild. Abandoning a
+    /// Fails when a run had no room left in its region, which the caller answers with a rebuild. Abandoning a
     /// half-applied patch is safe precisely because [`SpatialGrid::build_tables`] recomputes every table from the entries:
     /// the work is wasted, the result is not wrong.
     ///
     /// `O(moves)` twice, plus the shift of the run tails, which is why only a handful of moves may take this path.
     fn patch_movers(&mut self) -> Result<(), RebuildCause> {
+        self.remove_movers()?;
+        self.insert_movers()
+    }
+    /// Take every mover out of the cell it was in, closing the gap it leaves behind.
+    ///
+    /// A run stays sorted by identity, so the body is found by value rather than by position, and only the slots
+    /// between it and the end of its own run move down. The slots after the run belong to the next cell.
+    fn remove_movers(&mut self) -> Result<(), RebuildCause> {
         let Self {
             cell_start,
             cell_len,
             cell_cursor,
             order,
-            entries,
-            cells,
             movers,
             ..
         } = self;
@@ -1224,6 +1230,23 @@ impl SpatialGrid {
             *len_slot = len_slot.saturating_sub(1);
             *cursor = cursor.saturating_sub(1);
         }
+        Ok(())
+    }
+    /// Put every mover into the cell it now belongs in, keeping that cell's run sorted by identity.
+    ///
+    /// A run with no room in its region borrows a slot from the runs after it, so a clustered arrival does not force a
+    /// rebuild. The borrow is bounded by [`BORROW_MAX_ELEMENTS`], because it shifts elements rather than slots.
+    fn insert_movers(&mut self) -> Result<(), RebuildCause> {
+        let Self {
+            cell_start,
+            cell_len,
+            cell_cursor,
+            order,
+            entries,
+            cells,
+            movers,
+            ..
+        } = self;
         let mut budget = BORROW_MAX_ELEMENTS;
         for (body, _) in movers.iter().copied() {
             let Some(new) = cells.get(body as usize).copied() else {
@@ -1309,6 +1332,9 @@ impl SpatialGrid {
             return self.refill_cells_parallel();
         }
         let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
+        if self.cells.len() != self.entries.len() {
+            return self.rebuild_cells(min, inv, dims);
+        }
         let Self {
             cells,
             entries,
@@ -1316,14 +1342,6 @@ impl SpatialGrid {
             ..
         } = self;
         movers.clear();
-        if cells.len() != entries.len() {
-            cells.clear();
-            cells.resize(entries.len(), 0);
-            for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
-                *slot = cell_of_parts(min, inv, dims, entry.position);
-            }
-            return entries.len();
-        }
         let mut changed = 0_usize;
         for (index, (slot, entry)) in cells.iter_mut().zip(entries.iter()).enumerate() {
             let cell = cell_of_parts(min, inv, dims, entry.position);
@@ -1337,6 +1355,26 @@ impl SpatialGrid {
             }
         }
         changed
+    }
+    /// Recompute every body's cell from scratch, for a grid whose cell table no longer matches the entry list.
+    ///
+    /// A table of the wrong length describes a different population, so nothing in it can be diffed against the
+    /// entries: every body is placed again and the mover list starts empty, because the caller has just rebuilt.
+    fn rebuild_cells(&mut self, min: Vec3, inv: f32, dims: [u32; 3]) -> usize {
+        let Self {
+            cells,
+            entries,
+            movers,
+            ..
+        } = self;
+        let bodies = entries.len();
+        cells.clear();
+        cells.resize(bodies, 0);
+        movers.clear();
+        for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
+            *slot = cell_of_parts(min, inv, dims, entry.position);
+        }
+        bodies
     }
     /// The same diff, one body range per worker, each reporting how many moves it saw and which ones.
     ///
@@ -1353,38 +1391,61 @@ impl SpatialGrid {
         const SAMPLES: usize = 32;
         let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
         let workers = self.worker_count().min(SAMPLES);
+        let bodies = self.entries.len();
+        if self.cells.len() != bodies {
+            return self.rebuild_cells(min, inv, dims);
+        }
         self.movers.clear();
         self.movers
             .resize(workers.saturating_mul(PATCH_MAX_MOVERS), (0, 0));
-        let Self {
-            cells,
-            entries,
-            movers,
-            ..
-        } = self;
-        let bodies = entries.len();
-        if cells.len() != bodies {
-            cells.clear();
-            cells.resize(bodies, 0);
-            movers.clear();
-            for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
-                *slot = cell_of_parts(min, inv, dims, entry.position);
-            }
-            return bodies;
-        }
         let chunk = bodies.div_ceil(workers.max(1));
         if chunk == 0 {
-            movers.clear();
+            self.movers.clear();
             return 0;
         }
         let counts: [core::sync::atomic::AtomicUsize; SAMPLES] =
             core::array::from_fn(|_| core::sync::atomic::AtomicUsize::new(0));
         let wrote: [core::sync::atomic::AtomicUsize; SAMPLES] =
             core::array::from_fn(|_| core::sync::atomic::AtomicUsize::new(0));
+        self.fill_cells_scoped(chunk, min, inv, dims, &counts, &wrote);
+        let changed = counts
+            .iter()
+            .map(|slot| slot.load(core::sync::atomic::Ordering::Relaxed))
+            .fold(0_usize, usize::saturating_add);
+        if wrote
+            .iter()
+            .any(|slot| slot.load(core::sync::atomic::Ordering::Relaxed) == usize::MAX)
+        {
+            self.movers.clear();
+            return changed;
+        }
+        self.compact_movers(&wrote);
+        changed
+    }
+    /// Run the per-worker diff, one body range per worker.
+    ///
+    /// Each worker writes the moves it finds into its own chunk of the mover list, so the total is the same whatever
+    /// order the workers finish in, and the pass allocates nothing.
+    #[cfg(feature = "threads")]
+    fn fill_cells_scoped(
+        &mut self,
+        chunk: usize,
+        min: Vec3,
+        inv: f32,
+        dims: [u32; 3],
+        counts: &[core::sync::atomic::AtomicUsize],
+        wrote: &[core::sync::atomic::AtomicUsize],
+    ) {
+        let Self {
+            cells,
+            entries,
+            movers,
+            ..
+        } = self;
         let mut base = 0_usize;
         thread::scope(|scope| {
-            let mut siblings: &[core::sync::atomic::AtomicUsize] = counts.as_slice();
-            let mut writers: &[core::sync::atomic::AtomicUsize] = wrote.as_slice();
+            let mut siblings: &[core::sync::atomic::AtomicUsize] = counts;
+            let mut writers: &[core::sync::atomic::AtomicUsize] = wrote;
             for ((slots, slice), room) in cells
                 .chunks_mut(chunk)
                 .zip(entries.chunks(chunk))
@@ -1432,17 +1493,13 @@ impl SpatialGrid {
                 });
             }
         });
-        let changed = counts
-            .iter()
-            .map(|slot| slot.load(core::sync::atomic::Ordering::Relaxed))
-            .fold(0_usize, usize::saturating_add);
-        if wrote
-            .iter()
-            .any(|slot| slot.load(core::sync::atomic::Ordering::Relaxed) == usize::MAX)
-        {
-            self.movers.clear();
-            return changed;
-        }
+    }
+    /// Fold the per-worker mover chunks into the front of the mover list.
+    ///
+    /// The chunks are compacted in worker order, so a caller reads one contiguous list in the same order whatever
+    /// order the workers finished in.
+    #[cfg(feature = "threads")]
+    fn compact_movers(&mut self, wrote: &[core::sync::atomic::AtomicUsize]) {
         let mut write_at = 0_usize;
         for (index, slot) in wrote.iter().enumerate() {
             let count = slot.load(core::sync::atomic::Ordering::Relaxed);
@@ -1457,7 +1514,6 @@ impl SpatialGrid {
             write_at = write_at.saturating_add(count);
         }
         self.movers.truncate(write_at);
-        changed
     }
     /// Check the four things a completed rebuild promises, in `O(n)` plus one bitset.
     ///
@@ -1507,9 +1563,12 @@ impl SpatialGrid {
                 return Err(GridInvariant::PopulationMismatch);
             };
             for pair in run.windows(2) {
+                let (Some(first_slot), Some(second_slot)) = (pair.first(), pair.get(1)) else {
+                    return Err(GridInvariant::NotAPermutation);
+                };
                 let (Some(first), Some(second)) = (
-                    self.entries.get(pair[0] as usize),
-                    self.entries.get(pair[1] as usize),
+                    self.entries.get(*first_slot as usize),
+                    self.entries.get(*second_slot as usize),
                 ) else {
                     return Err(GridInvariant::NotAPermutation);
                 };

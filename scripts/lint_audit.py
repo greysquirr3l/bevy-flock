@@ -224,6 +224,7 @@ SEARCH = (
 MANIFESTS = (
     "Cargo.toml",
     "crates/bevy-flock-anim/Cargo.toml",
+    "crates/bevy-flock-core/Cargo.toml",
     "crates/bevy-flock-ecs/Cargo.toml",
     "demo/Cargo.toml",
     "demo-gpu/Cargo.toml",

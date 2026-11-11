@@ -61,7 +61,7 @@ enum Arrival {
 }
 
 impl Arrival {
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
             Self::Random => "random",
             Self::Cluster => "cluster",
