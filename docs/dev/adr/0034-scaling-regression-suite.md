@@ -47,6 +47,16 @@ warn_at = max(12%, 1.5 x widest)
 fail_at = max(25%, 2.0 x widest)
 ```
 
+The spread is read from the samples that are not the slowest, and the cell needs enough samples for
+that to mean something: with three or more runs the slowest is dropped before the spread is taken,
+because it is the run a noisy neighbour stole from, and it moves neither the median nor the noise the
+gate is measuring. The raw range is recorded beside it as `raw_spread_pct`, so the wobble stays visible
+rather than hidden. Four repeats per cell and eight for the sequential one are what make the median
+hold against that one slow run: a cell measured with two samples cannot tell a stolen run from a slow
+machine. On 2026-11-11 the runner's sequential cell came back with one run twice as long as the other
+three, which blinded all four comparable rows while every measured speedup sat within 9% of the
+baseline.
+
 On the recorded baseline the widest spread is 8.8%, so CI applies 13.2% and 25.0%. A cell between
 those lines is a warning that does not block the build: it is the band where a human should look at the
 curve but nobody has to re-run CI. A cell past the failure line names its shape, core count,
@@ -76,12 +86,13 @@ exits 2, "nothing comparable" is never a pass, because a green job that compared
 a red one.
 
 **6. CI runs a reduced matrix; the full sweep stays local.** The job sweeps shape A on one core and on
-two, the widths the recorded baseline holds as real cores (decision 2), at concurrency 1, 2 and 4, two
-repeats per cell and four for the sequential cell (`REF_REPEATS`), because that one is every row's
-denominator: 3 m 40 s measured on a six-core machine, and it covers the two ends of the curve, the
-sequential baseline the ratios divide by, and the fill-the-machine case the policy is about. The full
-matrix (both shapes, five core counts, six concurrencies) costs eighteen minutes measured and stays a
-local or nightly job, because a gate nobody waits for gets skipped.
+two, the widths the recorded baseline holds as real cores (decision 2), at concurrency 1, 2 and 4, four
+repeats per cell and eight for the sequential cell (`REF_REPEATS`), because that one is every row's
+denominator and because a shared runner hands a cell the occasional run twice as long as the others
+(decision 3): 3 m 40 s measured on a six-core machine at two repeats, and it covers the two ends of the
+curve, the sequential baseline the ratios divide by, and the fill-the-machine case the policy is
+about. The full matrix (both shapes, five core counts, six concurrencies) costs eighteen minutes
+measured and stays a local or nightly job, because a gate nobody waits for gets skipped.
 
 **7. The baseline is a reviewed file.** `docs/dev/tuning/data/scaling-sweep.json` is committed, so changing it is
 a commit with the raw rows attached, visible in review. Re-baselining after a deliberate trade-off is

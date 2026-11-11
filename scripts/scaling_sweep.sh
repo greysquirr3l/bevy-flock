@@ -16,12 +16,15 @@
 # says which CPUs it was pinned to.
 #
 # Output is JSON lines: one `meta` record, then one record per cell with the median over repeats and
-# the spread between them.
+# the spread between them. The spread is the noise the regression suite widens its thresholds with,
+# and it is taken over the samples that are not the slowest: a run a noisy neighbour stole from moves
+# neither the median nor the noise, and letting it set the noise floor blinds the gate for a reason
+# that has nothing to do with the code. The raw range is recorded beside it as `raw_spread_pct`.
 #
 # Usage:
 #   scripts/scaling_sweep.sh OUT.json
 # Environment:
-#   CORES="1 2 3 4 6"   core counts to pin (clamped to nproc)
+#   CORES="1 2 3 4 6"   core counts to pin (clamped to nproc and to the physical core count)
 #   CONC="1 2 3 4 6 8"  concurrency levels to try
 #   SHAPES="A B"        task shapes to measure
 #   REPEATS=2           runs per cell; the spread is what the regression suite calls noise
@@ -181,9 +184,14 @@ with open(tmp) as handle:
 
 records = []
 for (shape, cores_n, concurrency, tasks, threads), samples in sorted(cells.items()):
-    walls = [wall for wall, _ in samples]
+    walls = sorted(wall for wall, _ in samples)
     median = statistics.median(walls)
-    spread = (max(walls) - min(walls)) / median * 100.0 if len(walls) > 1 and median else 0.0
+    # The slowest run is the one a noisy neighbour stole from. With three samples or more it is
+    # dropped before the spread is taken, because it moves neither the median nor the noise the gate
+    # reads; the raw range is recorded beside it so the wobble stays visible rather than hidden.
+    kept = walls[:-1] if len(walls) >= 3 else walls
+    spread = (max(kept) - min(kept)) / median * 100.0 if len(kept) > 1 and median else 0.0
+    raw = (max(walls) - min(walls)) / median * 100.0 if len(walls) > 1 and median else 0.0
     records.append({
         "kind": "measurement",
         "shape": shape,
@@ -195,6 +203,8 @@ for (shape, cores_n, concurrency, tasks, threads), samples in sorted(cells.items
         "wall": round(median / 1000.0, 3),
         "repeats": len(walls),
         "spread_pct": round(spread, 1),
+        "spread_samples": len(kept),
+        "raw_spread_pct": round(raw, 1),
         "cpus": samples[0][1],
     })
 

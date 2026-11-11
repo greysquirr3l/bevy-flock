@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **The scaling gate stopped blinding itself on a noisy runner.** A shared runner hands a cell the occasional run twice
+  as long as the others, and the spread the gate reads as noise was the difference between the best and the worst of
+  every sample — so one stolen run set the noise floor for every row that divides by that cell, and the gate reported
+  "cannot verify" on a run whose measured speedups were all within 9% of the baseline. The spread is now taken over the
+  samples that are not the slowest, the raw range is recorded beside it, and CI measures four repeats per cell and
+  eight for the sequential one, which is what lets the median hold against that run. No threshold moved.
 - **The scaling gate stopped comparing hardware threads with cores.** A "four-core" row was four logical CPUs, and on
   a machine with SMT that is two cores' worth of parallelism: the CI runner measured 2.29x where the six-core baseline
   measured 3.73x, and the gate read that 38% loss as a regression in the crawl. It was the runner's topology, not the

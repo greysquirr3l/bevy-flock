@@ -138,9 +138,14 @@ jobs:
       # cores. A width wider than those would count hardware threads on one side and cores on the
       # other, and the two are not comparable, so the sweep pins one CPU per physical core and the
       # gate compares the widths that mean the same thing on both machines.
-      - name: Sweep (reduced matrix, two repeats per cell)
+      #
+      # Four repeats per cell and eight for the sequential one, not two and four: a shared runner
+      # hands a cell an occasional run twice as long as the others, and with two samples that one
+      # stolen run is half the measurement. Four samples make the median hold, and the spread the
+      # gate reads as noise ignore it.
+      - name: Sweep (reduced matrix, four repeats per cell)
         run: |
-          SHAPES="A" CORES="1 2" CONC="1 2 4" REPEATS=2 FUNCS=1500 \
+          SHAPES="A" CORES="1 2" CONC="1 2 4" REPEATS=4 REF_REPEATS=8 FUNCS=1500 \
             scripts/scaling_sweep.sh /tmp/candidate.json
       - name: Compare with the recorded baseline
         run: |
