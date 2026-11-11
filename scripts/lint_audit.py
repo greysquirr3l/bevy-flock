@@ -180,6 +180,7 @@ CRATE_ROOTS = {
     "crates/bevy-flock-ecs/src/lib.rs": "crates/bevy-flock-ecs/Cargo.toml",
     "demo/src/lib.rs": "demo/Cargo.toml",
     "examples/build_passes.rs": "Cargo.toml",
+    "examples/patch_tail.rs": "Cargo.toml",
     "examples/scaling_sweep.rs": "Cargo.toml",
     "playground/src/lib.rs": "playground/Cargo.toml",
     "tests/spatial_parity.rs": "Cargo.toml",
@@ -698,6 +699,14 @@ def self_test() -> int:
             "fn f() {}\n",
             0,
             "an example crate root restates the library manifest's crate-wide allow",
+        ),
+        (
+            "examples/patch_tail.rs",
+            '#![expect(\n    clippy::suboptimal_flops,\n'
+            '    reason = "benchmark fixtures must preserve unfused deterministic rounding"\n)]\n'
+            "fn f() {}\n",
+            0,
+            "a second example crate root restates the library manifest's crate-wide allow",
         ),
         (
             "playground/src/lib.rs",

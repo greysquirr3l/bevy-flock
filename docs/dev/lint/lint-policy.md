@@ -209,7 +209,7 @@ Five `#[expect]` cases are therefore permitted, and the audit checks all five:
    would measure less, not more. The audit only accepts the expectation in a bench, and only when
    the reason names Criterion.
 4. **At a crate root, for a lint that crate's own manifest already allows crate-wide.** The library,
-   animation, demo and playground library roots, the two affected example roots, and the spatial
+   animation, demo and playground library roots, the three affected example roots, and the spatial
    parity integration-test root carry `suboptimal_flops` expectations. Animation blends, playground
    transforms, benchmark fixtures and parity fixtures preserve unfused rounding for deterministic
    replays and measurements. The manifest is the authority; the source attribute restates its

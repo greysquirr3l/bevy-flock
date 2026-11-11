@@ -1,3 +1,8 @@
+#![expect(
+    clippy::suboptimal_flops,
+    reason = "benchmark fixtures must preserve unfused deterministic rounding"
+)]
+
 //! Tail latency of the patched rebuild under heavy random crosser loads, at two slack rules.
 //!
 //! [`SpatialGrid::build_incremental`] either patches the bodies that changed cell or falls back to a full rebuild, and the
