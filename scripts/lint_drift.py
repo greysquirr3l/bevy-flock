@@ -4,7 +4,7 @@
 The crate builds on the toolchain `rust-toolchain.toml` pins (1.97.1, Bevy 0.20's MSRV), so a lint
 added or sharpened after that release never runs in the job that gates the build. This script runs
 clippy under a newer toolchain, extracts every warning with its file and line, and compares that set
-with the table in `docs/lint-drift.md`.
+with the table in `docs/dev/lint/lint-drift.md`.
 
 Both directions fail, because both are drift: a warning nobody catalogued is debt that will surface
 in the pin-bump commit, and a catalogued warning that is gone is a page describing a tree that no
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGE = ROOT / "docs" / "lint-drift.md"
+PAGE = ROOT / "docs" / "dev" / "lint" / "lint-drift.md"
 START = "<!-- lint-drift:start -->"
 END = "<!-- lint-drift:end -->"
 
@@ -44,6 +44,7 @@ WHAT_IT_WANTS = {
     "chunks_exact_to_as_chunks": "`as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check",
     "manual_slice_fill": "`slice.fill(value)`, which is one call and vectorises",
     "needless_borrows_for_generic_args": "pass the closure by value; the call already takes it by value",
+    "suboptimal_flops": "`f32::mul_add`, which fuses the multiply and the add into one rounding",
     "tuple_array_conversions": "`<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])`",
 }
 

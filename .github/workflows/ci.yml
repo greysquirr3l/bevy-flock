@@ -139,7 +139,7 @@ jobs:
             scripts/scaling_sweep.sh /tmp/candidate.json
       - name: Compare with the recorded baseline
         run: |
-          python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/candidate.json \
+          python3 scripts/scaling_regression.py docs/dev/tuning/data/scaling-sweep.json /tmp/candidate.json \
             --fail-pct 25 --warn-pct 12 --json /tmp/scaling-verdict.json
       - uses: actions/upload-artifact@v4
         if: always()
@@ -334,7 +334,7 @@ jobs:
       # against itself proves the script runs, that the file parses, and that the case names in it are
       # the ones the script looks for. A real comparison needs the machine that recorded the baseline;
       # a shared runner measures the runner, which is why this is a self-check and says so.
-      - run: python3 scripts/bench_gate.py --check benches/anim-baseline.json
+      - run: python3 scripts/bench_gate.py --check crates/bevy-flock-anim/benches/baseline.json
       - run: python3 scripts/bench_gate.py --baseline benches/spatial-baseline.json --check benches/spatial-baseline.json
   examples:
     name: Examples run

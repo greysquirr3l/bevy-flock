@@ -5,8 +5,8 @@ candidate run regressed against the recorded baseline.
 Everything in the generated report is computed from the sweep files; the prose describes what the
 numbers do, so a reader who opens the report months later is not guessing which table to trust.
 
-    python3 scripts/scaling_report.py docs/data/scaling-sweep.json \\
-        --candidate /tmp/candidate.json --out docs/reports/scaling-report.md
+    python3 scripts/scaling_report.py docs/dev/tuning/data/scaling-sweep.json \\
+        --candidate /tmp/candidate.json --out docs/dev/tuning/reports/scaling-report.md
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def check_docs(path: str) -> int:
     with tempfile.NamedTemporaryFile("r", suffix=".md", delete=False) as handle:
         scratch = handle.name
     subprocess.run(
-        [sys.executable, __file__, "docs/data/scaling-sweep.json", "--out", scratch],
+        [sys.executable, __file__, "docs/dev/tuning/data/scaling-sweep.json", "--out", scratch],
         check=True,
         capture_output=True,
     )
@@ -75,15 +75,15 @@ def check_docs(path: str) -> int:
     pathlib.Path(scratch).unlink()
     if committed != fresh:
         failures.append(
-            f"{path} is stale: regenerate with `python3 scripts/scaling_report.py docs/data/scaling-sweep.json`"
+            f"{path} is stale: regenerate with `python3 scripts/scaling_report.py docs/dev/tuning/data/scaling-sweep.json`"
         )
 
-    adr = pathlib.Path("docs/adr/0034-scaling-regression-suite.md").read_text()
+    adr = pathlib.Path("docs/dev/adr/0034-scaling-regression-suite.md").read_text()
     import json
 
     records = [
         json.loads(line)
-        for line in pathlib.Path("docs/data/scaling-sweep.json").read_text().splitlines()
+        for line in pathlib.Path("docs/dev/tuning/data/scaling-sweep.json").read_text().splitlines()
         if line.strip()
     ]
     spreads = [float(r.get("spread_pct") or 0.0) for r in records if r.get("kind") == "measurement"]
@@ -110,7 +110,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep", nargs="?", help="sweep file to report on")
     parser.add_argument("--candidate", help="a newer sweep to compare against the baseline")
-    parser.add_argument("--out", default="docs/reports/scaling-report.md")
+    parser.add_argument("--out", default="docs/dev/tuning/reports/scaling-report.md")
     parser.add_argument(
         "--check",
         action="store_true",
@@ -148,7 +148,7 @@ def main() -> int:
         f"for shape A, and {fixture.get('bundles', '?')} bundles of {fixture.get('crates_per_bundle', '?')} "
         "crates for shape B.")
     add("")
-    add("![Wall clock and speedup against core count](../images/scaling-curves.png)")
+    add("![Wall clock and speedup against core count](../../../images/scaling-curves.png)")
     add("")
     add("Two quantities are used throughout. **Speedup** is the same core count's sequential wall clock "
         "divided by the wall clock at that concurrency: dimensionless, so it compares across machines. "
@@ -187,8 +187,8 @@ def main() -> int:
             "a six-core machine.")
         add("")
     add("Runtime frame budgets (16.6 ms at 10,000 agents, 8 ms at 100,000 with 5,000 manifested, 6 ms at "
-        "1,000,000) are enforced by the criterion benches and `docs/release-checklist.md`, not here: this "
-        "suite grades parallelism, not absolute speed.")
+        "1,000,000) are enforced by the criterion benches and `docs/dev/meta/release-checklist.md`, not "
+        "here: this suite grades parallelism, not absolute speed.")
     add("")
 
     for shape in shapes:
@@ -384,8 +384,8 @@ def main() -> int:
     add("```bash")
     add("scripts/scaling_sweep.sh /tmp/sweep.json            # ~20 minutes, pinned, two repeats per cell")
     add("python3 scripts/scaling_curves.py /tmp/sweep.json docs/images/scaling-curves.png")
-    add("python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/sweep.json")
-    add("python3 scripts/scaling_report.py docs/data/scaling-sweep.json --out docs/reports/scaling-report.md")
+    add("python3 scripts/scaling_regression.py docs/dev/tuning/data/scaling-sweep.json /tmp/sweep.json")
+    add("python3 scripts/scaling_report.py docs/dev/tuning/data/scaling-sweep.json --out docs/dev/tuning/reports/scaling-report.md")
     add("python3 scripts/scaling_report.py --check                       # fails if this report or ADR 0034 drifted")
     add("```")
     add("")

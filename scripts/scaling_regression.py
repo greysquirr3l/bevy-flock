@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail CI when group scaling gets worse than the recorded baseline in `docs/data/scaling-sweep.json`.
+"""Fail CI when group scaling gets worse than the recorded baseline in `docs/dev/tuning/data/scaling-sweep.json`.
 
 Wall clock alone cannot gate CI: a runner with four slower cores takes longer than the six-core
 machine the baseline came from, and nothing has regressed. What transfers is the *shape* of the
@@ -14,7 +14,7 @@ Two runs must have measured the same work to be comparable, so the fixture is ch
 different functions-per-crate or a different bundle size makes the comparison meaningless and is
 refused rather than reported as a regression.
 
-    python3 scripts/scaling_regression.py docs/data/scaling-sweep.json /tmp/candidate.json
+    python3 scripts/scaling_regression.py docs/dev/tuning/data/scaling-sweep.json /tmp/candidate.json
     python3 scripts/scaling_regression.py BASE.json CAND.json --fail-pct 30 --warn-pct 15 --json out.json
 
 Defaults are 25% to fail and 12% to warn. Both widen to twice the measured spread, so a noisy runner
@@ -272,7 +272,7 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("baseline", nargs="?", help="recorded sweep, usually docs/data/scaling-sweep.json")
+    parser.add_argument("baseline", nargs="?", help="recorded sweep, usually docs/dev/tuning/data/scaling-sweep.json")
     parser.add_argument("candidate", nargs="?", help="sweep from this run")
     parser.add_argument("--fail-pct", type=float, default=DEFAULT_FAIL_PCT, help="speedup drop that fails the build")
     parser.add_argument("--warn-pct", type=float, default=DEFAULT_WARN_PCT, help="speedup drop worth a warning")
