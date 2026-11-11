@@ -462,7 +462,10 @@ impl PassCosts {
 /// The patch's own bookkeeping is linear in the moves, and so is the chance that a run arrives full, so past a few
 /// thousand moves the rebuild is both cheaper and simpler. At the sizes the probe measured, 4,096 moves at a million
 /// bodies is 3.4 ms of shifting against a 15.7 ms rebuild — still a win, but the last decade of it.
-const PATCH_MAX_MOVERS: usize = 4_096;
+///
+/// Public because a crowd that wants to know whether its own movement will be patched or counted
+/// again has to ask: the answer changes at exactly this number.
+pub const PATCH_MAX_MOVERS: usize = 4_096;
 /// The most slots one tick's patch may shift to keep a narrow run alive.
 ///
 /// A borrow moves the tail of every run between the cell that needs a slot and the first run after it that has one
@@ -883,9 +886,17 @@ impl SpatialGrid {
     }
 
     /// Clear the grid, keeping its allocations.
+    ///
+    /// The cell memory goes with the entries. It remembers which cell each *entry index* was in last
+    /// tick, and a cleared grid describes a different population: leaving the memory behind lets the
+    /// next build diff the new bodies against the old ones, so a body that happens to land in the
+    /// cell its predecessor occupied looks as if it never moved, and the index answers about a
+    /// population that is no longer there.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.order.clear();
+        self.cells.clear();
+        self.movers.clear();
         self.built = false;
     }
 
@@ -1521,12 +1532,21 @@ impl SpatialGrid {
     /// incremental path's failures are quiet: a body left out of `order` is a neighbour that stops being found, and a
     /// run left unsorted changes a query's tie-break without changing how many neighbours it returns.
     ///
+    /// The sort check is conditional, and the condition is the entry list. A cell's run is written in the order the
+    /// bodies arrived, so a grid whose entries are not in identity order has runs that are not in identity order either,
+    /// and that is the grid's contract rather than a fault in it. The check therefore applies to a grid built from
+    /// identity-ordered entries, and is skipped for one that was not.
+    ///
     /// # Errors
     ///
     /// The first invariant that fails, named by [`GridInvariant`].
     pub fn check_invariants(&self) -> Result<(), GridInvariant> {
         let bodies = self.entries.len();
         let cells = self.cell_count();
+        let identity_ordered = self.entries.windows(2).all(|pair| {
+            pair.first()
+                .is_some_and(|first| pair.get(1).is_some_and(|second| first.id <= second.id))
+        });
         if self.cell_start.len() != cells.saturating_add(1) || self.cell_len.len() != cells {
             return Err(GridInvariant::PopulationMismatch);
         }
@@ -1572,7 +1592,7 @@ impl SpatialGrid {
                 ) else {
                     return Err(GridInvariant::NotAPermutation);
                 };
-                if first.id > second.id {
+                if identity_ordered && first.id > second.id {
                     return Err(GridInvariant::RunUnsorted);
                 }
             }

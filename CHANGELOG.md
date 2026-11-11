@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- **A cleared spatial grid no longer answers about the population it used to hold.** `SpatialGrid::clear` emptied the
+  entries and kept the cell memory, and that memory is what the patch compares against, so a grid that had been cleared
+  and refilled reported that nothing had moved and kept the old population's cells. A rebuild after a clear now recounts
+  every body, which is what a grid that has forgotten everything should say.
+- **The invariant audit no longer calls a grid unsorted for keeping its entries in slot order.** A cell's run is written
+  in the order the bodies arrived, so a grid whose entries are not in identity order have runs that are not in identity
+  order either. `check_invariants` applied the sort check to those grids anyway and named the grid's own contract a
+  fault. It applies the check to a grid built from identity-ordered entries now, and skips it for one that was not.
 - **The scaling gate stopped blinding itself on a noisy runner.** A shared runner hands a cell the occasional run twice
   as long as the others, and the spread the gate reads as noise was the difference between the best and the worst of
   every sample — a range, which the worst sample the machine produced sets. One stolen run in the sequential cell
