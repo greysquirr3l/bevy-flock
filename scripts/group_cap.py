@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
 import pathlib
 import resource
 import subprocess
@@ -195,14 +196,33 @@ def self_test() -> int:
           f"validate parsing gave {parse_validate(validate_text)}")
     check(parse_validate("") == [], "empty validate output produced groups")
 
-    # The real plan must parse and derive, whatever its groups turn out to be.
-    plan = pathlib.Path(__file__).resolve().parent.parent / "plan.toml"
-    if plan.exists():
-        groups, cap, _over = check_plan(str(plan), 1.0, 6)
-        check(len(groups) > 0, "the repository plan produced no groups")
-        check(all(groups), "a group came out empty")
-    else:
-        failures.append(f"plan not found at {plan}")
+    # The plan loader must parse a plan and derive groups from it. The repository's own `plan.toml` is
+    # a local artefact — it is gitignored, because it describes the work in front of whoever is doing
+    # it — so the self-test uses a fixture instead, and CI can run it without one.
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = pathlib.Path(directory) / "plan.toml"
+        fixture.write_text(
+            "[[completed]]\n"
+            "slug = \"finished\"\n"
+            "\n"
+            "[[phases]]\n"
+            "[[phases.tasks]]\n"
+            "slug = \"alpha\"\n"
+            "\n"
+            "[[phases]]\n"
+            "[[phases.tasks]]\n"
+            "slug = \"beta\"\n"
+            "depends_on = [\"alpha\"]\n",
+            encoding="utf-8",
+        )
+        groups, cap, _over = check_plan(str(fixture), 1.0, 6)
+        # A completed task is not live work, so it never appears in a group.
+        tasks, done = load_plan(str(fixture))
+    check(groups == [["alpha"], ["beta"]],
+          f"plan derivation gave {groups}, wanted [['alpha'], ['beta']]")
+    check(cap == 6, f"a one-thread task on 6 cores was capped at {cap}, wanted 6")
+    check(done == ["finished"], f"the loader reported {done} as completed")
+    check("finished" not in tasks, "a completed task was scheduled as live work")
 
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)
@@ -232,6 +252,11 @@ def main() -> int:
     if args.check_plan or args.groups_from:
         cores = os.cpu_count() or 1
         threads = args.threads if args.threads is not None else float(cores)
+        if args.check_plan and not pathlib.Path(args.check_plan).exists():
+            # The plan is a local artefact: it describes the work in front of whoever is doing it, so
+            # it is gitignored and CI has no copy. Say so rather than failing with a traceback.
+            print(f"no plan at {args.check_plan}; it is a local file and is not in the repository")
+            return 0
         if args.groups_from:
             groups = parse_validate(pathlib.Path(args.groups_from).read_text())
             cap = recommend(threads, cores)
