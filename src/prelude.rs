@@ -42,7 +42,7 @@ pub use crate::domain::memory::{
 pub use crate::domain::population::{PopulationMode, PopulationSize, SlotCount};
 #[cfg(feature = "memory")]
 pub use crate::domain::saves::{LoadReport, MemorySnapshot, Origin, SaveError, SaveRecord};
-pub use crate::domain::spatial::SpatialGridConfig;
+pub use crate::domain::spatial::{RebuildCause, RebuildOutcome, SpatialGridConfig};
 pub use crate::domain::spawn::{DEFAULT_SPACING, Placement};
 pub use crate::domain::steering::SteeringParams;
 pub use crate::domain::stimulus::{Perceived, Stimulus, StimulusKind};

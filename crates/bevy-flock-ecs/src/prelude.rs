@@ -32,7 +32,7 @@ pub use crate::adapters::primary::plugin::{
 pub use crate::adapters::primary::stimulus::{
     PerceivedStimuli, Perception, PerceptionSettings, StimulusPlugin, StimulusSource,
 };
-pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockSpatialGrid};
+pub use crate::boids::{BoidsConfig, BoidsPlugin, FlockGridReport, FlockSpatialGrid};
 
 #[cfg(feature = "memory")]
 pub use crate::adapters::primary::memory_bridge::{MemoryBridgeStats, MemoryConfig, NpcMemoryRow};

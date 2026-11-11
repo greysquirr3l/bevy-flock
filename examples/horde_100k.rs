@@ -76,6 +76,14 @@ fn main() {
         "steady frame     {:.2} ms over {WARM_FRAMES} frames",
         warm_elapsed.as_secs_f64() * 1_000.0 / f64::from(WARM_FRAMES)
     );
+    println!(
+        "index            {} patched, {} rebuilt, of {WARM_FRAMES} frames",
+        stats.patched_ticks, stats.rebuilt_ticks
+    );
+    println!(
+        "last outcome     {:?}",
+        app.world().resource::<FlockGridReport>().0
+    );
     println!();
     println!(
         "Note: this is the full-cognition path. For the ambient continuum — the\n\

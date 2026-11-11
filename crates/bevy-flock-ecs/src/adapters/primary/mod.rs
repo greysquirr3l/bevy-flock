@@ -7,6 +7,7 @@ pub mod components;
 pub mod dialogue;
 pub mod gaze;
 pub mod gesture;
+pub mod grid_slots;
 pub mod grouping;
 #[cfg(feature = "memory")]
 pub mod interaction;
@@ -37,6 +38,7 @@ pub use gesture::{
     GestureChannel, GestureConfig, GestureCue, GestureKind, GestureRequest, NpcGestures,
     advance_gestures, collect_gesture_requests, request_gesture,
 };
+pub use grid_slots::{GridSlots, Moved, NpcGridSlot};
 pub use grouping::{
     GroupLeader, GroupMember, Groups, NpcIndex, index_new_npcs, reconcile_despawns,
 };

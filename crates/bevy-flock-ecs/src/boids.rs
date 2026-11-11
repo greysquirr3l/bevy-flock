@@ -44,10 +44,13 @@ use crate::adapters::primary::components::{
     FlockMember, LodTier, Npc, NpcAvoidancePriority, NpcDesiredVelocity, NpcNeeds, NpcTarget,
     NpcTemperament, NpcVelocity,
 };
-use crate::adapters::primary::plugin::FlockSet;
+use crate::adapters::primary::grid_slots::{GridSlots, NpcGridSlot};
+use crate::adapters::primary::plugin::{FlockSet, FlockStats};
 use crate::application::SimClock;
 use crate::application::{AvoidanceParams, Crowd, CrowdParams, CrowdReport, SteeringRoad};
-use crate::domain::spatial::{GridEntry, Neighbour, SpatialGrid, SpatialGridConfig};
+use crate::domain::spatial::{
+    GridEntry, Neighbour, RebuildOutcome, SpatialGrid, SpatialGridConfig,
+};
 use crate::domain::steering::{AgentState, SteeringParams, desired_velocity};
 use crate::domain::temperament::{Needs, Temperament, TemperamentDrive, WeightBias};
 use crate::domain::tick::TicksPerSecond;
@@ -330,6 +333,22 @@ pub struct FlockSpatialGrid(pub SpatialGrid);
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct FlockSteerReport(pub CrowdReport);
 
+/// What the last rebuild of the spatial index did.
+///
+/// Published rather than discarded so a game can watch its own crowd: most ticks move no body
+/// across a cell boundary, and a crowd that reports [`RebuildOutcome::Patched`] is a crowd that
+/// is being simulated rather than re-sorted. A crowd that reports
+/// [`RebuildOutcome::Rebuilt`] every tick is not: something in it is moving every body every
+/// tick, or the population is changing every tick.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct FlockGridReport(pub RebuildOutcome);
+
+impl Default for FlockGridReport {
+    fn default() -> Self {
+        Self(RebuildOutcome::Unchanged)
+    }
+}
+
 /// The components steering reads and writes for one NPC.
 ///
 /// A named alias rather than an inline tuple: the query appears in signatures,
@@ -355,6 +374,16 @@ impl FlockSpatialGrid {
     #[must_use]
     pub const fn new(grid: SpatialGrid) -> Self {
         Self(grid)
+    }
+
+    /// A grid built from a configuration.
+    ///
+    /// A configuration that fails validation falls back to the degenerate one-cell grid rather than
+    /// panicking: the plugin has no way to report an error to the game that configured it, and a
+    /// grid that answers wrongly about one body beats a crash.
+    #[must_use]
+    pub fn from_config(config: SpatialGridConfig) -> Self {
+        Self(SpatialGrid::new(config).unwrap_or_else(|_| SpatialGrid::empty()))
     }
 }
 
@@ -389,8 +418,11 @@ impl BoidsPlugin {
 impl Plugin for BoidsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config)
-            .insert_resource(FlockSpatialGrid::default())
+            .insert_resource(FlockSpatialGrid::from_config(self.config.grid))
             .insert_resource(FlockSteerReport::default())
+            .insert_resource(FlockGridReport::default())
+            .init_resource::<GridSlots>()
+            .init_resource::<FlockStats>()
             .configure_sets(
                 Update,
                 (
@@ -414,8 +446,19 @@ impl Plugin for BoidsPlugin {
 
 /// Copy every NPC into the spatial index and rebuild it.
 ///
-/// Reads positions and velocities, writes the grid. Runs first in the frame so
-/// steering sees the world as it is now, not as it was last tick.
+/// Reads positions, velocities and slots; writes the grid's entry array and the window table it
+/// indexes. Runs first in the frame so steering sees the world as it is now, not as it was last
+/// tick.
+///
+/// The grid's incremental path needs the same body at the same entry index every tick, which a
+/// query rebuilt from scratch cannot promise: the order a query yields is the archetype order, and
+/// that changes when a body is spawned or despawned, so a body that changed archetype would look
+/// to the patch like a body that crossed a cell boundary. Each NPC therefore owns a slot, and the
+/// entry array is written by slot rather than appended to.
+///
+/// When the slots do not describe the population — a body the plugin never saw, a table that lost
+/// one — the system falls back to the full rebuild it always did. A correct index is worth more
+/// than a fast one.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Bevy hands a system its parameters by value; `&Res<T>` is not a `SystemParam`"
@@ -423,7 +466,18 @@ impl Plugin for BoidsPlugin {
 pub fn rebuild_spatial_grid(
     mut grid: ResMut<FlockSpatialGrid>,
     config: Res<BoidsConfig>,
-    query: Query<(&Transform, &Npc, &NpcVelocity)>,
+    mut slots: ResMut<GridSlots>,
+    mut report: ResMut<FlockGridReport>,
+    mut stats: ResMut<FlockStats>,
+    mut commands: Commands,
+    mut removed: RemovedComponents<Npc>,
+    mut query: Query<(
+        Entity,
+        &Transform,
+        &Npc,
+        &NpcVelocity,
+        Option<&mut NpcGridSlot>,
+    )>,
 ) {
     // Asking for more workers than the machine has costs throughput rather than buying it: the sweep in
     // `docs/dev/tuning/performance.md` measured eight workers on six cores at 25% slower than six. `0` means the
@@ -441,15 +495,125 @@ pub fn rebuild_spatial_grid(
             std::mem::replace(&mut grid.0, crate::domain::spatial::SpatialGrid::empty());
         grid.0 = grid_owned.with_threads(workers);
     }
+
+    // A despawned body gives its slot back. The event arrives a frame after the despawn, so for one
+    // tick the table still holds a body that is gone; the counts below then disagree, and the
+    // fallback keeps the dead body out of the index.
+    for entity in removed.read() {
+        slots.release(entity);
+    }
+    // A slot freed in the middle leaves a gap, and the entry array cannot describe a gap, so the
+    // body in the highest live slot moves down into it.
+    let moved = slots.compact();
+
+    let live = query.iter_mut().len();
+    // The fast path needs the entry array to be the population's array: the same length, and each
+    // body at its own slot. The table says how many bodies own a slot; when that is not the number
+    // of bodies in the world, the table describes a different population, and nothing in it can be
+    // diffed against the entries.
+    let fast = grid.0.entries().len() == live && slots.live() == live && slots.dense();
+
+    if fast {
+        // The slots have to be one body each. A body whose component names a slot another body
+        // owns would put two bodies at one index and lose one of them from the index, so the
+        // duplicates are caught here and the tick falls back to a rebuild.
+        let mut seen = vec![0_u64; live.div_ceil(u64::BITS as usize)];
+        let mut duplicated = false;
+        for (entity, transform, npc, velocity, slot) in &mut query {
+            let Some(mut slot) = slot else {
+                // A body the plugin never saw: the slot it would have had is a guess, so this tick
+                // is a rebuild. The slot it is given lands next tick.
+                duplicated = true;
+                continue;
+            };
+            let index = match moved {
+                Some(moved) if moved.entity == entity => moved.to,
+                _ => slot.index(),
+            };
+            let Some(word) = seen.get_mut((index as usize) / u64::BITS as usize) else {
+                duplicated = true;
+                continue;
+            };
+            let bit = 1_u64 << (index as usize % u64::BITS as usize);
+            if *word & bit != 0 {
+                duplicated = true;
+                continue;
+            }
+            *word |= bit;
+            if let Some(entry) = grid.0.entries_mut().get_mut(index as usize) {
+                *entry = GridEntry {
+                    id: npc.0,
+                    position: transform.translation,
+                    velocity: velocity.0,
+                };
+            }
+            // A body the table moved owns its new slot now, whatever its component still says.
+            if index != slot.index() {
+                *slot = NpcGridSlot(index);
+            }
+        }
+        if !duplicated {
+            let outcome = grid.0.build_incremental();
+            record_outcome(&mut report, &mut stats, outcome);
+            return;
+        }
+    }
+
+    // The fallback: the whole index, rebuilt from the bodies in front of us. The rebuild goes
+    // through the incremental path so the grid's cell memory describes the entries it just took:
+    // the next tick can then patch instead of starting over.
     grid.0.clear();
-    for (transform, npc, velocity) in &query {
-        grid.0.insert(GridEntry {
+    for (entity, transform, npc, velocity, slot) in &mut query {
+        let entry = GridEntry {
             id: npc.0,
             position: transform.translation,
             velocity: velocity.0,
-        });
+        };
+        if let Some(mut slot) = slot {
+            let index = match moved {
+                Some(moved) if moved.entity == entity => moved.to,
+                _ => slot.index(),
+            };
+            if index != slot.index() {
+                *slot = NpcGridSlot(index);
+            }
+            if slots.slot_of(entity).is_none() {
+                // The table has never seen this body, so the slot the component names is not the
+                // one the table handed out. The table is given the body and the component is
+                // corrected to match.
+                let assigned = slots.allocate(entity);
+                *slot = NpcGridSlot(assigned);
+            }
+        } else {
+            // A body the plugin never saw has no slot yet. It gets one now, and the component
+            // lands next tick, so this tick's index is a rebuild rather than a patch.
+            let assigned = slots
+                .slot_of(entity)
+                .unwrap_or_else(|| slots.allocate(entity));
+            commands.entity(entity).insert(NpcGridSlot(assigned));
+        }
+        grid.0.insert(entry);
     }
-    grid.0.build();
+    let outcome = grid.0.build_incremental();
+    record_outcome(&mut report, &mut stats, outcome);
+}
+
+/// Note what the rebuild did, so a game can see whether its crowd patches or rebuilds.
+const fn record_outcome(
+    report: &mut FlockGridReport,
+    stats: &mut FlockStats,
+    outcome: RebuildOutcome,
+) {
+    match outcome {
+        RebuildOutcome::Patched { .. } => {
+            stats.patched_ticks = stats.patched_ticks.saturating_add(1);
+        }
+        RebuildOutcome::Rebuilt { .. } => {
+            stats.rebuilt_ticks = stats.rebuilt_ticks.saturating_add(1);
+        }
+        RebuildOutcome::Unchanged => {}
+    }
+    report.0 = outcome;
 }
 
 /// What the steering pass reads from each NPC.
@@ -687,12 +851,31 @@ mod tests {
     use crate::adapters::primary::components::NpcBundle;
     use crate::domain::ids::NpcId;
     use crate::domain::num;
+    use crate::domain::spatial::{PATCH_MAX_MOVERS, RebuildCause};
     use crate::domain::temperament::Weight;
     use crate::testkit::OrDie;
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(BoidsPlugin::default());
+        app
+    }
+
+    /// A grid with four-metre cells.
+    ///
+    /// The default grid is a one-kilometre cube, and a budget of a million cells coarsens it to
+    /// thirteen and a half metres, so a body that moves four metres has not crossed a boundary at
+    /// all. The tests that move bodies across a boundary need the boundary where they say it is.
+    fn four_metre_grid() -> SpatialGridConfig {
+        SpatialGridConfig::try_new(Vec3::splat(-100.0), Vec3::splat(100.0), 4.0).or_die()
+    }
+
+    /// An app whose spatial index has four-metre cells.
+    fn app_with_four_metre_cells() -> App {
+        let mut app = App::new();
+        app.add_plugins(BoidsPlugin::new(
+            BoidsConfig::default().with_grid(four_metre_grid()),
+        ));
         app
     }
 
@@ -1142,6 +1325,130 @@ mod tests {
         assert!(
             first < second,
             "the gregarious agent must lose company faster: {company:?}"
+        );
+    }
+
+    /// A crowd of bodies that stands still: ambient tier agents are not steered, so the only
+    /// thing that can move them is the test.
+    fn standing_crowd(app: &mut App, count: u32) -> Vec<Entity> {
+        (0..count)
+            .map(|index| {
+                app.world_mut()
+                    .spawn(
+                        NpcBundle::default_for(NpcId::unique(index))
+                            .with_position(Vec3::new(5.0, 5.0, 5.0))
+                            .with_lod(LodTier::Ambient),
+                    )
+                    .id()
+            })
+            .collect()
+    }
+
+    /// The index the same bodies would get if it were built from scratch.
+    fn reference_grid(app: &App, entities: &[Entity], config: SpatialGridConfig) -> SpatialGrid {
+        let mut grid = SpatialGrid::new(config).or_die();
+        for entity in entities {
+            let transform = app.world().get::<Transform>(*entity).or_die();
+            let npc = app.world().get::<Npc>(*entity).or_die();
+            let velocity = app.world().get::<NpcVelocity>(*entity).or_die();
+            grid.insert(GridEntry {
+                id: npc.0,
+                position: transform.translation,
+                velocity: velocity.0,
+            });
+        }
+        grid.build();
+        grid
+    }
+
+    /// What the last rebuild did.
+    fn outcome(app: &App) -> RebuildOutcome {
+        app.world().resource::<FlockGridReport>().0
+    }
+
+    #[test]
+    fn a_still_crowd_does_not_rebuild_the_index() {
+        let mut app = app();
+        standing_crowd(&mut app, 10);
+        // The first tick hands out the slots and rebuilds; the second is the tick the index can
+        // patch, and a crowd that stands still has nothing to patch.
+        app.update();
+        app.update();
+        assert_eq!(outcome(&app), RebuildOutcome::Unchanged);
+        assert_eq!(app.world().resource::<FlockStats>().rebuilt_ticks, 1);
+        assert_eq!(app.world().resource::<FlockStats>().patched_ticks, 0);
+    }
+
+    #[test]
+    fn bodies_crossing_a_cell_boundary_are_patched() {
+        let mut app = app_with_four_metre_cells();
+        let entities = standing_crowd(&mut app, 10);
+        app.update();
+        // The cells are four metres wide and start at -100, so x = 5 and x = 9 are in different
+        // cells: every body crosses one.
+        for entity in &entities {
+            app.world_mut()
+                .get_mut::<Transform>(*entity)
+                .or_die()
+                .translation = Vec3::new(9.0, 5.0, 5.0);
+        }
+        app.update();
+        assert_eq!(outcome(&app), RebuildOutcome::Patched { changed: 10 });
+        // The patched index has to answer exactly like an index built from scratch.
+        let probes = [Vec3::new(9.0, 5.0, 5.0)];
+        let patched = crate::testkit::spatial_digest(
+            &app.world().resource::<FlockSpatialGrid>().0,
+            &probes,
+            12.0,
+        );
+        let reference = crate::testkit::spatial_digest(
+            &reference_grid(&app, &entities, four_metre_grid()),
+            &probes,
+            12.0,
+        );
+        assert_eq!(patched, reference);
+    }
+
+    #[test]
+    fn a_crowd_that_moves_everywhere_is_rebuilt() {
+        let mut app = app_with_four_metre_cells();
+        // More movers than the patch can absorb, so the index has to be counted again.
+        let entities = standing_crowd(&mut app, u32::try_from(PATCH_MAX_MOVERS + 1).or_die());
+        app.update();
+        for entity in &entities {
+            app.world_mut()
+                .get_mut::<Transform>(*entity)
+                .or_die()
+                .translation = Vec3::new(9.0, 5.0, 5.0);
+        }
+        app.update();
+        assert_eq!(
+            outcome(&app),
+            RebuildOutcome::Rebuilt {
+                changed: entities.len(),
+                cause: RebuildCause::TooManyMovers,
+            }
+        );
+    }
+
+    #[test]
+    fn a_spawn_and_a_despawn_fall_back_to_a_rebuild() {
+        let mut app = app();
+        let entities = standing_crowd(&mut app, 10);
+        app.update();
+        // One body leaves and one arrives: the table describes a different population, so there is
+        // nothing in it that can be diffed against the entries.
+        app.world_mut().despawn(entities.first().copied().or_die());
+        app.world_mut().spawn(
+            NpcBundle::default_for(NpcId::unique(999)).with_position(Vec3::new(5.0, 5.0, 5.0)),
+        );
+        app.update();
+        assert_eq!(
+            outcome(&app),
+            RebuildOutcome::Rebuilt {
+                changed: 10,
+                cause: RebuildCause::Population,
+            }
         );
     }
 }

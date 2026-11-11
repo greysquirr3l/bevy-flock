@@ -23,6 +23,21 @@ half-wired, in this order, because the second and third need the first:
 2. **`SpatialGrid::remove`.** There is no removal API at all, which is why a single death forces a full rebuild.
 3. **Per-cell aggregates.** Opt-in statistics a crowd library will want, with a design that keeps determinism.
 
+## Status
+
+**Task A is done**, on `feat/plugin-incremental-rebuild`: the slot table, the patched rebuild, the fallback, the outcome
+counters, and the four tests the task asks for. Two changes outside the task's four steps came with it, because the
+tests needed them and because the code was wrong without them:
+
+- `SpatialGrid::clear` clears the cell memory as well as the entries. It was the one thing standing between a cleared
+  grid and a truthful rebuild: the memory remembers which cell each entry index was in, so a grid that had been cleared
+  and refilled diffed the new bodies against the old ones and reported that nothing had moved.
+- `BoidsPlugin` builds its grid from `BoidsConfig::grid` rather than from the default configuration. The field was
+  documented as the grid the perception pass builds and was used to validate spawn positions, but the index itself
+  ignored it.
+
+Tasks B and C are untouched, and both need the slot table Task A put in place.
+
 ## How to work
 
 This section is procedure, not context. Follow it in order. The code is dense, the lints are strict, and a change that
@@ -312,11 +327,18 @@ Never write "5x" about the rebuild. ADR 0060 measured the ceiling at about 1.8x 
 ## Things that are easy to miss
 
 - **`RebuildCause` has no reference page.** It is new public API, it is mentioned in the site's performance page, and the
-  reference section does not describe it. Add it when Task A lands.
+  reference section does not describe it. Add it when Task A lands. **Done in Task A:** the site has a
+  `reference/rebuild-outcomes` page describing the three outcomes, the four causes, and how to read them from a game.
 - **`FlockStats` should count outcomes.** A game cannot currently tell whether its crowd patches or rebuilds. Two counters
-  in the existing stats struct close that.
+  in the existing stats struct close that. **Done in Task A.**
 - **`build_incremental` is documented as honouring `check_invariants` in debug builds.** Confirm that is true before
-  relying on it; if it is not, add it under `debug_assertions` and say so.
+  relying on it; if it is not, add it under `debug_assertions` and say so. **Resolved in Task A, and not the way the note
+  suggests.** ADR 0064 records the decision: the audit is a public method rather than a `debug_assert!` inside the path,
+  because an assertion that allocates a bitset would break the no-allocation tests and run on every tick of every test
+  that touches a grid. The harness calls the audit after each scripted tick instead, which is stronger than one
+  assertion at the end of a rebuild. What the audit did get wrong is the sort check: a cell's run is written in arrival
+  order, so a grid whose entries are in slot order has runs that are not in identity order either. `check_invariants` now
+  applies the sort check only to a grid built from identity-ordered entries, and says so.
 - **The look-back primitive is parked.** `docs/dev/adr/0063-dispatch-elimination.md` describes removing the per-pass
   barriers with a decoupled look-back, and PR #59 holds the primitive as a tested module that nothing calls. It is not
   needed for any of the three tasks above. Do not merge it into the grid without the aliasing decision that ADR 0063
