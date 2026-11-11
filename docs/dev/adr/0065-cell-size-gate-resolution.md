@@ -67,6 +67,29 @@ thousand, and the current default is chosen for the largest crowd the library su
 recorded frame number in `performance.md`, so it needs its own plan task and its own re-measurement, not a threshold
 adjustment in a gate.
 
+## Outcome
+
+Recorded from CI run `43004961498` on `6657104`, the first green run with this gate in place:
+
+| case | 13.5 m | 9 m | verdict |
+| --- | --- | --- | --- |
+| 10,000 | [7.34, 7.88] ms | [7.26, 7.82] ms | reported, intervals overlapping |
+| 100,000 | [59.48, 59.95] ms | [59.37, 59.78] ms | judged, intervals overlapping, 0.2% |
+
+`PASS: 9 m cells save 0.2% of a 100000-agent frame, below the 3% warn threshold.` The same run's scaling regression
+held all four comparable cells at −2.8%, −4.4%, +3.4% and −2.9%, so the two gates now agree about what a difference of a
+few percent means on a shared runner.
+
+The CI host is slower than the machine this ADR was written on (59.5 ms against 47.6 ms for the same frame), which is the
+other reason the gate reads intervals from one run rather than a number from a document: a percentage of a different
+frame is not the same quantity.
+
+The sibling gate made the same move in `6657104`, replacing ADR 0034's observed range with a robust standard error on the
+median. One asymmetry between them is deliberate and should survive any future harmonisation. That gate asserts a recorded
+baseline still holds, so a cell it cannot resolve is a failure of evidence and exits 2. This gate asserts an expiry
+condition on a design decision, so a difference it cannot resolve is the absence of evidence to re-open the decision, and
+passes with a warning. Same arithmetic, different question.
+
 ## Consequences
 
 - CI stops failing on a quantity it cannot resolve, and the failing job on `main` is explained rather than tolerated.
