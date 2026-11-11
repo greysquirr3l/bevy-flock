@@ -443,7 +443,12 @@ jobs:
           cargo run --release --quiet --manifest-path demo/Cargo.toml --bin ashfall-play -- \
             --population 400 --ticks 120 --play 2 --budget --cols 64 --rows 24 \
             --out "$RUNNER_TEMP/flight"
-          python3 -c "import json,pathlib,os; root=pathlib.Path(os.environ['RUNNER_TEMP'])/'flight'; frames=sorted(root.glob('frame-*.png')); table=json.loads((root/'playback.json').read_text()); assert len(frames)==10, len(frames); assert table['frames']==10, table['frames']; assert all(f.stat().st_size>1000 for f in frames); print('flight ok', len(frames), 'frames', round(table['mean_ms'],1), 'ms/frame')"
+          # Ten frames, each exactly the size the terminal arithmetic asked for, and ten different
+          # pictures: a camera rail that stopped or a rasteriser that drew nothing would repeat a
+          # frame. The old floor of a kilobyte per frame said nothing at this size — a 64x24 frame of
+          # this city is 400-1500 bytes whether or not the crowd is standing in it — so it is
+          # replaced by the two things it was meant to catch.
+          python3 -c "import json,pathlib,os,struct; root=pathlib.Path(os.environ['RUNNER_TEMP'])/'flight'; frames=sorted(root.glob('frame-*.png')); table=json.loads((root/'playback.json').read_text()); assert len(frames)==10, len(frames); assert table['frames']==10, table['frames']; assert all(f.stat().st_size>24 for f in frames), 'a frame is empty'; dims={struct.unpack('>II', f.read_bytes()[16:24]) for f in frames}; assert dims=={(64,24)}, dims; prints=[row['fingerprint'] for row in table['table']]; assert len(set(prints))==len(prints), prints; print('flight ok', len(frames), 'frames', round(table['mean_ms'],1), 'ms/frame')"
       # The bench is compiled, not run: criterion on a shared runner measures the runner. Compiling it
       # keeps the wgpu comparison honest, which is the part that rots when the API moves.
       - name: Compile the render benchmark
