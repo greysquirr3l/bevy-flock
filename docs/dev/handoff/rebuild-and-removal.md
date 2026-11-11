@@ -38,6 +38,14 @@ tests needed them and because the code was wrong without them:
 
 Tasks B and C are untouched, and both need the slot table Task A put in place.
 
+**What the measurement says.** The index path itself is 6.6x cheaper at 100,000 bodies and 9.9x at 1,000,000 (the
+`crossers` row against the `full` row of `examples/incremental_build`, medians of three runs on an Apple M3 Pro). The
+plugin's frame could not be read: `examples/horde_100k` at 100,000 NPCs gives medians of 15.43 ms after and 15.35 ms
+before over five alternating pairs, and the host's run-to-run range is 14.4 ms to 28.3 ms while its load average was
+above 18, so a difference of about a millisecond is under the noise. The rebuild the patch removes is about 1 ms of a
+15 ms frame. Raw rows and the journal entry are in `benchmarks/results/2026-11-11/m3-pro/plugin-incremental/` and
+`docs/dev/tuning/performance.md`.
+
 ## How to work
 
 This section is procedure, not context. Follow it in order. The code is dense, the lints are strict, and a change that

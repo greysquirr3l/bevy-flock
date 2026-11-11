@@ -8,6 +8,22 @@ The JSONL files here preserve benchmark output that was previously kept under ig
 - [`m3-pro/1000-ticks/bevy-flock.jsonl`](2026-11-09/m3-pro/1000-ticks/bevy-flock.jsonl), [`unreal.jsonl`](2026-11-09/m3-pro/1000-ticks/unreal.jsonl), and [`godot-grid.jsonl`](2026-11-09/m3-pro/1000-ticks/godot-grid.jsonl) contain the three-engine comparison, with 100 warm-up ticks and 1,000 measured ticks.
 - [`m3-pro/1000-ticks/godot-grid-runner.jsonl`](2026-11-09/m3-pro/1000-ticks/godot-grid-runner.jsonl) preserves the separate Godot result emitted by the cross-engine runner. Its measurements differ from `godot-grid.jsonl`, so keep these runs distinct.
 
+## 2026-11-11, Apple M3 Pro
+
+- [`m3-pro/plugin-incremental/incremental-build-100k.jsonl`](2026-11-11/m3-pro/plugin-incremental/incremental-build-100k.jsonl)
+  and [`incremental-build-1m.jsonl`](2026-11-11/m3-pro/plugin-incremental/incremental-build-1m.jsonl) are the index
+  paths the Bevy adapter now uses, from `examples/incremental_build`: the still row, the crossers row and the full
+  rebuild, three runs each, at 100,000 and 1,000,000 bodies over eleven workers. The crossers row is the patch path a
+  moving crowd takes, and it is 6.6x cheaper than the rebuild at a hundred thousand bodies and 9.9x at a million.
+- [`m3-pro/plugin-incremental/horde-100k.jsonl`](2026-11-11/m3-pro/plugin-incremental/horde-100k.jsonl) is the
+  full-cognition plugin at 100,000 NPCs, five runs, each reporting 120 patched ticks and 25 rebuilt ticks over a
+  120-frame steady run with the same digest every time.
+- [`m3-pro/plugin-incremental/horde-100k-before-after.txt`](2026-11-11/m3-pro/plugin-incremental/horde-100k-before-after.txt)
+  is the frame comparison that could not be read: the same harness before and after, five alternating pairs. The medians
+  are 0.08 ms apart and the host's run-to-run range is wider than that, so the frame says nothing about the change. The
+  host was shared while these ran and its load average was above 18, which is the likeliest reason the range is that
+  wide. The index path it moves is about 1 ms of a 15 ms frame.
+
 ## 2026-11-09, six-core aarch64 virtual machine
 
 The harness names this machine from `CPU implementer` and `CPU part`, because the kernel publishes no model line:

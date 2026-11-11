@@ -2180,3 +2180,47 @@ walk in the elements it shifts, because that is what a borrow costs; `BORROW_MAX
 from walking the table. All 512 crossers into a *single* cell needs 512 slots, more than 64 runs may lend, so
 `--cluster-radius 0` keeps every tick rebuilding. A party that size has re-formed the crowd, and a fresh count is the
 right answer.
+
+## The plugin patches its index (2026-11-11)
+
+The Bevy adapter rebuilt its spatial index from scratch on every tick. The index was right most of the time and the
+rebuild counted it again anyway, so the adapter paid for a full recount of a table the incremental path could have
+absorbed. Each NPC now owns a slot in the grid's entry array, which is what the patch needs to tell a body that moved
+from a body that was replaced, and the adapter reports what it did: `FlockStats` counts patched and rebuilt ticks, and
+`FlockGridReport` holds the last outcome with the cause when a rebuild was needed.
+
+The index path itself is the number that moved. Measured with `examples/incremental_build` on the machine below, medians
+of three runs, eleven workers, the same grid the plugin builds:
+
+| bodies | still | crossers | full rebuild | patch against rebuild |
+| --- | --- | --- | --- | --- |
+| 100,000 | 0.200 ms | 0.160 ms | 1.051 ms | 6.6x |
+| 1,000,000 | 0.438 ms | 0.495 ms | 4.877 ms | 9.9x |
+
+The "crossers" column is the row the plugin now takes on a moving crowd: 128 bodies crossing a cell boundary every tick
+at a hundred thousand, 512 at a million. Each tick of a million-body crowd costs about 0.5 ms to absorb instead of 4.9 ms
+to count again, and the saving is per tick, so it is a budget line rather than a startup cost.
+
+**The frame did not move, and the reason is worth stating.** `examples/horde_100k` runs the full-cognition path with
+100,000 NPCs, which is the frame a game actually sees, and the index is a small share of it. Five alternating runs of
+the same harness, after and before, on an Apple M3 Pro:
+
+| | runs (ms) | median | mean |
+| --- | --- | --- | --- |
+| after (patched) | 19.95, 28.27, 15.43, 14.68, 14.40 | 15.43 ms | 16.55 ms |
+| before (rebuilt) | 22.97, 19.32, 15.07, 15.35, 14.63 | 15.35 ms | 17.47 ms |
+
+The medians are 0.08 ms apart and the run-to-run range on this host is 14.4 ms to 28.3 ms, so the frame says nothing.
+The host was shared while these ran and its load average was above 18, which is the likeliest reason the range is that wide,
+and the likeliest reason a difference of about a millisecond cannot be read from it. The rebuild the patch removes is
+about 1 ms of a 15 ms frame: the plugin's own counters say 120 patched ticks and 25 rebuilt ticks over a 120-frame steady
+run, and the frame comparison is inconclusive rather than a claim that the frame did not change. What changed is the
+shape of the cost. The index's price used to scale with the population and did not care whether the crowd moved; it now
+scales with the movement, and the crowd that stands still pays nothing for it at all.
+
+Raw rows: `benchmarks/results/2026-11-11/m3-pro/plugin-incremental/`. Reproduce with:
+
+```sh
+cargo run --release --offline --example incremental_build -- --bodies 1000000 --workers 11 --crossers 512 --json
+cargo run --release --offline --example horde_100k -- --json
+```

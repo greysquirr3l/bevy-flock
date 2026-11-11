@@ -28,6 +28,7 @@ use std::time::Instant;
 const WARM_FRAMES: u32 = 120;
 
 fn main() {
+    let json = std::env::args().any(|argument| argument == "--json");
     let population = PopulationSize::try_new(100_000).or_die();
     let config = FlockConfig::default()
         .with_population(population)
@@ -53,8 +54,11 @@ fn main() {
     let spawn_elapsed = start.elapsed();
 
     let warm = Instant::now();
+    let mut samples = Vec::with_capacity(WARM_FRAMES as usize);
     for _ in 0..WARM_FRAMES {
+        let frame = Instant::now();
         app.update();
+        samples.push(frame.elapsed().as_secs_f64() * 1_000.0);
     }
     let warm_elapsed = warm.elapsed();
 
@@ -85,6 +89,27 @@ fn main() {
         app.world().resource::<FlockGridReport>().0
     );
     println!();
+    if json {
+        let mut sorted = samples.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted.get(sorted.len() / 2).copied().unwrap_or_default();
+        let p95 = sorted
+            .get((sorted.len() * 95).div_ceil(100).saturating_sub(1))
+            .copied()
+            .unwrap_or_default();
+        println!(
+            "{{\"kind\":\"horde\",\"schema_version\":1,\"machine\":\"{}\",\"workload\":\"full-cognition\",\
+             \"agents\":{},\"ticks\":{WARM_FRAMES},\"warmup\":{spawn_frames},\"spawn_frames\":{spawn_frames},\
+             \"mean_ms\":{:.3},\"median_ms\":{median:.3},\"p95_ms\":{p95:.3},\"patched_ticks\":{},\
+             \"rebuilt_ticks\":{},\"digest\":\"0x{:016x}\"}}",
+            std::env::consts::ARCH,
+            stats.live,
+            warm_elapsed.as_secs_f64() * 1_000.0 / f64::from(WARM_FRAMES),
+            stats.patched_ticks,
+            stats.rebuilt_ticks,
+            diagnostics.digest(),
+        );
+    }
     println!(
         "Note: this is the full-cognition path. For the ambient continuum — the\n\
          millions-of-NPCs path — see the band plugin and `docs/dev/tuning/performance.md`."

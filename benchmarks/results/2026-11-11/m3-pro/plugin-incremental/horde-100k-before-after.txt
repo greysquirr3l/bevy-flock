@@ -1,0 +1,20 @@
+Host: Apple M3 Pro, 11 cores, arm64, macOS 27.0.1
+Harness: examples/horde_100k, 100000 NPCs, full cognition, 24 spawn frames, 120 measured frames.
+after  = this branch (the index is patched); before = 9f37535 (the index is rebuilt every tick).
+Both binaries are the same harness, built --release on this host.
+
+=== pair 1 ===
+after  steady frame     19.95 ms over 120 frames
+before steady frame     22.97 ms over 120 frames
+=== pair 2 ===
+after  steady frame     28.27 ms over 120 frames
+before steady frame     19.32 ms over 120 frames
+=== pair 3 ===
+after  steady frame     15.43 ms over 120 frames
+before steady frame     15.07 ms over 120 frames
+=== pair 4 ===
+after  steady frame     14.68 ms over 120 frames
+before steady frame     15.35 ms over 120 frames
+=== pair 5 ===
+after  steady frame     14.40 ms over 120 frames
+before steady frame     14.63 ms over 120 frames
