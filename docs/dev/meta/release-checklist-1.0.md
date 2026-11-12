@@ -287,7 +287,7 @@ Rendering, physics, networking, file adapters. The crate simulates, the README s
 | 1. public surface frozen | **done**: `tests/facade_paths.rs` holds the paths, and the doc gate is clean across all four crates |
 | 2. MSRV proven | **done**: declared in all four manifests, pinned in `rust-toolchain.toml`, built by the `msrv` job |
 | 3. stranger path | **done**: the README's first block runs, and `site/src/content/docs/start/getting-started.md` walks through it |
-| 4. typed errors | **done**: enforced by the lint profile, and the variants are documented |
+| 4. typed errors | machine-enforced by the lint profile; the remaining variants' documentation is the open half |
 | 5. guarantees page | **done**: `site/src/content/docs/reference/guarantees.md`, one claim per test |
 | 6. core stands alone | **done and verified** |
 | 7. comparable benchmarks | **done**: three rows from one host, recorded in step 7 |
