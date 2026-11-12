@@ -153,3 +153,5 @@ demo/out/
 
 anti-slop/
 plan*.toml
+docs/dev/handoff/
+docs/dev/meta/

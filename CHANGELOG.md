@@ -217,11 +217,11 @@ fits in a frame at a million bodies.
   twenty-eight, is now a rule instead of a number.
 
 ### Added
+
 - `SpatialGrid::with_slack_floor` (default `DEFAULT_SLACK_FLOOR`, 2): every cell now keeps spare slots regardless of
   occupancy, so a pair arriving in an empty cell is patched instead of forcing a rebuild. At 512 crossers a tick the
   patched share rises from 61% to 99.5% and the p99 falls from 2.83 ms to 0.58 ms at 100,000 bodies (16.08 ms to
   2.49 ms at a million) for 2.7x and 1.7x the table. `with_slack_floor(0)` restores the percentage-only rule.
-
 
 - `SpatialGrid::with_slack_percent` (default `DEFAULT_SLACK_PERCENT`, 25) and `SpatialGrid::capacity`: the slack
   each cell's run is laid out with is now a knob rather than a constant. Measured with `examples/patch_tail.rs`:
