@@ -32,7 +32,12 @@ navmesh = ["bevy-flock-core/navmesh"]
 
 [dependencies]
 # The simulation, with no engine of its own. This crate is the half that adds one.
-bevy-flock-core = { version = "1.0.0", path = "../bevy-flock-core", features = ["ecs"] }
+#
+# `default-features = false` is load-bearing: the core's defaults are `simd` and `threads`, and
+# leaving them on here would force both on for every consumer that enables `ecs`, so the facade's
+# own `simd` and `threads` switches would have nothing to switch off. The core's features are
+# forwarded through this crate's `simd` and `threads` features instead, which the facade drives.
+bevy-flock-core = { version = "1.0.0", path = "../bevy-flock-core", default-features = false, features = ["ecs"] }
 bevy_app = "0.20.1"
 bevy_ecs = "0.20.1"
 bevy_math = "0.20.1"

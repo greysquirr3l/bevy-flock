@@ -115,10 +115,11 @@ fn run(app: &mut App) {
 
 fn bench_tiers(c: &mut Criterion) {
     let mut group = c.benchmark_group("tier_frame");
-    // 64,000 is the published reflex ceiling (ADR 0017, measured at ~217 ns per think);
-    // 100,000 is past it, and is here to show what "past it" costs rather than to be
-    // extrapolated from.
-    for count in [1_000_u32, 10_000, 64_000, 100_000] {
+    // The published reflex ceiling was 64,000 per tick at 14 ms (ADR 0017, measured at
+    // ~217 ns per think). A reflex think now costs a little over half that, so the
+    // ceiling has moved and the populations here cover both the old claim and the
+    // frame where the new one lands.
+    for count in [1_000_u32, 10_000, 64_000, 100_000, 200_000, 250_000, 300_000] {
         group.throughput(Throughput::Elements(u64::from(count)));
 
         // No brains: the crowd the plugin spawns on its own.
@@ -149,7 +150,7 @@ fn bench_mixed(c: &mut Criterion) {
     // The composition ADR 0017 argues for: almost everything reflex, a thin reactive
     // crust, a few deliberative, and the occasional conversation.
     let mut group = c.benchmark_group("tier_mix");
-    for count in [1_000_u32, 10_000, 64_000, 100_000] {
+    for count in [1_000_u32, 10_000, 64_000, 100_000, 200_000, 250_000, 300_000] {
         group.throughput(Throughput::Elements(u64::from(count)));
         let mut app = App::new();
         app.add_plugins(FlockPlugin::new(FlockConfig::preset(
