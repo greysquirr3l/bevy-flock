@@ -121,7 +121,7 @@ Advection is the tick's only expensive step and it is `O(cells)`, with cells bou
 
 ## The number to remember
 
-Per-agent cost is flat and slightly *falls* with population: 0.92 µs at ten thousand, 0.90 µs
+Per-agent cost is flat and slightly *falls* with population: 0.17 µs at ten thousand, 0.14 µs
 at a hundred thousand. The reason is locality, every agent's work is its own cell and its
 neighbours, so a bigger crowd does not make any one agent more expensive. That is the property
 that makes bands possible at all: if per-agent cost grew with population, adding a ring would

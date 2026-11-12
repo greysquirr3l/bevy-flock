@@ -13,7 +13,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # The interpreter the gate scripts run under.
-python := env_var_or_default("PYTHON", `test -x .venv/bin/python && echo .venv/bin/python || (command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3 || echo python3)`)
+python := env_var_or_default("PYTHON", `test -x .venv/bin/python && echo .venv/bin/python || (command -v python3.15 || command -v python3.14 || command -v python3.13 || command -v python3.12 || command -v python3.11 || command -v python3 || echo python3)`)
 
 # List the recipes.
 default:

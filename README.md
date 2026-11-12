@@ -90,15 +90,15 @@ population is zero, the preset's spawn volume missed your grid, the
 
 ## Performance
 
-Reference machine: shared cloud vCPU, x86_64, `--release`. Ratios and shape, not a hardware
-claim, measure your own before quoting these.
+Reference machine: Apple M3 Pro, 11 threads, macOS, `--release`. Ratios and shape, not a
+hardware claim, measure your own before quoting these.
 
 | | measured | gate |
 | --- | --- | --- |
-| 1,000,000-inhabitant band frame, wide kernel | 3.78 ms | < 6 ms |
-| 1,000,000-inhabitant band frame, scalar | 4.75 ms | < 6 ms |
-| 100,000 with 5,000 manifested | 3.37 ms | < 8 ms |
-| 1,000,000-body spatial rebuild, 6 workers | 4.572 ms | |
+| 1,000,000-inhabitant band frame, wide kernel | 1.37 ms | < 6 ms |
+| 1,000,000-inhabitant band frame, scalar | 1.87 ms | < 6 ms |
+| 100,000 with 5,000 manifested | 1.64 ms | < 8 ms |
+| 1,000,000-body spatial rebuild, one worker | 3.86 ms | |
 | Per agent | 32 B wide / 28 B scalar | |
 | Steady-state allocations over 60 frames | 0 | 0 |
 

@@ -6,19 +6,22 @@ description: The numbers, the machine they came from, and the shape rather than 
 Every number here is a measurement with a named fixture. None of them are rounded up, and the ones that lost are included
 because a tuning journal that only records wins is marketing.
 
-**Reference machine:** a six-core aarch64 sandbox VM with no CPU model string exposed, `--release`, `--offline`. The
-animation-envelope figures in the journals came from an earlier six-core x86-64 VM, and each section of
-`docs/dev/tuning/performance.md` names its own machine. Treat all of it as shape and ratios; measure your own machine
-before quoting it.
+**Reference machine:** the frame-budget rows below were measured on an Apple M3 Pro with 11 threads, macOS, `--release`;
+the spatial-rebuild section was measured on a six-core aarch64 sandbox VM with no CPU model string exposed. Each section
+names its own machine, and each section of `docs/dev/tuning/performance.md` names its own too. Treat all of it as shape
+and ratios; measure your own machine before quoting it.
 
 ## Frame budgets
 
+Measured on the M3 Pro, median of five runs each. The scalar row is the build with the `simd` feature off.
+
 | what | population | measured | gate |
 | --- | --- | --- | --- |
-| band frame, wide kernel | 1,000,000 | **3.78 ms** | < 6 ms |
-| band frame, scalar | 1,000,000 | 4.75 ms | < 6 ms |
-| ambient with 5,000 manifested | 100,000 | 3.37 ms | < 8 ms |
-| reflex tier ceiling | 64,000 / tick | at the ceiling | 64,000 |
+| band frame, wide kernel | 1,000,000 | **1.37 ms** | < 6 ms |
+| band frame, scalar | 1,000,000 | 1.87 ms | < 6 ms |
+| ambient with 5,000 manifested | 100,000 | 1.64 ms | < 8 ms |
+| reflex tier frame | 250,000 | **13.51 ms** | < 14 ms |
+| reflex tier frame | 300,000 | 14.92 ms | over |
 
 ## The spatial rebuild
 

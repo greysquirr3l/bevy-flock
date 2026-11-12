@@ -94,7 +94,6 @@ fn main() {
     // Everything the pack needs is allocated by now; from here the loop is the claim.
     let allocations_before = ALLOCATIONS.load(Ordering::Relaxed);
     let bytes_before = BYTES.load(Ordering::Relaxed);
-
     let started = std::time::Instant::now();
     let mut pairs = 0_u64;
     for _ in 0..frames {
@@ -120,8 +119,10 @@ fn main() {
         elapsed.as_secs_f64() * 1000.0 / num::usize_to_f64(frames)
     );
     println!("pairs: {pairs}");
-    // positions + velocities + desired, 8 bytes each, plus the two index arrays at 4 bytes.
-    let footprint = agents * (3 * 8 + 2 * 4);
+    // positions + velocities + desired, 8 bytes each, plus the chain array at 4 bytes. The
+    // cell-major order is a second 4-byte array, but only the vectorised path reads it.
+    let index_bytes = if cfg!(feature = "simd") { 2 * 4 } else { 4 };
+    let footprint = agents * (3 * 8 + index_bytes);
     println!(
         "footprint: {} KiB of agent arrays ({} bytes/agent)",
         footprint / 1024,

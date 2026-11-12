@@ -1,4 +1,10 @@
-//! Gate 8: 100,000 inhabitants with 5,000 manifested, under an 8 ms frame.
+//! The multi-band frame (ADR 0021): a near band of manifested agents, a mid band on a
+//! cadence, and everybody else as a density field.
+//!
+//! The three populations share a 5,000-agent near band and a 15,000-agent mid band, so the
+//! only thing that changes between them is how many inhabitants exist as density. That is
+//! the property the published numbers rest on: the frame tracks what is manifested, not
+//! what exists.
 
 use std::hint::black_box;
 
@@ -52,7 +58,11 @@ fn world(total: u32, manifested: u32) -> App {
 
 fn bench_band(c: &mut Criterion) {
     let mut group = c.benchmark_group("band_frame");
-    for (total, manifested) in [(1_000_000_u32, 5_000_u32)] {
+    for (total, manifested) in [
+        (100_000_u32, 5_000_u32),
+        (250_000, 5_000),
+        (1_000_000, 5_000),
+    ] {
         let mut app = world(total, manifested);
         for _ in 0..4 {
             app.update();

@@ -24,7 +24,7 @@ reports **12 warnings** across 5 lints: `chunks_exact_to_as_chunks` × 1, `manua
 | Lint | Site | What it wants |
 | --- | --- | --- |
 | `chunks_exact_to_as_chunks` | `crates/bevy-flock-core/src/domain/navmesh.rs:349` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
-| `manual_slice_fill` | `crates/bevy-flock-core/src/application/packed.rs:688` | `slice.fill(value)`, which is one call and vectorises |
+| `manual_slice_fill` | `crates/bevy-flock-core/src/application/packed.rs:705` | `slice.fill(value)`, which is one call and vectorises |
 | `needless_borrows_for_generic_args` | `crates/bevy-flock-core/src/domain/memory.rs:874` | pass the closure by value; the call already takes it by value |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:248` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:249` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
@@ -33,8 +33,8 @@ reports **12 warnings** across 5 lints: `chunks_exact_to_as_chunks` × 1, `manua
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/spawn.rs:219` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:613` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:614` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
-| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:517` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
-| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:520` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:534` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:537` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
 <!-- lint-drift:end -->
 
 ## What is deliberately not here

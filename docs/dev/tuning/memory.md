@@ -28,8 +28,8 @@ agents and 5 frames, which is slow under instrumentation and enough to be conclu
 
 Neither kernel allocates in the steady state, which is the invariant the whole design rests
 on: the pack grows only through `push`, and `steer` reuses its grid, chains and order vector.
-The SIMD path costs a fixed 4 bytes per agent for the order (`order: Vec<u32>`), taking the
-per-agent footprint from 28 to 32 bytes:
+The SIMD path costs a fixed 4 bytes per agent for the cell-major order (`order: Vec<u32>`),
+taking the per-agent footprint from 28 to 32 bytes:
 
 | Agents | Arrays |
 | --- | --- |
@@ -37,6 +37,26 @@ per-agent footprint from 28 to 32 bytes:
 | 1,000,000 | 30.5 MiB |
 
 At a million agents that is 32 MB of steering state, against the 4 MB the order vector adds.
+
+### The order vector was not SIMD-only until 2026-11-12
+
+The row above said the scalar path carries 28 bytes per agent. That was the intent, not the
+code: `order` was declared, allocated and filled unconditionally, and only `steer_blocks`
+read it. A scalar build paid 4 bytes per agent **and** an O(n) pass per `steer` for a vector
+it never looked at.
+
+`order` is now behind `#[cfg(feature = "simd")]`, along with its allocation and its fill.
+The measured footprints, from `memory_probe`:
+
+| Kernel | Bytes/agent | ms/frame @ 50,000, extent 512 |
+| --- | --- | --- |
+| scalar | 28 | 42.2 |
+| wide | 32 | 14.6 |
+
+The pair counts match to the digit between the two builds (`135082756`), so gating the
+vector changed the footprint and the time without changing the result.
+`the_per_agent_footprint_matches_the_kernel` in `bevy-flock-core` holds the figure to the
+kernel that pays for it.
 
 ## Cache
 

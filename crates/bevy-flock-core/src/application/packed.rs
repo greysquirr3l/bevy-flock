@@ -188,6 +188,9 @@ pub struct Pack {
     /// Agent indices grouped by grid cell, rebuilt with the grid. The vectorised path walks
     /// this instead of `0..len`, so the four agents in a block are neighbours on the map and
     /// not merely neighbours in memory.
+    ///
+    /// Only the vectorised path reads it, so a scalar build neither allocates nor fills it.
+    #[cfg(feature = "simd")]
     order: Vec<u32>,
     cell_size: f32,
     side: usize,
@@ -208,6 +211,7 @@ impl Pack {
             desired: Vec::with_capacity(capacity),
             heads: vec![-1; side * side],
             next: Vec::with_capacity(capacity),
+            #[cfg(feature = "simd")]
             order: Vec::with_capacity(capacity),
             cell_size,
             side,
@@ -218,6 +222,19 @@ impl Pack {
     #[must_use]
     pub const fn len(&self) -> usize {
         self.positions.len()
+    }
+
+    /// The capacity of the cell-major order, which a scalar build does not have.
+    #[cfg(test)]
+    fn order_capacity(&self) -> usize {
+        #[cfg(feature = "simd")]
+        {
+            self.order.capacity()
+        }
+        #[cfg(not(feature = "simd"))]
+        {
+            0
+        }
     }
 
     /// Whether the pack holds nobody.
@@ -702,18 +719,23 @@ impl Pack {
         }
 
         // Cell-major order, free: the buckets already hold exactly this grouping.
-        self.order.clear();
-        for head in &self.heads {
-            let mut cursor = *head;
-            let mut guard = 0_usize;
-            while cursor >= 0 && guard <= self.positions.len() {
-                self.order.push((cursor).cast_unsigned());
-                cursor = self
-                    .next
-                    .get(num::i32_to_usize(cursor))
-                    .copied()
-                    .unwrap_or(-1);
-                guard += 1;
+        //
+        // Only the vectorised path reads it, so a scalar build skips the pass entirely.
+        #[cfg(feature = "simd")]
+        {
+            self.order.clear();
+            for head in &self.heads {
+                let mut cursor = *head;
+                let mut guard = 0_usize;
+                while cursor >= 0 && guard <= self.positions.len() {
+                    self.order.push((cursor).cast_unsigned());
+                    cursor = self
+                        .next
+                        .get(num::i32_to_usize(cursor))
+                        .copied()
+                        .unwrap_or(-1);
+                    guard += 1;
+                }
             }
         }
     }
@@ -823,6 +845,49 @@ mod tests {
             extent: 64.0,
             ..SteerParams::default()
         }
+    }
+
+    /// The published per-agent footprint belongs to the kernel that pays for it.
+    ///
+    /// The cell-major order is read only by the vectorised path, so a scalar pack must not
+    /// carry it. If the field comes back ungated, the scalar build pays 4 bytes per agent
+    /// and an O(n) rebuild for a vector it never reads, and the published "28 B scalar"
+    /// figure becomes a lie.
+    #[test]
+    fn the_per_agent_footprint_matches_the_kernel() {
+        const AGENTS: usize = 64;
+        let mut pack = Pack::with_capacity(AGENTS, params());
+        for index in 0..AGENTS {
+            pack.push([index as f32, 0.0], [0.0, 0.0]);
+        }
+
+        // positions + velocities + desired at 8 bytes each, the chain at 4.
+        let mut per_agent = 3 * 8 + 4;
+        #[cfg(feature = "simd")]
+        {
+            // The cell-major order, one u32 per agent.
+            per_agent += 4;
+            assert_eq!(
+                pack.order_capacity(),
+                AGENTS,
+                "the wide path reserves the cell-major order"
+            );
+        }
+        #[cfg(not(feature = "simd"))]
+        {
+            // The scalar path has no order to fill.
+            assert_eq!(
+                pack.order_capacity(),
+                0,
+                "the scalar path must not reserve the cell-major order"
+            );
+        }
+
+        assert_eq!(
+            per_agent,
+            if cfg!(feature = "simd") { 32 } else { 28 },
+            "the published per-agent footprint changed"
+        );
     }
 
     #[test]
