@@ -11,8 +11,8 @@ those that decides where everybody walks, what they are doing, and why.
 
 Three claims, each measured and each defended by a gate in CI:
 
-1. **A crowd you can afford.** Ten thousand agents steer in 9.18 ms of a 60 Hz frame on the
-   reference host, 1.8× of margin, and the cost per agent *falls* as the crowd grows,
+1. **A crowd you can afford.** Ten thousand agents steer in 1.72 ms of a 60 Hz frame on the
+   reference host, 9.6× of margin, and the cost per agent *falls* as the crowd grows,
    because each agent's work is local. Past a hundred thousand, population becomes density
    and the cost stops growing at all.
 2. **Determinism you can ship.** Same seed, same world, tick for tick, across runs and

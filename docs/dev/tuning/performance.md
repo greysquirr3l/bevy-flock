@@ -7,8 +7,8 @@ less than a record of what was tried and rejected.
 
 ## Reproducing these numbers
 
-Every number in this document was produced on the machine below, from the commit named
-beside it, with the dependency graph the committed `Cargo.lock` pins. Three things are
+Every number in this document was produced on the machine named beside it, from the commit
+named there, with the dependency graph the committed `Cargo.lock` pins. Three things are
 deliberately fixed, because each of them moves a timing by more than the differences this
 document argues about:
 
@@ -52,6 +52,11 @@ earlier tables were taken on), which barely matters because every path measured 
 lane `wide` vectors, not rayon. What does change with the host is the absolute number, not the
 shape of the curve or the ranking of designs.
 
+The table under [Final numbers](#final-numbers) was re-measured later, on a different and much
+faster host — an Apple M3 Pro with 11 threads, macOS, no renderer — because PR #62 changed the
+frame path and the numbers below had stopped describing it. That table names its own host and
+date. It is the current one; this section's machine describes the runs that came before it.
+
 ### What still varies, and by how much
 
 - **Run to run, same binary, same machine:** 1–4%. Criterion's confidence interval covers it;
@@ -73,42 +78,101 @@ quoted interval, which is the intended relationship between this section and the
 
 ## Final numbers
 
+Measured on an Apple M3 Pro with 11 threads, macOS, `cargo bench --locked --bench crowd`,
+Rust 1.97.1, on 2026-11-11, at commit `ac725e0`. Same commands as the runs above, so the
+comparison is like for like; the host is not, and the host is named for that reason.
+
+Each row is the **median of nine runs**, and the raw records are archived at
+[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl).
+The spread between the fastest and slowest of those nine is in the archive next to each row.
+
+**This host is under heavy memory pressure**, which the numbers have to account for: swap was
+23 GB of 24 GB used and the load average sat above 5 throughout. A run that stalls on a page
+fault reads slow, and the stall hits every bench at once — one run of a 9-run sweep was an
+outlier in *every* case, which is a machine talking, not a kernel regressing. The rows below
+are the median of a 9-run sweep, whose spreads are 3% to 15%, and the raw values are archived so
+the spread can be judged rather than taken on trust.
+
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 1.01 ms |, |
-| `flock_frame/1000` | 1.74 ms | 1.7 µs |
-| `flock_frame/10000` | **4.27 ms** | 0.43 µs |
-| `flock_frame_large/100000` | **29.2 ms** | 0.29 µs |
-| `spatial_query/radius_8m/1000` | 138 ns |, |
-| `spatial_query/radius_8m/10000` | 185 ns |, |
-| `spatial_query/radius_8m/100000` | 552 ns |, |
-| `steering_step/32_neighbours` | 152 ns |, |
+| `flock_frame/1` | 2.66 µs | |
+| `flock_frame/1000` | 299 µs | 0.30 µs |
+| `flock_frame/10000` | **1.72 ms** | 0.17 µs |
+| `flock_frame_large/100000` | **14.1 ms** | 0.14 µs |
+| `spatial_query/radius_8m/1000` | 40 ns | |
+| `spatial_query/radius_8m/10000` | 50 ns | |
+| `spatial_query/radius_8m/100000` | 160 ns | |
+| `steering_step/32_neighbours` | 70 ns | |
+
+The previous run, on the six-vCPU sandbox named above, recorded 1.01 ms for the single-agent
+row, 4.27 ms for the ten-thousand row and 29.2 ms for the hundred-thousand row. Two things
+separate that run from this one, and only one of them is the host: PR #62 turned the per-tick
+rebuild into a patch, which is what removed the fixed cost the old table led with, and the M3
+Pro is the faster machine for what is left. The rows that did not go through the rebuild — the
+queries and the steering step — are between 2.8× and 3.3× faster, which is the host and
+nothing else.
 
 Four things to read from that table:
 
-- **Per-agent cost is flat, and it halved twice.** 1.7 µs at a thousand agents, 0.43 µs at ten
-  thousand and 0.29 µs at a hundred thousand: the index makes each agent's work local, the kernel
+- **Per-agent cost is flat, and it keeps falling.** 0.30 µs at a thousand agents, 0.17 µs at ten
+  thousand and 0.14 µs at a hundred thousand: the index makes each agent's work local, the kernel
   walks neighbours once instead of three times (ADR 0026), and the frame now uses every core
   (ADR 0044).
-- **10,000 agents fit a 60 Hz frame three times over.** 4.27 ms against the 16.6 ms budget is
-  234 fps, and 3.9× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
-  frame was 92% steering, at 1.79 µs per agent); the 3D kernel in ADR 0028 added 19% back on top of
-  the 7.71 ms planar figure, which is the honest price of the third dimension and is visible here
-  rather than buried.
-- **The fixed cost is the grid, not the crowd.** 1.01 ms of `flock_frame/1` is
-  `rebuild_spatial_grid` at the default 1 km volume; the other 3.3 ms of the 10,000 row is
-  everything that scales with agents. That fixed millisecond is now a quarter of the 10,000-agent
-  frame and is the next thing worth attacking, not the steering kernel. A playable area of 200 m across drops the fixed part to
-  ~20 µs.
-- **Query cost tracks density, not population.** 138 ns at 1,000 agents and 552 ns at 100,000:
+- **10,000 agents fit a 60 Hz frame nine times over.** 1.72 ms against the 16.6 ms budget is
+  577 fps, and 9.6× of margin. The same crowd cost 18.2 ms before the kernel was rewritten (the
+  frame was 92% steering, at 1.79 µs per agent), and the patch in PR #62 took the rest of it.
+- **The fixed cost is gone.** `flock_frame/1` is 2.66 µs, because a crowd that stands still
+  rebuilds the index once and patches nothing after that. What is left of a frame is the work
+  that scales with agents, which is the shape this section used to argue about.
+- **Query cost tracks density, not population.** 40 ns at 1,000 agents and 160 ns at 100,000:
   the index walks the same 27 cells, and the cells are fuller. Those numbers are unchanged by
   ADR 0026 because the grid is unchanged, the crowd kernel bypasses `SpatialGrid::radius`
   rather than changing it.
 
-The 1.00 ms at N=1 is the grid rebuild's fixed cost at the default 1 km volume
-(405,000 cells after coarsening). It is the price of dense cells, which the query
-numbers above justify. If your playable area is 200 m across, set the volume to
-match and the fixed cost drops to ~20 µs.
+A frame that does rebuild still pays for the rebuild, and that is the cost the history below
+measures. The difference is that a frame only pays it when something moved.
+
+### The parallel rebuild does not pay on this host (2026-11-12)
+
+The tables further down record the parallel build beating the serial one by 2.9× on the
+six-core aarch64 sandbox. On the M3 Pro the same fixture says the opposite, and the sweep says
+why.
+
+`examples/build_passes.rs`, 1,000,000 bodies, 421,876 cells, median of seven repeats:
+
+| workers | total | against one worker |
+| --- | ---: | --- |
+| 1 | 4.78 ms | 1.00× |
+| 2 | **3.52 ms** | 1.36× |
+| 3 | 4.30 ms | 0.90× |
+| 6 | 4.56 ms | 0.95× |
+| 11 | 5.26 ms | 0.91× |
+
+Two workers is the best the parallel build does, and it is 1.36×. Every count above two is
+*worse* than the serial path. The spread at the top of the table is small (5.26 ms against
+5.19 ms for the slowest repeat), so this is not the memory pressure described above: it is a
+property of the parallel path on this machine.
+
+The reason is that each parallel pass pays for its threads before it does any work. ADR 0059
+and the phase 5 notes record the tax: the parallel seat was 0.21 ms of copying plus a spawn,
+and a rebuild spends about 1.6 ms of its time starting threads. On the sandbox, six cores made
+that tax worth paying against a 12 ms serial build. Here the serial build is 3.86 ms to begin
+with, the same tax eats a larger share of it, and eleven workers each take a slice small
+enough that the spawn overhead dominates the work.
+
+`cargo bench --bench spatial` says the same thing from the other direction: at 1,000,000 bodies
+the serial build is 3.86 ms and the parallel one 4.35 ms, while at 100,000 bodies the parallel
+one still wins (0.91 ms against 0.99 ms). Below about 200,000 bodies the parallel path is the
+better choice on this host; above it, it is not.
+
+The consequence for anyone using this on hardware like the M3 Pro: **a full rebuild wants one
+worker**, and the parallel path is for machines with slow cores and many of them. The
+`benches/spatial-baseline.json` gate compares the two paths as ratios against each other
+rather than against a wall-clock number, so it still protects both.
+
+What this does *not* change is the frame path. PR #62 made the rebuild a patch, so a standing
+crowd does not rebuild at all, and the tables above are the frame numbers that matter. The
+rebuild figures matter for the tick where a crowd charges.
 
 ## The design that lost: 15.6 million cells
 
@@ -197,7 +261,7 @@ A whole think, including the walk over node indices:
 | `urchin` | 31.3 ns | 36 vns |
 | `noble` | 32.9 ns | 35 vns |
 | `wanderer` | 44.6 ns | 35 vns |
-| ten thousand guards, one think each | 449 µs |, |
+| ten thousand guards, one think each | 449 µs | , |
 
 The declared cost is the sum of the leaves a tree can reach; the measured cost
 also contains the traversal, roughly two nanoseconds per visited node. Neither is
@@ -260,7 +324,6 @@ At one NPC the container's fixed cost shows: 57 bytes becomes 197, because a tab
 and a registry are not free at small sizes either. A save with one relationship in
 it is not the case this format optimises for.
 
-
 ## Profiling the 1,000,000-inhabitant frame (2026-11-04)
 
 Captured with `cargo flamegraph` against `examples/profile_band.rs`, which builds the ADR 0021
@@ -277,7 +340,7 @@ cargo flamegraph --profile profiling --example profile_band --output docs/images
 | Symbol | Self | Children | Reading |
 | --- | --- | --- | --- |
 | `application::packed::Pack::steer` | 82.2% | 90.2% | the kernel is the frame |
-| `libm.so.6` | 10.6% |, | `hypotf`, `fmod` from clamp and wrap |
+| `libm.so.6` | 10.6% | , | `hypotf`, `fmod` from clamp and wrap |
 | `band_steer` | 1.2% | 68.5% | copy in/out is noise next to the steery |
 | `band_steer_mid` | 1.0% | 28.2% | consistent with a 3-frame cadence |
 
@@ -327,7 +390,6 @@ neighbours per agent at the band's density. The options, in order of expected va
 3. **Lower the band's density target**, the frame is neighbour-bound, and `density` is the
    parameter that decides how many neighbours an agent has. ADR 0020 made that a first-class
    knob for exactly this reason.
-
 
 ## Threads, not just lanes (2026-11-05)
 
@@ -383,7 +445,7 @@ its own neighbourhood:
 | --- | ---: | ---: | --- |
 | 4,096 records, 40 m square | 36.4 ms | 36.4 ms | index has nothing to prune, so it delegates |
 | 4,096 records, 400 m square | 9.6 ms | 4.0 ms | **2.4× faster** |
-| grid rebuild, 4,096 records |, | 69 µs | amortised over every observer due that tick |
+| grid rebuild, 4,096 records | , | 69 µs | amortised over every observer due that tick |
 
 The index is bit-identical to the linear scan by construction (candidate superset, no duplicates,
 total order) and the parity tests drive randomised worlds to prove it; ADR 0047 records the
@@ -493,6 +555,57 @@ Three earlier attempts at the same idea were slower and are recorded in the ADR:
 index order (1.40 ms at 5,000), blocking in cell order without the same-cell fast path
 (1.36 ms), and computing the pair count per candidate instead of from the lane totals.
 
+### The scalar build was not reachable (2026-11-11)
+
+Re-measuring the table above on the M3 Pro found the scalar column and the wide column
+**identical**, which the table says cannot be true: one is 20% slower than the other at a
+million band frame. The cause was not the kernel.
+
+`bevy-flock-ecs` depended on `bevy-flock-core` without `default-features = false`. The core's
+defaults are `simd` and `threads`, so the edge from the ECS crate pulled both in for every
+consumer that enabled the `ecs` feature — including the ones who had deliberately turned
+`simd` off. `cargo tree --features ecs` showed `wide` in the graph with no `simd` feature
+anywhere in the command line, which is the tell.
+
+The published scalar numbers were therefore **not reproducible from the published command**.
+They were measured against a build that was silently the wide one, and the "scalar" column in
+this document records what the wide kernel does on a different day, not the scalar kernel at
+all.
+
+The fix is one line on that dependency edge, with the core's features forwarded through the
+ECS crate's own `simd` and `threads` features, which the facade already drives:
+
+```toml
+bevy-flock-core = { version = "1.0.0", path = "../bevy-flock-core", default-features = false, features = ["ecs"] }
+```
+
+With that in place, `--no-default-features --features ecs,threads` builds without `wide` in the
+graph, and the two roads separate as the table says they should. Re-measured on the M3 Pro,
+five runs each:
+
+| Workload | Scalar | `simd` | Change |
+| --- | --- | --- | --- |
+| band frame, 100,000 total | 1.86 ms | **1.64 ms** | −11.8% |
+| band frame, 250,000 total | 1.85 ms | **1.56 ms** | −15.6% |
+| band frame, 1,000,000 total | 1.87 ms | **1.37 ms** | −26.7% |
+
+The wide kernel's advantage is larger here than in the 2026-11-04 table, and the band frame's
+advantage grows with population, which makes sense: the more of the frame is steering, the more
+of it the vectorised path touches. The archived records for both columns are in
+[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl),
+under the `kernel` field.
+
+The scalar column is also flat across the three populations — 1.86, 1.85, 1.87 ms — while the
+wide column falls from 1.64 to 1.37 ms as the population rises. The vectorised kernel is the
+only part of the frame that gets *cheaper* with more people in the field, because it is the
+part whose work is per-neighbour rather than per-cell.
+
+A build that wants the scalar kernel should now say so explicitly:
+
+```sh
+cargo bench --locked --no-default-features --features ecs,threads --bench band -- band_frame/
+```
+
 ## Memory, not just time
 
 Wall-clock numbers say nothing about *why*, and for this kernel the why turned out to be the
@@ -553,7 +666,7 @@ What the curves show, and what they cost ADR 0033:
 The suite that guards these numbers is ADR 0034: `scripts/scaling_regression.py` compares a fresh
 sweep against `docs/dev/tuning/data/scaling-sweep.json` on speedup ratios, so a slower CI runner is not a
 regression, and fails when a cell loses more than 25% of its speedup (widened to twice the measured
-spread; 12% to warn). The generated review , 
+spread; 12% to warn). The generated review ,
 matrices, efficiency, the measured optimum against the formula, is
 [`docs/dev/tuning/reports/scaling-report.md`](reports/scaling-report.md).
 
@@ -576,7 +689,7 @@ on shape A and **−0.9%** on shape B, worst cell **−3.7%** (B, two cores, thr
 Two cells were re-measured in isolation because their first readings were ragged:
 
 | cell | first reading | re-measured (4 repeats) | baseline |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | A, 1 core, sequential | 17.73 s, 18.1% spread | **15.78 s, 2.0%** | 15.88 s, 0.0% |
 | A, 4 cores, concurrency 4 | 5.22 s, 41.1% spread | **4.09 s, 1.1%** | 4.20 s, 1.5% |
 
@@ -609,7 +722,7 @@ in `benches/brain.rs`:
 
 | Participants | Thinks per tick | Served per tick | Worst wait | Planner wall time |
 | --- | --- | --- | --- | --- |
-| 1 | 1 | 100% | 1 tick |, |
+| 1 | 1 | 100% | 1 tick | , |
 | 1,000 | 1,000 | 100% | 1 tick | 0.12 ms |
 | 10,000 | 8,872 | 88.7% | 3 ticks | 1.34 ms |
 | 100,000 | 12,124 | 12.1% | 45 ticks | 1.83 ms |
@@ -667,38 +780,50 @@ With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs delibe
 
 ## Tiered cognition
 
-`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 4.23 ms baseline frame with the
+`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 0.62 ms baseline frame with the
 same crowd and no brains:
 
 | Composition | Frame | Delta | Who thought |
 | --- | --- | --- | --- |
-| All reflex (200 ns) | 6.40 ms | 2.17 ms | all 10,000, every tick |
-| All reactive (2 µs) | 4.85 ms | 0.62 ms | ~1,750 per tick |
-| All deliberative (8 µs) | 4.77 ms | 0.54 ms | ~262 per tick |
-| All social (30 µs) | 4.68 ms | 0.45 ms | ~23 per tick |
-| 95/4/1 mix | 6.42 ms | 2.19 ms | ~9,700 / 175 / 13 |
+| All reflex (200 ns) | 1.44 ms | 0.82 ms | all 10,000, every tick |
+| All reactive (2 µs) | 0.89 ms | 0.27 ms | ~1,750 per tick |
+| All deliberative (8 µs) | 0.82 ms | 0.20 ms | ~262 per tick |
+| All social (30 µs) | 0.83 ms | 0.21 ms | ~23 per tick |
+| 95/4/1 mix | 1.47 ms | 0.85 ms | all 10,000, every tick (9,500 / 400 / 100) |
 
 The expensive tiers are the cheap frames, because their reserved shares buy so few of them.
 Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
 Reflex is the only composition where everybody thinks every tick, and it is the only one
-that costs 2 ms.
+that costs most of a millisecond.
 
-**So the reflex ceiling is ~64,000 per tick at 14 ms**, measured at ~217 ns per reflex think
-end to end in the ECS, not the ~93,000 that dividing the budget by the declared 150 ns
-would suggest. The difference is query traversal, blackboard access and change detection,
-which no declared cost includes.
+**So the reflex ceiling is between 250,000 and 300,000 per tick at 14 ms.** ADR 0017 recorded
+~64,000, from ~217 ns per reflex think measured end to end in the ECS, and ADR 0018 already
+corrected that to "roughly a hundred nanoseconds, sometimes two" rather than a constant. The
+frame is the measurement and the per-think cost is not, so here is the frame, measured at
+each population (median of five runs, M3 Pro, 2026-11-12):
 
-## The comfortable maximum, restated
+| Population | Frame | Delta over no brains | Reflex thinks served |
+| --- | --- | --- | --- |
+| 64,000 | 4.34 ms | 3.71 ms | 38,500 |
+| 100,000 | 6.57 ms | 5.94 ms | 38,500 |
+| 200,000 | 11.20 ms | 10.58 ms | 38,500 |
+| 250,000 | **13.51 ms** | 12.90 ms | 38,500 |
+| 300,000 | 14.92 ms | 14.31 ms | 38,500 |
 
-| Tier | Measured per-think | Comfortable per tick (14 ms) |
-| --- | --- | --- |
-| Reflex | 217 ns | 64,000 |
-| Reactive | ~350 ns (delta/1,750) | 40,000 |
-| Deliberative | ~2 µs | 7,000 |
-| Social | ~20 µs | 700 |
+The raw records are archived at
+[`benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl`](../../benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl).
 
-Read the last column with the reservation in mind: a tier's share is not its capacity. The
-deliberative tier could *fit* 7,000, and its 15% share only pays for 262.
+250,000 fits inside 14 ms and 300,000 does not, which brackets the wall-clock ceiling. The
+gap from ADR 0017's 64,000 is the ECS patch work: PR #62 took the per-tick rebuild out of
+the frame, so what is left of a reflex think is the query traversal and the tree tick, not a
+spatial rebuild.
+
+**Two ceilings, and they are different things.** The frame above is wall clock: how many NPCs
+can be *in the world* before the frame costs 14 ms. The served count is the virtual budget:
+55% of 14 ms at a 200 ns declared cost buys exactly 38,500 reflex thinks, at every
+population above it. Past 38,500 the extra NPCs wait their turn rather than costing more
+frame — which is the point of a reservation, and why the served column is flat while the
+frame column is not.
 
 ## At 64,000 and 100,000 (full suite, 2026-11-04)
 
@@ -707,7 +832,7 @@ Frame times in ms; baseline is the same world with no brains.
 | Population | Baseline | Reflex | Reactive | Deliberative | Social | 95/4/1 mix |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1,000 | 4.26 | 4.38 | 4.38 | 4.27 | 4.24 | 4.42 |
-| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 |, | 6.42 |
+| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | , | 6.42 |
 | 64,000 | 4.19 | 11.44 | 7.93 | 7.68 | 7.55 | 11.99 |
 | 100,000 | 4.22 | 14.01 | 9.74 | 9.52 | 9.03 | 14.67 |
 
@@ -898,17 +1023,20 @@ triangles, the accounting test in `render3d` pins exactly that, and there is no 
 because no display of that size exists here.
 
 ## A GPU frame on a software Vulkan adapter (2026-11-06, ADR 0050 amendment)
+
 The sandbox now has a Vulkan loader and an X server, and no `/dev/dri` render node: the only adapter is
 `llvmpipe (LLVM 20.1.2, 128 bits)`, reported as `device_type: Cpu`. `demo-gpu/` renders the same
 district view through an instanced `wgpu` pipeline, so the GPU half of the comparison finally has a
 number, a number about that driver, not about a graphics card.
 `cargo bench --manifest-path demo-gpu/Cargo.toml --bench frame`, release, this sandbox, 600x375,
 615 instances, 7 draws, 5,401,392 triangles, adapter `Vulkan | llvmpipe (LLVM 20.1.2, 128 bits)`:
+
 | Case | Median | Interval |
 | --- | --- | --- |
 | `frame` (submit and wait) | 974.56 ms | 968.84 - 980.93 ms |
 | `eight_frames_per_drain` | 7.8932 s (986.6 ms/frame) | 7.8580 - 7.9271 s |
 | `frame_with_readback` | 997.35 ms | 994.51 - 1000.5 ms |
+
 Three facts, and no fourth. A CPU-backed adapter's latency and throughput are the same number (974 ms
 against 987 ms per frame), because there is no second processor to overlap with: the frame has nothing
 to pipeline into. Shipping the frame back costs about 23 ms, which a windowed front end would never pay.
@@ -917,7 +1045,7 @@ composition at the same size, because both are the same kind of work on the same
 GPU path draws every triangle of every body (5.4 million) where the software path spends its time on
 impostors and a culled ground.
 The one number worth carrying forward is the CPU half, measured inside the binary rather than through a
-benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame , 
+benchmark loop: `cpu_ms` 0.11 for 5.4 million triangles, which is the cost of encoding the frame ,
 create the encoder, one render pass, seven draws, one submit. On real hardware that 0.11 ms would be the
 frame's CPU cost and the GPU would be doing the work behind it. This sandbox cannot show that, and no
 figure here pretends to.
@@ -926,6 +1054,7 @@ draining the queue reported 992 ms for what it called `encode`, while the same s
 measured 0.1 ms. The loop was measuring saturation, not encoding. The cases are now named after what
 their loops do, `frame`, `eight_frames_per_drain`, `frame_with_readback`, and
 `docs/dev/tuning/playbooks/gpu-demos.md` writes the rule down for the next person.
+
 ## Personality costs nothing per frame
 
 `crowd_temperament` in `benches/crowd.rs` measures the same 10,000-agent volumetric fixture twice:
@@ -933,7 +1062,7 @@ once with the configured weights for everyone, once with a bias on every agent, 
 shape, since a crowd where only the near ring has a personality pays a fraction of it.
 
 | Case | Median |
-|---|---|
+| --- | --- |
 | `crowd_temperament/uniform` | 1.8766 ms |
 | `crowd_temperament/every_agent_biased` | 1.8772 ms |
 
@@ -945,7 +1074,6 @@ buffer is grown once and cleared rather than freed (ADR 0051).
 Needs decay is not in this table because it is not per frame: the system runs once every
 `NeedsDecay` ticks (eight by default) and touches one component pair per NPC when it does.
 
-
 ## The crowd readback: what the sort cost (2026-11-08)
 
 The window that draws Ashfall through Bevy reads the crowd out of the ECS once per rendered frame to
@@ -955,7 +1083,7 @@ times a second. `benches/crowd_readback.rs` (in `demo/`) separates the parts, on
 core, `cargo bench` profile, a crowd warmed by 600 ticks:
 
 | Case | 2,000 | 10,000 |
-|---|---|---|
+| --- | --- | --- |
 | `full`, build query, iterate, collect, stable-sort, copy out | 30.0 µs | 149.6 µs |
 | `fresh_query`, the same without the sort and the copy | 14.5 µs | 78.5 µs |
 | `reused_query`, iterate through a `QueryState` built once | 13.5 µs | 70.2 µs |
@@ -965,16 +1093,16 @@ which allocates a scratch buffer of half the elements and moves 40-byte pairs th
 are `Npc` identity bits, which are unique, so there was no stability to preserve and nothing to
 allocate for it. Three changes, in order of what they bought:
 
-* `sort_unstable_by_key`, no merge buffer, in place, same order, because the keys cannot tie.
-* One buffer instead of three: the pairs are refilled rather than reallocated, and the caller hands
+- `sort_unstable_by_key`, no merge buffer, in place, same order, because the keys cannot tie.
+- One buffer instead of three: the pairs are refilled rather than reallocated, and the caller hands
   in the output `Vec` via the new `bodies_into`. After the first frame the call allocates nothing.
-* The `QueryState` is kept on the `Playground` instead of rebuilt per call: 1.2 µs at 2,000, 10 µs at
+- The `QueryState` is kept on the `Playground` instead of rebuilt per call: 1.2 µs at 2,000, 10 µs at
   10,000, and it is the same archetype match every time.
 
 | Case | 2,000 before | 2,000 after | 10,000 before | 10,000 after |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `full` | 30.0 µs | 18.0 µs | 149.6 µs | 90.3 µs |
-| `into_reused`, the path the window uses |, | 18.0 µs |, | 89.4 µs |
+| `into_reused`, the path the window uses | , | 18.0 µs | , | 89.4 µs |
 
 Forty percent, and the shape of what is left changed: 13.5 µs of the remaining 18 is the query
 iteration itself, four component fetches and a 40-byte write per body, 6.7 ns each, which is the
@@ -998,7 +1126,7 @@ from the tier the scheduler already assigned (`NpcTier`) and the distance to an 
 game sets once a frame, not from a second distance test:
 
 | Level | What the binding does | When |
-|---|---|---|
+| --- | --- | --- |
 | `Full` | writes weights and rates every tick | inside `near`, or inside the band for a thinking tier |
 | `Stepped` | writes every `far_step_ticks` (default 6) | inside the band for a reflex or reactive tier |
 | `Paused` | `pause_all` and no writes | beyond `far` |
@@ -1013,7 +1141,7 @@ the same machine as this document's other numbers. Ten thousand bodies on a 60 m
 at reflex tier, 240 timed passes after a 32-pass warm-up, binding system only:
 
 | Camera | Bodies | Culled | Control | Saved | Split |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | plaza edge | 2,000 | 0.061 ms | 0.117 ms | 48.1% | 381 full, 1,619 stepped |
 | plaza edge | 10,000 | 0.305 ms | 0.601 ms | 49.1% | 1,914 full, 8,086 stepped |
 | 140 m out | 2,000 | 0.036 ms | 0.117 ms | 69.3% | 505 stepped, 1,495 paused |
@@ -1021,14 +1149,14 @@ at reflex tier, 240 timed passes after a 32-pass warm-up, binding system only:
 
 Two things this table says, and one it does not.
 
-* Culling at the plaza edge clears the gate, 49% of binding time at 10,000 bodies, against the 30%
+- Culling at the plaza edge clears the gate, 49% of binding time at 10,000 bodies, against the 30%
   the task asks for, because the tier check and the distance check are one branch set per body, not
   a query or an allocation.
-* The paused band is worth more than the stepped one: 70% saved when the camera is outside the
+- The paused band is worth more than the stepped one: 70% saved when the camera is outside the
   plaza, since a paused body costs one `pause_all` per return rather than a write per tick. The
   absolute numbers are small because the whole binding is 0.6 ms at 10,000; what a paused body also
   saves is Bevy's `animate_targets`, which is outside this system and outside this table.
-* A stepped body still advances its clip, the cadence saves the writes, not the bones. Making the
+- A stepped body still advances its clip, the cadence saves the writes, not the bones. Making the
   cadence also freeze the skeleton is what `Paused` is for, and a game that wants low-rate bone
   updates should step the whole player, not just this binding.
 
@@ -1062,6 +1190,7 @@ the ease is a fixed fraction of the window per tick, so `the_window_counts_ticks
 drives the same body at 1 tick and at 10 ticks per pass and requires the identical weight.
 
 ## The binding envelope (T10, profiled after T07–T11 merged)
+
 `cargo bench -p bevy-flock-anim --bench binding` is the measurement; `crates/bevy-flock-anim/benches/baseline.json`
 is the committed record; `python3 scripts/bench_gate.py` fails a build on a 25% regression against it.
 Every case runs the real systems on a real `World`, because a micro-benchmark of `blend()` on its own
@@ -1076,7 +1205,7 @@ Machine: a six-core x86-64 sandbox VM (no model string exposed), `[profile.bench
 | `weights/plaza_edge`, the blend with the camera on the plaza edge | 186 µs | 935 µs |
 | `culling/inside_band`, every body inside the near band | 187 µs | 940 µs |
 | `culling/beyond_far`, every body paused | 57 µs | 275 µs |
-| `gaze/2_000_bodies`, two bones solved per body | 263 µs |, |
+| `gaze/2_000_bodies`, two bones solved per body | 263 µs | , |
 | `root_motion/no_report`, the reconciler with nothing to reconcile | 6.3 µs | 26 µs |
 | `root_motion/every_body_reports`, every body reports a clip offset | 36 µs | 175 µs |
 
@@ -1085,6 +1214,7 @@ for the pair against the plan's 0.30 ms ceiling. The gap is 47% and it was 82% b
 this section records both numbers because the second one is the one that argues for the follow-up.
 
 ### What the profile found
+
 `cargo run --release -p bevy-flock-anim --example profile_gaze` runs four variants of the gaze solve on
 one 2,000-body fixture, so the difference between two rows is the cost of the thing that differs:
 
@@ -1115,6 +1245,7 @@ than the writes it saved, and `AnimationState` is touched by every other system 
 It was reverted rather than kept behind a flag, and the blend is where it was.
 
 ### What remains, and why it is not in this pass
+
 The remaining 90 ns per body for the blend is the four `set_weight`/`set_speed` writes plus the blend's
 own arithmetic, in a system already inside 6% of a 16.6 ms frame at 10,000 bodies. Getting the pair under
 0.30 ms needs a design change rather than a line: cache the node handles on `AnimationState` so the
@@ -1129,6 +1260,7 @@ commit. And the allocation test is a test, not a benchmark: `tests/no_alloc.rs` 
 a timing threshold would catch a release later.
 
 ## The serial spatial path (phase 3 baseline)
+
 Phase 3 replaces the single-threaded grid, so it needs the serial cost split into its pieces before a
 thread exists: a parallel build that halves the index and leaves the query alone is a different result
 from the reverse, and a frame time cannot tell them apart. `cargo bench --bench spatial` measures the
@@ -1157,6 +1289,7 @@ Comparing 30 ms against 4.75 ms and concluding the crate regressed would be comp
 an incremental band.
 
 ### Where the rebuild's time went
+
 The first baseline recorded 47.2 ms and that number was investigated before anything was optimised, with
 `cargo run --release --example profile_build` reproducing each pass of `SpatialGrid::build` from outside
 the crate and timing it separately:
@@ -1165,7 +1298,7 @@ the crate and timing it separately:
 | ----- | --------: | -------: |
 | `cell_of`, one call per body | 17.9 ms | 17.9 ns |
 | counting pass (`cell_of` + histogram increment) | 22.5 ms | 22.5 ns |
-| prefix sum over 592,704 cells | 1.3 ms |, |
+| prefix sum over 592,704 cells | 1.3 ms | , |
 | placement pass, cell indices already known | 3.5 ms | 3.5 ns |
 | `build()` as it was | 46.4 ms | 46.4 ns |
 
@@ -1203,12 +1336,13 @@ way the build is not: each query is independent, and the only ordering constrain
 gather into the shared arena (ADR 0054, invariant 4).
 
 ### The rebuild, partitioned (T03)
+
 `SpatialGrid::build` partitions its three `O(n)` passes across `with_threads(n)` workers and keeps the
 prefix sum serial. At a million bodies on this six-core VM, `cargo run --release --example profile_build`:
 
 | Threads | Rebuild | Speed-up |
 | ------: | ------: | -------: |
-| 1 (serial reference) | 28.0 ms |, |
+| 1 (serial reference) | 28.0 ms | , |
 | 6 | 10.0 ms | 2.8× |
 
 Three things explain why six workers buy 2.8× rather than 6×, and none of them is a defect:
@@ -1231,6 +1365,7 @@ fixture at 1, 2, 3 and 8 threads and compares `cell_start` and `order` byte for 
 pass while two cells' windows were swapped, because it only looks at one cell at a time.
 
 ### Batched queries, partitioned (T04)
+
 Every agent asks one neighbourhood question per tick, which is why `radius_batch` exists: it answers the
 whole crowd into one `QueryArena` where query `q` owns slots `q * cap .. (q + 1) * cap`, so the output
 offset of every query is known before any work starts and a batch partitions by query range with no gather
@@ -1260,6 +1395,7 @@ persistent pool is the open follow-up recorded in the plan, and the earlier clai
 that the parallel path allocates nothing was corrected when this was measured.
 
 ### The parity harness (T05)
+
 `tests/spatial_parity.rs` runs a simulation twice and compares the two runs tick by tick. Every tick folds
 the whole state into one FNV-1a digest, every body's identifier and position, the *ordered* neighbour lists
 around 24 probe points, and the scheduler's chosen set, so "identical" means the same bytes to the same
@@ -1282,9 +1418,9 @@ run is a release gate, not something to spend four minutes of every session on.
 
 Two things had to be true before this harness was worth trusting, and both are tests rather than claims:
 
-* **The digest notices a millimetre.** `the_stream_is_sensitive_to_a_single_moved_body` moves one body out of
+- **The digest notices a millimetre.** `the_stream_is_sensitive_to_a_single_moved_body` moves one body out of
   ten thousand by 1 mm and requires the stream to diverge on that tick.
-* **The digest notices the mistake a partition can make.**
+- **The digest notices the mistake a partition can make.**
   `the_spatial_digest_notices_an_insertion_ordered_reduction` (in `src/domain/spatial.rs`, where a grid's
   private arrays are reachable) rebuilds the window array in insertion order instead of cell order, every
   body still present, every window still filled, so a set or count comparison would pass, and requires the
@@ -1295,6 +1431,7 @@ worker count fails here, because the count changes every tick and the buffers ar
 with 1, 8, 3 and 2 workers in rotation.
 
 ### Thread scaling: where the phase 3 ceiling actually is (T06)
+
 Measured with `examples/scaling_sweep.rs`: 1M bodies, 5,000 queries of radius 12 m, median of five runs per
 cell, on **this VM, aarch64, six cores** (`thread::available_parallelism()` = 6). It is not a workstation and
 nothing below is extrapolated to hardware that was not measured. The figure is
@@ -1336,6 +1473,7 @@ about 12 ms rather than 16, and nothing in the batch would have had to change.
 regression has somewhere to appear.
 
 ### The rebuild's five passes, and a corrected premise (T01)
+
 `examples/build_passes.rs` times every pass separately through `SpatialGrid::build_measured`, median of seven
 runs, the same 1M fixture as the gated baseline, on the same six-core aarch64 VM.
 
@@ -1378,11 +1516,11 @@ depend on the machine (ADR 0055 §6). Measured on the same 1M fixture and six aa
 
 | Pass | 1 worker | 6 workers | Before (T01) at 6 | Change |
 | --- | ---: | ---: | ---: | --- |
-| clear | 13.08 ms | 2.46 ms | 2.46 ms |, |
+| clear | 13.08 ms | 2.46 ms | 2.46 ms | , |
 | count | 1.70 ms | 1.74 ms | 2.08 ms | 0.84x |
 | prefix | 0.44 ms | **0.28 ms** | 0.87 ms | **3.1x faster** |
-| place | 7.32 ms | 2.22 ms | 2.23 ms |, |
-| restore | 0.68 ms | 0.70 ms | 0.68 ms |, |
+| place | 7.32 ms | 2.22 ms | 2.23 ms | , |
+| restore | 0.68 ms | 0.70 ms | 0.68 ms | , |
 | **total** | **23.34 ms** | **7.48 ms** | 8.85 ms | **1.18x faster** |
 
 The build went from 8.85 ms to 7.48 ms at six workers, which is the 1.2x the ADR predicted, 8.85 minus the
@@ -1418,11 +1556,11 @@ It now advances a copy (`cell_cursor`) and the shift is gone: `PassCosts::restor
 
 | Pass | 1 worker | 6 workers | T03 at 6 | Change |
 | --- | ---: | ---: | ---: | --- |
-| clear | 12.96 ms | 2.46 ms | 2.46 ms |, |
-| count | 1.72 ms | 1.76 ms | 1.74 ms |, |
-| prefix | 0.43 ms | 0.30 ms | 0.28 ms |, |
+| clear | 12.96 ms | 2.46 ms | 2.46 ms | , |
+| count | 1.72 ms | 1.76 ms | 1.74 ms | , |
+| prefix | 0.43 ms | 0.30 ms | 0.28 ms | , |
 | **seat** | **0.12 ms** | **0.11 ms** | 0.68 ms | **6.0x faster** |
-| place | 7.19 ms | 2.22 ms | 2.22 ms |, |
+| place | 7.19 ms | 2.22 ms | 2.22 ms | , |
 | **total** | **22.15 ms** | **6.95 ms** | 7.48 ms | **1.08x faster** |
 
 Against the phase 3 baseline the build has gone 8.85 ms → 6.95 ms (1.27x) while the scan moved 0.87 → 0.30 ms and
@@ -1433,7 +1571,7 @@ complexity term the plan asked for:
 serial = O(blocks) + sizeof(cell_start)        # 0.30 ms bandwidth-bound scan + 0.11 ms memcpy
 ```
 
-Amdahl at that floor (0.41 ms of 22.15 ms) caps six workers at 5.5x, where the previous floor capped it at 4.5x , 
+Amdahl at that floor (0.41 ms of 22.15 ms) caps six workers at 5.5x, where the previous floor capped it at 4.5x ,
 so the 5x gate is now reachable arithmetically for the first time, rather than being blocked by a pass nobody had
 questioned.
 
@@ -1492,7 +1630,6 @@ shape the rebuild should take, with the constraint recorded: the serial scan has
 worker holding `&mut` to its slice of the window table cannot hand it back mid-closure. The one-scope design
 therefore has to either keep the scan outside the scope (two scopes per rebuild, 1.06 ms instead of 1.59 ms) or
 give the scan's local pass to the workers, which is what T03's fused totals would allow.
-
 
 ## Phase 5: the seat rides inside the place dispatch
 

@@ -286,9 +286,9 @@ Written down so the gaps are not mistaken for measurements:
 - **No real GPU numbers for the demo.** The software rasteriser validated on lavapipe is a CPU rasteriser; it says nothing
   about a Metal or D3D12 frame.
 - **No Unreal execution**, only the review and the fixture.
-- **No measured plugin frame for the incremental rebuild.** `build_incremental` is wired into the harnesses and not yet
-  into `rebuild_spatial_grid`, which clears and rebuilds every tick. The patched rows describe the mechanism, not the
-  frame a game gets.
+- **No measured plugin frame for a rebuild that changes nothing.** The plugin patches its spatial index now
+  (PR #62), so a still crowd does not rebuild it, and `flock_frame` measures the frame a game gets. The
+  `spatial_build` rows still measure a rebuild from scratch, because that is the operation they name.
 
 ## Reproducing a row
 

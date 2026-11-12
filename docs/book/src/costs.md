@@ -8,54 +8,73 @@ machine, but the *ratios* and the *shape*, which belong to the design.
 
 | Benchmark | Time | Per agent |
 | --- | --- | --- |
-| `flock_frame/1` | 0.99 ms |, |
-| `flock_frame/1000` | 1.73 ms | 1.7 µs |
-| `flock_frame/10000` | **9.18 ms** | 0.92 µs |
-| `flock_frame_large/100000` | 90.0 ms | 0.90 µs |
-| `spatial_query/radius_8m/1000` | 138 ns |, |
-| `spatial_query/radius_8m/100000` | 552 ns |, |
-| `steering_step/32_neighbours` | 152 ns |, |
+| `flock_frame/1` | 2.66 µs | |
+| `flock_frame/1000` | 299 µs | 0.30 µs |
+| `flock_frame/10000` | **1.72 ms** | 0.17 µs |
+| `flock_frame_large/100000` | 14.1 ms | 0.14 µs |
+| `spatial_query/radius_8m/1000` | 40 ns | |
+| `spatial_query/radius_8m/100000` | 160 ns | |
+| `steering_step/32_neighbours` | 70 ns | |
 
 Three things to read from it:
 
-1. **10,000 agents fit a 60 Hz frame with 1.8× margin.** 9.18 ms against 16.6 ms. Before the
+1. **10,000 agents fit a 60 Hz frame with 9.6× margin.** 1.72 ms against 16.6 ms. Before the
    kernel was rewritten the same crowd cost 18.2 ms, and 92% of the frame was steering.
-2. **Per-agent cost is flat.** 1.7 µs at a thousand, 0.92 µs at ten thousand, 0.90 µs at a
+2. **Per-agent cost is flat.** 0.30 µs at a thousand, 0.17 µs at ten thousand, 0.14 µs at a
    hundred thousand. A bigger crowd does not make any one agent more expensive, which is what
    makes bands possible at all.
-3. **The fixed cost is the grid, not the crowd.** `flock_frame/1` is 0.99 ms, and almost all
-   of it is the index rebuild at the default 1 km volume. Match the volume to your playable
-   area: 200 m across is about 20 µs.
+3. **The fixed cost is gone.** `flock_frame/1` is 2.66 µs. A crowd that stands still rebuilds
+   the index once and patches nothing after that, so what a frame costs is the work that scales
+   with agents and nothing else.
 
 ## The crowd at scale
 
+Band frame, wide kernel, on the M3 Pro.
+
 | Configuration | Frame |
 | --- | --- |
-| 100,000 total, 5,000 manifested | 3.72 ms |
-| 1,000,000 total, 5,000 manifested | 3.78 ms |
+| 100,000 total, 5,000 manifested | 1.64 ms |
+| 250,000 total, 5,000 manifested | 1.56 ms |
+| 1,000,000 total, 5,000 manifested | 1.37 ms |
 
-Ten times the population for 1.6% more frame, because cost tracks what is *manifested*.
+Ten times the population for *less* frame, because cost tracks what is *manifested* and the
+manifested count is 5,000 in every row. The rest of the population is a density field, and
+the field is not walked per body.
 
 ## Cognition
 
-`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 4.23 ms baseline frame with the same
+`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 0.62 ms baseline frame with the same
 crowd and no brains:
 
 | Composition | Frame | Delta | Who thought |
 | --- | --- | --- | --- |
-| All reflex (200 ns) | 6.40 ms | 2.17 ms | all 10,000, every tick |
-| All reactive (2 µs) | 4.85 ms | 0.62 ms | ~1,750 per tick |
-| All deliberative (8 µs) | 4.77 ms | 0.54 ms | ~262 per tick |
-| All social (30 µs) | 4.68 ms | 0.45 ms | ~23 per tick |
-| 95/4/1 mix | 6.42 ms | 2.19 ms | ~9,700 / 175 / 13 |
+| All reflex (200 ns) | 1.44 ms | 0.82 ms | all 10,000, every tick |
+| All reactive (2 µs) | 0.89 ms | 0.27 ms | ~1,750 per tick |
+| All deliberative (8 µs) | 0.82 ms | 0.20 ms | ~262 per tick |
+| All social (30 µs) | 0.83 ms | 0.21 ms | ~23 per tick |
+| 95/4/1 mix | 1.47 ms | 0.85 ms | all 10,000, every tick (9,500 / 400 / 100) |
 
 The expensive tiers are the *cheap* frames, because their reserved shares buy so few of them.
 Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
-Reflex is the only composition where everybody thinks every tick, and the only one that costs
-2 ms, which is why the reflex ceiling is ~64,000 per tick at 14 ms, measured at ~217 ns per
-reflex think end to end in the ECS rather than the ~93,000 that dividing the budget by the
-declared 150 ns would suggest. Query traversal, blackboard access and change detection are
-real costs no declared hint includes.
+Reflex is the only composition where the whole population thinks every tick, and the only one
+that costs most of a millisecond.
+
+A reflex think costs about 52 ns end to end in the ECS — the query traversal and the tree
+tick, with no spatial rebuild in the frame to amortise over it — so a crowd of 250,000
+reflex NPCs still fits a 14 ms frame, measured rather than extrapolated. 300,000 does not,
+at 14.92 ms. The same arithmetic on the declared 150 ns would say ~93,000; the declared cost
+is what the scheduler spends, and it is not what the frame pays.
+
+There are two ceilings, and they are different things. The frame is wall clock: how many
+NPCs can be *in the world* before a frame costs 14 ms. The budget is virtual: 55% of
+14 ms at a 200 ns declared cost buys exactly 38,500 reflex thinks, at every population
+above it. Past 38,500 the extra NPCs wait their turn instead of costing more frame, which
+is what a reservation is for.
+
+The mix is the case worth reading twice. Its reserved shares buy 38,500 reflex thinks, 1,750
+reactive and 262 deliberative, and the crowd is smaller than all three, so every NPC thinks
+every tick — the frame costs the same as a crowd of pure reflex. That is the budget working
+as intended: a reservation that is not needed is not spent.
 
 The declared costs in the leaf catalogue are calibrated to within 20% of the measured
 per-leaf cost, `benches/brain.rs` measures, `docs/dev/tuning/performance.md` records, and ADR 0009
