@@ -110,7 +110,7 @@ Every number, including the optimisations that were measured and rejected, is in
 | I want | add this |
 | --- | --- |
 | a crowd in a Bevy game | `bevy-flock` |
-| all of it | `bevy-flock = { version = "0.1", features = ["full"] }` |
+| all of it | `bevy-flock = { version = "1", features = ["full"] }` |
 | NPCs that walk with skeletons | `bevy-flock` with `features = ["anim"]` |
 | no Bevy in the dependency graph | `bevy-flock-core` alone |
 

@@ -42,6 +42,25 @@ CI, so a workflow that grows a shape the translator cannot follow fails there ra
 going unverified. `release` is tag-gated and `deny` is an action with no shell step; both are
 listed in the script with that reason.
 
+### The same gate, with `just`
+
+The commands are also recipes, so nobody has to remember which flag goes with which gate.
+`just` with no arguments lists them:
+
+```sh
+just                 # every recipe, and what it runs
+just preflight       # build, test, clippy and deny: what a commit has to pass
+just ci              # every CI job, run locally and read out of the workflow
+just scripts         # the gate scripts' own self-tests, against fixtures
+just release-check   # the pre-release checklist from RELEASING.md
+```
+
+`just` is not a dependency of the crate, and no recipe is a second copy of a gate: each one runs
+a command this repository already defines, so a recipe cannot drift from the thing it stands for.
+The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`), and the local CI
+runner needs PyYAML on top of that. `just python-venv` creates an interpreter with both, and the
+`just` recipes prefer it when it exists.
+
 The lint profile (all + pedantic + nursery + cargo + perf, with `unwrap_used`,
 `expect_used`, `panic`, `indexing_slicing`, `cast_ptr_alignment` and `suspicious`
 denied) lives in `Cargo.toml`, and `docs/dev/lint/lint-policy.md` says what each exception

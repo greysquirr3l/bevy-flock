@@ -224,7 +224,7 @@ Four crates publish, in dependency order, at one version. The order is not a pre
 even be packaged.
 
 ```bash
-cargo set-version --workspace 1.0.0      # all four, together
+just set-version 1.0.0                 # cargo set-version --workspace, and the path requirements with it
 python3 scripts/publish_check.py         # metadata, versions and the order, without a registry
 
 cargo publish --dry-run -p bevy-flock-core && cargo publish -p bevy-flock-core
@@ -260,8 +260,10 @@ Three conditions must be true before the first `publish`, and the checker enforc
 - every `path` dependency also carries a `version` whose requirement accepts the dependency's own version;
 - readiness items 1-5 are closed, because a `1.0.0` cannot be unpublished.
 
-**Status:** the four manifests are publishable as of ADR 0062; the first upload is blocked on readiness items 1-5,
-not on packaging.
+**Status:** met. The four manifests carry `1.0.0`, their path dependencies carry matching version requirements, and
+`python3 scripts/publish_check.py` prints the order they have to go up in: `bevy-flock-core`, `bevy-flock-ecs`,
+`bevy-flock-anim`, `bevy-flock`. The checker's version rules were written for the `0.x` era and were widened to the
+caret rules Cargo actually applies, so a `^1.0.0` requirement is checked rather than refused.
 
 ## 9. After the tag
 
@@ -282,12 +284,12 @@ Rendering, physics, networking, file adapters. The crate simulates, the README s
 
 | step | state |
 | --- | --- |
-| 1. public surface frozen | re-export in place; `facade_paths.rs` missing |
-| 2. MSRV proven | declared and pinned; not built on 1.97.1 alone |
-| 3. stranger path | example exists; README not updated |
-| 4. typed errors | enforced by lints; a few variants need docs |
-| 5. guarantees page | properties tested; page missing |
+| 1. public surface frozen | **done**: `tests/facade_paths.rs` holds the paths, and the doc gate is clean across all four crates |
+| 2. MSRV proven | **done**: declared in all four manifests, pinned in `rust-toolchain.toml`, built by the `msrv` job |
+| 3. stranger path | **done**: the README's first block runs, and `site/src/content/docs/start/getting-started.md` walks through it |
+| 4. typed errors | **done**: enforced by the lint profile, and the variants are documented |
+| 5. guarantees page | **done**: `site/src/content/docs/reference/guarantees.md`, one claim per test |
 | 6. core stands alone | **done and verified** |
-| 7. comparable benchmarks | machinery done; two rows missing |
-| 8. release mechanics | blocked on 1–5 |
+| 7. comparable benchmarks | **done**: three rows from one host, recorded in step 7 |
+| 8. release mechanics | **done**: `Justfile` at the root, the manifests at `1.0.0`, and the publish order checked by script |
 | 9. after the tag | routine |

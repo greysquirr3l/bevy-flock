@@ -1,6 +1,6 @@
 [package]
 name = "bevy-flock-anim"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
@@ -21,9 +21,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # The ECS half, not the facade. The layer reads `Locomotion`, `GazeAim`, `NpcGestures`, `NpcTier` and the
 # blackboard, all of which live there; depending on the facade instead would be the cycle this crate was
 # split out of in ADR 0062.
-bevy-flock-ecs = { version = "0.1.0", path = "../bevy-flock-ecs", default-features = false }
+bevy-flock-ecs = { version = "1.0.0", path = "../bevy-flock-ecs", default-features = false }
 # The simulation types the layer reads (`SimClock`, `CognitionTier`, the deterministic numeric helpers).
-bevy-flock-core = { version = "0.1.0", path = "../bevy-flock-core", default-features = false }
+bevy-flock-core = { version = "1.0.0", path = "../bevy-flock-core", default-features = false }
 bevy_animation = "0.20.1"
 bevy_app = "0.20.1"
 bevy_asset = "0.20.1"
