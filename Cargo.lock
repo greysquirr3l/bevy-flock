@@ -203,7 +203,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bevy-flock"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bevy-flock-anim",
  "bevy-flock-core",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "bevy-flock-anim"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bevy-flock-core",
  "bevy-flock-ecs",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "bevy-flock-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bevy_ecs",
  "bevy_math",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "bevy-flock-ecs"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bevy-flock-core",
  "bevy_app",

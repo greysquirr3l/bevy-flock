@@ -104,6 +104,28 @@ def check_metadata(manifest: Path, package: dict) -> None:
         raise Problem(f"{name}: [package.metadata.docs.rs] does not set all-features = true")
 
 
+def caret_accepts(wanted: list[int], got: list[int]) -> bool:
+    """Whether `got` falls inside the range the caret requirement `^wanted` names.
+
+    Cargo's rule is that the leftmost non-zero component is fixed and the components to its right
+    may change: `^1.2.3` is `>=1.2.3, <2.0.0`, `^0.2.3` is `>=0.2.3, <0.3.0`, and `^0.0.3` is
+    `>=0.0.3, <0.0.4`. The `0.x` and `1.x` eras therefore need different rules, and a checker that
+    knew only the `0.x` one rejected every `1.0.0` manifest it was meant to clear.
+    """
+    width = max(len(wanted), len(got), 3)
+    wanted = wanted + [0] * (width - len(wanted))
+    got = got + [0] * (width - len(got))
+    if got < wanted:
+        return False
+    if wanted[0] != 0:
+        upper = [wanted[0] + 1, 0, 0]
+    elif wanted[1] != 0:
+        upper = [0, wanted[1] + 1, 0]
+    else:
+        upper = [0, 0, wanted[2] + 1]
+    return got < upper
+
+
 def requirement_accepts(requirement: str, version: str) -> bool:
     """Whether a crates.io version requirement accepts `version`.
 
@@ -114,20 +136,18 @@ def requirement_accepts(requirement: str, version: str) -> bool:
         comparator = comparator.strip()
         if not comparator:
             continue
-        for prefix in ("^", "="):
-            if comparator.startswith(prefix):
-                comparator = comparator[len(prefix) :]
-                break
-        else:
-            if comparator[0] in "<>~*":
-                raise Problem(f"requirement {requirement!r}: only caret and exact forms are checked")
-        # Caret semantics for a 0.x version: the leftmost non-zero component is fixed.
+        caret = comparator.startswith("^")
+        exact = comparator.startswith("=")
+        if caret or exact:
+            comparator = comparator[1:]
+        elif comparator[0] in "<>~*":
+            raise Problem(f"requirement {requirement!r}: only caret and exact forms are checked")
         wanted = [int(part) for part in comparator.split(".")]
         got = [int(part) for part in version.split(".")]
-        if wanted[0] != 0:
-            raise Problem(f"requirement {requirement!r}: this checker only handles 0.x, found {version}")
-        compatible = got[:2] == wanted[:2] and len(got) >= len(wanted)
-        if not compatible:
+        if exact:
+            if wanted != got:
+                return False
+        elif not caret_accepts(wanted, got):
             return False
     return True
 
@@ -221,7 +241,7 @@ def write_fixture(root: Path, crates: dict[str, dict]) -> None:
         lines = [
             "[package]",
             f'name = "{name}"',
-            'version = "0.1.0"',
+            f'version = "{spec.get("version", "0.1.0")}"',
             'description = "d"',
             'license = "MIT"',
             'repository = "r"',
@@ -288,6 +308,22 @@ def self_test() -> None:
         order = run(root)
         if order != ["leaf", "root"]:
             raise SystemExit(f"self-test failed: order {order} is not dependencies-first")
+
+    # The version rules, which changed shape when the crates left `0.x`: a caret requirement fixes
+    # the leftmost non-zero component, so `^1.0.0` and `^0.1.0` are not the same rule.
+    version_cases = [
+        ("^1.0.0 accepts 1.0.0", "^1.0.0", "1.0.0", True),
+        ("^1.0.0 accepts 1.9.3", "^1.0.0", "1.9.3", True),
+        ("^1.0.0 rejects 2.0.0", "^1.0.0", "2.0.0", False),
+        ("^1.0.0 rejects 0.9.0", "^1.0.0", "0.9.0", False),
+        ("^0.1.0 accepts 0.1.7", "^0.1.0", "0.1.7", True),
+        ("^0.1.0 rejects 0.2.0", "^0.1.0", "0.2.0", False),
+        ("=1.0.0 accepts 1.0.0", "=1.0.0", "1.0.0", True),
+        ("=1.0.0 rejects 1.0.1", "=1.0.0", "1.0.1", False),
+    ]
+    for label, requirement, version, expected in version_cases:
+        if requirement_accepts(requirement, version) != expected:
+            raise SystemExit(f"self-test failed: {label}")
     print("self-test ok: every broken fixture is rejected, and a valid pair comes back in order")
 
 

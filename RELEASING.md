@@ -19,7 +19,9 @@ part of the same promise.
 
 ## Pre-release checklist
 
-Run from a clean checkout of the commit you intend to tag.
+Run from a clean checkout of the commit you intend to tag. The same list is a `just` recipe, so
+the commands do not have to be remembered: `just release-check` runs steps 1, 2 and 4, and
+`just ci` runs every CI job locally.
 
 ```sh
 # 1. Everything the CI does, locally, in one go.
@@ -45,9 +47,13 @@ grep -rn "TODO\|FIXME\|XXX" src/ docs/ README.md    # an empty result is the goa
 cargo package --locked                             # must be warning-free
 ```
 
+The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`), and
+`scripts/ci_local.py` needs PyYAML on top of that. `just python-venv` creates an interpreter with
+both, and `just` prefers it when it exists.
+
 Then the two judgement calls a script cannot make:
 
-- **Read the changelog as a stranger.** Does `## [0.1.0]` explain what they can now do, or
+- **Read the changelog as a stranger.** Does `## [1.0.0]` explain what they can now do, or
   does it list commits?
 - **Re-measure one number.** Pick the headline frame from `docs/dev/tuning/performance.md`, run its
   bench on your machine, and confirm the shape matches. If it does not, the table is stale
@@ -57,7 +63,7 @@ Then the two judgement calls a script cannot make:
 
 ```sh
 # 1. Version, in one place, then let cargo fix the lockfiles.
-cargo set-version 0.1.1          # or edit Cargo.toml by hand
+just set-version 1.0.1           # cargo set-version --workspace, and the path requirements with it
 cargo check --locked --all-features
 (cd compat && cargo check --locked)
 
@@ -66,19 +72,27 @@ $EDITOR CHANGELOG.md
 
 # 3. Commit, tag, push both.
 git add -A
-git commit -m "release: 0.1.1"
-git tag -a v0.1.1 -m "bevy-flock 0.1.1"
+git commit -m "release: 1.0.1"
+git tag -a v1.0.1 -m "bevy-flock 1.0.1"
 git push origin main --follow-tags
 ```
 
 The tag triggers the `release` CI job, which repeats the checklist plus
-`cargo semver-checks check-release --baseline-rev v0.1.0` (once a baseline tag exists) and
+`cargo semver-checks check-release --baseline-rev v1.0.0` (once a baseline tag exists) and
 `cargo publish --dry-run`.
 
 ## Publishing
 
+The four crates go up in dependency order, because `cargo` rewrites every path dependency to its
+version requirement before upload, and a crate whose dependency is not on crates.io yet cannot
+even be packaged. `python3 scripts/publish_check.py` prints the order and checks the manifests
+against it, without a registry:
+
 ```sh
-cargo publish --locked
+cargo publish --locked -p bevy-flock-core
+cargo publish --locked -p bevy-flock-ecs
+cargo publish --locked -p bevy-flock-anim
+cargo publish --locked -p bevy-flock
 ```
 
 Then, in the same hour:

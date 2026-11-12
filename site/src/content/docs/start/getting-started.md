@@ -27,7 +27,7 @@ cargo run --example hello_flock
 The example is deliberately headless, no window, no GPU, no assets, and prints what the simulation produced:
 
 ```text
-bevy-flock 0.1.0
+bevy-flock 1.0.0
   tick            120
   population      2000
   moving          2000
@@ -44,7 +44,7 @@ Four crates, three of them optional. The first row is the one almost everybody n
 | I want | add this |
 | --- | --- |
 | a crowd in a Bevy game | `bevy-flock` |
-| all of it, without reading a feature table | `bevy-flock = { version = "0.1", features = ["full"] }` |
+| all of it, without reading a feature table | `bevy-flock = { version = "1", features = ["full"] }` |
 | NPCs that walk, gesture and look with skeletons | `bevy-flock` with `features = ["anim"]` |
 | a server, replay tool or test harness with no Bevy in the graph | `bevy-flock-core` alone |
 

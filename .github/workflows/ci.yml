@@ -235,7 +235,12 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo package --locked
+      # `cargo package` rewrites every path dependency to its version requirement before it
+      # packages a crate, so the upper three cannot be packaged until the lower ones are on
+      # crates.io. The first crate is packaged here, and the manifests of the other three are
+      # checked directly, which is what `scripts/publish_check.py` reads.
+      - run: cargo package --locked -p bevy-flock-core
+      - run: python3 scripts/publish_check.py
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         continue-on-error: true # no baseline tag before the first release
         with:

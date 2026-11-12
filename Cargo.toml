@@ -11,7 +11,7 @@ exclude = ["demo", "demo-gpu", "playground", "compat", "fuzz"]
 
 [package]
 name = "bevy-flock"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
@@ -81,13 +81,13 @@ full = ["ecs", "simd", "threads", "memory", "serde", "navmesh", "anim"]
 [dependencies]
 # The simulation, with no engine in its graph. Everything the facade re-exports as `domain`, `behavior` and
 # `application` is there, moved rather than copied, so a headless server can depend on the core alone.
-bevy-flock-core = { version = "0.1.0", path = "crates/bevy-flock-core", default-features = false }
+bevy-flock-core = { version = "1.0.0", path = "crates/bevy-flock-core", default-features = false }
 # The Bevy half: the plugin, the components and the systems. It owns every `bevy_ecs` import in the workspace,
 # and the facade re-exports it at the paths a game already uses (`bevy_flock::adapters::primary::…`).
-bevy-flock-ecs = { version = "0.1.0", path = "crates/bevy-flock-ecs", default-features = false, optional = true }
+bevy-flock-ecs = { version = "1.0.0", path = "crates/bevy-flock-ecs", default-features = false, optional = true }
 # The animation layer, which depends on the ECS half rather than on this crate. That direction is what lets a
 # facade feature offer it at all (ADR 0061, ADR 0062).
-bevy-flock-anim = { version = "0.1.0", path = "crates/bevy-flock-anim", optional = true }
+bevy-flock-anim = { version = "1.0.0", path = "crates/bevy-flock-anim", optional = true }
 
 [dev-dependencies]
 # This crate's own tests, examples and benches drive the real plugin, so they name the engine crates the ECS half

@@ -40,7 +40,7 @@ Three claims, each measured and each defended by a gate in CI:
 - **Not an ECS tutorial.** It assumes you know what a `Query` is. It does explain the parts
   that are unusual, the scheduler, the tiers, the bands, because those are the parts that
   make the numbers work.
-- **Not finished.** `0.1.0` is the foundation plus the engine: crowds, borders, behaviour,
+- **Not finished.** `1.0.0` is the foundation plus the engine: crowds, borders, behaviour,
   memory, saving, diagnosis. The status table in the README is the honest list, and the
   plan in `plan.toml` is what remains.
 

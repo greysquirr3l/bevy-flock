@@ -4,7 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
+
+## [1.0.0] — 2026-11-11
+
+The first stable release. Four crates, one simulation core, and the promises this project has been
+measuring against since it started: deterministic replays, a stable public API, and a crowd that still
+fits in a frame at a million bodies.
+
+### Highlights
+
 - **The Bevy adapter patches its spatial index instead of rebuilding it every tick.** The incremental path existed, was
   measured, and was used by the benchmarks only: the adapter rebuilt the whole index from scratch on every tick, so a
   crowd paid for a full recount of a table that was usually still right. Each NPC now owns a slot in the grid's entry
@@ -207,7 +216,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recording the GPU measurements. The release checklist's "23 ADRs" count, which had drifted by
   twenty-eight, is now a rule instead of a number.
 
-## [Unreleased]
 ### Added
 - `SpatialGrid::with_slack_floor` (default `DEFAULT_SLACK_FLOOR`, 2): every cell now keeps spare slots regardless of
   occupancy, so a pair arriving in an empty cell is patched instead of forcing a rebuild. At 512 crossers a tick the
@@ -220,15 +228,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at a million bodies the patch's p95 falls from 13.9 ms to 2.4 ms for 17.8% more table, while at 100,000 it
   changes nothing and costs 1%, because the cells that refuse an arrival there are empty ones. See ADR 0064.
 
-### Added
-
 - Incremental rebuild step 2: the spatial grid now keeps a slotted table (capacity prefix, occupancy and
   cursor) and patches the bodies that changed cell in place instead of rebuilding. `RebuildOutcome::Patched`
   reports it. 11.3x faster than a rebuild at 1M bodies with 64 crossers per tick (1.190 ms against 13.427 ms).
   See ADR 0064.
-
-
-### Added
 
 - `SpatialGrid::build_incremental`: recomputes cell numbers against the table the last rebuild left, and ends the tick
   there when no body changed cell. 0.197 ms against 1.790 ms at 100,000 bodies, and 1.104 ms against 13.532 ms at a
@@ -636,8 +639,6 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
   at 50,000 agents 138 -> 56.5 ms. Bit-identical to the scalar path, which is kept as the
   reference and tested against it. See ADR 0023.
 
-### Added
-
 - A complete behaviour-tree node set: `Sequence`, `Selector`, `Parallel` with
   `RequireAll`/`RequireAny`, `Inverter`, `RepeatUntilFail`, `Cooldown`, `Timeout`,
   `Condition` and `Action`. Compiled to a flat node array; a tick allocates
@@ -815,6 +816,9 @@ and `replicon` adapters are specified in `plan.toml` and not implemented yet.
 ## [0.1.0] — 2026-11-04
 
 The simulation foundation.
+
+*Never published. `0.1.0` was the one-million-inhabitant milestone, signed off on the day; the first
+crate on crates.io is `1.0.0`.*
 
 ### Added
 

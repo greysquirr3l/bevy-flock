@@ -1,6 +1,6 @@
 [package]
 name = "bevy-flock-ecs"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Nick <greysquirr3l@users.noreply.github.com>"]
@@ -32,7 +32,7 @@ navmesh = ["bevy-flock-core/navmesh"]
 
 [dependencies]
 # The simulation, with no engine of its own. This crate is the half that adds one.
-bevy-flock-core = { version = "0.1.0", path = "../bevy-flock-core", features = ["ecs"] }
+bevy-flock-core = { version = "1.0.0", path = "../bevy-flock-core", features = ["ecs"] }
 bevy_app = "0.20.1"
 bevy_ecs = "0.20.1"
 bevy_math = "0.20.1"

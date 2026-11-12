@@ -20,7 +20,7 @@ what it needs.
 ```toml
 
 # a headless replay harness: no engine, no allocator churn, no tasks
-bevy-flock-core = { version = "0.1", default-features = false }
+bevy-flock-core = { version = "1", default-features = false }
 ```
 
 ## Picking a set

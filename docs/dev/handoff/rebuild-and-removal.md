@@ -6,7 +6,7 @@ was checked against the tree on `feat/p2-borrow-budget` at commit `ffaa406`.
 
 ## Where the project is
 
-`bevy-flock` is a Rust/Bevy crowd and NPC library at version 0.1.0, four crates in one workspace:
+`bevy-flock` is a Rust/Bevy crowd and NPC library at version 1.0.0, four crates in one workspace:
 
 | crate | what it holds |
 | --- | --- |
