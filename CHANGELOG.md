@@ -817,6 +817,9 @@ and `replicon` adapters are specified in `plan.toml` and not implemented yet.
 
 The simulation foundation.
 
+*Never published. `0.1.0` was the one-million-inhabitant milestone, signed off on the day; the first
+crate on crates.io is `1.0.0`.*
+
 ### Added
 
 - `FlockPlugin` with `FlockConfig`, four `CrowdPreset`s, and budgeted spawning
