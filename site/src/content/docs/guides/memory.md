@@ -8,7 +8,7 @@ crowds: memory is the most expensive thing you can add per agent.
 
 ```toml
 [dependencies]
-bevy-flock = { version = "0.1", features = ["memory"] }
+bevy-flock = { version = "1", features = ["memory"] }
 ```
 
 ## What changes when it is on

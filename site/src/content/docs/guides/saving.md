@@ -8,7 +8,7 @@ and the format carries a version so an old save is either loaded correctly or re
 
 ```toml
 [dependencies]
-bevy-flock = { version = "0.1", features = ["serde"] }
+bevy-flock = { version = "1", features = ["serde"] }
 ```
 
 ## What is in a save
