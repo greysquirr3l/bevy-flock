@@ -43,8 +43,9 @@ the field is not walked per body.
 
 ## Cognition
 
-`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 0.62 ms baseline frame with the same
-crowd and no brains:
+`benches/tiers.rs`, 10,000 NPCs, 14 ms budget. The baseline is the plugin's own ambient crowd —
+2,000 NPCs with no brains — and the fixture adds 10,000 more, so the delta column is the
+marginal cost of the fixture, not a total:
 
 | Composition | Frame | Delta | Who thought |
 | --- | --- | --- | --- |
@@ -56,14 +57,16 @@ crowd and no brains:
 
 The expensive tiers are the *cheap* frames, because their reserved shares buy so few of them.
 Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
-Reflex is the only composition where the whole population thinks every tick, and the only one
-that costs most of a millisecond.
+Reflex and the mix are the two compositions where everybody thinks every tick, and they are
+the two that cost most of a millisecond: their reserved shares buy more than the crowd needs,
+and what is left over is not spent.
 
-A reflex think costs about 52 ns end to end in the ECS — the query traversal and the tree
-tick, with no spatial rebuild in the frame to amortise over it — so a crowd of 250,000
-reflex NPCs still fits a 14 ms frame, measured rather than extrapolated. 300,000 does not,
-at 14.92 ms. The same arithmetic on the declared 150 ns would say ~93,000; the declared cost
-is what the scheduler spends, and it is not what the frame pays.
+The ceiling is a frame measurement, not a per-think one. A crowd of 250,000 reflex NPCs fits
+a 14 ms frame at 13.51 ms; 300,000 does not, at 14.92 ms. The marginal cost of each NPC
+falls as the crowd grows — 82 ns at 10,000, 52 ns at 250,000 — because most of what an NPC
+costs is fixed rather than per-unit, and fixed cost amortises. That figure covers the ECS
+work of carrying the NPC as well as the tree tick, so it is not a cost per think, and it is
+not a constant. Quote frame times, not nanoseconds.
 
 There are two ceilings, and they are different things. The frame is wall clock: how many
 NPCs can be *in the world* before a frame costs 14 ms. The budget is virtual: 55% of
