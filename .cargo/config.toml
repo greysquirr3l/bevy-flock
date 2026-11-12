@@ -13,6 +13,11 @@ rustflags = ["-C", "target-feature=+simd128"]
 # The preflight this repository's plan.toml runs, in one word. The lint profile
 # and its documented exceptions live in Cargo.toml's `[lints.clippy]` table, so
 # there is exactly one place to argue with them.
-preflight = "clippy --all-targets --all-features -- -D warnings"
-l = "clippy --all-targets --all-features -- -D warnings"
-t = "test --all-features"
+#
+# `--workspace` is load-bearing. A bare `cargo clippy` selects the workspace's
+# default members, and when the member crates were outside that selection their
+# test targets were never built, so the lint never reached them: two clippy
+# errors sat in `bevy-flock-core`'s test code while CI reported a clean run.
+preflight = "clippy --workspace --all-targets --all-features -- -D warnings"
+l = "clippy --workspace --all-targets --all-features -- -D warnings"
+t = "test --workspace --all-features"

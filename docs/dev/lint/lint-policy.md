@@ -1,7 +1,7 @@
 # Lint policy
 
 The crate is linted at one setting, in one place: `[lints]` in `Cargo.toml`. CI runs
-`cargo clippy --all-targets --all-features -- -D warnings`, and again with `--no-default-features`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, and again with `--no-default-features`,
 so a warning anywhere, in `src`, `tests`, `benches` or `examples`, is a build failure.
 
 Each crate carries that table in its own manifest rather than inheriting one, so the setting a crate
@@ -78,7 +78,7 @@ not for three hundred casts. They are denied now, the conversion module exists, 
 that remain are `#[expect]`s the audit checks by rule, see [The exceptions](#the-exceptions).
 
 The lint level lives in the manifest, not on the command line. `.cargo/config.toml` carries an `l`
-alias for `cargo clippy --all-targets --all-features -- -D warnings`, and it deliberately does *not*
+alias for `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and it deliberately does *not*
 repeat the `-W`/`-D` flags: the table in `Cargo.toml` is the one place a lint is turned on or off,
 and a second copy on the command line would be a second place to argue with it, drifting from the
 table the audit reads. The alias exists to make the CI command short, not to make the policy

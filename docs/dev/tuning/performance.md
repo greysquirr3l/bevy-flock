@@ -1592,7 +1592,7 @@ Against the phase 3 baseline the build has gone 8.85 ms → 6.95 ms (1.27x) whil
 the restore 0.68 → 0.11 ms. The serial share fell from 13.1% to 5.8%, and the serial remainder is now stated as the
 complexity term the plan asked for:
 
-```
+```text
 serial = O(blocks) + sizeof(cell_start)        # 0.30 ms bandwidth-bound scan + 0.11 ms memcpy
 ```
 

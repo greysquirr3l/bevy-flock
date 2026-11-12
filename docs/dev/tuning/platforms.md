@@ -80,6 +80,14 @@ crate never opened one.
 | `docs` | rustdoc builds without warnings |
 | `examples` | every example builds and runs headless |
 
+Every one of those jobs says `--workspace`. The selection decides what is checked, and it
+was wrong once: a bare `cargo test` at the root of a non-virtual workspace selects the root
+package alone, so the member crates' unit tests and test targets were never built. CI was
+green over 109 tests while 738 unit tests in `bevy-flock-core`, `bevy-flock-ecs` and
+`bevy-flock-anim` never ran, and two clippy errors sat in `bevy-flock-core`'s test code
+unseen. The manifest now sets `default-members` so a local `cargo test` matches, and the
+jobs name `--workspace` so the gate does not depend on that default holding.
+
 The gap this document exists to record: no `wasm32` job and no second OS. Both are one
 workflow block each, and both are in the plan rather than in the README's claims.
 

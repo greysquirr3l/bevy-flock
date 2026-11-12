@@ -64,7 +64,7 @@ fmt-write:
 
 # Build the server shape: the simulation core with no feature at all.
 core-only:
-    cargo check --no-default-features
+    cargo check --workspace --no-default-features
 
 # The licence and advisory audit.
 deny:
@@ -120,9 +120,11 @@ site-serve:
 publish-check: python-check
     {{python}} scripts/publish_check.py
 
-# Package the first crate, which is the only one that can be packaged offline.
+# Package every crate. `cargo package --workspace` resolves the workspace's internal path
+# dependencies against the workspace rather than against crates.io, so all four package
+# offline -- including the first release, when none of them is published yet.
 package:
-    cargo package --locked -p bevy-flock-core
+    cargo package --locked --workspace
 
 # Set every crate's version, and the version requirements that point at them.
 set-version version:

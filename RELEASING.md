@@ -26,11 +26,11 @@ the commands do not have to be remembered: `just release-check` runs steps 1, 2 
 ```sh
 # 1. Everything the CI does, locally, in one go.
 cargo fmt --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test   --locked --release --all-features
-cargo test   --locked --lib                       # default features
-cargo check  --locked --no-default-features       # the server build
-cargo check  --locked --target wasm32-unknown-unknown
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test   --locked --workspace --release --all-features
+cargo test   --locked --workspace --lib                   # default features
+cargo check  --locked --workspace --no-default-features   # the server build
+cargo check  --locked --workspace --target wasm32-unknown-unknown
 
 # 2. The scripts that guard decisions.
 python3 scripts/group_cap.py --self-test
@@ -40,12 +40,20 @@ python3 scripts/scaling_report.py --check
 python3 scripts/cell_size_gate.py
 
 # 3. The docs that quote numbers.
-cargo doc --locked --no-deps --all-features        # no warnings
+cargo doc --locked --workspace --no-deps --all-features   # no warnings
 grep -rn "TODO\|FIXME\|XXX" src/ docs/ README.md    # an empty result is the goal
 
 # 4. The package itself.
 cargo package --locked                             # must be warning-free
 ```
+
+`--workspace` on every line is load-bearing. The workspace's `default-members` now covers all
+four crates, so a bare command selects them all -- but the commands are written out with the
+flag because the selection is the property being checked, and a manifest default is one edit
+away from silently narrowing it again. It was narrowed once: the member crates sat outside the
+selection, their test targets were never built, and CI reported a clean run over 109 tests
+while 738 unit tests in `bevy-flock-core`, `bevy-flock-ecs` and `bevy-flock-anim` never
+ran.
 
 The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`), and
 `scripts/ci_local.py` needs PyYAML on top of that. `just python-venv` creates an interpreter with
@@ -64,7 +72,7 @@ Then the two judgement calls a script cannot make:
 ```sh
 # 1. Version, in one place, then let cargo fix the lockfiles.
 just set-version 1.0.1           # cargo set-version --workspace, and the path requirements with it
-cargo check --locked --all-features
+cargo check --locked --workspace --all-features
 (cd compat && cargo check --locked)
 
 # 2. Changelog: move Unreleased to the new version with today's date.

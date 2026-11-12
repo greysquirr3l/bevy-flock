@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI now tests and lints the whole workspace.** A bare `cargo test` or `cargo clippy` at the root of a non-virtual
+  workspace selects the root package alone, so the member crates' unit tests and test targets were never built. The
+  green CI run on the 1.0.0 release reported 109 tests while 738 unit tests in `bevy-flock-core`, `bevy-flock-ecs` and
+  `bevy-flock-anim` never ran, and two clippy errors sat in `bevy-flock-core`'s test code unseen. The manifest now sets
+  `default-members`, so a local `cargo test` matches CI, and every CI job says `--workspace` outright, because the
+  selection a job covers is a property of the job rather than of a manifest default nobody reads.
+- **`bevy-flock-core`'s footprint test passes in a scalar build.** The test that pins the published "28 B scalar" figure
+  used a `usize`-to-`f32` cast that loses precision above 16 bits and a helper that could not be `const`, both of
+  which clippy rejected. The cast is now exact and the footprint is computed from the field's own size.
+
+### Added
+
+- **Release workflows.** A green CI run on `main` can now tag the workspace version and publish the four crates to
+  crates.io behind a `release` environment gate that needs one approval from a required reviewer. `scripts/publish_check.py
+  --version` prints the version the publishable crates agree on, and refuses to print one when they disagree: a tag of
+  `v1.0.0` over a crate still saying `1.0.1` publishes a version the tag does not name, and crates.io accepts that
+  silently.
+
 ## [1.0.0] — 2026-11-11
 
 The first stable release. Four crates, one simulation core, and the promises this project has been

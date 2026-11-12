@@ -77,7 +77,7 @@ jobs:
           # stable has newer nursery lints, and failing on tomorrow's diagnostics under today's
           # code would make this job noise instead of a forward check.
           # shellcheck disable=SC2086 # flags is a list built one lint at a time
-          cargo +stable clippy --all-targets --all-features -- $flags
+          cargo +stable clippy --workspace --all-targets --all-features -- $flags
       - name: Check the drift catalogue
         run: python3 scripts/lint_drift.py --toolchain stable
   scripts:
@@ -170,13 +170,20 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # `--workspace`, because a bare `cargo clippy` selects the workspace's *default*
+      # members and the selection is what decides what gets linted. When the member crates
+      # were outside that selection their test targets were never built, so two clippy
+      # errors sat in `bevy-flock-core`'s test code and CI stayed green. The manifest now
+      # sets `default-members` so a local run matches, but the gate says `--workspace`
+      # outright: the selection the lint job covers is a property of the job, not a
+      # side effect of a manifest default nobody reads.
       - name: Clippy (deny warnings, all targets)
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The extremes, because `--all-features` alone hides two whole classes of failure: a lint
       # expectation that only holds when a feature is on (`unfulfilled_lint_expectations` under
       # `-D warnings`), and a target that does not compile without one.
       - name: Clippy (no default features)
-        run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -189,17 +196,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked --all-features
-      - run: cargo test --locked --no-default-features
-      - run: cargo test --locked --doc
+      # `--workspace`, for the same reason the lint job says it: the selection decides
+      # what runs. A bare `cargo test` selected the root package only, so the 738 unit
+      # tests in `bevy-flock-core`, `bevy-flock-ecs` and `bevy-flock-anim` never ran
+      # in CI at all -- a passing job was reporting 109 tests.
+      - run: cargo test --locked --workspace --all-features
+      - run: cargo test --locked --workspace --no-default-features
+      - run: cargo test --locked --workspace --doc
       # Compile every target in both extremes, benches and examples included. A test that imports a
       # feature-gated module without declaring `required-features` fails the *target* rather than the
       # library, and that is exactly how `tests/memory_bridge.rs` sat broken on main. Checking rather
       # than testing keeps the benchmark harnesses out of the CI clock.
       - name: Compile every target (all features)
-        run: cargo check --locked --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
       - name: Compile every target (no default features)
-        run: cargo check --locked --all-targets --no-default-features
+        run: cargo check --locked --workspace --all-targets --no-default-features
 
   features:
     name: Feature powerset
@@ -220,8 +231,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --locked --no-default-features --features "${{ matrix.features }}" --all-targets
-      - run: cargo test --locked --lib --no-default-features --features "${{ matrix.features }}"
+      # `--workspace`, so the powerset covers every member crate's feature table rather
+      # than the root facade's alone. A feature that gates a module in `bevy-flock-core`
+      # and nothing in the facade would otherwise never be compiled in this shape.
+      - run: cargo check --locked --workspace --no-default-features --features "${{ matrix.features }}" --all-targets
+      - run: cargo test --locked --workspace --lib --no-default-features --features "${{ matrix.features }}"
 
   release:
     # RELEASING.md promises this job: on a tag it repeats the checklist, checks the
@@ -236,11 +250,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # `cargo package` rewrites every path dependency to its version requirement before it
-      # packages a crate, so the upper three cannot be packaged until the lower ones are on
-      # crates.io. The first crate is packaged here, and the manifests of the other three are
-      # checked directly, which is what `scripts/publish_check.py` reads.
-      - run: cargo package --locked -p bevy-flock-core
+      # packages a crate, so a *single* crate's package cannot resolve its siblings until
+      # they are on crates.io. `cargo package --workspace` resolves them against the
+      # workspace instead, so all four crates are packaged here on the first release as
+      # well as every one after it. `scripts/publish_check.py` reads the manifests
+      # directly, and the version it agrees on is the one the tag names.
+      - run: cargo package --locked --workspace
       - run: python3 scripts/publish_check.py
+      - run: python3 scripts/publish_check.py --version
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         continue-on-error: true # no baseline tag before the first release
         with:
@@ -273,7 +290,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # docs/platforms.md claims these four configurations compile for wasm; this is the
       # job that keeps the claim true.
-      - run: cargo check --locked --target wasm32-unknown-unknown --features "${{ matrix.features }}"
+      - run: cargo check --locked --workspace --target wasm32-unknown-unknown --features "${{ matrix.features }}"
   portability:
     name: Build and test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -287,7 +304,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # The crate has no platform-specific code, and this job is what proves it stays
       # that way rather than merely being true today.
-      - run: cargo test --locked --lib --all-features
+      - run: cargo test --locked --workspace --lib --all-features
   lockfile:
     name: Lockfiles current
     runs-on: ubuntu-latest
@@ -308,7 +325,7 @@ jobs:
       - name: Randomised seed sweep
         run: |
           for i in 1 2 3; do
-            cargo test --locked --test determinism -- --nocapture
+            cargo test --locked --workspace --test determinism -- --nocapture
           done
 
   msrv:
@@ -318,7 +335,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97.1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --locked --all-features
+      - run: cargo check --locked --workspace --all-features
 
   docs:
     name: Docs
@@ -329,7 +346,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --locked --no-deps --all-features
+      - run: cargo doc --locked --workspace --no-deps --all-features
 
   deny:
     name: Supply chain
@@ -347,10 +364,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --locked --bench crowd --no-run
+      # `--workspace`, so the member crates' benchmark harnesses are compiled here too.
+      # `cargo bench --benches` builds every bench in every selected package, and the
+      # anim crate's binding bench is one of them.
+      - run: cargo bench --locked --workspace --bench crowd --no-run
       # The newer benches: cognition (the scheduler), groups, flow fields and the
       # replication wire format. They compile here and are run on demand locally.
-      - run: cargo bench --locked --all-features --benches --no-run
+      - run: cargo bench --locked --workspace --all-features --benches --no-run
       # A smoke test of the gate itself, not a performance gate: comparing each committed baseline
       # against itself proves the script runs, that the file parses, and that the case names in it are
       # the ones the script looks for. A real comparison needs the machine that recorded the baseline;
@@ -366,11 +386,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # An example that does not run is a broken promise in the README, so the cheap
       # ones are executed rather than merely compiled.
-      - run: cargo build --locked --all-features --examples
-      - run: cargo run --release --locked --example hello_flock
-      - run: cargo run --release --locked --example custom_behavior
-      - run: cargo run --release --locked --all-features --example tavern_dialog
-      - run: cargo run --release --locked --all-features --example ambient_metropolis
+      # `--workspace`, so the member crates' examples are built as well. `cargo run`
+      # takes no `--workspace` -- it is a single-target command -- so the runs below
+      # name the package that owns the example.
+      - run: cargo build --locked --workspace --all-features --examples
+      - run: cargo run --release --locked -p bevy-flock --example hello_flock
+      - run: cargo run --release --locked -p bevy-flock --example custom_behavior
+      - run: cargo run --release --locked -p bevy-flock --all-features --example tavern_dialog
+      - run: cargo run --release --locked -p bevy-flock --all-features --example ambient_metropolis
 
   cell-size-gate:
     name: Cell-size re-open gate (ADR 0031)
@@ -381,7 +404,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Measure the frame at 13.5 m and 9 m
         run: >-
-          cargo bench --locked --bench crowd -- flock_frame_cell
+          cargo bench --locked --workspace --bench crowd -- flock_frame_cell
           --warm-up-time 0.5 --measurement-time 2 --sample-size 10
       - name: Fail if the finer grid is worth more than 10% of a frame
         run: python3 scripts/cell_size_gate.py --warn 3 --fail 10

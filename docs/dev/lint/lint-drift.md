@@ -57,7 +57,7 @@ The order matters:
    `allow` would have to go through `SANCTIONED` with a reason, which is a heavier decision than the
    fix in every one of them.
 2. Run `python3 scripts/lint_drift.py --update`, which rewrites the region above from a live run.
-3. Keep the pinned job clean: `cargo clippy --all-targets --all-features -- -D warnings` on 1.97.1
+3. Keep the pinned job clean: `cargo clippy --workspace --all-targets --all-features -- -D warnings` on 1.97.1
    is what `lint-future` cannot see, and it is what the repo actually builds with.
 
 When the table is empty and the pin has not moved, `lint-future` can be tightened from denying three
