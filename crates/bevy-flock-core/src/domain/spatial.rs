@@ -692,7 +692,7 @@ pub enum RebuildCause {
     TooManyMovers,
     /// A mover was not in the run its previous cell named, so the table was already inconsistent with the entries.
     StaleTable,
-    /// A run had no spare slot and the runs after it could not lend one inside [`BORROW_MAX_ELEMENTS`].
+    /// A run had no spare slot and the runs after it could not lend one inside the borrow budget.
     NarrowRun,
 }
 /// What [`SpatialGrid::build_incremental`] did with a tick's worth of movement.
@@ -1144,7 +1144,7 @@ impl SpatialGrid {
     /// The cheap tick. Cell numbers are recomputed for every body, which is the work `fill` already did, and the result
     /// is compared against the table the previous rebuild left behind. A body that stayed in its cell keeps its slot in
     /// that cell's run, so the old table still describes the new positions; a body that moved between cells makes the
-    /// old runs wrong, which is the only case that pays for [`SpatialGrid::build_tables`].
+    /// old runs wrong, which is the only case that pays for counting the tables again.
     ///
     /// The comparison costs nothing extra: `fill` was writing every slot unconditionally, so this writes a slot only
     /// when it changes and counts the writes it made.
