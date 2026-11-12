@@ -83,7 +83,7 @@ Rust 1.97.1, on 2026-11-11, at commit `ac725e0`. Same commands as the runs above
 comparison is like for like; the host is not, and the host is named for that reason.
 
 Each row is the **median of nine runs**, and the raw records are archived at
-[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl).
+[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl).
 The spread between the fastest and slowest of those nine is in the archive next to each row.
 
 **This host is under heavy memory pressure**, which the numbers have to account for: swap was
@@ -592,7 +592,7 @@ five runs each:
 The wide kernel's advantage is larger here than in the 2026-11-04 table, and the band frame's
 advantage grows with population, which makes sense: the more of the frame is steering, the more
 of it the vectorised path touches. The archived records for both columns are in
-[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl),
+[`benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl`](../../../benchmarks/results/2026-11-11/m3-pro/perf-refresh/perf-refresh.jsonl),
 under the `kernel` field.
 
 The scalar column is also flat across the three populations — 1.86, 1.85, 1.87 ms — while the
@@ -811,7 +811,7 @@ each population (median of five runs, M3 Pro, 2026-11-12):
 | 300,000 | 14.92 ms | 14.31 ms | 38,500 |
 
 The raw records are archived at
-[`benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl`](../../benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl).
+[`benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl`](../../../benchmarks/results/2026-11-12/m3-pro/tier-ceiling/tier-ceiling.jsonl).
 
 250,000 fits inside 14 ms and 300,000 does not, which brackets the wall-clock ceiling. The
 gap from ADR 0017's 64,000 is the ECS patch work: PR #62 took the per-tick rebuild out of
