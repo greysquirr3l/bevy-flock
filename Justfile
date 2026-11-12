@@ -6,8 +6,9 @@
 # out of `.github/workflows/ci.yml` by `scripts/ci_local.py`, and the publishable manifests are read
 # out of the manifests by `scripts/publish_check.py`.
 #
-# The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`). The default picks the
-# newest interpreter that has it; set `PYTHON=/path/to/python3` to choose your own.
+# The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`). The default prefers a
+# `.venv` in the tree, then the newest interpreter on PATH; `just python-venv` creates one, and
+# `PYTHON=/path/to/python3` chooses your own.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -107,7 +108,7 @@ scaling-report: python-check
 cell-size: python-check
     {{python}} scripts/cell_size_gate.py
 
-# Build the documentation site.
+# Build the documentation site. The site's dependencies have to be installed once: `npm ci` in `site/`.
 site:
     cd site && npm run build
 
@@ -130,7 +131,8 @@ set-version version:
 # The pre-release checklist from RELEASING.md, in one run.
 release-check: preflight scripts lint-audit docs-links publish-check package
 
-# The type-level API against the last published release.
+# The type-level API against the last published release. Needs `cargo semver-checks`, which is not
+# installed by default: `cargo install cargo-semver-checks`.
 semver baseline="v0.1.0-rc.1":
     cargo semver-checks check-release --baseline-rev {{baseline}} --feature-group all-features
 
