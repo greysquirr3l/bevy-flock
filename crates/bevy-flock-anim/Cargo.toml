@@ -11,7 +11,7 @@ documentation = "https://docs.rs/bevy-flock-anim"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bevy", "animation", "crowd", "npc", "gamedev"]
-categories = ["game-development", "animation"]
+categories = ["game-development", "game-engines"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -46,6 +46,78 @@ MAX_KEYWORDS = 5
 MAX_KEYWORD_LEN = 20
 MAX_CATEGORIES = 5
 
+# crates.io accepts a closed list of category slugs and answers an upload that names another
+# one with a 400, after the upload has started and the crates before it are already published.
+# The list is `https://crates.io/api/v1/categories`, refreshed by hand: it has not moved in
+# years, and a stale entry here fails the gate loudly, where a manifest that names a slug
+# crates.io does not have fails the release silently.
+#
+# `animation` was the one that cost a release: it is not a crates.io category, and the upload
+# stopped with `bevy-flock-core` and `bevy-flock-ecs` already on crates.io. `game-engines` is
+# where Bevy's own crates sit, so it is where this one belongs too.
+CRATES_IO_CATEGORIES = frozenset(
+    {
+        "api-bindings",
+        "accessibility",
+        "aerospace",
+        "algorithms",
+        "artificial-intelligence",
+        "asynchronous",
+        "authentication",
+        "automotive",
+        "caching",
+        "command-line-interface",
+        "command-line-utilities",
+        "compilers",
+        "compression",
+        "computer-vision",
+        "concurrency",
+        "config",
+        "cryptography",
+        "data-structures",
+        "database",
+        "database-implementations",
+        "date-and-time",
+        "development-tools",
+        "email",
+        "embedded",
+        "emulators",
+        "encoding",
+        "external-ffi-bindings",
+        "filesystem",
+        "finance",
+        "game-development",
+        "game-engines",
+        "games",
+        "graphics",
+        "gui",
+        "hardware-support",
+        "internationalization",
+        "localization",
+        "mathematics",
+        "memory-management",
+        "multimedia",
+        "network-programming",
+        "no-std",
+        "os",
+        "parser-implementations",
+        "parsing",
+        "rendering",
+        "rust-patterns",
+        "science",
+        "security",
+        "simulation",
+        "template-engine",
+        "text-editors",
+        "text-processing",
+        "value-formatting",
+        "virtualization",
+        "visualization",
+        "wasm",
+        "web-programming",
+    }
+)
+
 
 class Problem(Exception):
     """One manifest is not publishable, with the reason a human needs."""
@@ -103,6 +175,12 @@ def check_metadata(manifest: Path, package: dict) -> None:
         raise Problem(f"{name}: no categories")
     if len(categories) > MAX_CATEGORIES:
         raise Problem(f"{name}: {len(categories)} categories, crates.io allows {MAX_CATEGORIES}")
+    for category in categories:
+        if category not in CRATES_IO_CATEGORIES:
+            raise Problem(
+                f"{name}: category {category!r} is not one crates.io accepts; "
+                f"the upload would be answered with a 400"
+            )
 
     # `[package.metadata.docs.rs]` is three TOML keys, not one: tomllib reads it as metadata.docs.rs
     metadata = package.get("metadata") or {}
@@ -286,7 +364,9 @@ def write_fixture(root: Path, crates: dict[str, dict]) -> None:
         if keywords:
             quoted = ", ".join(f'"{keyword}"' for keyword in keywords)
             lines.append(f"keywords = [{quoted}]")
-        lines.append('categories = ["c"]')
+        categories = spec.get("categories", ["game-development"])
+        quoted = ", ".join(f'"{category}"' for category in categories)
+        lines.append(f"categories = [{quoted}]")
         if spec.get("publish") is False:
             lines.append("publish = false")
         if spec.get("docs_rs", True):
@@ -313,6 +393,12 @@ def self_test() -> None:
         "no keywords": {"leaf": {"keywords": []}},
         "too many keywords": {"leaf": {"keywords": ["a", "b", "c", "d", "e", "f"]}},
         "no docs.rs all-features": {"leaf": {"docs_rs": False}},
+        "category crates.io does not have": {
+            "leaf": {"categories": ["game-development", "animation"]},
+        },
+        "too many categories": {
+            "leaf": {"categories": ["a", "b", "c", "d", "e", "f"]},
+        },
         "path dep without version": {"leaf": {}, "root": {"deps": {"leaf": '{ path = "leaf" }'}}},
         "publish = false dependency": {
             "leaf": {"publish": False},

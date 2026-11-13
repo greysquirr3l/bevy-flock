@@ -278,9 +278,15 @@ Three conditions must be true before the first `publish`, and the checker enforc
 `bevy-flock-anim`, `bevy-flock`. The checker's version rules were written for the `0.x` era and were widened to the
 caret rules Cargo actually applies, so a `^1.0.0` requirement is checked rather than refused.
 
-**Not yet published.** crates.io returns 404 for all four crate names, so nothing has been published and `1.0.0` is still
-available. The only tag is `v0.1.0-rc.1`, which points at the commit that introduced the subject registry and is what
-`compat/Cargo.toml` pins. `1.0.0` is therefore the first version that reaches crates.io, not a follow-up to one that did.
+**Partly published.** `bevy-flock-core` and `bevy-flock-ecs` `1.0.0` are on crates.io; `bevy-flock-anim` and
+`bevy-flock` are not. The first upload stopped on `bevy-flock-anim` with a 400: the manifest named the category
+`animation`, which is not one crates.io has. The checker had been checking that the manifests *had* categories, and
+how many, and never that the slugs were ones the registry accepts, so the first upload was also the first thing to
+find out. `scripts/publish_check.py` now holds crates.io's category list and rejects an unknown slug before anything
+is uploaded, and `bevy-flock-anim` is categorised `game-engines`, where Bevy's own crates sit. The release workflow
+skips the crates already on crates.io, so a re-run finishes the publish rather than stopping at the first "version
+already exists". The only other tag is `v0.1.0-rc.1`, which points at the commit that introduced the subject registry
+and is what `compat/Cargo.toml` pins.
 
 ## 9. After the tag
 
