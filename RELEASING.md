@@ -104,7 +104,9 @@ The `Release gate` CI job repeats the checklist on the tag, checks the type-leve
 The four crates go up in dependency order, because `cargo` rewrites every path dependency to its
 version requirement before upload, and a crate whose dependency is not on crates.io yet cannot
 even be packaged. `python3 scripts/publish_check.py` prints the order and checks the manifests
-against it, without a registry:
+against it, without a registry. It also checks the category slugs against the list crates.io
+accepts: the registry answers an unknown one with a 400, and it does so after the upload has
+started and the crates before it are already published.
 
 ```sh
 cargo publish --locked -p bevy-flock-core
