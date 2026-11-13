@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Check the workspace is publishable, in the order it has to be published.
 
-`cargo publish --dry-run` cannot answer this question for a workspace of path dependencies. The
-first crate verifies; every crate above it fails with
+`cargo publish --dry-run` cannot answer this question for a workspace of path dependencies *when it
+is asked about one crate*. The first crate verifies; every crate above it fails with
 
     no matching package named `bevy-flock-core` found
 
 because the packaged manifest no longer contains a path, only a version requirement, and that
-version is not on crates.io yet. That is the ordering constraint working, not a defect, but it
-means the only offline way to know the four manifests agree is to check them directly.
+version is not on crates.io yet. That is the ordering constraint working, not a defect.
+
+`cargo publish --dry-run --workspace` does not have that problem: it resolves the workspace's
+internal path dependencies against the workspace, so all four crates verify at once, on the first
+release as well as every one after it. Cargo 1.90 stabilised that.
 
 So this script checks the things that must be true before the first upload, all of which are
 readable from the manifests:
@@ -21,6 +24,10 @@ readable from the manifests:
      falls into when a member is temporarily unshipped
   4. the resulting dependency graph is acyclic, and its topological order is printed, because
      that order is the publish order
+
+`--version` prints the one version the publishable crates agree on, which is the version a release
+tag names. The crates have to agree: a tag of `v1.0.0` over a crate still saying `1.0.1` publishes
+a version the tag does not name, and crates.io accepts that silently.
 
 Run with `--self-test` to check the checks against fixtures rather than the real workspace.
 """
@@ -210,13 +217,39 @@ def publish_order(edges: dict[str, set[str]]) -> list[str]:
     return order
 
 
-def run(root: Path) -> list[str]:
-    manifests = workspace_members(root)
+def agreed_version(packages: dict[str, tuple[Path, dict]]) -> str:
+    """The one version every publishable crate carries.
+
+    This workspace has no `[workspace.package] version` to inherit from, so the four
+    manifests each carry their own. A release tags one version, so the crates have to
+    agree on it: a tag of `v1.0.0` over a crate still saying `1.0.1` publishes a
+    version the tag does not name, and crates.io accepts that silently.
+    """
+    publishable = {
+        name: document["package"]["version"]
+        for name, (_, document) in packages.items()
+        if is_publishable(document["package"])
+    }
+    distinct = sorted(set(publishable.values()))
+    if len(distinct) > 1:
+        listed = ", ".join(f"{name} {version}" for name, version in sorted(publishable.items()))
+        raise Problem(f"the publishable crates do not agree on one version: {listed}")
+    if not distinct:
+        raise Problem("no publishable crate in the workspace")
+    return distinct[0]
+
+
+def workspace_packages(root: Path) -> dict[str, tuple[Path, dict]]:
+    """Every member manifest of the workspace, keyed by package name."""
     packages = {}
-    for manifest in manifests:
+    for manifest in workspace_members(root):
         data = load(manifest)
         packages[data["package"]["name"]] = (manifest, data)
+    return packages
 
+
+def run(root: Path) -> list[str]:
+    packages = workspace_packages(root)
     versions = {name: document["package"]["version"] for name, (_, document) in packages.items()}
     publishable = {name: is_publishable(document["package"]) for name, (_, document) in packages.items()}
 
@@ -324,6 +357,38 @@ def self_test() -> None:
     for label, requirement, version, expected in version_cases:
         if requirement_accepts(requirement, version) != expected:
             raise SystemExit(f"self-test failed: {label}")
+
+    # The version agreement, which is what the release tag is built from. Two crates
+    # carrying different versions is the mistake that publishes `v1.0.0` over a crate
+    # that says `1.0.1`, and it has to be caught here rather than at the registry.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_fixture(root, {"leaf": {"version": "1.2.3"}, "root": {"version": "1.2.3"}})
+        packages = workspace_packages(root)
+        if agreed_version(packages) != "1.2.3":
+            raise SystemExit("self-test failed: agreeing versions did not come back")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_fixture(root, {"leaf": {"version": "1.2.3"}, "root": {"version": "1.2.4"}})
+        packages = workspace_packages(root)
+        try:
+            agreed_version(packages)
+        except Problem:
+            pass
+        else:
+            raise SystemExit("self-test failed: disagreeing versions were accepted")
+    # A crate that is not published does not vote on the version: it is not going to
+    # crates.io, so its version is not the one the tag names.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_fixture(
+            root,
+            {"leaf": {"version": "1.2.3"}, "root": {"version": "9.9.9", "publish": False}},
+        )
+        packages = workspace_packages(root)
+        if agreed_version(packages) != "1.2.3":
+            raise SystemExit("self-test failed: an unpublished crate changed the version")
+
     print("self-test ok: every broken fixture is rejected, and a valid pair comes back in order")
 
 
@@ -332,6 +397,11 @@ def main(argv: list[str]) -> int:
         self_test()
         return 0
     try:
+        if "--version" in argv:
+            # The release workflow derives the tag from this, so it prints the version
+            # alone: the tag is `v` plus that string.
+            print(agreed_version(workspace_packages(REPO)))
+            return 0
         order = run(REPO)
     except Problem as problem:
         print(f"not publishable: {problem}", file=sys.stderr)

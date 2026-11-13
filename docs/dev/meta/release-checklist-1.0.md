@@ -227,17 +227,22 @@ even be packaged.
 just set-version 1.0.0                 # cargo set-version --workspace, and the path requirements with it
 python3 scripts/publish_check.py         # metadata, versions and the order, without a registry
 
-cargo publish --dry-run -p bevy-flock-core && cargo publish -p bevy-flock-core
-cargo publish --dry-run -p bevy-flock-ecs  && cargo publish -p bevy-flock-ecs
-cargo publish --dry-run -p bevy-flock-anim && cargo publish -p bevy-flock-anim
-cargo publish --dry-run -p bevy-flock      && cargo publish -p bevy-flock
+cargo publish --dry-run --locked --workspace && cargo publish --locked --workspace
 
 cargo deny check
-git tag -a v1.0.0 -m "bevy-flock 1.0.0" && git push --tags
 
 ```
 
-**Only the first dry run can pass before the first upload.** For the other three it fails with
+**The tag is not made by hand.** `main` is protected, so a release reaches it through a pull request: bump the version on a
+branch, push the branch, open the pull request, and get one review from the other account. When the merge lands and CI is
+green, `Auto Tag` creates `v1.0.0` from the version the four manifests agree on, and `Release` starts from that tag and
+stops at the `release` environment gate, which needs one approval from a required reviewer. Nothing is published until that
+approval happens. ADR 0066 has the branch protection shape, and RELEASING.md has the sequence.
+
+**One dry run covers all four crates.** `cargo publish --dry-run --workspace` resolves the workspace's internal path
+dependencies against the workspace rather than against crates.io, so it passes on the first release, before any of
+them is published. Cargo 1.90 stabilised multi-package publishing, which is what makes this possible: before it, a
+*single* crate's dry run failed with
 
 ```
 error: failed to prepare local package for uploading
@@ -247,10 +252,18 @@ Caused by:
 
 ```
 
-which is the ordering constraint stating itself, not a defect. Sequential dry runs that pass are therefore possible
-only after each lower crate is live, which is why `scripts/publish_check.py` exists: it checks the same manifests for
-the things a dry run would catch (missing README, absent keywords, a path dependency without a version, a publishable
-crate depending on a `publish = false` one) and prints the order, offline, in CI, on every push.
+because packaging strips the path and re-resolves the version requirement against the registry, where the sibling did
+not exist yet. The error was the ordering constraint stating itself, not a defect, and it is why
+`scripts/publish_check.py` exists: it checks the same manifests for the things a dry run would catch (missing README,
+absent keywords, a path dependency without a version, a publishable crate depending on a `publish = false` one) and
+prints the order, offline, in CI, on every push.
+
+**The upload still has to be sequential.** `cargo publish --workspace` publishes in dependency order and waits for
+each crate to become resolvable on the registry before publishing the crate that depends on it, but crates.io
+versions are immutable and the upload is not atomic: a server-side error halfway leaves the workspace partly
+published. The release workflow therefore publishes one crate at a time in dependency order and skips any crate
+already on crates.io, so a re-run after a partial publish finishes the job instead of stopping at the first "version
+already exists".
 
 Three conditions must be true before the first `publish`, and the checker enforces the first two:
 
@@ -264,6 +277,10 @@ Three conditions must be true before the first `publish`, and the checker enforc
 `python3 scripts/publish_check.py` prints the order they have to go up in: `bevy-flock-core`, `bevy-flock-ecs`,
 `bevy-flock-anim`, `bevy-flock`. The checker's version rules were written for the `0.x` era and were widened to the
 caret rules Cargo actually applies, so a `^1.0.0` requirement is checked rather than refused.
+
+**Not yet published.** crates.io returns 404 for all four crate names, so nothing has been published and `1.0.0` is still
+available. The only tag is `v0.1.0-rc.1`, which points at the commit that introduced the subject registry and is what
+`compat/Cargo.toml` pins. `1.0.0` is therefore the first version that reaches crates.io, not a follow-up to one that did.
 
 ## 9. After the tag
 

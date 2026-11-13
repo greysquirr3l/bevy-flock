@@ -7,6 +7,16 @@
 # release profile and its own reason to exist, and folding them in would make a `cargo test` at the
 # root build three renderers before it ran a single simulation test.
 members = ["crates/*"]
+# `default-members` decides what a bare `cargo test` / `cargo clippy` / `cargo check` at the
+# root selects. Without it, Cargo picks the root package only -- the crates under `crates/*`
+# are workspace members, but a non-virtual workspace's default selection is just the root
+# package -- so every unit test in `crates/*` and every test target in them went unbuilt and
+# unlinted. The gap was invisible: CI was green while two clippy errors sat in
+# `bevy-flock-core`'s test code, and 738 unit tests never ran.
+#
+# The explicit list keeps the root package in the selection. It is what the crates publish
+# as, and it is where the facade's own tests live.
+default-members = [".", "crates/*"]
 exclude = ["demo", "demo-gpu", "playground", "compat", "fuzz"]
 
 [package]

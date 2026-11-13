@@ -1,0 +1,14 @@
+# Code owners for bevy-flock.
+#
+# GitHub reads this file from the base branch of a pull request, so it has to be on `main`
+# before it can gate a review. Both accounts listed below have write access.
+#
+# The one rule this encodes: a pull request needs one approving review, and the author cannot
+# approve their own pull request. Naming both accounts on the catch-all rule makes that
+# explicit. A change opened by one account is reviewed by the other, and either account can open
+# one, so the rule works in both directions without anyone being able to approve their own work.
+#
+# A pattern that names two owners means "one of these owners has to approve", not "both have to
+# approve". Listing both is what keeps either account able to open a change.
+
+* @greysquirr3l @sosh-ncampbell

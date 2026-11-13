@@ -26,11 +26,11 @@ the commands do not have to be remembered: `just release-check` runs steps 1, 2 
 ```sh
 # 1. Everything the CI does, locally, in one go.
 cargo fmt --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test   --locked --release --all-features
-cargo test   --locked --lib                       # default features
-cargo check  --locked --no-default-features       # the server build
-cargo check  --locked --target wasm32-unknown-unknown
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test   --locked --workspace --release --all-features
+cargo test   --locked --workspace --lib                   # default features
+cargo check  --locked --workspace --no-default-features   # the server build
+cargo check  --locked --workspace --target wasm32-unknown-unknown
 
 # 2. The scripts that guard decisions.
 python3 scripts/group_cap.py --self-test
@@ -40,12 +40,20 @@ python3 scripts/scaling_report.py --check
 python3 scripts/cell_size_gate.py
 
 # 3. The docs that quote numbers.
-cargo doc --locked --no-deps --all-features        # no warnings
+cargo doc --locked --workspace --no-deps --all-features   # no warnings
 grep -rn "TODO\|FIXME\|XXX" src/ docs/ README.md    # an empty result is the goal
 
 # 4. The package itself.
 cargo package --locked                             # must be warning-free
 ```
+
+`--workspace` on every line is load-bearing. The workspace's `default-members` now covers all
+four crates, so a bare command selects them all -- but the commands are written out with the
+flag because the selection is the property being checked, and a manifest default is one edit
+away from silently narrowing it again. It was narrowed once: the member crates sat outside the
+selection, their test targets were never built, and CI reported a clean run over 109 tests
+while 738 unit tests in `bevy-flock-core`, `bevy-flock-ecs` and `bevy-flock-anim` never
+ran.
 
 The gate scripts need Python 3.11 or newer (`tomllib`, `zip(strict=True)`), and
 `scripts/ci_local.py` needs PyYAML on top of that. `just python-venv` creates an interpreter with
@@ -61,25 +69,35 @@ Then the two judgement calls a script cannot make:
 
 ## Cutting the release
 
+`main` is protected: it cannot be pushed to, and a change reaches it through a pull request with one review from the other
+account. The release is that pull request, merged.
+
 ```sh
 # 1. Version, in one place, then let cargo fix the lockfiles.
 just set-version 1.0.1           # cargo set-version --workspace, and the path requirements with it
-cargo check --locked --all-features
+cargo check --locked --workspace --all-features
 (cd compat && cargo check --locked)
 
 # 2. Changelog: move Unreleased to the new version with today's date.
 $EDITOR CHANGELOG.md
 
-# 3. Commit, tag, push both.
+# 3. Commit on a branch, push it, and open the pull request.
+git switch -c chore/release-1.0.1
 git add -A
 git commit -m "release: 1.0.1"
-git tag -a v1.0.1 -m "bevy-flock 1.0.1"
-git push origin main --follow-tags
+git push origin chore/release-1.0.1
+gh pr create --base main --title "release: 1.0.1" --body "Version bump and changelog."
 ```
 
-The tag triggers the `release` CI job, which repeats the checklist plus
-`cargo semver-checks check-release --baseline-rev v1.0.0` (once a baseline tag exists) and
-`cargo publish --dry-run`.
+**The merge is the trigger.** When the pull request merges and CI is green on `main`, `Auto Tag` creates `v1.0.1` from the
+version the four manifests agree on. `Release` starts from that tag and stops at the `release` environment gate, which needs
+one approval from a required reviewer. Nothing reaches crates.io until that approval happens.
+
+A tag that already exists is left alone. To cut a release, bump the version in every publishable crate's `Cargo.toml` and
+merge; that is the only trigger.
+
+The `Release gate` CI job repeats the checklist on the tag, checks the type-level API against the last published release with
+`cargo-semver-checks`, and proves the package builds with `cargo package --locked --workspace`.
 
 ## Publishing
 

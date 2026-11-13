@@ -764,6 +764,11 @@ frame will see the same shape: the scheduler is a small line item, and the crowd
 schedules is the large one. That is the correct order of magnitude, and it is why the
 budget has to be a budget.
 
+These two rows are from the six-vCPU sandbox, before PR #62 turned the per-tick rebuild into
+a patch; the section below measures the same thing on the M3 Pro, where the baseline is
+0.62 ms rather than 4.28 ms. The shape is what carries across the hosts — the scheduler is a
+line item and the crowd is the frame.
+
 ### The comfortable maximum
 
 With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs deliberation:
@@ -778,10 +783,18 @@ With a 14 ms virtual budget (`ThinkSchedule::DEFAULT_BUDGET`) and a 2 µs delibe
   when the tiering in ADR 0017 lands, because then 95% of them are reflex agents at a
   hundredth of the cost.
 
+Those ceilings divide the *whole* budget by one declared cost, and they are the right
+arithmetic for `benches/think.rs`, which runs one scheduler and gives it all 14 ms. The
+tiered bench below splits the same budget across four schedulers by reserved share first, so
+a tier's ceiling is its share rather than the whole: a deliberative tier at an 8 µs declared
+cost gets 15% of 14 ms and serves 262, not 7,000. Both numbers are right about their own
+bench, and they are not interchangeable.
+
 ## Tiered cognition
 
-`benches/tiers.rs`, 10,000 NPCs, 14 ms budget, against a 0.62 ms baseline frame with the
-same crowd and no brains:
+`benches/tiers.rs`, 10,000 NPCs, 14 ms budget. The baseline is the plugin's own ambient crowd —
+2,000 NPCs with no brains — and the fixture adds 10,000 more, so the delta column is the
+marginal cost of the fixture, not a total:
 
 | Composition | Frame | Delta | Who thought |
 | --- | --- | --- | --- |
@@ -793,16 +806,23 @@ same crowd and no brains:
 
 The expensive tiers are the cheap frames, because their reserved shares buy so few of them.
 Frame cost is bounded by the budget; the tier decides who is served and how long they wait.
-Reflex is the only composition where everybody thinks every tick, and it is the only one
-that costs most of a millisecond.
+Reflex and the mix are the two compositions where everybody thinks every tick, and they are
+the two that cost most of a millisecond: their reserved shares buy more than the crowd needs,
+and what is left over is not spent.
+
+**The delta is the NPC, not the think.** 0.82 ms over 10,000 NPCs is 82 ns each, and that
+covers the ECS work of carrying the NPC — the components, the query traversal, the change
+detection — as well as the tree tick. It is not the cost of a think, and it is not constant:
+the same arithmetic gives 52 ns at 250,000 NPCs, because most of what an NPC costs is fixed
+rather than per-unit, and fixed cost amortises. Quote frame times, not nanoseconds.
 
 **So the reflex ceiling is between 250,000 and 300,000 per tick at 14 ms.** ADR 0017 recorded
 ~64,000, from ~217 ns per reflex think measured end to end in the ECS, and ADR 0018 already
 corrected that to "roughly a hundred nanoseconds, sometimes two" rather than a constant. The
 frame is the measurement and the per-think cost is not, so here is the frame, measured at
-each population (median of five runs, M3 Pro, 2026-11-12):
+each population (M3 Pro, 2026-11-12; median of five runs, and seven at 64,000 and 100,000):
 
-| Population | Frame | Delta over no brains | Reflex thinks served |
+| Population | Frame | Marginal cost of the fixture | Reflex thinks served |
 | --- | --- | --- | --- |
 | 64,000 | 4.34 ms | 3.71 ms | 38,500 |
 | 100,000 | 6.57 ms | 5.94 ms | 38,500 |
@@ -829,10 +849,15 @@ frame column is not.
 
 Frame times in ms; baseline is the same world with no brains.
 
+**This table predates PR #62**, so its frames are the ones a rebuild every tick cost. The
+ceiling table above is the same measurement after the patch, on a faster host; compare the
+shape, not the absolute numbers. The 64,000 row here reads 11.44 ms and the same population
+reads 4.34 ms there.
+
 | Population | Baseline | Reflex | Reactive | Deliberative | Social | 95/4/1 mix |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1,000 | 4.26 | 4.38 | 4.38 | 4.27 | 4.24 | 4.42 |
-| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | , | 6.42 |
+| 10,000 | 4.18 | 6.37 | 4.87 | 4.75 | — | 6.42 |
 | 64,000 | 4.19 | 11.44 | 7.93 | 7.68 | 7.55 | 11.99 |
 | 100,000 | 4.22 | 14.01 | 9.74 | 9.52 | 9.03 | 14.67 |
 
@@ -1567,7 +1592,7 @@ Against the phase 3 baseline the build has gone 8.85 ms → 6.95 ms (1.27x) whil
 the restore 0.68 → 0.11 ms. The serial share fell from 13.1% to 5.8%, and the serial remainder is now stated as the
 complexity term the plan asked for:
 
-```
+```text
 serial = O(blocks) + sizeof(cell_start)        # 0.30 ms bandwidth-bound scan + 0.11 ms memcpy
 ```
 

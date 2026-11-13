@@ -1,0 +1,276 @@
+name: Release
+
+# Publishing four crates to crates.io. The upload sits behind the `release`
+# environment, which carries required reviewers so a green CI run cannot
+# publish unattended.
+#
+# The review gate is load-bearing. `environment: release` with empty protection
+# rules is NOT a gate: it is a label. If the rules are ever cleared, this
+# workflow uploads to crates.io on a green run and a timer, which is the
+# failure the gate is there to prevent. Re-check them before trusting a green
+# run:
+#
+#   gh api repos/greysquirr3l/bevy-flock/environments/release \
+#     --jq '.protection_rules'
+#
+# A tag becomes a release through the `workflow_run` trigger on "Auto Tag".
+# A manual dispatch names its own tag; see the `on:` block.
+on:
+  # A tag becomes a release through "Auto Tag", not through a push to a tag
+  # ref: auto-tag.yml is what decides that a commit has earned one, and this
+  # consumes that decision rather than racing it.
+  workflow_run:
+    workflows: ['Auto Tag']
+    types: [completed]
+  # Manual re-run for a tag the trigger missed. `resolve-tag` resolves the tag
+  # from the dispatch input instead of the `workflow_run` payload, so this path
+  # is self-contained rather than depending on the event that triggered it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v1.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # The tag is not available as an input on `workflow_run` — there is no
+  # `github.ref` pointing at it. It is derived from the commit the triggering
+  # run reported, which works regardless of what caused the run, rather than
+  # assuming a push-to-tag event shape.
+  resolve-tag:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.workflow_run.head_sha || '' }}
+      - name: Find tag
+        id: resolve
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED_TAG}" ]; then
+            # A dispatch names its tag, so trust the input but check it is a
+            # real ref: a typo should fail here rather than publish `HEAD`.
+            if ! git rev-parse --verify --quiet "refs/tags/${REQUESTED_TAG}" > /dev/null; then
+              echo "::error::no such tag: ${REQUESTED_TAG}"
+              exit 1
+            fi
+            tag="${REQUESTED_TAG}"
+          else
+            if [ -z "${HEAD_SHA}" ]; then
+              echo "::error::no head sha and no requested tag; nothing to release"
+              exit 1
+            fi
+            tag="$(git tag --points-at "${HEAD_SHA}" --sort=-creatordate | head -n 1)"
+            if [ -z "${tag}" ]; then
+              # Auto Tag succeeds without tagging when the workspace version
+              # already has a tag on an earlier commit. That is the common
+              # case, not a failure: most green pushes to main are not
+              # releases. Report it and let every downstream job skip.
+              echo "No tag points at ${HEAD_SHA}; nothing to release."
+              echo "::notice title=No release for this push::Expected. The workspace version already has a tag on an earlier commit, so Auto Tag deliberately tagged nothing and this run has nothing to publish. To cut a release, bump the version in every publishable crate's Cargo.toml and merge."
+              {
+                echo "## No release for this push — expected"
+                echo
+                echo "No tag points at \`${HEAD_SHA}\`. This run is **green and correct**:"
+                echo "there is nothing to publish."
+                echo
+                echo "Auto Tag creates \`v<workspace version>\` only when that tag does not"
+                echo "already exist. Most green pushes to \`main\` are not releases, so"
+                echo "the common case is a green push that tags nothing."
+                echo
+                echo "**To cut a release:** bump the version in every publishable crate's"
+                echo "\`Cargo.toml\` and merge. That is the only trigger — re-tagging will not"
+                echo "produce one, and re-running this workflow will not either."
+              } >> "${GITHUB_STEP_SUMMARY}"
+              echo "tag=" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          fi
+          echo "Resolved release tag: ${tag}"
+          {
+            echo "## Releasing ${tag}"
+            echo
+            echo "Tag \`${tag}\` resolves to \`${HEAD_SHA}\`."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+  # Always runs, needs no secrets, and is the job that actually proves the
+  # release is publishable before anything is uploaded.
+  #
+  # It verifies all four crates, and not because the tooling got better but
+  # because Cargo 1.90 stabilised multi-package publishing: `cargo publish
+  # --workspace` resolves a workspace's internal path dependencies against the
+  # workspace rather than against the registry, and publishes in dependency
+  # order. Before that, a single-crate publish of `bevy-flock-ecs` failed with
+  # "no matching package named `bevy-flock-core` found", because packaging
+  # strips the path and re-resolves the version requirement against crates.io,
+  # where the sibling did not exist yet.
+  #
+  # So the whole workspace is packaged and verified in one invocation, which
+  # covers the first release as well as every one after it. The upload is
+  # still the thing that proves a crate is *accepted*, and that is the
+  # `publish` job's job.
+  verify:
+    name: verify packaging
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+      - name: Verify packaging
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          echo "Verifying ${TAG} (${version})"
+
+          # The manifests are checked first, because they are the part that can
+          # be wrong without anything failing to compile: a missing keyword, a
+          # path dependency without a version, a crate whose version disagrees
+          # with the tag's.
+          echo "::group::publish_check"
+          python3 scripts/publish_check.py
+          manifest_version="$(python3 scripts/publish_check.py --version)"
+          echo "::endgroup::"
+
+          # The tag names one version, so every publishable crate has to carry
+          # it. `publish_check.py --version` refuses to print a version the
+          # crates do not agree on; this is the check that the agreed version is
+          # the one the tag names.
+          if [ "${manifest_version}" != "${version}" ]; then
+            echo "::error::tag ${TAG} does not match the crate version ${manifest_version}"
+            exit 1
+          fi
+
+          # The whole workspace in one invocation. Cargo packages the crates in
+          # dependency order and verifies each packaged tarball against the
+          # workspace, so the upper crates are covered here even on the very
+          # first release, when none of them exist on crates.io yet.
+          echo "::group::dry-run ${version}"
+          cargo publish --dry-run --locked --workspace
+          echo "::endgroup::"
+
+          {
+            echo "### Packaging verified for ${TAG}"
+            echo
+            echo "| Crate | Verified |"
+            echo "| --- | --- |"
+            echo "| \`bevy-flock-core\` | full \`cargo publish --dry-run --workspace\` |"
+            echo "| \`bevy-flock-ecs\` | full \`cargo publish --dry-run --workspace\` |"
+            echo "| \`bevy-flock-anim\` | full \`cargo publish --dry-run --workspace\` |"
+            echo "| \`bevy-flock\` | full \`cargo publish --dry-run --workspace\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  publish:
+    name: publish
+    needs: [resolve-tag, verify]
+    runs-on: ubuntu-latest
+    # The upload waits for a human here. This is a real gate only while the
+    # `release` environment carries required reviewers; see the note at the
+    # top of this file. With the rules in place, a maintainer approves the
+    # release before any crate is uploaded.
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          # Whether crates.io already serves this exact version.
+          crate_is_published() {
+            local crate="$1" ver="$2"
+            local code
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: bevy-flock-release' \
+              "https://crates.io/api/v1/crates/${crate}/${ver}")"
+            [ "${code}" = "200" ]
+          }
+
+          # Wait until crates.io serves the version. `cargo publish` returning means
+          # the tarball was accepted, not that the registry has indexed it, and
+          # the next crate's manifest resolves this one against the registry.
+          wait_until_published() {
+            local crate="$1" ver="$2"
+            echo -n "Waiting for ${crate} ${ver} to appear on crates.io"
+            local code="000"
+            for _ in $(seq 1 60); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' \
+                -H 'User-Agent: bevy-flock-release-verify' \
+                "https://crates.io/api/v1/crates/${crate}/${ver}")"
+              if [ "${code}" = "200" ]; then
+                echo " ok"
+                return 0
+              fi
+              echo -n "."
+              sleep 10
+            done
+            echo
+            echo "::error::${crate} ${ver} is not resolvable on crates.io"
+            return 1
+          }
+
+          # A fork, or a repository where the token has not been configured, has
+          # no secret. Skip with a warning rather than failing the chain, so
+          # the `verify` result above is still reported.
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN is not set; skipping publish of ${TAG}"
+            exit 0
+          fi
+          # One crate at a time, in dependency order.
+          #
+          # `cargo publish --workspace` would do the ordering itself, and it waits
+          # for each crate to become resolvable before publishing the crate that
+          # depends on it. The workspace is published one at a time anyway,
+          # because crates.io versions are immutable and the upload is not atomic:
+          # a server-side error mid-publish leaves the workspace partly
+          # published. Publishing one at a time means a re-run after a partial
+          # publish finishes the job instead of stopping at the first "version
+          # already exists".
+          #
+          # Each crate is waited for until the registry serves it before the next
+          # one starts, because the next crate's manifest resolves this one
+          # against crates.io. Uploading is not the same as being resolvable, and
+          # publishing the dependent crate into a gap produces a crate nobody can
+          # depend on.
+          for crate in bevy-flock-core bevy-flock-ecs bevy-flock-anim bevy-flock; do
+            if crate_is_published "${crate}" "${version}"; then
+              echo "::notice::${crate} ${version} is already on crates.io; skipping"
+              continue
+            fi
+            echo "::group::publish ${crate} ${version}"
+            cargo publish --locked -p "${crate}"
+            echo "::endgroup::"
+            wait_until_published "${crate}" "${version}"
+          done

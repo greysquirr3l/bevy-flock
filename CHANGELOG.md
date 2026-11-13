@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-11-11
+## [1.0.0] — 2026-11-12
 
 The first stable release. Four crates, one simulation core, and the promises this project has been
 measuring against since it started: deterministic replays, a stable public API, and a crowd that still
@@ -615,6 +615,19 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 
 ### Fixed
 
+- **CI now tests and lints the whole workspace.** A bare `cargo test` or `cargo clippy` at the root of a non-virtual
+  workspace selects the root package alone, so the member crates' unit tests and test targets were never built. The
+  green CI run on the 1.0.0 release reported 109 tests while 738 unit tests in `bevy-flock-core`, `bevy-flock-ecs` and
+  `bevy-flock-anim` never ran, and two clippy errors sat in `bevy-flock-core`'s test code unseen. The manifest now sets
+  `default-members`, so a local `cargo test` matches CI, and every CI job says `--workspace` outright, because the
+  selection a job covers is a property of the job rather than of a manifest default nobody reads.
+- **`bevy-flock-core`'s footprint test passes in a scalar build.** The test that pins the published "28 B scalar" figure
+  used a `usize`-to-`f32` cast that loses precision above 16 bits and a helper that could not be `const`, both of
+  which clippy rejected. The cast is now exact and the footprint is computed from the field's own size.
+- **`clippy::rest_pattern_accessible_field` is clean on Rust 1.100.** The lint was extended in 1.100 to fire on a
+  `..` that skips a field the current module can already see, which is thirteen struct destructurings in
+  `bevy-flock-core`'s spatial grid. `lint-future` denies the lint, so a green `main` on 1.99 turned red the day 1.100
+  shipped. The destructurings are explicit field borrows now: the same borrow split, without a rest pattern.
 - **The band no longer manifolds what it folds.** The manifest window was square, so its
   corners reached 1.41 radius while folding began at 1.15 radius: every agent manifested from
   there was born outside the band and folded on the next tick, and the band held one ration of
@@ -634,6 +647,17 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 
 ### Added
 
+- **`main` is protected.** A change reaches it through a pull request that needs one approving review from someone
+  other than its author, all thirty-five required checks green, and no open conversation. Deleting `main` and
+  force-pushing to it are blocked, and the rules apply to administrators as well. `.github/CODEOWNERS` names both
+  accounts, and the list of required checks is derived from the workflows that report them by
+  `scripts/required_checks.py`, so a renamed job, or a check name that carries a version, fails in CI instead of
+  turning into a merge that cannot happen. ADR 0066.
+- **Release workflows.** A green CI run on `main` can now tag the workspace version and publish the four crates to
+  crates.io behind a `release` environment gate that needs one approval from a required reviewer. `scripts/publish_check.py
+  --version` prints the version the publishable crates agree on, and refuses to print one when they disagree: a tag of
+  `v1.0.0` over a crate still saying `1.0.1` publishes a version the tag does not name, and crates.io accepts that
+  silently.
 - `simd` feature: the steering kernel processes four agents at a time with `wide::f32x4`,
   behind a cell-major block order. 1,000,000-inhabitant frame 4.75 -> 3.78 ms; packed steer
   at 50,000 agents 138 -> 56.5 ms. Bit-identical to the scalar path, which is kept as the

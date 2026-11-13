@@ -149,6 +149,11 @@ demo/out/
 /demo-gpu/target/
 /playground/target/
 
+# The book's build output. The book is Markdown in `docs/book/src`, and `docs/book/book.toml`
+# says so: `mdbook build` is a convenience for reading it locally, not a source that belongs
+# in the tree. The generated HTML is ten thousand lines that nobody reviews and nobody forks.
+docs/book/book/
+
 .github/skills/
 
 anti-slop/

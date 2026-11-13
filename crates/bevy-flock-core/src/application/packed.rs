@@ -224,19 +224,6 @@ impl Pack {
         self.positions.len()
     }
 
-    /// The capacity of the cell-major order, which a scalar build does not have.
-    #[cfg(test)]
-    fn order_capacity(&self) -> usize {
-        #[cfg(feature = "simd")]
-        {
-            self.order.capacity()
-        }
-        #[cfg(not(feature = "simd"))]
-        {
-            0
-        }
-    }
-
     /// Whether the pack holds nobody.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -838,6 +825,15 @@ mod tests {
     use super::*;
     use crate::testkit::OrDie;
 
+    /// The bytes per agent the cell-major order costs.
+    ///
+    /// The field is compiled out of a scalar build, so the scalar path pays nothing
+    /// for a vector it never reads.
+    #[cfg(feature = "simd")]
+    const ORDER_BYTES: usize = core::mem::size_of::<u32>();
+    #[cfg(not(feature = "simd"))]
+    const ORDER_BYTES: usize = 0;
+
     fn params() -> SteerParams {
         SteerParams {
             radius: 8.0,
@@ -858,31 +854,22 @@ mod tests {
         const AGENTS: usize = 64;
         let mut pack = Pack::with_capacity(AGENTS, params());
         for index in 0..AGENTS {
-            pack.push([index as f32, 0.0], [0.0, 0.0]);
+            // `u16` is exact in `f32` and `usize` is not, so the width stops at the cast.
+            let x = f32::from(u16::try_from(index).or_die());
+            pack.push([x, 0.0], [0.0, 0.0]);
         }
+
+        // The wide path reserves the cell-major order, one u32 per agent. The scalar path
+        // has no order to fill, and the footprint below is what proves it paid nothing.
+        #[cfg(feature = "simd")]
+        assert_eq!(
+            pack.order.capacity(),
+            AGENTS,
+            "the wide path reserves the cell-major order"
+        );
 
         // positions + velocities + desired at 8 bytes each, the chain at 4.
-        let mut per_agent = 3 * 8 + 4;
-        #[cfg(feature = "simd")]
-        {
-            // The cell-major order, one u32 per agent.
-            per_agent += 4;
-            assert_eq!(
-                pack.order_capacity(),
-                AGENTS,
-                "the wide path reserves the cell-major order"
-            );
-        }
-        #[cfg(not(feature = "simd"))]
-        {
-            // The scalar path has no order to fill.
-            assert_eq!(
-                pack.order_capacity(),
-                0,
-                "the scalar path must not reserve the cell-major order"
-            );
-        }
-
+        let per_agent = 3 * 8 + 4 + ORDER_BYTES;
         assert_eq!(
             per_agent,
             if cfg!(feature = "simd") { 32 } else { 28 },
