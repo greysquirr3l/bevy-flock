@@ -1209,14 +1209,11 @@ impl SpatialGrid {
     /// A run stays sorted by identity, so the body is found by value rather than by position, and only the slots
     /// between it and the end of its own run move down. The slots after the run belong to the next cell.
     fn remove_movers(&mut self) -> Result<(), RebuildCause> {
-        let Self {
-            cell_start,
-            cell_len,
-            cell_cursor,
-            order,
-            movers,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_len = &mut self.cell_len;
+        let cell_cursor = &mut self.cell_cursor;
+        let order = &mut self.order;
+        let movers = &mut self.movers;
         for (body, old) in movers.iter().copied() {
             let Some((start, len)) = window_of(cell_start, cell_len, old) else {
                 return Err(RebuildCause::StaleTable);
@@ -1248,16 +1245,13 @@ impl SpatialGrid {
     /// A run with no room in its region borrows a slot from the runs after it, so a clustered arrival does not force a
     /// rebuild. The borrow is bounded by [`BORROW_MAX_ELEMENTS`], because it shifts elements rather than slots.
     fn insert_movers(&mut self) -> Result<(), RebuildCause> {
-        let Self {
-            cell_start,
-            cell_len,
-            cell_cursor,
-            order,
-            entries,
-            cells,
-            movers,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_len = &mut self.cell_len;
+        let cell_cursor = &mut self.cell_cursor;
+        let order = &mut self.order;
+        let entries = &mut self.entries;
+        let cells = &mut self.cells;
+        let movers = &mut self.movers;
         let mut budget = BORROW_MAX_ELEMENTS;
         for (body, _) in movers.iter().copied() {
             let Some(new) = cells.get(body as usize).copied() else {
@@ -1346,12 +1340,9 @@ impl SpatialGrid {
         if self.cells.len() != self.entries.len() {
             return self.rebuild_cells(min, inv, dims);
         }
-        let Self {
-            cells,
-            entries,
-            movers,
-            ..
-        } = self;
+        let cells = &mut self.cells;
+        let entries = &mut self.entries;
+        let movers = &mut self.movers;
         movers.clear();
         let mut changed = 0_usize;
         for (index, (slot, entry)) in cells.iter_mut().zip(entries.iter()).enumerate() {
@@ -1372,12 +1363,9 @@ impl SpatialGrid {
     /// A table of the wrong length describes a different population, so nothing in it can be diffed against the
     /// entries: every body is placed again and the mover list starts empty, because the caller has just rebuilt.
     fn rebuild_cells(&mut self, min: Vec3, inv: f32, dims: [u32; 3]) -> usize {
-        let Self {
-            cells,
-            entries,
-            movers,
-            ..
-        } = self;
+        let cells = &mut self.cells;
+        let entries = &mut self.entries;
+        let movers = &mut self.movers;
         let bodies = entries.len();
         cells.clear();
         cells.resize(bodies, 0);
@@ -1447,12 +1435,9 @@ impl SpatialGrid {
         counts: &[core::sync::atomic::AtomicUsize],
         wrote: &[core::sync::atomic::AtomicUsize],
     ) {
-        let Self {
-            cells,
-            entries,
-            movers,
-            ..
-        } = self;
+        let cells = &mut self.cells;
+        let entries = &mut self.entries;
+        let movers = &mut self.movers;
         let mut base = 0_usize;
         thread::scope(|scope| {
             let mut siblings: &[core::sync::atomic::AtomicUsize] = counts;
@@ -1615,7 +1600,8 @@ impl SpatialGrid {
     /// body into a reused buffer so the placement pass reads four bytes instead of recomputing.
     fn fill_cells_serial(&mut self) {
         let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
-        let Self { cells, entries, .. } = self;
+        let cells = &mut self.cells;
+        let entries = &mut self.entries;
         cells.clear();
         cells.resize(entries.len(), 0);
         for (slot, entry) in cells.iter_mut().zip(entries.iter()) {
@@ -1654,11 +1640,8 @@ impl SpatialGrid {
         self.block_totals.clear();
         self.block_totals.resize(blocks, 0);
         let cells = self.cell_count();
-        let Self {
-            cell_start,
-            block_totals,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let block_totals = &mut self.block_totals;
         for (index, slot) in block_totals.iter_mut().enumerate() {
             let (first, len) = block_span(index, cells, blocks);
             *slot = cell_start
@@ -1684,11 +1667,8 @@ impl SpatialGrid {
         let cells_in_grid = self.cell_count();
         let slack = self.slack_percent;
         let floor = self.slack_floor;
-        let Self {
-            cell_start,
-            cell_len,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_len = &mut self.cell_len;
         if let (Some(window), Some(lens)) =
             (cell_start.get_mut(1..), cell_len.get_mut(..cells_in_grid))
         {
@@ -1745,11 +1725,8 @@ impl SpatialGrid {
     /// It also writes `cell_cursor[p]` from the value it just computed, so the two tables are equal the moment
     /// this returns and `place` has a cursor to advance without a copy (ADR 0057).
     fn prefix_cells_serial(&mut self) {
-        let Self {
-            cell_start,
-            cell_cursor,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_cursor = &mut self.cell_cursor;
         // Index 0 is the empty prefix and the start of cell 0's window: always zero, and the one slot the walk
         // below does not touch.
         if let Some(first) = cell_cursor.get_mut(0) {
@@ -1901,14 +1878,11 @@ impl SpatialGrid {
         let cells_in_grid = self.cell_count();
         let total = self.prefix_bases();
         let capacity = total as usize;
-        let Self {
-            cell_start,
-            cell_cursor,
-            order,
-            cells,
-            block_bases,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_cursor = &mut self.cell_cursor;
+        let order = &mut self.order;
+        let cells = &mut self.cells;
+        let block_bases = &mut self.block_bases;
         let cell_list: &[u32] = cells.as_slice();
         let bases: &[u32] = block_bases.as_slice();
         order.clear();
@@ -2005,13 +1979,10 @@ impl SpatialGrid {
     #[cfg(feature = "threads")]
     fn place_cells_parallel(&mut self, workers: usize) -> Duration {
         let cells_in_grid = self.cell_count();
-        let Self {
-            cell_start,
-            cell_cursor,
-            order,
-            cells,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_cursor = &mut self.cell_cursor;
+        let order = &mut self.order;
+        let cells = &mut self.cells;
         let starts: &[u32] = cell_start.as_slice();
         let cell_list: &[u32] = cells.as_slice();
         order.clear();
@@ -2084,7 +2055,8 @@ impl SpatialGrid {
     #[cfg(feature = "threads")]
     fn fill_cells_parallel(&mut self, workers: usize) {
         let (min, inv, dims) = (self.config.min, self.inv_cell_size, self.dims);
-        let Self { cells, entries, .. } = self;
+        let cells = &mut self.cells;
+        let entries = &mut self.entries;
         cells.clear();
         cells.resize(entries.len(), 0);
         let chunk = entries.len().div_ceil(workers);
@@ -2121,13 +2093,10 @@ impl SpatialGrid {
         self.block_totals.clear();
         self.block_totals.resize(blocks, 0);
 
-        let Self {
-            cell_start,
-            cell_len,
-            cells,
-            block_totals,
-            ..
-        } = self;
+        let cell_start = &mut self.cell_start;
+        let cell_len = &mut self.cell_len;
+        let cells = &mut self.cells;
+        let block_totals = &mut self.block_totals;
         let cell_list: &[u32] = cells;
         let per = blocks.div_ceil(workers.max(1)).max(1);
         thread::scope(|scope| {

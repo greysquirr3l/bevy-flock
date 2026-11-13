@@ -18,23 +18,32 @@ direction: a warning that is not listed, or a listed warning that is gone. CI ru
 `lint-future` job, next to the probe for the three lints 1.97 cannot name.
 
 <!-- lint-drift:start -->
-clippy on **1.99.1** (`cargo +stable clippy --all-targets --all-features`)
-reports **12 warnings** across 5 lints: `chunks_exact_to_as_chunks` × 1, `manual_slice_fill` × 1, `needless_borrows_for_generic_args` × 1, `suboptimal_flops` × 7, `tuple_array_conversions` × 2.
+clippy on **1.100.0** (`cargo +stable clippy --all-targets --all-features`)
+reports **21 warnings** across 5 lints: `assert_is_empty` × 9, `chunks_exact_to_as_chunks` × 1, `manual_slice_fill` × 1, `suboptimal_flops` × 8, `tuple_array_conversions` × 2.
 
 | Lint | Site | What it wants |
 | --- | --- | --- |
+| `assert_is_empty` | `crates/bevy-flock-core/src/application/tiered.rs:318` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-core/src/behavior/provider.rs:425` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-core/src/domain/cognition.rs:474` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-core/src/domain/spatial.rs:3554` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-core/src/domain/spatial.rs:3557` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-ecs/src/adapters/primary/dialogue.rs:480` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-ecs/src/adapters/primary/gesture.rs:855` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-ecs/src/adapters/primary/interaction.rs:870` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
+| `assert_is_empty` | `crates/bevy-flock-ecs/src/adapters/primary/observability.rs:642` | `assert_eq!(x, [])` or `assert_ne!(x, "")`, so a failing assert prints the value |
 | `chunks_exact_to_as_chunks` | `crates/bevy-flock-core/src/domain/navmesh.rs:349` | `as_chunks::<N>()`, which hands out `&[T; N]` instead of a slice to re-check |
-| `manual_slice_fill` | `crates/bevy-flock-core/src/application/packed.rs:705` | `slice.fill(value)`, which is one call and vectorises |
-| `needless_borrows_for_generic_args` | `crates/bevy-flock-core/src/domain/memory.rs:874` | pass the closure by value; the call already takes it by value |
+| `manual_slice_fill` | `crates/bevy-flock-core/src/application/packed.rs:692` | `slice.fill(value)`, which is one call and vectorises |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:248` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:249` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:250` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
+| `suboptimal_flops` | `crates/bevy-flock-core/src/application/avoidance.rs:328` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/spawn.rs:215` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/spawn.rs:219` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:613` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
 | `suboptimal_flops` | `crates/bevy-flock-core/src/domain/temperament.rs:614` | `f32::mul_add`, which fuses the multiply and the add into one rounding |
-| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:534` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
-| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:537` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:521` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
+| `tuple_array_conversions` | `crates/bevy-flock-core/src/application/packed.rs:524` | `<[T; N]>::into()`, or a `let [a, b] = …` binding, instead of `(v[0], v[1])` |
 <!-- lint-drift:end -->
 
 ## What is deliberately not here
@@ -44,6 +53,14 @@ The three lints the pin cannot name, `clippy::unnecessary_rest_pattern`,
 because the tree is already clean for them: 51 sites were rewritten when the forward job was made to
 work, and `lint-future` denies all three. Drift is what is left when the tree is still living with
 the newer answer.
+
+Rust 1.100 reached `rest_pattern_accessible_field` further than 1.99 did. It now fires on a `..` that
+skips a field the current module can already see, which is thirteen struct destructurings in
+`spatial.rs`, and `lint-future` denies the lint, so a green `main` on 1.99 turned red the day 1.100
+shipped. The destructurings were rewritten as explicit field borrows: the same borrow split, without
+a rest pattern. The lint's own suggestion, naming all nineteen fields of the grid, is worse than the
+pattern it objects to. The lint cannot be named in `Cargo.toml` either, because the pinned 1.97
+toolchain does not know it and would turn every downstream build into an `unknown_lints` warning.
 
 Style is not drift either. A newer clippy rewording a diagnostic, or a lint moving between groups,
 changes nothing here: the script reads warnings, not the text clippy prints for them, and matches on

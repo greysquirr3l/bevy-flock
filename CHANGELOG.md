@@ -624,6 +624,10 @@ fixed; the remaining 11 newer-lint warnings are `stable-lint-drift` in `plan.tom
 - **`bevy-flock-core`'s footprint test passes in a scalar build.** The test that pins the published "28 B scalar" figure
   used a `usize`-to-`f32` cast that loses precision above 16 bits and a helper that could not be `const`, both of
   which clippy rejected. The cast is now exact and the footprint is computed from the field's own size.
+- **`clippy::rest_pattern_accessible_field` is clean on Rust 1.100.** The lint was extended in 1.100 to fire on a
+  `..` that skips a field the current module can already see, which is thirteen struct destructurings in
+  `bevy-flock-core`'s spatial grid. `lint-future` denies the lint, so a green `main` on 1.99 turned red the day 1.100
+  shipped. The destructurings are explicit field borrows now: the same borrow split, without a rest pattern.
 - **The band no longer manifolds what it folds.** The manifest window was square, so its
   corners reached 1.41 radius while folding began at 1.15 radius: every agent manifested from
   there was born outside the band and folded on the next tick, and the band held one ration of
