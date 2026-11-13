@@ -1,33 +1,80 @@
 # The site is the adoption path, so a broken build is a broken front door. This job builds it on every change to site/
 # and fails on a build error rather than letting a broken page reach Pages.
+#
+# There is deliberately no `paths:` filter on the trigger. A path-filtered workflow does not run at all when the filter
+# does not match, so it reports no check run at all -- and a required status check that never reports blocks the merge
+# forever. The filter is applied to the build steps instead, so this job always runs and always reports a result. That is
+# what lets "Site build" be a required check on `main`.
 name: docs
 
 on:
   push:
-    paths: ["site/**", ".github/workflows/docs.yml"]
+    branches: [main]
   pull_request:
-    paths: ["site/**", ".github/workflows/docs.yml"]
+  workflow_dispatch:
 
 jobs:
   build:
+    name: Site build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The change detection below diffs against the merge base, which needs the history behind the base commit.
+          fetch-depth: 0
+
+      - name: Detect site changes
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          changed=false
+          case "${EVENT_NAME}" in
+            pull_request)
+              files="$(git diff --name-only "${BASE_SHA}...HEAD")"
+              if grep -qE '^(site/|\.github/workflows/docs\.yml)' <<< "${files}"; then
+                changed=true
+              fi
+              ;;
+            push)
+              if [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+                changed=true
+              else
+                files="$(git diff --name-only "${BEFORE_SHA}...${GITHUB_SHA}")"
+                if grep -qE '^(site/|\.github/workflows/docs\.yml)' <<< "${files}"; then
+                  changed=true
+                fi
+              fi
+              ;;
+            *)
+              changed=true
+              ;;
+          esac
+          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          echo "site changed: ${changed}"
+
       # No version pin here: the action reads `packageManager` from the manifest, so the lockfile and the tool that
       # wrote it cannot drift apart. It looks for `package.json` at the repository root by default, and this repository
       # keeps the site in `site/`, which is why `package_json_file` is not optional: without it the action fails with
       # "No pnpm version is specified" before a single page is built, and this whole job becomes decoration.
       - uses: pnpm/action-setup@v4
+        if: steps.filter.outputs.changed == 'true'
         with:
           package_json_file: site/package.json
       - uses: actions/setup-node@v4
+        if: steps.filter.outputs.changed == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: site/pnpm-lock.yaml
       - name: install
+        if: steps.filter.outputs.changed == 'true'
         working-directory: site
         run: pnpm install --frozen-lockfile
       - name: build
+        if: steps.filter.outputs.changed == 'true'
         working-directory: site
         run: pnpm build

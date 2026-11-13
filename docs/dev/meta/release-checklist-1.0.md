@@ -230,9 +230,14 @@ python3 scripts/publish_check.py         # metadata, versions and the order, wit
 cargo publish --dry-run --locked --workspace && cargo publish --locked --workspace
 
 cargo deny check
-git tag -a v1.0.0 -m "bevy-flock 1.0.0" && git push --tags
 
 ```
+
+**The tag is not made by hand.** `main` is protected, so a release reaches it through a pull request: bump the version on a
+branch, push the branch, open the pull request, and get one review from the other account. When the merge lands and CI is
+green, `Auto Tag` creates `v1.0.0` from the version the four manifests agree on, and `Release` starts from that tag and
+stops at the `release` environment gate, which needs one approval from a required reviewer. Nothing is published until that
+approval happens. ADR 0066 has the branch protection shape, and RELEASING.md has the sequence.
 
 **One dry run covers all four crates.** `cargo publish --dry-run --workspace` resolves the workspace's internal path
 dependencies against the workspace rather than against crates.io, so it passes on the first release, before any of
@@ -272,6 +277,10 @@ Three conditions must be true before the first `publish`, and the checker enforc
 `python3 scripts/publish_check.py` prints the order they have to go up in: `bevy-flock-core`, `bevy-flock-ecs`,
 `bevy-flock-anim`, `bevy-flock`. The checker's version rules were written for the `0.x` era and were widened to the
 caret rules Cargo actually applies, so a `^1.0.0` requirement is checked rather than refused.
+
+**Not yet published.** crates.io returns 404 for all four crate names, so nothing has been published and `1.0.0` is still
+available. The only tag is `v0.1.0-rc.1`, which points at the commit that introduced the subject registry and is what
+`compat/Cargo.toml` pins. `1.0.0` is therefore the first version that reaches crates.io, not a follow-up to one that did.
 
 ## 9. After the tag
 

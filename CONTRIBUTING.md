@@ -182,6 +182,34 @@ The rule is about the message, so it lives in `commit-msg` rather than
 `pre-commit`: a pre-commit hook runs before the editor opens, so the message
 does not exist yet.
 
+## Branch protection
+
+`main` is protected. A change reaches it through a pull request, and a pull request needs one
+approving review from someone other than its author, every required check green, and no open
+conversation. Deleting `main` and force-pushing to it are both blocked, and the rules apply to
+administrators as well.
+
+Two consequences for the way you work here:
+
+- **You cannot approve your own pull request.** GitHub does not count the author as a
+  reviewer, so the review has to come from the other account. The rule works the same in both
+  directions.
+- **A required check is matched by exact name.** Adding a job to a workflow means adding its
+  name to `.github/branch-protection.json`, and `python3 scripts/required_checks.py --check`
+  fails until you do. Renaming a job has the same cost, and a name that carries a version stops
+  matching the day the version moves, so the script refuses one.
+
+The list of required checks is derived from the workflows rather than copied out of them, and
+the derivation is in `scripts/required_checks.py`. To change the protection itself, edit
+`.github/branch-protection.json` and send it:
+
+```sh
+python3 scripts/required_checks.py --print-payload \
+  | gh api --method PUT repos/greysquirr3l/bevy-flock/branches/main/protection --input -
+```
+
+ADR 0066 has the reasoning behind the shape.
+
 ## Benchmarks
 
 Performance claims need numbers. Run:

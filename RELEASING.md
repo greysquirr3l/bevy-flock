@@ -69,6 +69,9 @@ Then the two judgement calls a script cannot make:
 
 ## Cutting the release
 
+`main` is protected: it cannot be pushed to, and a change reaches it through a pull request with one review from the other
+account. The release is that pull request, merged.
+
 ```sh
 # 1. Version, in one place, then let cargo fix the lockfiles.
 just set-version 1.0.1           # cargo set-version --workspace, and the path requirements with it
@@ -78,16 +81,23 @@ cargo check --locked --workspace --all-features
 # 2. Changelog: move Unreleased to the new version with today's date.
 $EDITOR CHANGELOG.md
 
-# 3. Commit, tag, push both.
+# 3. Commit on a branch, push it, and open the pull request.
+git switch -c chore/release-1.0.1
 git add -A
 git commit -m "release: 1.0.1"
-git tag -a v1.0.1 -m "bevy-flock 1.0.1"
-git push origin main --follow-tags
+git push origin chore/release-1.0.1
+gh pr create --base main --title "release: 1.0.1" --body "Version bump and changelog."
 ```
 
-The tag triggers the `release` CI job, which repeats the checklist plus
-`cargo semver-checks check-release --baseline-rev v1.0.0` (once a baseline tag exists) and
-`cargo publish --dry-run`.
+**The merge is the trigger.** When the pull request merges and CI is green on `main`, `Auto Tag` creates `v1.0.1` from the
+version the four manifests agree on. `Release` starts from that tag and stops at the `release` environment gate, which needs
+one approval from a required reviewer. Nothing reaches crates.io until that approval happens.
+
+A tag that already exists is left alone. To cut a release, bump the version in every publishable crate's `Cargo.toml` and
+merge; that is the only trigger.
+
+The `Release gate` CI job repeats the checklist on the tag, checks the type-level API against the last published release with
+`cargo-semver-checks`, and proves the package builds with `cargo package --locked --workspace`.
 
 ## Publishing
 
