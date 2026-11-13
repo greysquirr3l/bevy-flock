@@ -13,6 +13,7 @@ pub mod generator;
 pub mod groups;
 pub mod ids;
 pub mod links;
+pub mod lookback;
 #[cfg(feature = "memory")]
 pub mod memory;
 pub mod nav;
